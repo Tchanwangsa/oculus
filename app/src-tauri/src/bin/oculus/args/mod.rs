@@ -13,6 +13,7 @@ mod planning;
 mod query;
 mod revision;
 mod studio;
+mod widget;
 
 pub(crate) use lecture::*;
 pub(crate) use memory::*;
@@ -21,6 +22,7 @@ pub(crate) use planning::*;
 pub(crate) use query::*;
 pub(crate) use revision::*;
 pub(crate) use studio::*;
+pub(crate) use widget::*;
 
 #[derive(Parser)]
 #[command(
@@ -33,7 +35,7 @@ pub(crate) struct Cli {
     ///
     /// Honoured by every command that prints: status, list, search, grep,
     /// read, files, calendar, project, task, tag, cheat, quiz, artifact, topic,
-    /// keyd and studio. On failure the JSON is
+    /// widget, keyd and studio. On failure the JSON is
     /// `{"error": "..."}` on stderr and the exit code is 1.
     #[arg(long, global = true)]
     pub(crate) json: bool,
@@ -109,7 +111,7 @@ pub(crate) enum Command {
         #[command(subcommand)]
         action: QuizAction,
     },
-    /// Save and inspect interactive OpenUI programs in Revision
+    /// Save and inspect interactive OpenUI programs and widgets in Revision
     Artifact {
         #[command(subcommand)]
         action: ArtifactAction,
@@ -118,6 +120,11 @@ pub(crate) enum Command {
     Topic {
         #[command(subcommand)]
         action: TopicAction,
+    },
+    /// Check a chat widget's TSX before it is sent
+    Widget {
+        #[command(subcommand)]
+        action: WidgetAction,
     },
     Docs(DocsArgs),
     Agent(AgentArgs),

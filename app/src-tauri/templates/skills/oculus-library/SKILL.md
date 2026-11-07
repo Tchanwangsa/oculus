@@ -25,11 +25,6 @@ Two consequences worth holding on to:
 - **Neither reaches a recording.** Lectures are files on disk that no index
   covers — that is the `oculus-lectures` skill, not this one.
 
-And a third, for when a plain `rg` looks tempting: **per-page PDF text is not
-on disk.** It lives in the database, and it is where most of the actual
-teaching is. `rg` over `courses/` reads the markdown and silently misses
-every slide deck's page text.
-
 ## The two passes
 
 `oculus grep` is a **locator, not a reader**. Its snippets are truncated and
@@ -41,8 +36,8 @@ courses/COMP30022_2026_SM2/files/SE_Project_Idea.pdf:p1: Design the experience�
 ```
 
 `:L200` for markdown, **`:p1` for a PDF** — and that page number is the one
-`oculus read -p` and the app's viewer use, so a hit opens directly. Nothing
-else in the library can hand you that, because the page text is not in a file.
+`oculus read -p` and the app's viewer use, so a hit opens directly. Use the
+returned address to read the source.
 
 So the shape is always locate, then read:
 
@@ -120,14 +115,12 @@ what retrieval can see.
 
 **The `indexed` column is how many pages are searchable.** A PDF showing none
 has never been parsed — a real state, not a bug, and not something to work
-around by reading the raw file. Propose a Reparse card with the exact file paths when the student asks to
-index them; it takes minutes per file, so the student confirms before it starts.
+around by reading the raw file. For an indexing request, use Reparse through
+the `oculus-plan` workflow.
 
 **A video's words are in `<video>.vtt` beside it**, when there is one. A video
-without it has no transcript yet. When asked, propose Transcribe(file) in an
-`openui` fence; the card names the engine order from Settings and warns when
-Groq uploads audio. The student confirms before the job starts. See
-`oculus-plan` and `oculus-ui` for the card syntax.
+without it has no transcript yet. For a transcription request, use Transcribe
+through `oculus-plan`.
 
 ## `oculus read` — the text of one file
 
@@ -172,8 +165,6 @@ inside it are megabytes of base64.
   ask rather than guess.
 - A picture older than the student's last edit is stale; if the age looks wrong
   for what they say they just wrote, say so rather than commenting on old work.
-- A notebook is the student's. You cannot and should not write into
-  `notebooks/` or `canvases/`.
 - `oculus read` says so when a notebook has no pictures yet (never opened
   since it was made); relay that, do not retry. A canvas (`canvases/`) is a
   whiteboard drawing with neither pages nor text.

@@ -14,3 +14,4 @@ mod run;
 mod status;
 mod studio;
 mod transcribe;
+mod widget;

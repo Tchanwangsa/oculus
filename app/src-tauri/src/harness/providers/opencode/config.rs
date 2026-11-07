@@ -58,6 +58,10 @@ fn render_config(library: &Path, prompt: &str, one_off: &OneOffPrompts, subagent
             "\"{{LECTURE_END_PROMPT}}\"",
             &json_string(one_off.lecture_end),
         )
+        .replace(
+            "\"{{WIDGET_PROMPT}}\"",
+            &json_string(crate::widgets::ask::INSTRUCTIONS),
+        )
 }
 
 fn json_string(s: &str) -> String {
@@ -75,7 +79,8 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::super::{
-        AGENT, DICTATION_AGENT, LECTURE_END_AGENT, NAMING_AGENT, REVISION_AGENT, WRITER_AGENT,
+        AGENT, DICTATION_AGENT, LECTURE_END_AGENT, NAMING_AGENT, REVISION_AGENT, WIDGET_AGENT,
+        WRITER_AGENT,
     };
     use super::*;
 
@@ -279,6 +284,7 @@ mod tests {
             (NAMING_AGENT, "You name conversations."),
             (WRITER_AGENT, "You complete \"notes\"."),
             (LECTURE_END_AGENT, "You find where lectures end."),
+            (WIDGET_AGENT, crate::widgets::ask::INSTRUCTIONS),
         ] {
             assert_eq!(v["agent"][agent]["hidden"], true, "{agent}");
             assert_eq!(v["agent"][agent]["permission"]["*"], "deny", "{agent}");

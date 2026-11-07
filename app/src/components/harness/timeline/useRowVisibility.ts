@@ -71,6 +71,7 @@ export function useRowVisibility(rootRef: RefObject<HTMLDivElement | null>, thre
     }, { root: scroller, rootMargin: "200px 0px" });
 
     // Direct children only: appending history must not walk the maths DOM.
+    let initial = true;
     const sync = () => {
       for (const row of rows) {
         if (row.parentElement === root) continue;
@@ -96,12 +97,16 @@ export function useRowVisibility(rootRef: RefObject<HTMLDivElement | null>, thre
         contents.set(child, { host, scrolls, onScroll });
         host.addEventListener("scroll", onScroll, true);
         rows.add(child);
-        if (expanded) show(child);
+        // A row arriving later (a reply committed, a page of history) starts
+        // drawn: `content-visibility: auto` would lay it out at its 160px
+        // estimate for the first frame, after the anchoring has run.
+        if (expanded || !initial) show(child);
         resize.observe(child);
         visibility.observe(child);
       }
     };
     sync();
+    initial = false;
     const changes = new MutationObserver(sync);
     changes.observe(root, { childList: true });
     const off = onExpand(root, ({ upToId }) => {

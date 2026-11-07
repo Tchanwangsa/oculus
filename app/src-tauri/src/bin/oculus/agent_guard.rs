@@ -198,6 +198,8 @@ mod tests {
             "memory reindex",
             "memory append gaps a-line",
             "memory fold a b --into c --text merged",
+            "widget check outputs/w.tsx",
+            "widget check -",
         ] {
             let cli = Cli::try_parse_from(std::iter::once("oculus").chain(args.split_whitespace()))
                 .unwrap();

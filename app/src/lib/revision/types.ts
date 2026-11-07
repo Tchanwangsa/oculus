@@ -62,12 +62,16 @@ export interface RevisionSet {
   created_at: string;
   updated_at: string;
 }
+/** What an artifact's `program` is: OpenUI Lang, or a ```widget fence's TSX
+ *  (docs/widgets.md). */
+export type ArtifactFormat = "openui" | "widget";
 export interface RevisionArtifact {
   topic_ids: number[];
   id: number;
   subject_id: number | null;
   title: string;
   program: string;
+  format: ArtifactFormat;
   state: Record<string, unknown>;
   source_ref: string | null;
   created_at: string;
@@ -120,5 +124,8 @@ export type ItemInput = Pick<RevisionItem, "kind" | "prompt" | "answer"> &
   >;
 export type ArtifactInput = Pick<RevisionArtifact, "title" | "program"> &
   Partial<
-    Pick<RevisionArtifact, "topic_ids" | "subject_id" | "state" | "source_ref">
+    Pick<
+      RevisionArtifact,
+      "topic_ids" | "subject_id" | "format" | "state" | "source_ref"
+    >
   >;

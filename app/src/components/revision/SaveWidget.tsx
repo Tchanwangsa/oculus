@@ -4,9 +4,12 @@ import { WidgetIndex } from "@/components/markdown/openui/state";
 import { invoke } from "@tauri-apps/api/core";
 import { useWidgetRow } from "@/components/markdown/openui/state";
 import { widgetSubject } from "@/lib/revision/subject";
+import { artifactInput } from "@/lib/revision/artifacts";
+import { cn } from "@/lib/utils";
 import {
   createArtifact,
   notifyRevisionUpdated,
+  type ArtifactFormat,
   type ItemInput,
 } from "@/lib/revision";
 import { Button } from "@/components/ui/button";
@@ -58,23 +61,34 @@ export function SaveQuestions({ items }: { items: ItemInput[] }) {
     </span>
   );
 }
+/** Save to Revision for a fence in a reply: names it, then writes its
+ *  program and `state()` as it is at that moment. */
 export function SaveArtifact({
   source,
   state,
+  format = "openui",
+  defaultTitle = "Interactive artifact",
+  className,
 }: {
   source: string;
   state: () => Record<string, unknown>;
+  format?: ArtifactFormat;
+  defaultTitle?: string;
+  className?: string;
 }) {
   const row = useWidgetRow();
   const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState("Interactive artifact");
+  const [title, setTitle] = useState(defaultTitle);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   return (
     <div
       data-copy-skip
-      className="flex flex-wrap items-center justify-end gap-2 text-xs"
+      className={cn(
+        "flex flex-wrap items-center justify-end gap-2 text-xs",
+        className,
+      )}
     >
       {!open ? (
         <Button
@@ -100,13 +114,16 @@ export function SaveArtifact({
               setBusy(true);
               void widgetSubject(row?.thread ?? null)
                 .then((subject) =>
-                  createArtifact({
-                    title: title.trim(),
-                    program: source,
-                    state: state(),
-                    subject_id: subject,
-                    source_ref: row ? `${row.thread}:${row.row}` : null,
-                  }),
+                  createArtifact(
+                    artifactInput({
+                      title,
+                      program: source,
+                      format,
+                      state: state(),
+                      subject,
+                      row,
+                    }),
+                  ),
                 )
                 .then(() => {
                   setSaved(true);

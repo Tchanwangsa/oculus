@@ -57,6 +57,7 @@ bun run keyd          # build and sign the dev oculus-keyd; install it from the 
 bun run stage-keyd    # build and sign the release oculus-keyd the bundle ships, into binaries/
 bun run math          # build the maths wasm into app/math-core/pkg/
 bun run canvas        # build the drawing geometry wasm into app/canvas-core/pkg/
+bun run widget-kit    # build the chat widgets' kit into app/dist/widget-kit/ (docs/widgets.md)
 ```
 
 ## `predev` is the whole preflight, and it is idempotent
@@ -67,7 +68,9 @@ environment before running bun, so every `tauri dev` runs it on either OS. In or
 runs `bun install`, fetches ffmpeg, compiles the speech helper,
 `whisper-cli`, the maths wasm and the drawing canvas wasm, builds the
 device-sharing companion page when its inputs changed
-([device-sharing.md](./device-sharing.md#desktop-ui); never fatal), builds the editor core's wasm for
+([device-sharing.md](./device-sharing.md#desktop-ui); never fatal), builds the
+chat widgets' kit when its inputs changed ([widgets.md](./widgets.md); never
+fatal), builds the editor core's wasm for
 [shadow mode](./editor-core.md#shadow-mode-checks-the-rust-core-against-every-note-editor)
 (skipped with one line without the `wasm32-unknown-unknown` target or the
 pinned `wasm-bindgen` CLI, and never fatal), builds and signs the dev

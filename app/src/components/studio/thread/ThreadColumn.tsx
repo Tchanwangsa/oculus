@@ -56,7 +56,7 @@ export function ThreadColumn({ threadId, onTurnEnd }: { threadId: number; onTurn
     wasRunning.current = running;
   }, [running, onTurnEnd]);
 
-  const scroll = useStickToBottom(threadId, true, running);
+  const scroll = useStickToBottom(threadId, true, running, items);
   useScrollFade(scroll.outer, "y");
 
   const threadRef = useRef(threadId);
@@ -75,7 +75,7 @@ export function ThreadColumn({ threadId, onTurnEnd }: { threadId: number; onTurn
       {/* `overflow-x-hidden` is load-bearing: `overflow-y: auto` makes x `auto`
           too, so one wide row would scroll the whole thread. */}
       <div className="relative min-h-0 flex-1">
-        <div ref={scroll.outer} className="h-full overflow-x-hidden overflow-y-auto px-6 py-6">
+        <div ref={scroll.outer} className="h-full overflow-x-hidden overflow-y-auto px-6 pt-6 pb-10">
           <div ref={scroll.inner} className="mx-auto w-full max-w-[640px]">
             <Timeline items={items} threadId={threadId} running={running} questions={questions} pending={pending} />
           </div>

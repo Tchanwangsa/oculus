@@ -65,11 +65,8 @@ pub fn thread_sections(
             "\n\n## This conversation\n\n\
              It is scoped to **{code}** — the folder `../courses/{code}/`. Unless the \
              student names another subject, answer from that folder, and pass `{code}` \
-             as the subject to the CLI. Read its `AGENTS.md` for the layout, and run \
-             `oculus memory list -s {code}` for what you already know about it — that \
-             bucket, and not the cross-subject one, is where a fact from this \
-             conversation belongs, so `-s {code}` rides every `oculus memory write` \
-             you make here.\n"
+             as the subject to the CLI. Subject-specific guidance, if present, is at \
+             `../courses/{code}/agents/INSTRUCTIONS.md`.\n"
         ));
     }
     if let Some(lec) = lecture {
@@ -168,27 +165,9 @@ mod tests {
             !general.contains("This conversation"),
             "no scope section on a general thread"
         );
-        // The memory contract rides every brief, both halves: read the index
-        // first, write a fact the moment it is true.
         assert!(
-            general.contains("oculus memory list"),
-            "the index is read with the command"
-        );
-        assert!(
-            general.contains("oculus memory write"),
-            "and written with it"
-        );
-        assert!(
-            general.contains("oculus memory append"),
-            "a new fact is a line in a page that exists"
-        );
-        assert!(
-            general.contains("`./TASTE.md`"),
-            "the standing preferences are named too"
-        );
-        assert!(
-            general.contains("## Memory"),
-            "and the contract is its own section"
+            general.contains("./AGENTS.md"),
+            "the shared library instructions are referenced"
         );
 
         let scoped = instructions(&root, Some("COMP30026_2026_SM2"), None, None);
@@ -197,9 +176,7 @@ mod tests {
             "the scope is appended to the same brief"
         );
         assert!(scoped.contains("`../courses/COMP30026_2026_SM2/`"));
-        // The subject bucket is named by flag, never by the course folder's
-        // own `agents/memories/` path, which every sandbox refuses.
-        assert!(scoped.contains("oculus memory list -s COMP30026_2026_SM2"));
+        assert!(scoped.contains("../courses/COMP30026_2026_SM2/agents/INSTRUCTIONS.md"));
         assert!(
             !scoped.contains("../courses/COMP30026_2026_SM2/agents/memories"),
             "the unwritable path is not offered as a place to write"

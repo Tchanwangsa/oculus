@@ -12,7 +12,7 @@ pub struct Reply {
 /// The `{ends_at, quote}` object out of whatever the model said: prose,
 /// fences and an envelope around it are tolerated, as in `chapters`.
 pub fn parse_reply(reply: &str) -> Result<Reply, String> {
-    crate::lectures::chapters::parse_reply(reply, "{\"ends_at\", \"quote\"} object", decode)
+    crate::harness::reply_json::parse_reply(reply, "{\"ends_at\", \"quote\"} object", decode)
 }
 
 fn decode(text: &str) -> Option<Reply> {

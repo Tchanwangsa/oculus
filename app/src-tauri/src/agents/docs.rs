@@ -60,6 +60,37 @@ pub(super) const SKILLS: &[Skill] = &[
         )],
     },
     Skill {
+        name: "oculus-widgets",
+        files: &[
+            (
+                SKILL_DOC_NAME,
+                include_str!("../../templates/skills/oculus-widgets/SKILL.md"),
+            ),
+            // The kit's own contract, so the skill can't drift from it.
+            (
+                "widget.d.ts",
+                include_str!("../../../widget-kit/widget.d.ts"),
+            ),
+            // The gallery: each passes `oculus widget check` (agents/tests.rs).
+            (
+                "bloch-sphere.tsx",
+                include_str!("../../templates/skills/oculus-widgets/bloch-sphere.tsx"),
+            ),
+            (
+                "derivative-steps.tsx",
+                include_str!("../../templates/skills/oculus-widgets/derivative-steps.tsx"),
+            ),
+            (
+                "bubble-sort.tsx",
+                include_str!("../../templates/skills/oculus-widgets/bubble-sort.tsx"),
+            ),
+            (
+                "vector-field.tsx",
+                include_str!("../../templates/skills/oculus-widgets/vector-field.tsx"),
+            ),
+        ],
+    },
+    Skill {
         name: "oculus-studio",
         files: &[
             (

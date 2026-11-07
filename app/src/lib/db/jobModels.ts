@@ -16,7 +16,8 @@ export type JobId =
   | "documentSuggestions"
   | "revisionMarking"
   | "studioResearch"
-  | "studioScene";
+  | "studioScene"
+  | "widgetAsk";
 
 /** `reasoningEffort` is null only for a model that takes no level. */
 export interface JobSelection {
@@ -87,6 +88,11 @@ export const JOBS: {
       "Build animations for each video scene.",
     perAgent: SUBAGENT_AGENTS,
   },
+  {
+    id: "widgetAsk",
+    label: "Widget questions",
+    description: "Answer a chat widget's request once you allow it. Off until you choose a model.",
+  },
 ];
 
 const JOB_IDS = new Set<string>(JOBS.map((j) => j.id));
@@ -112,6 +118,8 @@ export const DEFAULT_JOB_MODELS: JobModels = {
     { provider: "claude", model: "claude-opus-5-5", reasoningEffort: "high" },
     { provider: "codex", model: "gpt-6.1-sol", reasoningEffort: "high" },
   ],
+  // Agent-written code spends on it, so it stays off until a model is chosen.
+  widgetAsk: [],
 };
 
 if (!providerAvailability("claude").supported) {

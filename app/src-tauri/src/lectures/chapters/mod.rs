@@ -20,7 +20,6 @@ mod tests;
 mod transcript;
 
 pub use crate::lectures::lecture_jobs::Run;
-pub(crate) use agent::parse_reply;
 pub use agent::{hms, outline, parse_chapters, prompt, validate, Chapter, Job, MAX_CHAPTERS};
 pub use decode::{sample_diffs, tail_luma};
 pub use frames::{extract_frames, grab_frame, thumbnail_pick};

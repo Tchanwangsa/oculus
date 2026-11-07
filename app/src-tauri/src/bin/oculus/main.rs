@@ -125,6 +125,7 @@ fn main() {
         Some(Command::Quiz { action }) => ctx.quiz(action),
         Some(Command::Artifact { action }) => ctx.artifact(action),
         Some(Command::Topic { action }) => ctx.topic(action),
+        Some(Command::Widget { action }) => ctx.widget(action),
         Some(Command::Docs(args)) => ctx.docs(&args),
         Some(Command::Agent(args)) => ctx.agent(&args),
     };

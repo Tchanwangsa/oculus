@@ -49,11 +49,10 @@ and "the subject turned here" land on adjacent lines, so a topic boundary is
 visible instead of being reconstructed from two files. Only a lecture that has
 been chaptered has one — if it is missing, fall back to `transcript.vtt`.
 
-## 3. Never read the whole file, and never loop over it
+## 3. Find the span before reading
 
-A lecture is around **2500 cues**. Do not `cat` it, and do not write a `for`,
-a `while`, an `awk` or a `$(…)` over the folder — a compound command is
-refused outright and the turn continues without the answer.
+A lecture is around **2500 cues**. Read the relevant span rather than
+loading the whole recording into context.
 
 Find the span, then read it:
 
@@ -76,9 +75,8 @@ sed -n '390,450p' ../lectures/2d2a4a23-5b1e-4c55-9d0a-6f1c2e7b8a90/outline.md
 Two calls, each a single command. Widen with a second `sed -n` rather than
 re-reading from the top.
 
-**On opencode, `bash` is allow-listed to `oculus …` and `ls …` only** — `sed`
-and `grep` are refused there. Use the `grep` and `read` tools instead, with an
-offset; they are permitted and do the same job.
+Where the chat sandbox restricts shell reads, use the native `grep` and
+`read` tools with an offset instead.
 
 ## 4. Quote it by time
 
@@ -89,9 +87,9 @@ column, which is for matching a chapter's `start` to a detected boundary.
 
 `oculus lecture chapters` and `oculus lecture end` **generate** things — they
 drive a model, cost quota (chapters take minutes to an hour), and leave an
-existing result alone unless given `--force`. They are not lookups. When asked to produce chapters or a lecture's end, propose LectureChapters
-or LectureEnd in an `openui` fence and let the student confirm. See
-`oculus-plan` and `oculus-ui`. Never generate them to find out what was said.
+existing result alone unless given `--force`. They are not lookups. For a
+generation request, use the LectureChapters or LectureEnd workflow in
+`oculus-plan`. Never generate them to find out what was said.
 
 `oculus lecture candidates` is free and writes nothing, but it returns
 boundary moments with no words attached — `outline.md` already has those

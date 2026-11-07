@@ -364,3 +364,113 @@ async fn every_entry_and_topic_names_a_subject() {
         .await
         .is_err());
 }
+
+const WIDGET: &str =
+    "// title: Phase\nimport { Widget } from \"oculus/ui\";\nexport default () => <Widget />;\n";
+
+#[tokio::test]
+async fn format_migration_keeps_existing_artifacts_openui() {
+    let db = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    let (before, after): (Vec<_>, Vec<_>) = crate::db::migrations::all()
+        .into_iter()
+        .partition(|m| m.version < 53);
+    for migration in before {
+        sqlx::raw_sql(migration.sql).execute(&db).await.unwrap();
+    }
+    sqlx::raw_sql("INSERT INTO subjects(id,code,name) VALUES(1,'A','A'); INSERT INTO revision_artifacts(subject_id,title,program,state) VALUES(1,'Old','root = Stack([])','{\"$x\":3}');").execute(&db).await.unwrap();
+    for migration in after {
+        sqlx::raw_sql(migration.sql).execute(&db).await.unwrap();
+    }
+    let old = show(&db, Entity::Artifact, 1).await.unwrap();
+    assert_eq!(old["format"], "openui");
+    assert_eq!(old["state"], json!({"$x":3}));
+    // The CHECK holds for writers that skip the Rust validation.
+    assert!(sqlx::query(
+        "INSERT INTO revision_artifacts(subject_id,title,program,format) VALUES(1,'B','x','html')"
+    )
+    .execute(&db)
+    .await
+    .is_err());
+}
+
+#[tokio::test]
+async fn widget_artifacts_must_compile() {
+    let db = setup().await;
+    let id = add(
+        &db,
+        Entity::Artifact,
+        &json!({"subject_id":1,"title":"Phase","program":WIDGET,"format":"widget","state":{"angle":0.5}}),
+    )
+    .await
+    .unwrap();
+    let row = show(&db, Entity::Artifact, id).await.unwrap();
+    assert_eq!(row["format"], "widget");
+    assert_eq!(row["program"], WIDGET);
+    assert_eq!(row["state"], json!({"angle":0.5}));
+
+    for (program, needle) in [
+        ("export default () => <div", "does not compile"),
+        ("const x = 1;", "default export"),
+        (
+            "import x from \"https://cdn.example/x.js\";\nexport default () => null;",
+            "does not compile",
+        ),
+    ] {
+        let err = add(
+            &db,
+            Entity::Artifact,
+            &json!({"subject_id":1,"title":"Bad","program":program,"format":"widget"}),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains(needle), "{err}");
+    }
+    assert!(add(
+        &db,
+        Entity::Artifact,
+        &json!({"subject_id":1,"title":"Bad","program":WIDGET,"format":"html"})
+    )
+    .await
+    .unwrap_err()
+    .contains("format must be openui, widget"));
+    assert_eq!(list(&db, Entity::Artifact).await.unwrap().len(), 1);
+
+    // A patch is checked against the row it produces.
+    assert!(update(
+        &db,
+        Entity::Artifact,
+        id,
+        &json!({"program":"export default () => <div"})
+    )
+    .await
+    .is_err());
+    assert_eq!(
+        show(&db, Entity::Artifact, id).await.unwrap()["program"],
+        WIDGET
+    );
+    update(&db, Entity::Artifact, id, &json!({"state":{"angle":1}}))
+        .await
+        .unwrap();
+
+    // OpenUI programs are not TSX and are not compiled.
+    let openui = add(
+        &db,
+        Entity::Artifact,
+        &json!({"subject_id":1,"title":"Slider","program":"root = Stack([])"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        show(&db, Entity::Artifact, openui).await.unwrap()["format"],
+        "openui"
+    );
+    assert!(
+        update(&db, Entity::Artifact, openui, &json!({"format":"widget"}))
+            .await
+            .is_err()
+    );
+}

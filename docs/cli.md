@@ -15,6 +15,7 @@ agent queries and plans through. Flags are in
 | `lecture` | `app/src-tauri/src/bin/oculus/commands/lecture.rs`, `app/src-tauri/src/bin/oculus/args/lecture.rs` |
 | `transcribe` | `app/src-tauri/src/bin/oculus/commands/transcribe.rs`, `app/src-tauri/src/transcribe/` |
 | `studio` | `app/src-tauri/src/bin/oculus/commands/studio/` (`mod.rs` resolves a slug and dispatches; `videos.rs` for `new` and `list`, `lint.rs`, `brief.rs`, `beats.rs`, `components.rs`, `themes.rs`, `gallery.rs`, `render.rs`, `narrate.rs` for `narrate` and `tts`, `aligner.rs`, `slide.rs` for `slide` and `blocks`), `app/src-tauri/src/bin/oculus/args/studio.rs`, `app/studio-core/`, `app/src-tauri/src/studio/` (`videos/`, `libraries/`, `brief/`) |
+| `widget check` | `app/src-tauri/src/bin/oculus/commands/widget.rs`, `app/src-tauri/src/bin/oculus/args/widget.rs`, `app/src-tauri/src/widgets/check/` ([widgets.md](./widgets.md#checking-a-widget-before-it-is-sent)) |
 | `docs`: help rendering; agent docs, stubs and links | `app/src-tauri/src/bin/oculus/commands/docs.rs`, `app/src-tauri/src/agents/` (`docs.rs`, `links.rs`) |
 | The memory store | `app/src-tauri/src/agents/memory/`, `app/src-tauri/src/bin/oculus/commands/memory.rs` |
 | `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/commands/keyd.rs`, `app/src-tauri/src/auth/keyd/`; the platform registrations in `app/keyd/core/src/platform/macos/registrar.rs` and `app/keyd/core/src/platform/windows/registrar.rs` |
@@ -47,6 +48,7 @@ agent queries and plans through. Flags are in
 | `studio pronounce list` | Nothing | Reads the suggestion files |
 | `studio voices download`, `studio voices delete` | Kokoro's `voice-kokoro` and `g2p-en-us` packs (101 MB) and its 20 voices (510 KB each) in `<app data>/models/voice/`; named voices or `--all` touch only voices | Checked against their pinned sha256 before they get their names; `voices` alone writes nothing |
 | `studio aligner download`, `studio aligner delete` | The aligner model in `<app data>/models/align/` (378 MB) | Checked against its pinned sha256 before it gets its name; `status` writes nothing |
+| `widget check` | Nothing | Reads one TSX file or stdin; exits 1 on any finding ([widgets.md](./widgets.md#checking-a-widget-before-it-is-sent)) |
 | `docs` | The library's `agents/` folder | [Below](#oculus-docs-writes-the-agents-folder) |
 | `keyd install`, `keyd uninstall` | macOS: the LaunchAgent, copied helper app and stamp; Windows: uninstall stops the verified resident broker and removes its registration and stamp, while CLI install cannot start it | Keeps the vault and its master key ([below](#keyd-lifetime-follows-the-platform)) |
 | `keyd status` | Nothing | Pings keyd; macOS launchd can activate it, while Windows only checks an existing broker. Prints no secret |

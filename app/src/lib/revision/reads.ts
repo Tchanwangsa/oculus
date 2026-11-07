@@ -62,13 +62,21 @@ export const getItems = (scope: RevisionScope = "all") =>
   ]);
 export const getSets = (scope: RevisionScope = "all") =>
   list<RevisionSet>("revision_sets", scope, "updated_at DESC, id DESC");
-export const getArtifacts = (scope: RevisionScope = "all") =>
-  list<RevisionArtifact>(
-    "revision_artifacts",
-    scope,
-    "updated_at DESC, id DESC",
-    ["state"],
-  );
+/** A row from before migration 53 can't reach here (the column defaults to
+ *  openui), but anything unknown draws as OpenUI, whose fallback is code. */
+export const readArtifact = (row: RevisionArtifact): RevisionArtifact => ({
+  ...row,
+  format: row.format === "widget" ? "widget" : "openui",
+});
+export const getArtifacts = async (scope: RevisionScope = "all") =>
+  (
+    await list<RevisionArtifact>(
+      "revision_artifacts",
+      scope,
+      "updated_at DESC, id DESC",
+      ["state"],
+    )
+  ).map(readArtifact);
 export async function getSetItems(setId: number): Promise<RevisionItem[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(

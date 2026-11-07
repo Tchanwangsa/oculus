@@ -180,7 +180,7 @@ pub(crate) struct QuizSetAddArgs {
 #[derive(Subcommand)]
 pub(crate) enum ArtifactAction {
     Save(ArtifactSaveArgs),
-    /// Patch title, program, state, subject_id, source_ref or topic_ids with JSON
+    /// Patch title, program, format, state, subject_id, source_ref or topic_ids with JSON
     Update(QuizUpdateArgs),
     List(RevisionListArgs),
     Show(RevisionIdArgs),
@@ -192,9 +192,13 @@ pub(crate) enum ArtifactAction {
 pub(crate) struct ArtifactSaveArgs {
     #[arg(long)]
     pub(crate) title: String,
-    /// OpenUI Lang source file, or - for stdin
+    /// The program's file, or - for stdin: OpenUI Lang, or a widget's TSX
+    /// with --format widget
     #[arg(long)]
     pub(crate) program_file: String,
+    /// What the program is; a widget must compile, as in chat
+    #[arg(long, default_value = "openui", value_parser = ["openui", "widget"])]
+    pub(crate) format: String,
     /// Subject code
     #[arg(short, long)]
     pub(crate) subject: String,

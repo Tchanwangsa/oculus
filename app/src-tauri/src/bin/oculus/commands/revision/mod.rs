@@ -207,7 +207,7 @@ impl Ctx {
                     Some(s) => serde_json::from_str::<Value>(&s).map_err(|e| e.to_string())?,
                     None => json!({}),
                 };
-                let id=self.rt.block_on(revision::add(&pool,Entity::Artifact,&json!({"title":a.title,"program":program,"state":state,"subject_id":subject,"source_ref":a.source,"topic_ids":topic_ids(a.topics.as_deref())?})))?;
+                let id=self.rt.block_on(revision::add(&pool,Entity::Artifact,&json!({"title":a.title,"program":program,"format":a.format,"state":state,"subject_id":subject,"source_ref":a.source,"topic_ids":topic_ids(a.topics.as_deref())?})))?;
                 self.revision_output(json!({"id":id}))
             }
             ArtifactAction::Update(a) => self.rt.block_on(revision::update(
@@ -298,6 +298,110 @@ mod tests {
         for value in ["0", "-1", "name", "1.5"] {
             assert!(topic_ids(Some(value)).is_err());
         }
+    }
+
+    /// `artifact save` against a throwaway database: a widget is saved with
+    /// its format and state, and one that doesn't compile writes nothing.
+    #[test]
+    fn widget_artifacts_round_trip_through_the_cli() {
+        let dir = std::env::temp_dir().join(format!("oculus-artifact-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ctx = Ctx {
+            data_dir: dir.clone(),
+            rt: Runtime::new().unwrap(),
+            json: true,
+        };
+        let path = app_lib::library::paths::db_path(&dir);
+        ctx.rt.block_on(async {
+            // One connection, as the app's migrator uses: each migration sees the last.
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(
+                    sqlx::sqlite::SqliteConnectOptions::new()
+                        .filename(&path)
+                        .create_if_missing(true),
+                )
+                .await
+                .unwrap();
+            for migration in app_lib::db::migrations::all() {
+                sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+            }
+            sqlx::query("INSERT INTO subjects(id,code,name) VALUES(1,'MATH1','Maths')")
+                .execute(&pool)
+                .await
+                .unwrap();
+            pool.close().await;
+        });
+        let save = |program: &str| {
+            let file = dir.join("widget.tsx");
+            std::fs::write(&file, program).unwrap();
+            let file = file.to_str().unwrap().to_string();
+            let cli = Cli::try_parse_from([
+                "oculus",
+                "artifact",
+                "save",
+                "--title",
+                "Phase",
+                "--subject",
+                "MATH1",
+                "--format",
+                "widget",
+                "--state",
+                r#"{"angle":1}"#,
+                "--program-file",
+                &file,
+            ])
+            .unwrap();
+            match cli.command.unwrap() {
+                Command::Artifact { action } => ctx.artifact(action),
+                _ => panic!("wrong command"),
+            }
+        };
+        let widget = "// title: Phase\nexport default function Phase() { return <p>θ</p>; }\n";
+        save(widget).unwrap();
+        assert!(save("export default () => <p>")
+            .unwrap_err()
+            .contains("does not compile"));
+
+        let pool = ctx.planning_db().unwrap();
+        let rows = ctx
+            .rt
+            .block_on(revision::list(&pool, Entity::Artifact))
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["format"], "widget");
+        assert_eq!(rows[0]["program"], widget);
+        assert_eq!(rows[0]["state"], json!({"angle":1}));
+        ctx.rt.block_on(pool.close());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn artifact_format_defaults_to_openui() {
+        let parse = |extra: &[&str]| {
+            let args = [
+                "oculus",
+                "artifact",
+                "save",
+                "--title",
+                "A",
+                "--subject",
+                "M",
+            ]
+            .into_iter()
+            .chain(["--program-file", "-"])
+            .chain(extra.iter().copied());
+            match Cli::try_parse_from(args).map(|cli| cli.command) {
+                Ok(Some(Command::Artifact {
+                    action: ArtifactAction::Save(a),
+                })) => Ok(a.format),
+                Ok(_) => panic!("wrong command"),
+                Err(e) => Err(e),
+            }
+        };
+        assert_eq!(parse(&[]).unwrap(), "openui");
+        assert_eq!(parse(&["--format", "widget"]).unwrap(), "widget");
+        assert!(parse(&["--format", "html"]).is_err());
     }
 
     #[test]

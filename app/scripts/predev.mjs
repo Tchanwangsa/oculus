@@ -1,4 +1,4 @@
-// Dev preflight: dependencies, native binaries, the companion page, the editor core's wasm, debug CLI, keyd and generated docs.
+// Dev preflight: dependencies, native binaries, the companion page, the widget kit, the editor core's wasm, debug CLI, keyd and generated docs.
 // OCULUS_CLI_WATCH=1 also starts the CLI watcher; OCULUS_SKIP_PREDEV skips it.
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
@@ -53,6 +53,15 @@ try {
   execFileSync(process.execPath, [join(app, "scripts", "build-companion.mjs")], { cwd: app, stdio: "inherit" });
 } catch {
   log("the companion page did not build — shared links show a missing page until it does");
+}
+
+// The chat widgets' kit, which the media server reads from dist/widget-kit/.
+// Skipped when current; a failed build leaves widgets showing their "kit
+// failed to load" error, not the app without a start.
+try {
+  execFileSync(process.execPath, [join(app, "scripts", "build-widget-kit.mjs")], { cwd: app, stdio: "inherit" });
+} catch {
+  log("the widget kit did not build — chat widgets show a load error until it does");
 }
 
 // The editor core's wasm for shadow mode (docs/editor-core.md). Without the wasm32

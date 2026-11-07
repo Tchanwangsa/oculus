@@ -37,6 +37,8 @@ dirs = "6"
 keyd_core = { package = "oculus-keyd-core", path = "../keyd/core", features = ["client"] }
 # Studio's scene renderer, for `oculus studio` (docs/studio.md).
 studio_core = { package = "oculus-studio-core", path = "../studio-core" }
+# Same version as studio-core so one oxc compiles. `ast_visit` finds imports.
+oxc = { version = "0.153.0", features = ["transformer", "codegen", "semantic", "ast_visit"] }
 serde = { version = "1", features = ["derive"] }
 # `raw_value`: `harness/providers/antigravity/rules.rs` rewrites two lists in agy's
 # settings file and hands every other value back verbatim, in file order.

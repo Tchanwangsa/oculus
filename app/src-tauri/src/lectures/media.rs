@@ -5,12 +5,16 @@
 //! Scope: files under the data dir's `lectures/`, `courses/` and
 //! `studio/videos/` (rendered videos and their stills), and only with the
 //! per-launch token in the path — any local process can reach the port.
+//!
+//! One route needs no token: `/widget-kit/**`, the code and fonts chat
+//! widgets run on (`widgets/kit.rs`), public files with CORS `*`.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::widgets::kit::{self, Kit};
 use tiny_http::{Header, Method, Response, Server};
 
 /// Managed state: where the media server is listening this launch.
@@ -36,7 +40,7 @@ pub fn media_server_info(state: tauri::State<MediaServer>) -> MediaServerInfo {
     }
 }
 
-pub fn start_media_server(data_dir: PathBuf) -> MediaServer {
+pub fn start_media_server(data_dir: PathBuf, kit: Kit) -> MediaServer {
     let server = Server::http("127.0.0.1:0").expect("[oculus] failed to start media HTTP server");
     let port = server
         .server_addr()
@@ -48,13 +52,15 @@ pub fn start_media_server(data_dir: PathBuf) -> MediaServer {
     elog!("[oculus] media HTTP server on 127.0.0.1:{port}");
 
     let server = Arc::new(server);
+    let kit = Arc::new(kit);
     for _ in 0..MEDIA_WORKERS {
         let server = Arc::clone(&server);
         let data_dir = data_dir.clone();
         let token = token.clone();
+        let kit = Arc::clone(&kit);
         std::thread::spawn(move || {
             while let Ok(request) = server.recv() {
-                handle(request, &data_dir, &token);
+                handle(request, &data_dir, &token, &kit);
             }
         });
     }
@@ -62,7 +68,7 @@ pub fn start_media_server(data_dir: PathBuf) -> MediaServer {
     MediaServer { port, token }
 }
 
-fn handle(request: tiny_http::Request, data_dir: &Path, token: &str) {
+fn handle(request: tiny_http::Request, data_dir: &Path, token: &str, kit: &Kit) {
     let respond_status = |request: tiny_http::Request, code: u16| {
         let _ = request.respond(Response::empty(code));
     };
@@ -75,6 +81,9 @@ fn handle(request: tiny_http::Request, data_dir: &Path, token: &str) {
     let Ok(url) = url::Url::parse(&format!("http://localhost{}", request.url())) else {
         return respond_status(request, 400);
     };
+    if let Some(rest) = url.path().strip_prefix(kit::ROUTE) {
+        return respond_kit(request, kit, rest);
+    }
     if url.path().trim_matches('/') != token {
         return respond_status(request, 403);
     }
@@ -162,6 +171,26 @@ fn handle(request: tiny_http::Request, data_dir: &Path, token: &str) {
     }
 }
 
+/// A kit file (or its 404) with the kit's CORS and caching headers.
+fn respond_kit(request: tiny_http::Request, kit: &Kit, rest: &str) {
+    let reply = kit.respond(request.method().as_str(), rest);
+    let hdr = |k: &str, v: &str| Header::from_bytes(k.as_bytes(), v.as_bytes()).unwrap();
+    let len = reply.body.len();
+    let body: Box<dyn Read + Send> = if request.method() == &Method::Head {
+        Box::new(std::io::empty())
+    } else {
+        Box::new(std::io::Cursor::new(reply.body))
+    };
+    let mut response = Response::new(reply.status.into(), vec![], body, Some(len), None);
+    for (k, v) in kit::HEADERS {
+        response = response.with_header(hdr(k, v));
+    }
+    if let Some(content_type) = reply.content_type {
+        response = response.with_header(hdr("Content-Type", content_type));
+    }
+    let _ = request.respond(response);
+}
+
 /// Parse `Range: bytes=a-b` into inclusive (start, end); `None` for anything
 /// malformed or unsatisfiable, and the caller serves the whole file.
 fn parse_range(value: &str, total: u64) -> Option<(u64, u64)> {
@@ -199,4 +228,45 @@ fn random_token() -> String {
         .fill(&mut buf)
         .expect("media bearer token entropy unavailable");
     buf.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::Scratch;
+    use std::io::Write;
+
+    fn get(port: u16, path: &str) -> String {
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write!(
+            stream,
+            "GET {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        let mut out = String::new();
+        stream.read_to_string(&mut out).unwrap();
+        out.to_ascii_lowercase()
+    }
+
+    #[test]
+    fn kit_route_needs_no_token_and_only_it_has_cors() {
+        let scratch = Scratch::new("media-kit");
+        let root = scratch.join("kit");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("core.js"), "export {}").unwrap();
+        let server = start_media_server(scratch.join("data"), Kit::disk(root));
+
+        let kit = get(server.port, "/widget-kit/core.js?x=1");
+        assert!(kit.starts_with("http/1.1 200"), "{kit}");
+        assert!(kit.contains("access-control-allow-origin: *"), "{kit}");
+        assert!(kit.contains("x-content-type-options: nosniff"), "{kit}");
+        assert!(kit.contains("content-type: text/javascript"), "{kit}");
+
+        let missing = get(server.port, "/widget-kit/a%5Cb.js");
+        assert!(missing.starts_with("http/1.1 404"), "{missing}");
+
+        let video = get(server.port, "/not-the-token?path=/etc/hosts");
+        assert!(video.starts_with("http/1.1 403"), "{video}");
+        assert!(!video.contains("access-control-allow-origin"), "{video}");
+    }
 }

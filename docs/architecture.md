@@ -310,6 +310,15 @@ port with a per-launch token and Range support, scoped to `lectures/`,
 `courses/` and `studio/videos/` (rendered videos), and serving PNG, JPEG and
 WebP as images. The frontend gets URLs from `mediaSrc()` in `app/src/lib/lectures/media/src.ts`.
 
+The same server answers `GET|HEAD /widget-kit/<path>` with no token: the
+chat-widget kit (`dist/widget-kit/**`), loaded by sandboxed frames whose origin
+is `null`. Only these responses carry `Access-Control-Allow-Origin: *`,
+`nosniff` and `no-cache` (file names are unhashed); the video route never does.
+Debug builds read the files from `app/dist/widget-kit`, release builds the copy
+Tauri embeds with the frontend. Paths are plain segments only
+(`app/src-tauri/src/widgets/kit.rs`). The frontend builds
+`http://127.0.0.1:<port>/widget-kit/` from `media_server_info`.
+
 ## One data directory, resolved without a Tauri handle
 
 `library::paths::data_dir()` computes the directory Tauri would

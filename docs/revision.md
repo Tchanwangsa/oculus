@@ -11,6 +11,7 @@ to one subject at a time.
 | Tables and indexes, registered as migration 50 | `app/src-tauri/src/db/revision/schema.sql`, `app/src-tauri/src/db/migrations.rs` |
 | Topic tables, membership triggers and seed, migration 51 | `app/src-tauri/src/db/revision/topics.sql`, `app/src-tauri/src/db/revision/topics.rs` |
 | Cheat tag registry and its triggers, migration 52 | `app/src-tauri/src/db/revision/tags.sql`, `app/src-tauri/src/db/revision/tags.rs`, `app/src/lib/revision/tags.ts` |
+| An artifact's `format`, migration 53 | `app/src-tauri/src/db/revision/format.sql` |
 | Topics nav group, editor picker and matching | `app/src/components/revision/nav/`, `app/src/components/revision/TopicPicker.tsx`, `app/src/lib/revision/topics.ts` |
 | Guarded Revision field edits (`EditItems`) | `app/src-tauri/src/db/proposals/edits.rs` |
 | Rust validated row writers and CLI persistence | `app/src-tauri/src/db/revision/`, `app/src-tauri/src/bin/oculus/commands/revision/` |
@@ -213,14 +214,20 @@ agent.
 
 Every rendered OpenUI fence offers Save to Revision on hover or keyboard
 focus, except one holding a proposal or job card, which is part of the chat
-rather than a widget to keep. `revision_artifacts` stores its source program and runtime snapshot,
-including slider values and component progress. The Artifacts page renders
-through the same lazy runtime, supports expansion, rename and deletion, and
-saves state changes after a short debounce, flushing on unmount.
+rather than a widget to keep. A ` ```widget ` fence offers it in its title bar
+once it runs ([widgets.md](./widgets.md#a-running-widget-can-be-saved-to-revision)).
+`revision_artifacts` stores the program, its `format` (`openui` or `widget`;
+a CHECK and the Rust writer refuse anything else) and the runtime snapshot,
+including slider values and component progress. The Artifacts page draws each
+with its format's runtime (`ArtifactBody`: the lazy OpenUI block, or
+`LiveWidget`), supports expansion, rename and deletion, and saves state
+changes after a short debounce, flushing on unmount.
 
-Ask about this appends the artifact's program to a new-chat draft and opens
-Chat. The student sends it. Saved programs use the same fixed component
-library as replies; arbitrary HTML is handled by the separate output embed.
+Ask about this appends the artifact in its own fence (` ```openui ` or
+` ```widget `) to a new-chat draft and opens Chat. The student sends it. An
+OpenUI program uses the fixed component library; a widget is TSX on the
+widget kit and must compile to be saved. Arbitrary HTML is handled by the
+separate output embed.
 
 ## CLI writes refresh open Revision views
 
@@ -228,8 +235,10 @@ library as replies; arbitrary HTML is handled by the separate output embed.
 tag registry; agent writes require a `NewCheatNotes` proposal instead. `oculus quiz add --batch` validates and saves
 its draft questions atomically. `quiz list --due` reads active due questions
 without computing a schedule. `quiz set add` creates an ordered set.
-`oculus artifact save --program-file` persists a widget program and optional
-state. `oculus topic` lists, adds, renames and removes topics; creation
+`oculus artifact save --program-file` persists an OpenUI program, or with
+`--format widget` a widget's TSX, and optional state; the `oculus-revision`
+and `oculus-widgets` skills have the agent save one only when the student
+asks, after `oculus widget check`. `oculus topic` lists, adds, renames and removes topics; creation
 commands take `--topics` ids and list commands filter by `--topic`. An
 agent's updates, topic renames included, require an `EditItems` proposal;
 deleting a topic or entry is left to the student. Exact flags are in [cli-reference.md](./cli-reference.md).
@@ -248,3 +257,4 @@ counts refresh while a pane is idle, and FSRS learning repeats return when due.
 - Preserve `learning_steps` when reconstructing an FSRS card.
 - A malformed marking response is an error with an explicit self-mark option.
 - Do not edit an applied migration: SQLite's migration checksums include comments.
+- Never save a widget artifact without compiling it in Rust — the Artifacts page would show a widget that can't run.

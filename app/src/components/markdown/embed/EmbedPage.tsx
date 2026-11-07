@@ -6,10 +6,9 @@ import { isDark, subscribeDark } from "@/lib/ui/themes";
 import { IconAction } from "@/components/markdown/embed/IconAction";
 import { PageViewer } from "@/components/markdown/embed/PageViewer";
 import {
-  DEFAULT_HEIGHT,
-  HEIGHT_MESSAGE,
-  MAX_HEIGHT,
-  MIN_HEIGHT,
+  initialPageHeight,
+  nextPageHeight,
+  readPageHeight,
   baseHref,
   prepare,
 } from "@/components/markdown/embed/pagePrepare";
@@ -20,7 +19,8 @@ export function EmbedPage({ path, alt }: { path: string; alt?: string }) {
   const dark = useSyncExternalStore(subscribeDark, isDark);
   const [source, setSource] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const [height, setHeight] = useState(DEFAULT_HEIGHT);
+  const [sizing, setSizing] = useState(initialPageHeight);
+  const { height } = sizing;
   const [open, setOpen] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
   const title = alt || basename(path);
@@ -41,21 +41,27 @@ export function EmbedPage({ path, alt }: { path: string; alt?: string }) {
   // A theme flip rebuilds the document (and reloads the frame) so the
   // injected scheme follows; the last height holds until it reports again.
   const doc = useMemo(
-    () => (source != null && dataDir ? prepare(source, baseHref(dataDir, path), dark) : null),
+    () => {
+      if (source == null || !dataDir) return null;
+      const base = baseHref(dataDir, path);
+      return {
+        inline: prepare(source, base, dark, true),
+        expanded: prepare(source, base, dark),
+      };
+    },
     [source, dataDir, path, dark],
   );
 
   // Only this frame's own reports; the expanded copy and other embeds post too.
   useEffect(() => {
+    setSizing((current) => initialPageHeight(current.height));
     const onMessage = (e: MessageEvent) => {
-      if (!frame.current || e.source !== frame.current.contentWindow) return;
-      if (e.data?.type !== HEIGHT_MESSAGE) return;
-      const h = Number(e.data.height);
-      if (Number.isFinite(h)) setHeight(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.ceil(h))));
+      const report = readPageHeight(e, frame.current?.contentWindow ?? null);
+      if (report !== null) setSizing((current) => nextPageHeight(current, report));
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, []);
+  }, [doc]);
 
   return (
     <span
@@ -87,14 +93,14 @@ export function EmbedPage({ path, alt }: { path: string; alt?: string }) {
           ref={frame}
           // Never `allow-same-origin`: the page would get the app's origin and the Tauri IPC.
           sandbox="allow-scripts"
-          srcDoc={doc}
+          srcDoc={doc.inline}
           title={title}
           style={{ height }}
           className="block w-full border-0"
         />
       )}
       {doc != null && (
-        <PageViewer doc={doc} title={title} path={path} open={open} onOpenChange={setOpen} />
+        <PageViewer doc={doc.expanded} title={title} path={path} open={open} onOpenChange={setOpen} />
       )}
     </span>
   );

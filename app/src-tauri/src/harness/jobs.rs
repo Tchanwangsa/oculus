@@ -40,6 +40,8 @@ pub enum Job {
     StudioResearch,
     /// A chat agent's subagent that builds one scene of a video.
     StudioScene,
+    /// A chat widget's `ask` from `oculus/ask` (`widgets::ask`).
+    WidgetAsk,
 }
 
 impl Job {
@@ -54,6 +56,7 @@ impl Job {
             Job::RevisionMarking => "revisionMarking",
             Job::StudioResearch => "studioResearch",
             Job::StudioScene => "studioScene",
+            Job::WidgetAsk => "widgetAsk",
         }
     }
 
@@ -68,6 +71,7 @@ impl Job {
             Job::RevisionMarking => "Revision marking",
             Job::StudioResearch => "Studio research",
             Job::StudioScene => "Studio scenes",
+            Job::WidgetAsk => "Widget questions",
         }
     }
 }
@@ -89,6 +93,8 @@ impl JobSelection {
 
 /// What a job runs on until someone says otherwise. The Studio jobs name one
 /// model per agent whose subagents take a model (`studio_agents::takes_model`).
+/// Widget questions have none: agent-written code spends on it, so it stays
+/// off until the student picks a model.
 /// Native Claude Code is disabled on Windows (docs/harness.md), so there the
 /// small jobs run on Codex and the Studio jobs drop their Claude entry.
 pub fn default_chain(job: Job) -> Vec<JobSelection> {
@@ -127,6 +133,7 @@ pub fn default_chain(job: Job) -> Vec<JobSelection> {
             one(Provider::Claude, "claude-opus-5-5", Some("high")),
             one(Provider::Codex, "gpt-6.1-sol", Some("high")),
         ],
+        Job::WidgetAsk => Vec::new(),
     };
     if cfg!(windows) {
         chain
@@ -549,6 +556,30 @@ mod tests {
             &from_json(body, Job::ThreadNaming),
             Job::ThreadNaming
         ));
+    }
+
+    #[test]
+    fn widget_questions_have_no_default_and_a_missing_key_leaves_them_off() {
+        assert_eq!(Job::WidgetAsk.key(), "widgetAsk");
+        assert_eq!(Job::WidgetAsk.label(), "Widget questions");
+        assert!(default_chain(Job::WidgetAsk).is_empty());
+        for body in [
+            "{}",
+            "not json",
+            r#"{"widgetAsk":null}"#,
+            r#"{"widgetAsk":[]}"#,
+        ] {
+            assert!(from_json(body, Job::WidgetAsk).is_empty(), "{body}");
+        }
+        let chain = from_json(
+            r#"{"widgetAsk":[{"provider":"codex","model":"gpt-6-luna","reasoningEffort":"low"}]}"#,
+            Job::WidgetAsk,
+        );
+        assert_eq!(models(&chain), ["gpt-6-luna"]);
+        assert_eq!(
+            try_each(Job::WidgetAsk, &[], |_| Ok(())).unwrap_err(),
+            "No model is set for Widget questions — choose one in Settings → Jobs."
+        );
     }
 
     #[test]

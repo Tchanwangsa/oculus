@@ -1,0 +1,564 @@
+/* The widget kit's stylesheet: fonts, the frame's base and every `oculus/ui`
+ * component. Colours are the app's tokens, which the parent writes into the
+ * frame as custom properties for the current theme (docs/widgets.md); this
+ * file never names a colour of its own. */
+
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(fonts/inter-latin-wght-normal.woff2) format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(fonts/inter-latin-ext-wght-normal.woff2) format("woff2-variations");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(fonts/inter-greek-wght-normal.woff2) format("woff2-variations");
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+@font-face {
+  font-family: "Manrope Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url(fonts/manrope-latin-wght-normal.woff2) format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Manrope Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url(fonts/manrope-latin-ext-wght-normal.woff2) format("woff2-variations");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Never a scrollbar: the frame is exactly the content's height. */
+html,
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--color-card);
+  color: var(--color-foreground);
+}
+
+body {
+  font-family: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Holds its children's margins, so its height is the content's. */
+#root {
+  display: flow-root;
+}
+
+h1, h2, h3, h4 {
+  font-family: "Manrope Variable", "Manrope", "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  margin: 0;
+}
+h1 { font-size: 16px; }
+h2 { font-size: 15px; }
+h3, h4 { font-size: 14px; }
+p { margin: 0; }
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button,
+.o-label,
+.o-tablist,
+.o-slider input {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+
+.o-widget {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px;
+}
+
+.o-row {
+  display: flex;
+  min-width: 0;
+}
+
+.o-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.o-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-muted-foreground);
+}
+
+.o-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-muted-foreground);
+}
+.o-note-success { color: var(--color-success); }
+.o-note-warning { color: var(--color-warning); }
+.o-note-danger { color: var(--color-destructive); }
+
+.o-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 120ms, background-color 120ms, border-color 120ms;
+}
+.o-pill:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.o-pill-outline {
+  border-color: var(--color-border);
+  background: var(--color-card);
+  color: var(--color-foreground);
+}
+.o-pill-outline:not(:disabled):hover { background: var(--color-accent); }
+.o-pill-outline[aria-pressed="true"] {
+  border-color: var(--color-brand);
+  background: var(--color-brand-muted);
+  color: var(--color-brand);
+}
+.o-pill-primary {
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+}
+.o-pill-primary:not(:disabled):hover { background: var(--color-primary-hover); }
+.o-pill-ghost {
+  background: transparent;
+  color: var(--color-muted-foreground);
+}
+.o-pill-ghost:not(:disabled):hover {
+  background: var(--color-accent);
+  color: var(--color-foreground);
+}
+.o-pill-ghost[aria-pressed="true"] {
+  background: var(--color-accent);
+  color: var(--color-foreground);
+}
+
+.o-value {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.o-value-number,
+.o-control-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-foreground);
+}
+.o-value-number {
+  font-size: 15px;
+  font-weight: 600;
+}
+.o-control-value {
+  font-size: 12px;
+  font-weight: 500;
+}
+.o-value-unit {
+  margin-left: 2px;
+  color: var(--color-muted-foreground);
+  font-weight: 500;
+}
+
+.o-control-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.o-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 140px;
+  flex: 1;
+}
+.o-slider input {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.o-slider input::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, var(--color-primary) var(--fill, 0%), var(--color-surface-raised) var(--fill, 0%));
+}
+.o-slider input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 9999px;
+  border: 1.5px solid var(--color-primary);
+  background: var(--color-card);
+}
+
+.o-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.o-toggle:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.o-toggle-track {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  flex: none;
+  border-radius: 9999px;
+  background: var(--color-input);
+  transition: background-color 120ms;
+}
+.o-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--color-card);
+  transition: transform 120ms;
+}
+.o-toggle[aria-checked="true"] .o-toggle-track { background: var(--color-primary); }
+.o-toggle[aria-checked="true"] .o-toggle-knob {
+  transform: translateX(12px);
+  background: var(--color-primary-foreground);
+}
+.o-toggle-label { font-size: 13px; }
+
+.o-select,
+.o-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.o-select-box {
+  position: relative;
+  display: inline-flex;
+  align-self: flex-start;
+}
+/* The caret, drawn from borders so it takes the token colour. */
+.o-select-box::after {
+  content: "";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin-top: -4px;
+  border-right: 1.5px solid var(--color-muted-foreground);
+  border-bottom: 1.5px solid var(--color-muted-foreground);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+.o-select select {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 28px;
+  padding: 0 30px 0 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 9999px;
+  background: var(--color-card);
+  font-size: 13px;
+  cursor: pointer;
+}
+.o-field input {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--color-input);
+  border-radius: 8px;
+  background: var(--color-card);
+  font-size: 13px;
+}
+.o-field input::placeholder { color: var(--color-muted-foreground); }
+.o-field-preview {
+  min-height: 20px;
+  padding: 2px 2px 0;
+}
+
+.o-tabs,
+.o-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.o-tablist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.o-tab {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 120ms, background-color 120ms;
+}
+.o-tab:hover { color: var(--color-foreground); }
+.o-tab[aria-selected="true"] {
+  background: var(--color-accent);
+  color: var(--color-foreground);
+}
+
+/* Every panel in one cell: the cell is the tallest panel's height. */
+.o-panels {
+  display: grid;
+  min-width: 0;
+}
+.o-panel {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
+.o-pages-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.o-dots {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+.o-dot {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--color-border);
+  cursor: pointer;
+}
+.o-dot[aria-selected="true"] { background: var(--color-primary); }
+
+.o-tex .katex { font-size: 1.05em; }
+.o-tex-display {
+  display: block;
+  text-align: center;
+}
+.o-tex-display .katex-display { margin: 0; }
+.o-tex-pending { color: var(--color-muted-foreground); }
+/* The engine's empty-slot marker, drawn only by the note editor. */
+.o-tex .oc-placeholder {
+  display: inline-block;
+  width: 0;
+  visibility: hidden;
+}
+
+/* `oculus/2d`: Mafs' own stylesheet is not loaded (it names its colours and
+ * a serif face); these rules redraw it from the tokens, in the kit's fonts. */
+.o-plane {
+  width: 100%;
+  min-width: 0;
+}
+.MafsView {
+  display: block;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--mafs-bg);
+  font-family: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  -webkit-user-select: none;
+  user-select: none;
+  /* Touch scrolls the chat; only a movable point (below) takes the pointer. */
+  touch-action: auto;
+  outline: 0;
+
+  --mafs-bg: var(--color-card);
+  --mafs-fg: var(--color-foreground);
+  --mafs-origin-color: var(--color-muted-foreground);
+  --mafs-line-color: var(--color-border);
+  --grid-line-subdivision-color: var(--color-border-subtle);
+  --mafs-line-stroke-dash-style: 4, 3;
+  --mafs-axis-stroke-width: 1px;
+
+  --mafs-red: var(--color-destructive);
+  --mafs-orange: var(--color-warning);
+  --mafs-yellow: var(--color-chart-3);
+  --mafs-green: var(--color-chart-2);
+  --mafs-blue: var(--color-chart-1);
+  --mafs-indigo: var(--color-chart-1);
+  --mafs-violet: var(--color-brand);
+  --mafs-pink: var(--color-chart-4);
+}
+.o-plane-bare .MafsView {
+  --mafs-line-color: transparent;
+  --grid-line-subdivision-color: transparent;
+}
+.MafsView:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+.MafsView text {
+  fill: var(--mafs-fg);
+  cursor: default;
+}
+.MafsView path {
+  stroke: var(--mafs-fg);
+}
+.mafs-shadow {
+  paint-order: stroke;
+  stroke-width: 3px;
+  stroke: var(--mafs-bg);
+  stroke-opacity: 0.75;
+  stroke-linejoin: round;
+}
+
+.mafs-movable-point {
+  cursor: grab;
+  touch-action: none;
+}
+.mafs-movable-point-dragging { cursor: grabbing; }
+.mafs-movable-point:focus { outline: 0; }
+.mafs-movable-point * {
+  fill: none;
+  stroke: none;
+}
+.mafs-movable-point-hitbox { fill: transparent; }
+.mafs-movable-point-focus {
+  stroke: var(--movable-point-color);
+  stroke-width: 2;
+  stroke-opacity: 0;
+  fill: none;
+  transition: stroke-opacity 0.2s ease;
+}
+.mafs-movable-point-ring {
+  fill: var(--movable-point-color);
+  fill-opacity: 0.25;
+  stroke: none;
+  transition: r 0.2s ease;
+}
+.mafs-movable-point-point {
+  fill: var(--movable-point-color);
+  transition: r 0.2s ease;
+}
+.mafs-movable-point:hover .mafs-movable-point-point,
+.mafs-movable-point:focus-visible .mafs-movable-point-point {
+  r: calc(var(--movable-point-ring-size) - 2px);
+}
+.mafs-movable-point:hover .mafs-movable-point-ring,
+.mafs-movable-point:focus-visible .mafs-movable-point-ring {
+  r: calc(var(--movable-point-ring-size) + 3px);
+}
+.mafs-movable-point.mafs-movable-point-dragging .mafs-movable-point-ring {
+  r: var(--movable-point-ring-size);
+}
+.mafs-movable-point:focus-visible .mafs-movable-point-focus { stroke-opacity: 1; }
+
+/* A halo in the card's colour keeps a label legible over grid lines. */
+.o-plane-label > div {
+  font-size: 13px;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-shadow: 0 0 2px var(--color-card), 0 0 2px var(--color-card), 0 0 3px var(--color-card), 0 0 3px var(--color-card);
+}
+
+/* `oculus/3d`: the scene's box is its full size before anything draws, so
+ * the frame's height never changes; the canvas, its still and the labels
+ * are layered in it. Transparent: the card shows through. */
+.o-scene {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+.o-canvas {
+  position: relative;
+  width: 100%;
+  height: 320px;
+  overflow: hidden;
+  border-radius: 8px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.o-scene > .o-canvas { height: 100%; }
+.o-canvas-still,
+.o-scene-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.o-canvas-still {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.o-scene-labels { overflow: hidden; }
+.o-scene-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+/* A halo in the card's colour keeps a label legible over what is behind it. */
+.o-scene-label-box {
+  font-size: 13px;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-shadow: 0 0 2px var(--color-card), 0 0 2px var(--color-card), 0 0 3px var(--color-card), 0 0 3px var(--color-card);
+}

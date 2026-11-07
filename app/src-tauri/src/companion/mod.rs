@@ -10,7 +10,7 @@
 //! - `bridge` adapts requests and authority events to each other.
 //! - `assets` serves the browser bundle, `endpoints` this Mac's addresses.
 
-mod assets;
+pub(crate) mod assets;
 mod bridge;
 pub mod commands;
 mod core;

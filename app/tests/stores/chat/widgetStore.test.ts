@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createWidgetStore, widgetKey } from "@/stores/chat/widgetStore";
+import { artifactWidgetKey, createWidgetStore, entryState, widgetKey } from "@/stores/chat/widgetStore";
 
 function storage(initial = "{}") {
   let value = initial;
@@ -36,4 +36,23 @@ test("corrupt storage is ignored and failed writes retain in-memory progress", (
   const store = createWidgetStore({ getItem: () => { throw Error("denied"); }, setItem: () => { throw Error("full"); } });
   store.getState().save("1:10:0", "program", { "$x": 2 });
   expect(store.getState().entries["1:10:0"].state).toEqual({ "$x": 2 });
+});
+
+test("an artifact's entry survives thread pruning and goes with drop", () => {
+  const disk = storage();
+  const store = createWidgetStore(disk).getState();
+  store.save(widgetKey(1, 10, 0), "program", {});
+  store.setAsk(artifactWidgetKey(7), "program", { allowed: true, used: 3 });
+  store.prune(1);
+  expect(Object.keys(createWidgetStore(disk).getState().entries)).toEqual(["artifact:7"]);
+  store.drop(artifactWidgetKey(7));
+  store.drop(artifactWidgetKey(8));
+  expect(createWidgetStore(disk).getState().entries).toEqual({});
+});
+
+test("entryState hands over the state for that source and never the grant", () => {
+  const entry = { source: "program", state: { angle: 2 }, ask: { allowed: true, used: 4 } };
+  expect(entryState(entry, "program")).toEqual({ angle: 2 });
+  expect(entryState(entry, "other")).toEqual({});
+  expect(entryState(undefined, "program")).toEqual({});
 });

@@ -27,6 +27,7 @@ Read this before any UI work.
 | Identity icons, shared picker and colour palette | `app/src/components/ui/icon/`, `app/src/lib/ui/iconPreferences.ts` |
 | A titled block that folds, its state kept by the caller | `app/src/components/ui/CollapsibleSection.tsx` |
 | Study widgets in markdown replies | `app/src/components/markdown/openui/components/` |
+| Agent-written widgets and the kit they are built from | `app/src/components/markdown/widget/`, `app/widget-kit/` |
 | Proposal cards, typed editors and result links | `app/src/components/markdown/openui/proposals/` |
 
 ## Study widgets use the reply's primitives and semantic tokens
@@ -40,6 +41,12 @@ chart, border and muted-text tokens; controls use primary, brand, success and
 destructive tokens. Nothing inside the widget sets a fixed pixel width, so
 the cards reflow with the chat pane and page zoom. The runtime and its state
 contract are in [harness.md](./harness.md#openui-fences-draw-interactive-study-widgets).
+
+A ` ```widget ` fence runs in a sandboxed frame, so it can't use these
+components; its kit (`app/widget-kit/kit.css`) redraws the same card, pills
+and controls from the app's tokens, written into the frame for the current
+theme. It never scrolls: the frame is its content's height, and taller content
+is paginated with the kit's `Pages` ([widgets.md](./widgets.md)).
 
 `Rich` repairs JSON's form-feed, tab, backspace and carriage-return escapes
 before a letter, plus newline escapes inside dollar-delimited maths. It cannot

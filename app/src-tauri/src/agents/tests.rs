@@ -214,6 +214,7 @@ fn stubs_are_written_once_and_then_left_alone() {
             "oculus-plan",
             "oculus-ui",
             "oculus-revision",
+            "oculus-widgets",
             "oculus-studio"
         ]
     );
@@ -286,6 +287,70 @@ fn every_skill_file_lands_and_stale_ones_are_removed() {
         studio_files,
         [SKILL_DOC_NAME, "reference.md", "build.md", "studio.d.ts"]
     );
+}
+
+/// The widgets skill's gallery, `(file, source)`.
+fn widget_gallery() -> Vec<(&'static str, &'static str)> {
+    let skill = SKILLS.iter().find(|s| s.name == "oculus-widgets").unwrap();
+    let files: Vec<&str> = skill.files.iter().map(|(f, _)| *f).collect();
+    assert_eq!(
+        files,
+        [
+            SKILL_DOC_NAME,
+            "widget.d.ts",
+            "bloch-sphere.tsx",
+            "derivative-steps.tsx",
+            "bubble-sort.tsx",
+            "vector-field.tsx"
+        ]
+    );
+    skill
+        .files
+        .iter()
+        .filter(|(f, _)| f.ends_with(".tsx"))
+        .copied()
+        .collect()
+}
+
+/// A gallery example is taught as a finished widget, so it passes the
+/// check the skill tells the agent to run.
+#[test]
+fn every_widget_gallery_example_passes_the_check() {
+    for (file, source) in widget_gallery() {
+        assert_eq!(crate::widgets::check::check(source), Vec::new(), "{file}");
+    }
+}
+
+/// `app/tests/fixtures/widget-gallery/<name>.js` is each example's real
+/// transpile output, which the bun test builds a frame document from.
+/// `WIDGET_BLESS=1 cargo test widget_gallery` rewrites them.
+#[test]
+fn widget_gallery_fixtures_are_the_transpile_output() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/widget-gallery");
+    let bless = std::env::var_os("WIDGET_BLESS").is_some();
+    let mut want = Vec::new();
+    for (file, source) in widget_gallery() {
+        let name = file.replace(".tsx", ".js");
+        let js = crate::widgets::transpile::transpile(source).unwrap().js;
+        let path = dir.join(&name);
+        if bless {
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(&path, &js).unwrap();
+        }
+        let fixture = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(
+            fixture == js,
+            "{name} is not {file}'s transpile output; run WIDGET_BLESS=1 cargo test widget_gallery"
+        );
+        want.push(name);
+    }
+    let mut have: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    want.sort();
+    have.sort();
+    assert_eq!(have, want, "a fixture no example makes");
 }
 
 /// Each CLI indexes a skill by its `SKILL.md` front matter; the name must be

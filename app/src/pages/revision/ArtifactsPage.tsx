@@ -1,16 +1,10 @@
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { draftKey, useDraftStore } from "@/stores/chat/draftStore";
 import { useNavigate } from "react-router-dom";
 import { RevisionPage } from "@/components/revision/RevisionPage";
 import { TopicPicker } from "@/components/revision/TopicPicker";
 import { SourceLink } from "@/components/revision/SourceLink";
+import { ArtifactBody, artifactFence } from "@/components/revision/ArtifactBody";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useRevisionData } from "@/layouts/RevisionLayout";
@@ -19,9 +13,7 @@ import {
   deleteArtifact,
   type RevisionArtifact,
 } from "@/lib/revision";
-const OpenUIBlock = lazy(
-  () => import("@/components/markdown/openui/OpenUIBlock"),
-);
+import { artifactWidgetKey, useWidgetStore } from "@/stores/chat/widgetStore";
 function Artifact({
   artifact,
   wide,
@@ -68,24 +60,7 @@ function Artifact({
             }).catch((e) => setError(String(e)));
         }}
       />
-      <Suspense
-        fallback={
-          <p className="text-sm text-muted-foreground">Loading artifact…</p>
-        }
-      >
-        <OpenUIBlock
-          source={artifact.program}
-          blockIndex={0}
-          savedState={artifact.state}
-          onPersistState={save}
-          hideSave
-          fallback={
-            <p role="alert" className="text-sm text-destructive">
-              This saved program cannot be rendered.
-            </p>
-          }
-        />
-      </Suspense>
+      <ArtifactBody artifact={artifact} onPersistState={save} />
       <div className="flex flex-wrap items-center gap-2">
         <TopicPicker
           subjectId={artifact.subject_id}
@@ -114,7 +89,7 @@ function Artifact({
                 key,
                 [
                   old,
-                  `Explain this interactive artifact: ${artifact.title}\n\n\`\`\`openui\n${artifact.program}\n\`\`\``,
+                  `Explain this interactive artifact: ${artifact.title}\n\n${artifactFence(artifact)}`,
                 ]
                   .filter(Boolean)
                   .join("\n\n"),
@@ -128,7 +103,11 @@ function Artifact({
           size="xs"
           variant="ghost"
           onClick={() =>
-            void deleteArtifact(artifact.id).catch((e) => setError(String(e)))
+            void deleteArtifact(artifact.id)
+              .then(() =>
+                useWidgetStore.getState().drop(artifactWidgetKey(artifact.id)),
+              )
+              .catch((e) => setError(String(e)))
           }
         >
           Delete

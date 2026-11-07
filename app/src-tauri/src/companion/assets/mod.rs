@@ -6,7 +6,7 @@
 //! root check (disk), never through Tauri's fallback to the app's own
 //! `index.html`.
 
-mod mime;
+pub(crate) mod mime;
 mod path;
 
 use bytes::Bytes;

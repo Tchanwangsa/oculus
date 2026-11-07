@@ -144,7 +144,7 @@ export const LectureChatPanel = memo(function LectureChatPanel({
   }, [model, active, store]);
 
   const empty = items.length === 0 && !running;
-  const scroll = useStickToBottom(threadId, !empty, running);
+  const scroll = useStickToBottom(threadId, !empty, running, items);
   useScrollFade(scroll.outer, "y", !empty);
   /** Pictures drop anywhere on the panel, not only on the box. */
   const panelRef = useRef<HTMLDivElement>(null);
@@ -242,7 +242,7 @@ export const LectureChatPanel = memo(function LectureChatPanel({
           wide row would scroll the whole column. See `RowShell`. */}
       <div className="relative min-h-0 flex-1">
         <div ref={scroll.outer} className="h-full overflow-x-hidden overflow-y-auto px-2">
-          <div ref={scroll.inner} className="min-w-0 py-1">
+          <div ref={scroll.inner} className="min-w-0 pt-1 pb-6">
             {empty ? (
               // No suggestion chips: the dock is too narrow.
               resolved && (

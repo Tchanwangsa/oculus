@@ -1,0 +1,6 @@
+/** What Ask to fix sends: the error and the whole fence, so the agent can
+ *  resend a corrected widget in its reply. */
+export function fixRequest(title: string, error: string, source: string): string {
+  const reason = error.trim().replace(/[.\s]+$/, "");
+  return `The widget "${title}" failed: ${reason}. Fix it and resend the widget.\n\n\`\`\`widget\n${source}\n\`\`\``;
+}

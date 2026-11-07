@@ -72,24 +72,24 @@ needs an explicit code. Do this when the student says "remember this" or
 "add that to my cheat sheet" too. Never offer entries for task planning, sync
 or chat about the app. The student edits the card and clicks Add; do not run
 `oculus cheat add` yourself. `oculus cheat list/show` reads existing entries;
-existing entries are edited through `EditItems` below. The arguments are
-`CheatEntry(title, body, subject, tags, source, topics)`. Tags come from the
-cheat sheet's registry: read it with `oculus cheat tags` and spell a name as
-listed (`Formula`, `Definition`, `Worked example`). A new name joins the
-registry, so add one only when nothing fits. The library path or page the
-entry came from goes in `source`, never in tags, and the last argument is its
-topic names.
+existing entries are edited through `EditItems` below. Read `oculus-ui` for
+CheatEntry's positional arguments. Choose one or two tags from
+`oculus cheat tags`, adding a name only when nothing fits. Put the library
+path or page in `source`, never in tags, and topic names in `topics`.
 For example:
 
 ```openui
 root = Stack([NewCheatNotes([CheatEntry("Product rule", "For $y=uv$, $y'=u'v+uv'$. Example: $(x^2 e^x)'=2xe^x+x^2e^x$.", "MAST10006", ["Formula"], "courses/MAST10006_2026_SM1/files/Lecture_5.pdf#page=3", ["Differentiation"])])])
 ```
 
-Quiz and Flashcards widgets have Save to Revision, saving drafts. Interactive
-fences can be saved as artifacts, retaining their current slider/card state.
-`oculus artifact save --title "Explorer" --program-file path` creates an
-artifact directly. Use only the widget components in `oculus-ui`; do not
-invent iframe or arbitrary HTML components.
+Quiz and Flashcards in an `openui` fence have Save to Revision, which saves
+drafts. Any other `openui` fence, and every `widget` fence, saves as an
+artifact with the student's current state (sliders, cards, the page or step
+they reached). When the student asks you to keep one, save it yourself:
+`oculus artifact save --title "Explorer" --program-file path --subject CODE`
+for an OpenUI program, adding `--format widget` for a widget's TSX, which
+must pass the validation workflow in `oculus-widgets`. An artifact is one of
+those two formats, never an iframe or HTML of your own.
 
 ## Edit content and topic memberships together
 

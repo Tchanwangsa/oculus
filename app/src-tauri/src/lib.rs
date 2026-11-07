@@ -23,6 +23,7 @@ pub mod sync;
 #[cfg(test)]
 mod test_support;
 pub mod transcribe;
+pub mod widgets;
 
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
@@ -75,6 +76,7 @@ pub fn run() {
             // WebKit won't play <video> from the asset protocol (see lectures/media.rs).
             app.manage(lectures::media::start_media_server(
                 library::paths::data_dir(),
+                widgets::kit::Kit::for_app(app.handle()),
             ));
             // Device sharing: off until a canvas is shared (docs/device-sharing.md).
             app.manage(companion::Companion::for_app(app.handle()));
@@ -309,6 +311,9 @@ pub fn run() {
             studio::commands::components::studio_component_restore,
             studio::commands::components::studio_component_delete,
             lectures::media::media_server_info,
+            widgets::commands::widget_transpile,
+            widgets::ask::command::widget_ask,
+            widgets::ask::command::widget_ask_cancel,
             pages::retrieval::commands::embed_file,
             pages::retrieval::commands::search_pages,
             pages::retrieval::commands::embedding_stats,

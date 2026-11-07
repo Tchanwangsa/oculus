@@ -39,7 +39,7 @@ pub const ROLES: [Role; 2] = [
         name: "studio-research",
         job: Job::StudioResearch,
         description: "Reads one slice of a lecture for an Oculus Studio video and writes notes",
-        prompt: || include_str!("../../templates/STUDIO_RESEARCH.template.md"),
+        prompt: research_prompt,
     },
     Role {
         name: "studio-scene",
@@ -52,6 +52,22 @@ pub const ROLES: [Role; 2] = [
 const SCENE_ROLE: &str = include_str!("../../templates/STUDIO_SCENE.template.md");
 const BUILD: &str = include_str!("../../templates/skills/oculus-studio/build.md");
 const REFERENCE: &str = include_str!("../../templates/skills/oculus-studio/reference.md");
+const HARNESS: &str = include_str!("../../templates/HARNESS.template.md");
+
+fn chat_shell() -> &'static str {
+    section(HARNESS, "Chat shell").expect("HARNESS has a Chat shell section")
+}
+
+fn research_prompt() -> &'static str {
+    static PROMPT: LazyLock<String> = LazyLock::new(|| {
+        format!(
+            "{}\n\n{}",
+            include_str!("../../templates/STUDIO_RESEARCH.template.md").trim_end(),
+            chat_shell()
+        )
+    });
+    &PROMPT
+}
 
 /// The `reference.md` sections a scene helper works from, in the file's
 /// order. The director's own (video.json, script.md, Narrate,
@@ -71,12 +87,13 @@ pub const BUILDER_SECTIONS: [&str; 11] = [
     "Slides",
 ];
 
-/// The scene role's prompt: the role, `build.md`, then [`BUILDER_SECTIONS`].
+/// The scene role, shared chat shell, `build.md`, then [`BUILDER_SECTIONS`].
 fn scene_prompt() -> &'static str {
     static PROMPT: LazyLock<String> = LazyLock::new(|| {
         let mut out = format!(
-            "{}\n\n{}\n\n# `reference.md`: the builder's sections\n",
+            "{}\n\n{}\n\n{}\n\n# `reference.md`: the builder's sections\n",
             SCENE_ROLE.trim_end(),
+            chat_shell().trim_end(),
             BUILD.trim_end()
         );
         for name in BUILDER_SECTIONS {
@@ -327,7 +344,7 @@ mod tests {
         assert!(agy.contains("yourself"));
     }
 
-    /// The scene prompt is the role, then build.md whole, then each builder
+    /// The scene prompt carries the role and shell, build.md, then each builder
     /// section of reference.md from its heading on, and no director section.
     #[test]
     fn the_scene_prompt_carries_build_md_and_the_builder_sections() {
@@ -368,6 +385,16 @@ mod tests {
         let template = SCENE_ROLE.split_whitespace().collect::<Vec<_>>().join(" ");
         for name in BUILDER_SECTIONS {
             assert!(template.contains(name), "the role names {name}");
+        }
+    }
+
+    #[test]
+    fn studio_roles_share_the_chat_shell_without_the_chat_output_rules() {
+        let shell = chat_shell().trim();
+        for role in ROLES {
+            let prompt = role.prompt();
+            assert_eq!(prompt.matches(shell).count(), 1, "{}", role.name);
+            assert!(!prompt.contains("## Output"), "{}", role.name);
         }
     }
 

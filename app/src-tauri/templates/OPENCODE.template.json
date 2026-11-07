@@ -87,6 +87,13 @@
       "description": "Finds where a lecture recording's content ends",
       "prompt": "{{LECTURE_END_PROMPT}}",
       "permission": { "*": "deny" }
+    },
+    "oculus-widget": {
+      "mode": "primary",
+      "hidden": true,
+      "description": "Answers a chat widget's request with JSON",
+      "prompt": "{{WIDGET_PROMPT}}",
+      "permission": { "*": "deny" }
     }
   }
 }

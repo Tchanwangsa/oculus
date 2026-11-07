@@ -24,6 +24,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src"],
+  "include": ["src", "widget-kit", "src-tauri/templates/skills/oculus-widgets"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

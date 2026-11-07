@@ -72,7 +72,14 @@ impl Entity {
                 "last_review",
             ],
             Self::Set => &["subject_id", "title", "description"],
-            Self::Artifact => &["subject_id", "title", "program", "state", "source_ref"],
+            Self::Artifact => &[
+                "subject_id",
+                "title",
+                "program",
+                "format",
+                "state",
+                "source_ref",
+            ],
         }
     }
 
@@ -170,6 +177,7 @@ fn input(entity: Entity, value: &Value, creating: bool) -> Result<&Map<String, V
         "source_ref",
         "description",
         "program",
+        "format",
     ] {
         if let Some(v) = object.get(key).filter(|v| !v.is_null()) {
             if !v.is_string() {
@@ -213,6 +221,7 @@ fn input(entity: Entity, value: &Value, creating: bool) -> Result<&Map<String, V
             "source_kind",
             &["chat", "file", "lecture", "agent", "manual"][..],
         ),
+        ("format", &["openui", "widget"][..]),
     ] {
         if let Some(value) = object.get(field) {
             if !value.as_str().is_some_and(|v| allowed.contains(&v)) {
@@ -278,6 +287,9 @@ pub async fn add_batch(
         if matches!(entity, Entity::Item) {
             validate_question(value)?;
         }
+        if matches!(entity, Entity::Artifact) {
+            validate_artifact(value)?;
+        }
     }
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     let mut ids = Vec::new();
@@ -312,6 +324,11 @@ pub async fn update_on(
     }
     if matches!(entity, Entity::Item) {
         validate_question(&next)?;
+    }
+    if matches!(entity, Entity::Artifact)
+        && (object.contains_key("program") || object.contains_key("format"))
+    {
+        validate_artifact(&next)?;
     }
     if object.is_empty() {
         return Err("no changes supplied".into());
@@ -510,6 +527,18 @@ fn validate_question(value: &Value) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// A widget program must transpile as the chat's frame would, so a saved
+/// widget can't be one that never runs (docs/widgets.md).
+fn validate_artifact(value: &Value) -> Result<(), String> {
+    if value["format"] != "widget" {
+        return Ok(());
+    }
+    let program = value["program"].as_str().unwrap_or_default();
+    crate::widgets::transpile::transpile(program)
+        .map(drop)
+        .map_err(|e| format!("The widget does not compile: {e}"))
 }
 
 async fn insert_on(

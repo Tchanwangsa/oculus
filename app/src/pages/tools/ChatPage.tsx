@@ -133,7 +133,7 @@ export default function ChatPage() {
   // Borrowed rows belong to the outgoing thread; wait for this thread's
   // history before choosing its initial bottom position.
   const ownRows = items.length === 0 || items[0].thread_id === activeId;
-  const scroll = useStickToBottom(activeId, !fresh && ownRows, running);
+  const scroll = useStickToBottom(activeId, !fresh && ownRows, running, items);
   useScrollFade(scroll.outer, "y", !fresh);
   const recentScroll = useRef<HTMLDivElement>(null);
   useScrollFade(recentScroll, "y", fresh);
@@ -248,7 +248,7 @@ export default function ChatPage() {
           <div className="relative min-h-0 flex-1">
             {/* `overflow-x-hidden` is load-bearing: `overflow-y: auto` makes x
                 `auto` too, so one wide row would scroll the whole thread. */}
-            <div ref={scroll.outer} className="h-full overflow-x-hidden overflow-y-auto px-6 py-6">
+            <div ref={scroll.outer} className="h-full overflow-x-hidden overflow-y-auto px-6 pt-6 pb-10">
               <div ref={scroll.inner} className="mx-auto w-full max-w-[760px]">
                 <Timeline
                   items={items}

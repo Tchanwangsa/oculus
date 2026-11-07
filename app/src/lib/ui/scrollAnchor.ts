@@ -124,8 +124,10 @@ export function anchorDrift(
   return (node.getBoundingClientRect().top - box.top) / scale - anchor.offset;
 }
 
-/** A row's own content is skipped (not the row: its box is still laid out). */
+/** A row's own content is skipped (not the row: its box is still laid out),
+ *  including a row whose content is detached, which has no child to ask. */
 function skippedContent(row: Element, probe: AnchorProbe): boolean {
+  if (row.hasAttribute?.(SKIPPED_CONTENT)) return true;
   const first = row.firstElementChild;
   return first != null && probe.skipped(first);
 }

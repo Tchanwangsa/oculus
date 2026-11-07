@@ -33,8 +33,9 @@ Commands:
               frame
   cheat       Keep condensed concepts in the Revision cheat sheet
   quiz        Draft questions, inspect their due queue and assemble quizzes
-  artifact    Save and inspect interactive OpenUI programs in Revision
+  artifact    Save and inspect interactive OpenUI programs and widgets in Revision
   topic       Shared subject topics for every kind of Revision entry
+  widget      Check a chat widget's TSX before it is sent
   docs        Write the agent-facing docs into the library
   agent       Run one prompt through a CLI agent (Claude Code, Codex, opencode or
               Antigravity)
@@ -45,9 +46,9 @@ Options:
           Print machine-readable JSON instead of formatted text
 
           Honoured by every command that prints: status, list, search, grep, read,
-          files, calendar, project, task, tag, cheat, quiz, artifact, topic, keyd and
-          studio. On failure the JSON is `{"error": "..."}` on stderr and the exit code
-          is 1.
+          files, calendar, project, task, tag, cheat, quiz, artifact, topic, widget,
+          keyd and studio. On failure the JSON is `{"error": "..."}` on stderr and the
+          exit code is 1.
 
   -h, --help
           Print help (see a summary with '-h')
@@ -3308,13 +3309,14 @@ Options:
 ## `oculus artifact`
 
 ```
-Save and inspect interactive OpenUI programs in Revision
+Save and inspect interactive OpenUI programs and widgets in Revision
 
 Usage: oculus artifact <COMMAND>
 
 Commands:
   save
-  update  Patch title, program, state, subject_id, source_ref or topic_ids with JSON
+  update  Patch title, program, format, state, subject_id, source_ref or topic_ids with
+          JSON
   list
   show
   rm      Permanently delete a saved artifact; there is no undo
@@ -3335,7 +3337,14 @@ Options:
 
 
       --program-file <PROGRAM_FILE>
-          OpenUI Lang source file, or - for stdin
+          The program's file, or - for stdin: OpenUI Lang, or a widget's TSX with
+          --format widget
+
+      --format <FORMAT>
+          What the program is; a widget must compile, as in chat
+
+          [default: openui]
+          [possible values: openui, widget]
 
   -s, --subject <SUBJECT>
           Subject code
@@ -3356,7 +3365,7 @@ Options:
 ### `oculus artifact update`
 
 ```
-Patch title, program, state, subject_id, source_ref or topic_ids with JSON
+Patch title, program, format, state, subject_id, source_ref or topic_ids with JSON
 
 Usage: oculus artifact update [OPTIONS] <ID>
 
@@ -3521,6 +3530,71 @@ Usage: oculus topic rm <ID>
 Arguments:
   <ID>
 
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `oculus widget`
+
+```
+Check a chat widget's TSX before it is sent
+
+Usage: oculus widget <COMMAND>
+
+Commands:
+  check  Check a chat widget's TSX before it is sent
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus widget check`
+
+```
+Check a chat widget's TSX before it is sent
+
+First compiles it the way the chat and `oculus artifact save --format widget` do:
+TypeScript and JSX, the default export, and imports only from react, oculus/ui,
+oculus/state, oculus/2d, oculus/math, oculus/3d, oculus/ask, three and
+@react-three/fiber. A widget that doesn't compile gets that one finding.
+
+Then lints the code it parsed, each finding with its rule, line and column:
+
+title: the first line isn't `// title: …`.
+
+colour: a hex colour (#rgb, #rgba, #rrggbb, #rrggbbaa) or rgb(), rgba(), hsl(), hsla(),
+hwb(), lab(), lch(), oklab() or oklch() in a string, or a 0xRRGGBB number. Name a theme
+token instead.
+
+font: a fontFamily or font-family key or attribute, or `font-family:` in a string.
+
+tex: a JSX attribute string holding \\, which stays two backslashes; write
+tex={"\\theta"}.
+
+sandbox: a global fetch, XMLHttpRequest, WebSocket, EventSource, localStorage,
+sessionStorage, indexedDB, eval, Function or document.cookie, bare or on window,
+globalThis or self.
+
+cleanup: setInterval, setTimeout or requestAnimationFrame (global), or any
+.addEventListener, outside the callback of a useEffect or useLayoutEffect, or in one
+whose returned cleanup doesn't call the matching clearInterval, clearTimeout,
+cancelAnimationFrame or removeEventListener.
+
+A name the widget declares itself is its own and passes. Any finding exits 1. `--json`
+prints them as a list of `{rule, line, col, message}` (`line` and `col` are null for a
+compile error with no place).
+
+oculus widget check outputs/bubble-sort.tsx
+
+Usage: oculus widget check <FILE|->
+
+Arguments:
+  <FILE|->
+          The widget's TSX file, or - for stdin
 
 Options:
   -h, --help
