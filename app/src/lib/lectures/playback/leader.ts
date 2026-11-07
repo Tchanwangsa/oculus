@@ -1,7 +1,7 @@
 import { markPlaying } from "@/lib/lectures/playbackOwner";
 import { pauseLibraryVideos } from "@/lib/lectures/media";
 import type { SourceNum } from "@/lib/db";
-import { syncFollowers } from "./follower";
+import { followLeaderSeek, syncFollowers } from "./follower";
 import { saveLectureProgress } from "./progress";
 import { leaderVideo, onScreen, state } from "./source";
 
@@ -29,7 +29,7 @@ const onLeaderPause = () => {
 const onLeaderEnded = onLeaderPause;
 const onLeaderSeeked = () => {
   void saveLectureProgress();
-  syncFollowers();
+  followLeaderSeek();
 };
 const onLeaderRateChange = () => syncFollowers();
 

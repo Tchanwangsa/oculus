@@ -693,8 +693,15 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
   `navigateActive` / `goInActiveTab` call `confirmLeavingLecture` — never
   through a router blocker, which strands the pane when nobody answers.
 - **Two streams, one clock.** The main-frame source leads (audio, clock,
-  progress); followers are rate-trimmed past `MAX_DRIFT` and seeked only past
-  `SEEK_DRIFT`. `syncLectureSources` takes the whole plan, so only it can tell
+  progress); followers play at its rate and are corrected only by seeks
+  (`follower.ts`). A follower further than `MAX_DRIFT` from the playing leader
+  seeks ahead by `seekLag`, the time a seek takes to play again, learned from
+  each landing once it has settled (`SETTLE_MS`, since `currentTime` reads the
+  target until playback restarts). The leader's own `seeked` sends followers
+  to its exact time, as both restart together. Never trim a follower's rate:
+  WebKit stalls a playing video on every `playbackRate` change (about 0.25 s at
+  1×, a second at 2×), so a late follower trimmed on and off cycled 0.3–0.9 s
+  behind for good. `syncLectureSources` takes the whole plan, so only it can tell
   a fresh lecture (resume) from a source switch (keep the second). Speed and
   volume re-apply per leader element, since both reset on load.
 - **Fullscreen is the Tauri window plus a `fixed inset-0` overlay**: element

@@ -5,12 +5,26 @@ import type { SourceNum } from "@/lib/db";
  *  stutter the picture for no visible gain. */
 export const MAX_DRIFT = 0.35;
 
-/** Drift worth a seek. Between this and `MAX_DRIFT` the follower's rate is
- *  trimmed instead, since a seek flushes the decoder and stutters. */
-const SEEK_DRIFT = 1.5;
+/** Drift past which the error is a jump, not seek latency, so nothing is learned from it. */
+const JUMP_DRIFT = 1.5;
 
-/** Fraction a trimmed follower's rate is nudged by. */
-const RATE_TRIM = 0.08;
+/** How long a landed seek takes to start playing again: until then its
+ *  `currentTime` is the target, not where the picture is. */
+const SETTLE_MS = 1500;
+
+/** Ceiling on the learned seek latency, in wall seconds. */
+const MAX_SEEK_LAG = 1;
+
+/** Wall seconds a follower's seek takes to play again, learned from each
+ *  landing; a correcting seek aims this far ahead. Never trim the rate instead:
+ *  WebKit stalls a video on every `playbackRate` change (`docs/viewers.md`). */
+let seekLag = 0.3;
+
+/** A follower's last correcting seek: when, and whether its error teaches `seekLag`. */
+const settling = new WeakMap<HTMLVideoElement, { at: number; learn: boolean }>();
+
+/** The leader seeked: followers take its exact time, since both restart together. */
+let leaderJumped = false;
 
 /** Both files are trimmed alike (`echo360::trim_video`, by the university's
  *  lead-in), so in sync means the same `currentTime` — no offset. */
@@ -22,6 +36,8 @@ export function syncFollowers() {
     const f = els.get(source);
     if (!f) continue;
     f.muted = true;
+    // Before the readyState check: a fresh element's rate is reset by its load.
+    if (f.playbackRate !== lead.playbackRate) f.playbackRate = lead.playbackRate;
     // readyState 0 has no timeline to seek on yet; the next tick catches it.
     if (f.readyState > 0) alignFollower(f, lead);
     if (lead.paused) {
@@ -32,24 +48,42 @@ export function syncFollowers() {
       });
     }
   }
+  if (!lead.seeking) leaderJumped = false;
+}
+
+/** The leader's `seeked`: realign followers to it exactly. */
+export function followLeaderSeek() {
+  leaderJumped = true;
+  syncFollowers();
 }
 
 function alignFollower(f: HTMLVideoElement, lead: HTMLVideoElement) {
-  const rate = lead.playbackRate;
+  if (lead.seeking) return;
+  const now = performance.now();
+  if (leaderJumped || lead.paused) {
+    if (leaderJumped || Math.abs(lead.currentTime - f.currentTime) > MAX_DRIFT) {
+      f.currentTime = lead.currentTime;
+      settling.set(f, { at: now, learn: false });
+    }
+    return;
+  }
+  if (f.seeking) return;
+
   const behind = lead.currentTime - f.currentTime;
   const off = Math.abs(behind);
-
-  if (lead.paused || off > SEEK_DRIFT) {
-    if (off > MAX_DRIFT) f.currentTime = lead.currentTime;
-    if (f.playbackRate !== rate) f.playbackRate = rate;
-    return;
+  const last = settling.get(f);
+  if (last && off <= JUMP_DRIFT) {
+    if (now - last.at < SETTLE_MS) return;
+    // Half the error: one landing is noisy, and a full step overshoots.
+    if (last.learn) {
+      seekLag = Math.min(MAX_SEEK_LAG, Math.max(0, seekLag + behind / lead.playbackRate / 2));
+    }
   }
+  settling.delete(f);
   if (off > MAX_DRIFT) {
-    const trimmed = Number((rate * (behind > 0 ? 1 + RATE_TRIM : 1 - RATE_TRIM)).toFixed(3));
-    if (f.playbackRate !== trimmed) f.playbackRate = trimmed;
-    return;
+    f.currentTime = lead.currentTime + seekLag * lead.playbackRate;
+    settling.set(f, { at: now, learn: true });
   }
-  if (f.playbackRate !== rate) f.playbackRate = rate;
 }
 
 /** Seek an element to `at` — now if it can, otherwise the moment it can.
