@@ -88,3 +88,64 @@ fn after_the_first_expiry_every_request_fails_without_asking_keyd_again() {
         Some(CanvasError::Expired(Some(paused())))
     );
 }
+
+/// Canvas's body for a course an expired session can no longer see.
+const GONE: &[u8] = br#"{"errors":[{"message":"The specified resource does not exist."}]}"#;
+
+#[test]
+fn an_api_404_checks_the_session_and_is_sent_again_once_keyd_signed_in() {
+    let tabs = std::sync::atomic::AtomicUsize::new(0);
+    let r = rig(move |h, _| match h["path"].as_str().unwrap() {
+        "/api/v1/courses/5/tabs" if tabs.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 => {
+            answer(404, &[], GONE)
+        }
+        "/api/v1/courses/5/tabs" => answer(200, &[], b"[]"),
+        _ => answer(200, &[], br#"{"name":"A"}"#),
+    });
+    assert_eq!(
+        r.canvas.get_json("/api/v1/courses/5/tabs").unwrap(),
+        json!([])
+    );
+    assert_eq!(
+        r.paths(),
+        [
+            "/api/v1/courses/5/tabs",
+            "/api/v1/users/self",
+            "/api/v1/courses/5/tabs"
+        ]
+    );
+}
+
+#[test]
+fn a_404_on_a_live_session_is_the_answer_and_checks_the_session_once() {
+    let r = rig(|h, _| match h["path"].as_str().unwrap() {
+        "/api/v1/users/self" => answer(200, &[], br#"{"name":"A"}"#),
+        _ => answer(404, &[], GONE),
+    });
+    assert_eq!(r.canvas.get("/api/v1/courses/5/tabs").unwrap().status, 404);
+    assert_eq!(r.canvas.get("/api/v1/courses/6/tabs").unwrap().status, 404);
+    assert_eq!(r.canvas.get("/courses/6/pages/x").unwrap().status, 404);
+    assert_eq!(
+        r.paths(),
+        [
+            "/api/v1/courses/5/tabs",
+            "/api/v1/users/self",
+            "/api/v1/courses/5/tabs",
+            "/api/v1/courses/6/tabs",
+            "/courses/6/pages/x"
+        ]
+    );
+}
+
+#[test]
+fn an_api_404_whose_session_check_could_not_sign_in_is_expired() {
+    let r = rig(|h, _| match h["path"].as_str().unwrap() {
+        "/api/v1/users/self" => refused(401, &[], b"{}", paused()),
+        _ => answer(404, &[], GONE),
+    });
+    assert_eq!(
+        r.canvas.get_json("/api/v1/courses/5/tabs").unwrap_err(),
+        CanvasError::Expired(Some(paused()))
+    );
+    assert!(r.canvas.expired().is_some());
+}

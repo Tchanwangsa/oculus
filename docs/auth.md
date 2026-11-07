@@ -584,6 +584,13 @@ to a file host is never a rejection.
   reads it as `RawResponse.signin`. With no session and no way to make one,
   the error is `missing` carrying the same field
   (`KeydError::NoSession`). No cookie is in any reply or log.
+- **A 404 from the API can be a dead session too.** Canvas answers some
+  course endpoints (a course's `/tabs`) with a 404, not a 401, once the
+  session has expired, and the body is the same as a real 404's, so keyd
+  cannot judge it. The app's client does (`Canvas::get_hop`): the first API
+  404 a `Canvas` meets asks `/api/v1/users/self`, whose 401 keyd does sign
+  in for, and sends the request once more. A sign-in keyd could not do is
+  the error; any other answer leaves the 404 as it was.
 - **The socket must wait.** A rejected request goes quiet while the flow runs
   (up to a dozen 45 s Okta requests, a wait for a fresh TOTP window, another
   caller's attempt first), so a session route's client timeout is

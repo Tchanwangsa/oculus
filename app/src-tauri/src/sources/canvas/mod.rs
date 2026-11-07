@@ -11,6 +11,7 @@ mod transport;
 mod tests;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::providers::credentials::Credentialed;
@@ -66,6 +67,8 @@ impl From<Hop> for Res {
 pub struct Canvas {
     keyd: Credentialed,
     expired: Mutex<Option<CanvasError>>,
+    /// Set once a 404 has made this client check the session ([`Canvas::get_hop`]).
+    session_checked: AtomicBool,
     /// The institution profile this run is for; `None` before a Canvas
     /// address is set, and then every Canvas request fails with that.
     institution: Option<crate::sources::institution::Institution>,
@@ -98,6 +101,7 @@ impl Canvas {
         Canvas {
             keyd: Credentialed::at(data_dir),
             expired: Mutex::new(None),
+            session_checked: AtomicBool::new(false),
             base: institution
                 .as_ref()
                 .and_then(|i| url::Url::parse(&i.canvas).ok()),
@@ -158,7 +162,7 @@ impl Canvas {
         let mut url = self.resolve(url_or_path)?;
         for followed in 0.. {
             let hop = if self.is_canvas(&url) {
-                self.hop("GET", &url, &[], b"")?
+                self.get_hop(&url)?
             } else {
                 transport::direct(&url)?
             };
@@ -174,6 +178,27 @@ impl Canvas {
             url = next;
         }
         unreachable!("the loop returns")
+    }
+
+    /// One GET to Canvas. Canvas answers some API requests (a course's tabs)
+    /// with a 404, not a 401, once the session has expired, so keyd does not
+    /// sign in for them. The first API 404 this client meets asks
+    /// `/api/v1/users/self`, whose 401 does make keyd sign in, then sends the
+    /// request once more; a sign-in keyd could not do is the error.
+    fn get_hop(&self, url: &url::Url) -> Result<Hop, CanvasError> {
+        let hop = self.hop("GET", url, &[], b"")?;
+        if hop.status != 404
+            || !url.path().starts_with("/api/")
+            || self.session_checked.swap(true, Ordering::Relaxed)
+        {
+            return Ok(hop);
+        }
+        let probe = self.hop("GET", &self.resolve("/api/v1/users/self")?, &[], b"");
+        match probe {
+            Ok(me) if (200..300).contains(&me.status) => self.hop("GET", url, &[], b""),
+            Err(e @ CanvasError::Expired(_)) => Err(e),
+            _ => Ok(hop),
+        }
     }
 
     pub fn get_json(&self, url_or_path: &str) -> Result<serde_json::Value, CanvasError> {
