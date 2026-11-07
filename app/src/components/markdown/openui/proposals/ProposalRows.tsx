@@ -6,6 +6,9 @@ import type { ProjectColumn } from "@/lib/planning/projects";
 import type { RevisionTopic } from "@/lib/revision/types";
 import { topicNames } from "./RevisionFields";
 import { cn } from "@/lib/utils";
+import { TagDot } from "@/components/projects/tags/TagDot";
+import { tagColorLabel } from "@/components/projects/tags/tagColors";
+import { isTagColor, type TagColor } from "@/lib/planning/projects/tags";
 import { Fields, fieldLabel, TextDiff, Field } from "./Fields";
 import { ChangedSince, dateShift, displayValue, Include, RowActions } from "./ProposalParts";
 import { conflicts, effectiveChanges, included, includeChange, object, rowId, rows, type Row } from "./model";
@@ -86,19 +89,21 @@ export function ChangeRow({ kind, row, previous, live, loaded, disabled, columns
     <div className="flex min-w-0 items-start gap-3">
       <Include title={title} checked={on} disabled={disabled || (loaded && !live && !tagCreate)} onChange={toggle} />
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-1.5"><span className={cn("text-[13px] break-words", !on && "text-muted-foreground")}>{title}</span><ChangedSince fields={stale} live={live} /></div>
-        {deletion && <p className="mt-1 text-xs text-destructive">Delete{kind === "DeleteTasks" ? " with its subtasks" : ""}{row.tag != null && live?.task_count != null ? ` · ${live.task_count} tasks lose this tag` : ""}</p>}
+        <div className="flex flex-wrap items-center gap-1.5">{kind === "TagChanges" && isTagColor(live?.color ?? row.color) && <TagDot color={(live?.color ?? row.color) as TagColor} />}<span className={cn("text-[13px] break-words", !on && "text-muted-foreground")}>{title}</span><ChangedSince fields={stale} live={live} /></div>
+        {deletion && <p className="mt-1 text-xs text-destructive">Delete{kind === "DeleteTasks" ? " with its subtasks" : ""}{row.tag != null && typeof live?.task_count === "number" ? ` · ${live.task_count ? `${live.task_count} ${live.task_count === 1 ? "task loses" : "tasks lose"} this tag` : "no tasks use this tag"}` : ""}</p>}
         {deletion && Array.isArray(live?.children) && live.children.length > 0 && <ul className="mt-1 pl-3 text-xs text-muted-foreground">{rows(live.children).map((task, i) => <li key={i}>{String(task.title)}</li>)}</ul>}
         {Object.entries(fields).map(([key, value]) => {
           const before = object(row.from)[key], delta = dateShift(before, value);
           const long = ["body", "brief", "notes", "prompt", "answer", "description", "program"].includes(key);
-          const show = (value: unknown) => key === "topic_ids" ? topicNames(value, topics) : displayValue(value, key);
+          const text = (value: unknown) => key === "topic_ids" ? topicNames(value, topics) : key === "column" ? columns.find((column) => column.id === value)?.name as string ?? displayValue(value, key) : displayValue(value, key);
+          // A tag colour reads as its swatch and name, as in the tag picker.
+          const show = (value: unknown) => key === "color" && isTagColor(value) ? <><TagDot color={value} />{tagColorLabel(value)}</> : text(value);
           return <div key={key} className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
             <span className="text-muted-foreground">{fieldLabel(key)}</span>
             {previous && JSON.stringify(object(previous.to)[key]) !== JSON.stringify(value) && <span className="size-1.5 rounded-full bg-brand" aria-label={`Updated ${key}`} />}
             {long ? <div className="w-full"><TextDiff before={before} after={value} /></div> : <>
-              {!tagCreate && <><span className="rounded-full bg-surface px-2 py-0.5 text-muted-foreground line-through">{key === "column" ? columns.find((column) => column.id === before)?.name as string ?? show(before) : show(before)}</span><ArrowRight size={12} className="text-muted-foreground" /></>}
-              {["due", "starts", "start", "end"].includes(key) && !disabled ? <DateTimeField allowAllDay value={typeof value === "string" ? value : null} label={`New ${fieldLabel(key)}`} onCommit={(next) => onChange({ ...row, to: { ...object(row.to), [key]: next } })} /> : <span className="max-w-full rounded-full bg-surface px-2 py-0.5 break-words">{key === "column" ? columns.find((column) => column.id === value)?.name as string ?? show(value) : show(value)}</span>}
+              {!tagCreate && <><span className="inline-flex items-center gap-1.5 rounded-full bg-surface px-2 py-0.5 text-muted-foreground line-through">{show(before)}</span><ArrowRight size={12} className="text-muted-foreground" /></>}
+              {["due", "starts", "start", "end"].includes(key) && !disabled ? <DateTimeField allowAllDay value={typeof value === "string" ? value : null} label={`New ${fieldLabel(key)}`} onCommit={(next) => onChange({ ...row, to: { ...object(row.to), [key]: next } })} /> : <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-surface px-2 py-0.5 break-words">{show(value)}</span>}
               {delta && <span className="text-xs text-warning">{delta}</span>}
             </>}
           </div>;

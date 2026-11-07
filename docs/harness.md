@@ -1368,7 +1368,9 @@ Confirmed jobs use `proposal_job_start`, which atomically decides a pending
 card before launching the app's native job. Transcription and downloads
 await those commands; lecture jobs follow their terminal events; sync and
 parse retain the existing progress events. The row's `job` state persists
-running, complete or error across views. Completion clears `told` so the next
+running, complete or error across views; the card draws running as its
+applying phase, complete as created and error as failed (phases in
+[ui.md](./ui.md#proposal-cards-show-a-decision-before-a-write)). Completion clears `told` so the next
 message reports the outcome. Startup marks interrupted runs as errors and
 keeps the card decided, avoiding an accidental second billed launch. Jobs
 have no Undo or amendments.

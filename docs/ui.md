@@ -55,7 +55,27 @@ the agent must still double TeX backslashes in strings.
 
 ## Proposal cards show a decision before a write
 
-Each proposal or job has its own OpenUI fence. The same rounded frame holds
+Each proposal or job has its own OpenUI fence. `CardFrame`
+(`app/src/components/markdown/openui/proposals/CardFrame.tsx`) draws every
+proposal, job and result list: header (icon, title, subtitle, a right-hand
+count or badge), body, an error strip, and a footer with the phase's status
+at the left and the actions at the right. `cardState.ts` names the phase:
+
+| Phase | Shown as |
+| --- | --- |
+| streaming | title shimmers, body locked and dimmed, "Still writing…" |
+| uncommitted | body locked and dimmed, clock, "Available when the reply finishes" |
+| loading | body locked and dimmed, spinner, "Loading…" |
+| pending | editable; a small single change is the compact one-row form |
+| applying | spinner, "Creating…", "Applying…" or "Undoing…" with the body locked and dimmed; a running job's "Running…" keeps its body live for progress |
+| created | results, green check "Done" (a job's "Complete"), Undo |
+| failed | red border; a refused Apply stays editable with the error in the strip, a row that never loaded says so in the footer with Try again |
+| undone | muted header and icon, results still open where the item remains, "Undone" |
+| discarded, superseded | header only on the page background, a Discarded or "V1 · replaced" badge and the newer version's link |
+
+Locked bodies are `inert`, so nothing in a card that is not ready or is busy
+takes a click. `useCardStreaming` reads OpenUI's `useIsStreaming`; outside a
+`Renderer` it is false. The frame holds
 editable creation rows, before → after changes, deletions and confirmed
 results. Five rows fit a page; paging retains edits and inclusion ticks.
 Subtasks group beneath their existing parent's live title, status and due
@@ -77,13 +97,15 @@ chooses an explicit time. Status names and column choices come from the real
 board, including custom done columns. A stale change starts excluded and has
 a warning tooltip with its live values; explicitly ticking it uses those
 values as the new guarded baseline. Reverting every field removes that row
-from the changes to apply.
+from the changes to apply. A tag colour shows as its swatch and name, and a
+tag deletion says how many tasks lose the tag.
 
 Create, Apply, Discard and Undo show errors in the card. Confirmed results
 link to the actual items and deletion results have no Open action. A valid
 amendment collapses its predecessor to its version number and a newer-version
 link, and dots changed fields against the student's saved card. Pending cards
-offer a V1/V2 selector, Modified indicator and Reset; their snapshot and draft
+offer a V1/V2 selector once a second version exists (beside the actions in a
+compact card, under the title otherwise), a Modified indicator and Reset; their snapshot and draft
 contract is in [harness.md](./harness.md#proposal-context-is-read-at-dispatch-and-confirmation-lives-in-rust).
 Decided cards keep their state
 through reloads and multiple views; their database and send contracts are in

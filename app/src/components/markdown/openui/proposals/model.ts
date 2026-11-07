@@ -77,6 +77,14 @@ export function includeChange(row: Row, checked: boolean, live: Row | null | und
   return { ...row, included: checked, ...(checked && live && conflicts(row, live).length ? { from: Object.fromEntries(keys.map((key) => [key, live[key] ?? null])) } : {}) };
 }
 
+/** A change whose `from` no longer matches the live row starts excluded, so
+ * every send and a second view see the same decision. Unchanged rows keep
+ * their identity; the same array comes back when nothing is stale. */
+export function excludeStale(values: Row[], live: Record<string, Row | null>): Row[] {
+  const next = values.map((row) => row.from && row.included === undefined && conflicts(row, live[liveKey(row)]).length ? { ...row, included: false } : row);
+  return next.some((row, i) => row !== values[i]) ? next : values;
+}
+
 export function effectiveChanges(row: Row): Row {
   const from = object(row.from);
   return Object.fromEntries(Object.entries(object(row.to)).filter(([key, value]) => !equal(from[key], value)));

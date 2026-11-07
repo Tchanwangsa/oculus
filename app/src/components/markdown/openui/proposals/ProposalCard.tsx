@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowCounterClockwise, CalendarBlank, Check, CheckSquare, FileText, FolderSimple, SpinnerGap, Tag } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowDown, ArrowCounterClockwise, CalendarBlank, CheckSquare, FileText, FolderSimple, SpinnerGap, Tag } from "@phosphor-icons/react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ViewTabs } from "@/components/ui/table/ViewTabs";
@@ -13,8 +14,12 @@ import { CheatRow } from "./CheatRow";
 import { useProposal, useProposalLive } from "./useProposal";
 import { useProposalVersions } from "./useProposalVersions";
 import { VersionControl } from "./VersionControl";
-import { conflicts, effectiveChanges, included, object, rowId, liveKey, rowKey, rows, validateProposal, type Row } from "./model";
+import { CardFrame, useCardStreaming } from "./CardFrame";
+import { cardState } from "./cardState";
+import { conflicts, effectiveChanges, excludeStale, included, object, rowId, liveKey, rowKey, rows, validateProposal, type Row } from "./model";
 import type { Proposal } from "@/lib/harness/proposals";
+
+type Action = "apply" | "discard" | "undo";
 
 const plural = (count: number, noun: string) => `${count} ${count === 1 ? noun : noun.replace(/([^aeiou])y$/, "$1ie") + "s"}`;
 
@@ -30,10 +35,10 @@ function resultTitle(proposal: Proposal, project: Row | null): string {
   else if (kind === "NewNote") title = `Created note “${state.title}”`;
   else if (kind.startsWith("Delete")) title = `Deleted ${plural(made.length, kind === "DeleteTasks" ? "task" : "event")}`;
   else title = `Updated ${plural(made.length, kind === "TaskChanges" ? "task" : kind === "ProjectChanges" ? "project" : kind === "EventChanges" ? "event" : "tag")}`;
-  return proposal.status === "undone" ? `Undone · ${title}` : title;
+  return title;
 }
 
-function headline(kind: string, state: Row, count: number, total: number, project: Row | null, live: Record<string, Row | null>): string {
+function headline(kind: string, state: Row, total: number, project: Row | null, live: Record<string, Row | null>): string {
   if (kind === "NewCheatNotes") return `Add ${plural(total, "entry")} to your cheat sheet?`;
   if (kind === "EditItems") return `Edit ${plural(total, "item")}?`;
   if (kind === "NewTasks") {
@@ -67,7 +72,7 @@ function headline(kind: string, state: Row, count: number, total: number, projec
     if (fields.length === 1 && liveRow) return `Change “${liveRow.title ?? liveRow.name}” ${fields[0]} to ${displayValue(object(change.to)[fields[0]], fields[0])}?`;
   }
   if (kind === "ProjectChanges" && changes.every((item) => object(item.to).status === "archived")) return `Archive ${plural(total, "project")}?`;
-  return `Apply ${plural(count, kind === "TagChanges" ? "tag change" : "change")}?`;
+  return `Apply ${plural(total, kind === "TagChanges" ? "tag change" : "change")}?`;
 }
 
 function columns(row: Row | null | undefined): Row[] {
@@ -76,38 +81,45 @@ function columns(row: Row | null | undefined): Row[] {
   return Array.isArray(values) ? values.map(object) : DEFAULT_COLUMNS.map((column) => ({ ...column }));
 }
 
-/** The same persisted decision frame surrounds every student-owned write. */
+/** Every student-owned write draws in the shared `CardFrame`; `cardState`
+ * names its phase, and only `pending` (or a refused Apply) takes input. */
 export function ProposalCard({ kind, input }: { kind: string; input: Row }) {
   const card = useProposal(kind, input);
   validateProposal(kind, card.initial);
+  const streaming = useCardStreaming();
   const { state, proposal } = card;
   const key = rowKey(kind);
   const data = useProposalLive(kind, state);
   const progress = useWidgetProgress(0);
   const [validation, setValidation] = useState<string>();
+  const [acting, setActing] = useState<Action>("apply");
   const version = useProposalVersions(kind, card, () => setValidation(undefined));
   const [expanded, setExpanded] = useState(false);
   const [tab, setTab] = useState<"attributes" | "tasks">("attributes");
+  const frame = cardState({ streaming, id: card.id, status: proposal?.status, busy: card.busy, error: card.error ?? validation });
   const listing = useMemo(() => key ? viewRows(kind, state, key).filter((item) => !item.row.from || Object.keys(effectiveChanges(item.row)).length > 0) : [], [kind, state, key]);
   const page = Math.min(Math.max(0, Number(progress.value) || 0), Math.max(0, Math.ceil(listing.length / 5) - 1));
-  const pending = !proposal || proposal.status === "pending";
-  const disabled = card.busy || !proposal || !pending;
+  const pending = proposal?.status === "pending";
+  /** The proposed rows show until a decision; afterwards the results do. */
+  const editor = !proposal || pending;
+  const disabled = !frame.editable;
   const active = listing.filter((item) => item.allowed && included(item.row) && (!item.row.from || Object.keys(effectiveChanges(item.row)).length) && (item.row.included !== undefined || !data.loaded || !conflicts(item.row, data.live[liveKey(item.row)]).length));
   const count = kind === "NewNote" ? 1 : active.length;
   const total = listing.length;
   const Icon = kind.includes("Project") ? FolderSimple : kind.includes("Event") ? CalendarBlank : kind.includes("Note") ? FileText : kind.includes("Tag") ? Tag : CheckSquare;
-  const title = headline(kind, state, count, total, data.project, data.live);
+  const title = headline(kind, state, total, data.project, data.live);
   const onlyUnder = kind === "NewTasks" && rows(state.items).length > 0 && rows(state.items).every((item) => item.task != null);
   const applyLabel = kind === "NewCheatNotes" ? `Add ${plural(count, "entry")}` : kind === "NewProject" ? `Create project${count ? ` and ${plural(count, "task")}` : ""}` : kind === "NewNote" ? "Create note" : kind === "NewTasks" ? onlyUnder ? `Add ${plural(count, "subtask")}` : `Create ${plural(count, "task")}` : kind === "NewEvents" ? `Create ${plural(count, "event")}` : kind.startsWith("Delete") ? `Delete ${plural(count, kind === "DeleteTasks" ? "task" : "event")}` : `Apply ${count} of ${total}`;
   const change = (next: Row) => { setValidation(undefined); version.edit(next); };
+  const act = (action: Action) => { setActing(action); card.act(action); };
   // A stale row defaults to excluded in the durable state, so every send and
   // a second view see the same decision. An explicit tick rebases its from.
   useEffect(() => {
-    if (!key || !pending || !proposal || !data.loaded || data.error) return;
+    if (!key || !pending || !data.loaded || data.error) return;
     const values = rows(state[key]);
-    const next = values.map((row) => row.from && row.included === undefined && conflicts(row, data.live[liveKey(row)]).length ? { ...row, included: false } : row);
-    if (next.some((row, i) => row !== values[i])) card.edit({ ...state, [key]: next });
-  }, [state, proposal, key, data.loaded, data.error, data.live, pending]);
+    const next = excludeStale(values, data.live);
+    if (next !== values) card.edit({ ...state, [key]: next });
+  }, [state, key, data.loaded, data.error, data.live, pending]);
 
   const apply = () => {
     try {
@@ -115,36 +127,43 @@ export function ProposalCard({ kind, input }: { kind: string; input: Row }) {
       if (key && (kind.endsWith("Changes") || kind === "EditItems")) next = { ...state, [key]: rows(state[key]).map((row) => row.from && !Object.keys(effectiveChanges(row)).length ? { ...row, included: false } : row) };
       validateProposal(kind, next);
       if (next !== state) card.edit(next);
-      card.act("apply");
+      act("apply");
     } catch (error) { setValidation(String(error)); }
   };
   const anchor = card.id ? `proposal-${card.id}` : undefined;
-  const small = kind !== "EditItems" && listing.length === 1 && !listing[0].parent && !["NewProject", "NewNote", "NewCheatNotes", "TagChanges"].includes(kind) && (!listing[0].row.from || Object.keys(object(listing[0].row.to)).length === 1) && !Object.keys(object(listing[0].row.to)).some((field) => ["body", "brief", "notes"].includes(field));
-  if (small && !expanded && pending) return <section id={anchor} aria-label="Proposal" className="@container/proposal my-3 min-w-0 rounded-xl border border-border bg-card">
-    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2 px-4 py-3 @sm/proposal:grid-cols-[auto_minmax(0,1fr)_auto] @sm/proposal:items-center">
-      <Icon size={16} className="mt-0.5 shrink-0 text-brand @sm/proposal:mt-0" />
-      <div className="flex min-w-0 items-center gap-1.5"><button type="button" disabled={disabled} onClick={() => setExpanded(true)} aria-label="Edit proposal" className="min-w-0 flex-1 cursor-pointer text-left text-[13px] break-words hover:text-brand">{title}</button><ChangedSince fields={data.loaded ? conflicts(listing[0].row, data.live[liveKey(listing[0].row)]) : []} live={data.live[String(rowId(listing[0].row))]} /></div>
-      <div className="col-span-2 flex justify-end gap-2 @sm/proposal:col-span-1"><Button variant="ghost" size="sm" disabled={disabled} onClick={() => card.act("discard")}>Discard</Button><Button variant={kind.startsWith("Delete") ? "destructive" : "default"} size="sm" disabled={disabled || count === 0} onClick={apply}>{card.busy && <SpinnerGap className="animate-spin" />}{kind.startsWith("New") ? "Create" : kind.startsWith("Delete") ? "Delete" : "Apply"}</Button></div>
-    </div>
-    {pending && <div className="px-4 pb-2"><VersionControl version={version} disabled={disabled} /></div>}
-    {(card.error || validation || data.error) && <p role="alert" className="px-4 pb-2 text-xs text-destructive">{card.error ?? validation ?? data.error}</p>}
-  </section>;
-  if (proposal && ["discarded", "superseded"].includes(proposal.status)) return <div id={anchor} className="my-3 flex flex-wrap items-center gap-2 rounded-xl border border-border px-4 py-3 text-[13px] text-muted-foreground">
-    {proposal.status === "superseded" ? <><ArrowDown size={14} /><span>V{version.versions.findIndex((item) => item.id === card.id) + 1}</span>{proposal.superseded_by && <a className="text-brand hover:underline" href={`#proposal-${proposal.superseded_by}`} onClick={(event) => { event.preventDefault(); document.getElementById(`proposal-${proposal.superseded_by}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>View newer version</a>}</> : <span>Discarded · {title.replace(/\?$/, "")}</span>}
-  </div>;
+  const error = card.error ?? validation ?? data.error;
+  const verb = kind.startsWith("New") ? "Create" : kind.startsWith("Delete") ? "Delete" : "Apply";
+  // Busy on a decided card can only be Undo, whichever view clicked it.
+  const working = proposal?.status === "created" ? "Undoing…" : acting === "discard" ? "Discarding…" : `${{ Create: "Creating", Delete: "Deleting", Apply: "Applying" }[verb]}…`;
+  const decide = (label: string) => frame.failure === "load"
+    ? <Button variant="outline" size="sm" onClick={card.retry}><ArrowClockwise />Try again</Button>
+    : <><Button variant="ghost" size="sm" disabled={disabled} onClick={() => act("discard")}>Discard</Button><Button variant={kind.startsWith("Delete") ? "destructive" : "default"} size="sm" disabled={disabled || (count === 0 && kind !== "NewProject")} onClick={apply}>{frame.phase === "applying" && acting === "apply" && <SpinnerGap className="animate-spin" />}{label}</Button></>;
 
-  return <section id={anchor} aria-label="Proposal" className="@container/proposal my-3 min-w-0 overflow-hidden rounded-xl border border-border bg-card">
-    <header className="flex min-w-0 items-start gap-2.5 px-4 py-3">
-      <Icon size={18} className="mt-0.5 shrink-0 text-brand" />
-      <div className="min-w-0 flex-1">
-        <div role="heading" aria-level={4} className="font-display text-[13px] leading-relaxed font-semibold break-words">{pending ? title : resultTitle(proposal!, data.project)}</div>
-        {data.project?.subject != null && <p className="mt-0.5 text-xs text-muted-foreground">{String(data.project.subject)}</p>}
-        {pending && <VersionControl version={version} disabled={disabled} />}
-      </div>
-      {pending && total > 1 && kind !== "NewProject" && <span className="mt-0.5 shrink-0 rounded-full bg-surface px-2 py-0.5 text-xs tabular-nums text-muted-foreground">{count} of {total}</span>}
-    </header>
-    {pending ? <>
-      {kind === "NewProject" && <div className="border-b border-border-subtle px-4">
+  if (frame.collapsed) {
+    const index = version.versions.findIndex((item) => item.id === card.id) + 1;
+    const newer = proposal?.superseded_by;
+    return <CardFrame id={anchor} state={frame} icon={Icon} title={title.replace(/\?$/, "")} meta={frame.phase === "discarded" ? <Badge variant="secondary">Discarded</Badge> : <>
+      <Badge variant="secondary">{index > 0 ? `V${index} · replaced` : "Replaced"}</Badge>
+      {newer && <a className="inline-flex items-center gap-1 text-xs text-brand hover:underline" href={`#proposal-${newer}`} onClick={(event) => { event.preventDefault(); document.getElementById(`proposal-${newer}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>View newer version<ArrowDown size={12} /></a>}
+    </>} />;
+  }
+
+  const small = kind !== "EditItems" && listing.length === 1 && !listing[0].parent && !["NewProject", "NewNote", "NewCheatNotes", "TagChanges"].includes(kind) && (!listing[0].row.from || Object.keys(object(listing[0].row.to)).length === 1) && !Object.keys(object(listing[0].row.to)).some((field) => ["body", "brief", "notes"].includes(field));
+  if (small && !expanded && editor) {
+    const heading = <span className="inline-flex max-w-full min-w-0 items-center gap-1.5"><button type="button" disabled={disabled} onClick={() => setExpanded(true)} aria-label="Edit proposal" className="min-w-0 cursor-pointer text-left break-words enabled:hover:text-brand disabled:cursor-default">{title}</button><ChangedSince fields={data.loaded ? conflicts(listing[0].row, data.live[liveKey(listing[0].row)]) : []} live={data.live[String(rowId(listing[0].row))]} /></span>;
+    return <CardFrame compact id={anchor} state={frame} icon={Icon} title={heading} error={error} status={frame.phase === "applying" ? working : undefined}
+      meta={editor && <VersionControl inline version={version} disabled={disabled} />}
+      actions={decide(verb)} />;
+  }
+
+  return <CardFrame id={anchor} state={frame} icon={Icon} error={error}
+    title={editor ? title : resultTitle(proposal!, data.project)}
+    subtitle={<>{data.project?.subject != null && <p className="mt-0.5 text-xs text-muted-foreground">{String(data.project.subject)}</p>}{editor && <VersionControl version={version} disabled={disabled} />}</>}
+    meta={editor && total > 1 && kind !== "NewProject" && <span className="rounded-full bg-surface px-2 py-0.5 text-xs tabular-nums text-muted-foreground">{count} of {total}</span>}
+    status={frame.phase === "applying" ? working : undefined}
+    actions={editor ? decide(applyLabel) : proposal?.status === "created" && <Button variant="outline" size="sm" disabled={frame.phase !== "created"} onClick={() => act("undo")}>{frame.phase === "applying" ? <SpinnerGap className="animate-spin" /> : <ArrowCounterClockwise />}Undo</Button>}>
+    {editor ? <>
+      {kind === "NewProject" && <div className="border-t border-border-subtle px-4">
         <ViewTabs value={tab} onChange={setTab} tabs={[{ value: "attributes", label: "Attributes" }, { value: "tasks", label: "Tasks", badge: <span className="rounded-full bg-surface px-1.5 text-[11px] tabular-nums text-muted-foreground">{count === total ? total : `${count} of ${total}`}</span> }]} />
       </div>}
       {kind === "NewProject" && tab === "attributes" && <ProjectAttributes key={`project:${version.generation}`} state={state} disabled={disabled} onChange={change} />}
@@ -161,11 +180,5 @@ export function ProposalCard({ kind, input }: { kind: string; input: Row }) {
       })}
       <Pager page={page} count={total} onChange={(next) => progress.setValue(next)} /></div>}
     </> : <Results proposal={proposal!} />}
-    {(card.error || validation || data.error) && <p role="alert" className="border-t border-border-subtle px-4 py-2 text-xs leading-relaxed text-destructive">{card.error ?? validation ?? data.error}</p>}
-    <footer className={cn("flex flex-wrap items-center justify-end gap-2 border-t border-border-subtle bg-surface/40 px-4", pending ? "py-3" : "py-2")}>
-      {!card.id && <span className="mr-auto text-xs text-muted-foreground">Available after the reply finishes.</span>}
-      {card.id && !proposal && <span className="mr-auto text-xs text-muted-foreground">{card.error ? <Button variant="ghost" size="xs" onClick={card.retry}>Try loading again</Button> : "Loading card…"}</span>}
-      {pending ? <><Button variant="ghost" size="sm" disabled={disabled} onClick={() => card.act("discard")}>Discard</Button><Button variant={kind.startsWith("Delete") ? "destructive" : "default"} size="sm" disabled={disabled || (count === 0 && kind !== "NewProject")} onClick={apply}>{card.busy && <SpinnerGap className="animate-spin" />}{applyLabel}</Button></> : proposal?.status === "created" ? <><Check size={14} className="mr-auto text-success" aria-label="Applied" /><Button variant="outline" size="xs" disabled={card.busy} onClick={() => card.act("undo")}><ArrowCounterClockwise />Undo</Button></> : <span className="mr-auto text-xs text-muted-foreground">Changes undone</span>}
-    </footer>
-  </section>;
+  </CardFrame>;
 }
