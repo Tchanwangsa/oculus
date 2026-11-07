@@ -25,6 +25,7 @@ export function parseProgram(source: string): Verdict {
   } catch (e) {
     return { ok: false, reason: "invalid", errors: [String(e)], result: null };
   }
+  if (result.mutationStatements.length) return { ok: false, reason: "invalid", errors: ["Mutation is not supported; use a proposal for writes"], result };
   const errors = result.meta.errors.filter((e) => e.severity !== "warning").map((e) => `${e.code}: ${e.message}`);
   if (errors.length) return { ok: false, reason: "invalid", errors, result };
   if (result.meta.incomplete || result.meta.unresolved.length)

@@ -10,7 +10,7 @@ import { useWidgetProgress } from "../progress";
 
 export const Option = defineComponent({
   name: "Option",
-  description: "One answer choice; mark exactly one option per question correct = true. Only inside Question.",
+  description: "One answer choice inside Question; mark exactly one correct = true inside a scored Quiz. Reveal questions may omit correctness.",
   props: z.object({
     text: z.string(),
     correct: z.boolean().optional(),
@@ -20,13 +20,32 @@ export const Option = defineComponent({
 
 export const Question = defineComponent({
   name: "Question",
-  description: "A multiple-choice question. Only inside Quiz.",
+  description: "A standalone, unscored reveal question: choose an option to see the explanation immediately. Inside Quiz it is scored. Standalone questions may omit correct flags.",
   props: z.object({
     prompt: z.string().describe("Markdown and $…$ maths allowed"),
     options: z.array(Option.ref),
-    explanation: z.string().optional().describe("Shown after checking"),
+    explanation: z.string().optional().describe("Shown after choosing in reveal mode, or after checking in Quiz"),
   }),
-  component: () => null,
+  component: function RevealQuestion({ props }) {
+    const streaming = useIsStreaming();
+    const pending = useContext(StreamingPending);
+    const progress = useWidgetProgress({ picked: null as number | null });
+    const picked = progress.value.picked;
+    const options = props.options ?? [];
+    return <Frame title="Check your intuition" footer={streaming ? <StreamingStatus /> : picked !== null ? <Pill onClick={() => progress.setValue({ picked: null })}>Try again</Pill> : undefined}>
+      {typeof props.prompt === "string" ? <Rich text={props.prompt} className="block text-sm leading-relaxed text-foreground" /> : <MoreComing />}
+      <div role="group" aria-label="Answer choices" className="mt-2 flex flex-col gap-1.5">
+        {options.map((option, i) => typeof option?.props?.text !== "string" ? <MoreComing key={i} /> : <button
+          key={i} type="button" aria-pressed={picked === i} disabled={streaming || picked !== null}
+          onClick={() => progress.setValue({ picked: i })}
+          className={cn("cursor-pointer rounded-lg border px-3 py-2 text-left text-sm transition-[color,background-color,border-color] disabled:cursor-default", picked === i ? "border-brand bg-brand-muted" : "border-border hover:bg-accent")}>
+          <Rich text={option.props.text} />
+        </button>)}
+      </div>
+      {picked !== null && typeof props.explanation === "string" && <div role="status" className="mt-2 text-[13px] leading-relaxed text-muted-foreground"><Rich text={props.explanation} /></div>}
+      {streaming && pending && <MoreComing />}
+    </Frame>;
+  },
 });
 
 type OptionProps = { text?: unknown; correct?: unknown };

@@ -30,6 +30,8 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Page, thread list, recent list, timeline, rows, composer | `app/src/pages/tools/ChatPage.tsx`, `app/src/components/harness/` (`threads/`, `timeline/`, `composer/`; recent list: `threads/RecentThreads.tsx`) |
 | Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/chat/draftStore.ts` |
 | Proposal dispatch context and confirmed jobs | `app/src-tauri/src/harness/app/proposal_context.rs`, `app/src-tauri/src/harness/app/proposal_jobs/` |
+| Local OpenUI Query tools and event refresh | `app/src/components/markdown/openui/query/` |
+| Seeded simulation and maths functions | `app/src/components/markdown/openui/functions/` |
 | Interactive reply fences, study widgets and their persisted progress | `app/src/components/markdown/openui/`, `app/src/stores/chat/widgetStore.ts` |
 | Model picker and its catalogue hook | `app/src/components/harness/composer/ModelPicker.tsx`, `app/src/hooks/agents/useProviderModels.ts` |
 | Settings → opencode: the provider and model tables, the connect flow, the offered-model gate | `app/src/pages/settings/integrations/OpencodePage.tsx`, `app/src/components/settings/agents/opencode/`, `app/src/components/settings/agents/OpencodeConnectDialog.tsx`, `app/src/lib/harness/opencodeCatalogue.ts` |
@@ -529,6 +531,58 @@ grammar from `app/src-tauri/templates/skills/oculus-ui/SKILL.md`, registered in
 to ` ```openui `, an illustration the student plays with to ` ```widget `
 (the `oculus-widgets` skill) and a static picture or page to `outputs/`. Widget primitives follow the
 [UI tokens](./ui.md#study-widgets-use-the-replys-primitives-and-semantic-tokens).
+
+## OpenUI queries read local rows and refresh after edits
+
+`OpenUIBlock` supplies the read-only provider in
+`app/src/components/markdown/openui/query/`. `Query("tasks", {project:12}, [])`
+returns rows with the fields from `oculus task list --json`. The other tools
+are `projects` (`project list`), `calendar` / `upcoming` (`calendar`),
+`deadlines` (`calendar --due`), `lectures` (`lecture list`), `revision due`
+(`quiz list --due`), `cheat notes` (`cheat list`) and `subjects` (`list`).
+Calendar tools include Canvas and local events, matching the CLI; tasks and
+recordings come from their own tools rather than the calendar's synthetic
+app-only layers.
+
+Every tool validates its arguments with strict Zod schemas before reading.
+`limit` defaults to 100 and clamps at 400 rows. Task filters are `project`,
+`unfiled`, `column` (requires project), `due_before` (ISO date or timestamp)
+and `tag`. Project filters are `subject`, `personal` and `archived`.
+Calendar tools accept `subject`, `days` (0–365, default 14), `past` and `due`.
+Lectures accept `subject`; revision tools accept `subject` and `topic`.
+Subjects accept only `limit`. A subject is an id or code; omit it for all.
+Single-subject reads refuse ambiguous codes, calendar codes may span terms,
+and revision also accepts `general` for personal entries.
+
+The provider uses local database reads, never a sync or a network call.
+The existing project, calendar and revision window events invalidate only the
+queries that read that source through the runtime's `@Run` path. Subject and
+lecture reads also listen for synced-file updates. Refresh and Retry retain
+the runtime store, slider bindings and mounted controls. Query arguments
+bound to `$variables` re-evaluate through OpenUI itself. Query failures render
+through `Renderer.QueryError` with `Renderer.Retry`, outside `Renderer.Content`;
+they do not set the fence's render-failure state. Final validation refuses
+`Mutation` statements: writes belong to proposals.
+
+`Question` directly inside `Stack` is an unscored reveal: choosing immediately
+shows its explanation, and Try again clears the choice. Inside `Quiz`, the
+same Question definition supplies the scored question and its Check step.
+Reveal questions need no correct option and do not save review items.
+
+`app/src/components/markdown/openui/functions/` holds pure, seeded simulation
+functions. `@Normal()`, `@Binomial()`, `@Uniform()` and `@Exponential()` return
+distribution names, not densities; `@Sample(dist, params, n, seed)` and
+`@Means(dist, params, n, trials, seed)` validate the parameter object for that
+distribution. Defaults are normal `{mean:0, sd:1}`, binomial
+`{trials:1, p:0.5}`, uniform `{min:0, max:1}` and exponential `{rate:1}`.
+Omitted seed is 0. Samples and means return at most 400 values; Means refuses
+more than 200,000 draws, including underlying Bernoulli draws for binomial.
+`@Bins(values, count)` returns at most 400 `{x:centre, y:count}` points for
+Chart bars, including the upper edge. Empty bins input returns an empty
+array; constant input uses a unit-wide domain. `@Mean` and population
+`@StdDev` take 1–400 values. Invalid inputs return null. Fixed seeds make a
+slider change the sample size reproducibly, without consuming ambient
+randomness.
 
 ## The timeline mounts its newest rows and holds the view still
 

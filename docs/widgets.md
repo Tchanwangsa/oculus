@@ -3,7 +3,7 @@
 A ` ```widget ` fence in a reply is a small TSX program the agent wrote for one
 question, run in a sandboxed frame inside the reply and built from the Oculus
 kit so it looks like the app. ` ```openui ` stays for what only the app can
-do (proposals, jobs, quizzes that feed reviews —
+do (live student data, proposals, jobs, quizzes that feed reviews —
 [harness.md](./harness.md#openui-fences-draw-interactive-study-widgets));
 a widget is for illustration.
 The agent learns to write one from the `oculus-widgets` skill and checks it
@@ -57,6 +57,18 @@ request includes the original `openui` fence through `fixRequest` in
 `app/src/components/markdown/widget/fixRequest.ts`. The lifecycle and
 validation contract are in
 [harness.md](./harness.md#openui-fences-draw-interactive-study-widgets).
+
+## OpenUI reads local student data and illustrates short lessons
+
+Use OpenUI for a small chart or seeded simulation beside the prose it explains,
+a standalone `Question` that reveals its explanation after a choice, or the
+student's live data. A widget illustrates something that needs its own rules
+(geometry, physics, a game); it cannot read the app's database. OpenUI's
+`Query` reads local rows through the same data layer as the Live components,
+using the CLI's JSON field names, and refreshes after edits. It never makes a
+network request or a write; changes still require proposal cards. Query
+failures stay in the fence with Retry. Tool names, arguments and simulation
+limits live in [harness.md](./harness.md#openui-queries-read-local-rows-and-refresh-after-edits).
 
 ## A widget runs only once its reply is a committed row
 

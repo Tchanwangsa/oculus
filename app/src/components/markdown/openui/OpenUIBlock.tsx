@@ -3,6 +3,10 @@ import { Renderer, type ActionEvent, type OpenUIError } from "@openuidev/react-l
 import { useAssistantSend } from "./assistant";
 import { SaveArtifact } from "@/components/revision/SaveWidget";
 import { library } from "./library";
+import { toolProvider } from "./query";
+import { QueryRefresh } from "./query/refresh";
+import { QueryStatus } from "./query/QueryStatus";
+import { isFenceFailure } from "./query/errors";
 import { OpenUISkeleton, StreamingPending } from "./Streaming";
 import { parseProgram, streamVerdict } from "./parse";
 import { useWidgetRow, WidgetFence, WidgetRow } from "./state";
@@ -45,7 +49,7 @@ export default function OpenUIBlock({ source, fallback, blockIndex, savedState, 
     [send],
   );
   const onError = useCallback((errors: OpenUIError[]) => {
-    if (!isStreaming && errors.some((e) => e.severity !== "warning")) setFailed(true);
+    if (!isStreaming && isFenceFailure(errors)) setFailed(true);
   }, [isStreaming]);
 
   if (!isStreaming && (!verdict?.ok || failed)) return <>{fallback}</>;
@@ -55,9 +59,11 @@ export default function OpenUIBlock({ source, fallback, blockIndex, savedState, 
         <WidgetRow.Provider value={isStreaming ? null : row}>
         <WidgetFence.Provider value={blockIndex}>
         <StreamingPending.Provider value={stream?.pending ?? false}>
-        <Renderer response={source} library={library} isStreaming={isStreaming} onAction={onAction} onError={onError}
+        <Renderer response={source} library={library} toolProvider={toolProvider} isStreaming={isStreaming} onAction={onAction} onError={onError}
           initialState={initialState} onStateUpdate={onStateUpdate}
           publishObservability={false}>
+          <QueryRefresh queries={(verdict?.result ?? stream?.result)?.queryStatements ?? []} isStreaming={isStreaming} />
+          <QueryStatus />
           {ready && <div inert={isStreaming} className="contents"><Renderer.Content /></div>}
           {isStreaming && (!ready || !stream?.drawable) && <OpenUISkeleton />}
         </Renderer>

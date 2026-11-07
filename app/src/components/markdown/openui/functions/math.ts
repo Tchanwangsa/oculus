@@ -55,4 +55,4 @@ export const Range = defineFunction({
   },
 });
 
-export const functions = [Pow, Sqrt, Log, Range];
+

@@ -36,15 +36,15 @@ Props typed `ActionExpression` accept one @step, or Action([@steps...]) for seve
 Props marked `$binding<type>` accept a `$variable` reference for two-way binding.
 
 ### Root
-Stack(items: (Task | TaskList | Deadline | Upcoming | Lecture | StudioVideo | CheatNote | ReviewDue | NewCheatNotes | EditItems | Flashcards | Quiz | Steps | Explorer | Text | PageRef | Ask | NewTasks | NewProject | NewEvents | NewNote | TaskChanges | ProjectChanges | EventChanges | TagChanges | DeleteTasks | DeleteEvents | Sync | Reparse | Transcribe | LectureChapters | LectureEnd | Download)[]) — The root: study widgets top to bottom. Ask and PageRef items line up in a row.
+Stack(items: (Task | TaskList | Deadline | Upcoming | Lecture | StudioVideo | CheatNote | ReviewDue | NewCheatNotes | EditItems | Flashcards | Quiz | Question | Steps | Explorer | Text | PageRef | Ask | NewTasks | NewProject | NewEvents | NewNote | TaskChanges | ProjectChanges | EventChanges | TagChanges | DeleteTasks | DeleteEvents | Sync | Reparse | Transcribe | LectureChapters | LectureEnd | Download)[]) — The root: study widgets top to bottom. Ask and PageRef items line up in a row.
 Text(text: string, tone?: "normal" | "muted") — A short line of markdown; $…$ for maths. Strings may be built with + from $variables.
 
 ### Recall
 Flashcards(title: string, cards: Card[]) — A flashcard deck: flip, then mark each card known or not; unknown cards come round again.
 Card(front: string, back: string) — One flashcard: a prompt on the front, the answer on the back. Only inside Flashcards.
 Quiz(title: string, questions: Question[]) — A multiple-choice quiz, one question at a time, scored as it goes.
-Question(prompt: string, options: Option[], explanation?: string) — A multiple-choice question. Only inside Quiz.
-Option(text: string, correct?: boolean) — One answer choice; mark exactly one option per question correct = true. Only inside Question.
+Question(prompt: string, options: Option[], explanation?: string) — A standalone, unscored reveal question: choose an option to see the explanation immediately. Inside Quiz it is scored. Standalone questions may omit correct flags.
+Option(text: string, correct?: boolean) — One answer choice inside Question; mark exactly one correct = true inside a scored Quiz. Reveal questions may omit correctness.
 - Mark exactly one answer per question with Option(text, true).
 - 5 to 12 cards or 3 to 8 questions; every one checks a single idea.
 
@@ -68,6 +68,12 @@ Lecture(id: string, at?: number) — A lecture's live title and chapter, with a 
 StudioVideo(slug: string) — A Studio video's live title and poster, opening its player. Read the slug from studio list.
 CheatNote(id: number) — A live cheat sheet entry by id.
 ReviewDue(subject?: string | number) — Due review count for a subject code or id, null for all.
+
+### Data
+- Live read-only rows: rows = Query("tasks", {project:12, limit:100}, []). Use the CLI to inspect ids and JSON shapes before composing the UI. Never Mutation; writes go through proposals.
+- Tools: "tasks" (oculus task list --json), "projects" (project list), "calendar" / "upcoming" (calendar), "deadlines" (calendar --due), "lectures" (lecture list), "revision due" (quiz list --due), "cheat notes" (cheat list), "subjects" (list). Every result is an array; query errors offer Retry.
+- All tools accept limit (default 100, capped at 400). tasks: project, unfiled, column (needs project), due_before (ISO), tag. projects: subject, personal, archived. calendar/upcoming/deadlines: subject, days (0–365, default 14), past, due. lectures: subject. revision due/cheat notes: subject, topic. subjects: limit only. No other args.
+- subject is an id or code; omit for all. A single-subject read requires an unambiguous code; calendar also accepts a code prefix spanning terms. Revision also accepts "general". Local data refreshes after edits; @Run(rows) reads again. Query args may depend on $variables.
 
 ### Links
 PageRef(path: string, page?: number, label?: string) — A link to a page of a library file, e.g. PageRef("courses/MAST10006/Lecture 4.pdf", 12, "Chain rule"); same paths you cite in prose.
@@ -135,6 +141,15 @@ Use @-prefixed built-in functions (@Count, @Sum, @Avg, @Min, @Max, @Round) on da
 @Sqrt(number: number) → number — Square root; null for a negative number
 @Log(number: number) → number — Natural logarithm; null for zero or less
 @Range(start: number, end: number, step?: number) → number[] — Numbers from start to end inclusive, stepping by step (default 1), e.g. @Range(0, 10) for a chart's x values; at most 400
+@Sample(dist: "normal" | "binomial" | "uniform" | "exponential", params: Record<string, number>, n: number, seed?: number) → number[] — Seeded draws: @Sample(@Exponential(), {rate:1}, 400, 42). dist may also be a distribution name string; at most 400 points; seed defaults to 0. Invalid parameters return null.
+@Means(dist: "normal" | "binomial" | "uniform" | "exponential", params: Record<string, number>, n: number, trials: number, seed?: number) → number[] — Seeded sample means: @Means(@Exponential(), {}, $n, 400, 42). At most 400 trials; trials × n <= 200000 (also capped at 200000 Bernoulli draws for Binomial); over-budget/invalid inputs return null. Seed defaults to 0.
+@Bins(values: number[], count: number) → {x: number, y: number}[] — Histogram {x:bin centre, y:count} points for Chart(..., ..., ..., "bar"). @Bins(values, 20); count capped at 400; values at most 400. Includes the maximum in the last bin; constant values use a unit-wide domain; empty input returns [].
+@Normal() → "normal" | "binomial" | "uniform" | "exponential" — Distribution name "normal" for @Sample/@Means, not a density. params {mean:0, sd:1}; sd >= 0. Omitted parameter keys use these defaults.
+@Binomial() → "normal" | "binomial" | "uniform" | "exponential" — Distribution name "binomial" for @Sample/@Means, not a density. params {trials:1, p:0.5}; integer trials 0–400, probability 0–1. Omitted parameter keys use these defaults.
+@Uniform() → "normal" | "binomial" | "uniform" | "exponential" — Distribution name "uniform" for @Sample/@Means, not a density. params {min:0, max:1}; max >= min. Omitted parameter keys use these defaults.
+@Exponential() → "normal" | "binomial" | "uniform" | "exponential" — Distribution name "exponential" for @Sample/@Means, not a density. params {rate:1}; rate > 0. Omitted parameter keys use these defaults.
+@Mean(values: number[]) → number — Arithmetic mean of 1–400 finite numbers; empty or invalid input returns null.
+@StdDev(values: number[]) → number — Population standard deviation of 1–400 finite numbers (divisor N); one value gives 0; empty or invalid input returns null.
 
 Builtins compose — output of one is input to the next:
 `@Count(@Filter(data.rows, "field", "==", "val"))` for KPIs/chart values, `@Round(@Avg(data.rows.score), 1)`, `@Each(data.rows, "item", Comp(item.field))` for per-item rendering.
