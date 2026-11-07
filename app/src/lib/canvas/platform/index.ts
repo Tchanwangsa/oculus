@@ -20,6 +20,8 @@ export interface CanvasPlatform {
   readDroppedImages?(paths: string[], signal?: AbortSignal): Promise<CanvasImportedImage[]>;
   /** Saves an exported PNG or SVG. */
   saveExport(blob: Blob, format: "png" | "svg"): Promise<void>;
+  /** Whether `searchPdfs` and `openPdf` reach a library; absent where they only say to open the desktop app. */
+  libraryPdfs?: boolean;
   /** Searches library PDFs by filename and subject; an empty query lists recent files. */
   searchPdfs(query: string): Promise<CanvasLibraryPdf[]>;
   /** Opens a library result for picking pages. */

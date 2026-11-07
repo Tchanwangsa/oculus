@@ -19,6 +19,7 @@ const REAL_FILENAME = new Set(["file", "image", "upload"]);
 export function fileTitle(file: Pick<DbFile, "category" | "filename">): string {
   // A document's filename was typed by the student: never humanise it.
   if (file.category === "canvas") return file.filename.replace(/\.canvas$/i, "");
+  if (file.category === "notebook") return file.filename.replace(/\.notebook$/i, "");
   if (file.category === "document") return file.filename.replace(/\.md$/i, "");
   return REAL_FILENAME.has(file.category ?? "") || isLessonAsset(file)
     ? file.filename
@@ -117,36 +118,7 @@ export function libraryPath(raw: string | null | undefined): string | null {
   return fullCitation(raw)?.path ?? null;
 }
 
-/** Folder under `courses/<CODE>/` to category. Must agree with
- *  `category_from_path` in `app/src-tauri/src/library/paths/categories.rs`, which sets a row's
- *  `category`. */
-const CATEGORY_FOLDERS: Record<string, string> = {
-  "pages/": "page",
-  "assignments/": "assignment",
-  "quizzes/": "quiz",
-  "announcements/": "announcement",
-  "ed/": "ed",
-  "lessons/": "lessons",
-  "files/": "file",
-  "modules/": "module",
-  "images/": "image",
-  "documents/": "document",
-  "canvases/": "canvas",
-  "uploads/": "upload",
-};
-
-/** Category and filename derived from a library path — enough for
- *  `categoryIconFor` and `fileTitle` without a query. */
-export function pathFile(path: string): Pick<DbFile, "category" | "filename"> {
-  const rel = path.replace(/^courses\/[^/]+\//, "");
-  return { category: categoryFromPath(rel), filename: rel.slice(rel.lastIndexOf("/") + 1) };
-}
-
-function categoryFromPath(rel: string): string {
-  if (rel === "home.md" || rel === "syllabus.md") return rel.slice(0, -3);
-  const folder = Object.keys(CATEGORY_FOLDERS).find((f) => rel.startsWith(f));
-  return folder ? CATEGORY_FOLDERS[folder] : "other";
-}
+export { pathFile } from "@/lib/files/pathCategory";
 
 /** Prose, a fenced library path, or an attached picture (`image.path` is
  *  already `<img>`-loadable; see `app/src/lib/harness/attachments.ts`). */

@@ -1,33 +1,41 @@
-# Drawing canvases live in Drive
+# Canvases and notebooks live in Drive
 
-Files → Drive holds the student’s own notes and drawing canvases. New file
-chooses the editor; a canvas opens as an infinite drawing surface in a tab or
-beside another page.
+Files → Drive holds the student's own notes and drawings. A drawing is one of
+two kinds on the same engine: a **canvas**, an infinite whiteboard, or a
+**notebook**, paper pages to write on. Either opens in a tab or beside another
+page.
 
 ## Where
 
 | Piece | Location |
 | --- | --- |
 | Drive list, type filters and creation menu | `app/src/pages/subject/files/DrivePage.tsx` |
-| File route and editor choice | `app/src/pages/subject/files/FilePage.tsx` |
-| Canvas file rows and native command wrappers | `app/src/lib/canvas/files.ts` |
+| File route and editor choice (passes the file's kind to `CanvasEditor`) | `app/src/pages/subject/files/FilePage.tsx` |
+| The two kinds: folder, extension, category, path and row helpers, reconcile plan | `app/src/lib/canvas/drawingKinds.ts`, `DrawingKind` in `app/src-tauri/src/library/files/canvases.rs` |
+| Folder → category for a path (`notebooks/` is `notebook`) | `app/src/lib/files/pathCategory.ts`, `app/src-tauri/src/library/paths/categories.rs` |
+| Drawing file rows, reconciles and native command wrappers | `app/src/lib/canvas/files.ts` |
 | Shared ordered saves and the shared-canvas adapter | `app/src/lib/canvas/sessions.ts`, `app/src/lib/canvas/sessionRuntime.ts`, `app/src/lib/canvas/authority.ts` |
 | Desktop recovery drafts | `app/src/lib/canvas/drafts.ts`, `app/src-tauri/src/library/files/canvases/drafts.rs` |
 | Authority command wrappers and event listeners | `app/src/lib/canvas/files.ts` (`canvasAuthority`) |
 | Title, save state, recovery, conflict and pause controls, the Share button and editor host | `app/src/components/canvas/CanvasEditor.tsx` |
 | Drawing surface, label text overlay, tool bar and style panel shell | `app/src/components/canvas/CanvasSurface.tsx`, `app/src/components/canvas/CanvasToolbar.tsx`, `app/src/components/canvas/CanvasStylePanel.tsx` |
-| Pointer gestures, history and keyboard commands | `app/src/hooks/canvas/useCanvasInteraction.ts` |
+| Pointer gestures, history, keyboard commands and the notebook's page rules | `app/src/hooks/canvas/useCanvasInteraction.ts` |
 | Two-finger pan and pinch | `app/src/lib/canvas/touchViewport.ts` |
+| Zoom ranges | `app/src/lib/canvas/zoom.ts` |
 | Content transactions (undo steps and shared edits) and rebasing | `app/src/lib/canvas/collaboration.ts`, `app/src/lib/canvas/clientReconciliation.ts` |
 | Device-local drawing preferences | `app/src/lib/canvas/toolPreferences.ts` |
 | Native selection, callout and touch defaults kept off the canvas | `app/src/lib/canvas/browserSelectionGuard.ts` |
 | Canvas2D drawing and image export | `app/src/lib/canvas/render.ts`, `app/src/lib/canvas/renderSvg.ts` |
 | Text fonts, measuring, wrapping and label layout | `app/src/lib/canvas/renderText.ts` |
 | Versioned document model and coordinate helpers | `app/src/lib/canvas/model.ts`, `app/src/lib/canvas/geometry.ts` |
-| Notebook pages: the `paper` field, page layout, templates, locked backdrops, the page camera | `app/src/lib/canvas/paper.ts` |
-| Adding and removing a page | `app/src/lib/canvas/pages.ts`, `app/src/components/canvas/CanvasPageBar.tsx` |
-| Drawing pages and templates; page pictures and the notebook's export bounds | `app/src/lib/canvas/renderPaper.ts`, `renderPagePng` and `paintCanvas` in `app/src/lib/canvas/render.ts`, `paperSvg` in `renderSvg.ts` |
-| New notebook: blank paper or a copy of a library PDF | `app/src/components/canvas/NotebookDialog.tsx`, `app/src/components/canvas/WriteOnCopy.tsx`, `app/src/lib/canvas/notebook.ts` |
+| Pages: the `paper` field, `notebookPaper`, layout, templates, locked backdrops, the page camera | `app/src/lib/canvas/paper.ts` |
+| Drawing pages and templates, the element → page owner, export bounds | `app/src/lib/canvas/renderPaper.ts`, `renderPagePng` and `paintCanvas` in `app/src/lib/canvas/render.ts`, `paperSvg` in `renderSvg.ts` |
+| What the pointer reaches on a page | `app/src/lib/canvas/pageHits.ts` |
+| Page operations: add, insert, duplicate, move, remove, template, size, PDF pages | `app/src/lib/canvas/pages.ts` |
+| Page bar, page sidebar, thumbnails, per-page menu and drag to reorder | `app/src/components/canvas/pages/` |
+| What a page's picture depends on | `app/src/lib/canvas/pageFingerprints.ts` |
+| New notebook: blank paper or a copy of a library PDF | `app/src/components/canvas/NotebookDialog.tsx`, `app/src/lib/canvas/notebook.ts` |
+| A PDF's Draw button: a notebook or a canvas copy of its pages | `app/src/components/canvas/DrawOnCopy.tsx`, `app/src/lib/canvas/pdfCopy.ts` |
 | Page pictures for chat agents: change detection, writer, hook, Rust commands and manifest | `app/src/lib/canvas/snapshots.ts`, `app/src/hooks/canvas/useNotebookSnapshots.ts`, `app/src-tauri/src/library/files/canvases/snapshots.rs`, `app/src-tauri/src/library/paths/notebook.rs` |
 | Which notebooks are open, for the chat message | `app/src/lib/canvas/openNotebooks.ts` (read by `harnessSend` in `app/src/lib/harness/commands.ts`) |
 | `oculus read` on a notebook | `app/src-tauri/src/bin/oculus/commands/query/notebook.rs` |
@@ -41,43 +49,62 @@ beside another page.
 | Arrow path (the one rendered path), curve, point edits, handles, retyping | `app/src/lib/canvas/arrow/` |
 | Elbow routing: headings, ends, grid, A*, route, fixed segments and segment drags | `app/src/lib/canvas/elbow/` |
 | Scaling a selection | `app/src/lib/canvas/resize.ts` |
-| Image import modal, library PDF search and selectable pages | `app/src/components/canvas/CanvasImageDialog.tsx`, `app/src/components/canvas/CanvasLibraryPdfs.tsx`, `app/src/components/canvas/CanvasPdfPages.tsx` |
+| Image import modal (and a notebook's Insert PDF pages), library PDF search and selectable pages | `app/src/components/canvas/CanvasImageDialog.tsx`, `app/src/components/canvas/CanvasLibraryPdfs.tsx`, `app/src/components/canvas/CanvasPdfPages.tsx` |
 | Image decoding and batch placement; native PDF import sessions | `app/src/lib/canvas/importMedia.ts`, `app/src/lib/canvas/mediaPlacement.ts`; `app/src/lib/canvas/importPdf.ts` |
 | Image drops, placement previews and raster paste | `app/src/hooks/canvas/useCanvasMediaDrop.ts`, `app/src/lib/ui/nativeFileDrop.ts`, `app/src-tauri/src/library/files/canvases/images.rs` |
 | What the surface takes from its host (export saving, library PDF search and opening): the browser default and the desktop's | `app/src/lib/canvas/platform/` |
-| Area captures, crop geometry and clipped PNG rendering | `app/src/lib/canvas/region.ts`, `app/src/components/canvas/CanvasRegionActions.tsx` |
+| Area captures, crop geometry and clipped PNG rendering | `app/src/lib/canvas/region.ts`, `app/src/components/canvas/CanvasRegionActions.tsx`, `app/src/components/canvas/CanvasCaptureHold.tsx` |
 | Embedded raster validation and Canvas2D image cache | `app/src/lib/canvas/imageSource.ts`, `app/src/lib/canvas/renderImages.ts` |
 | Scoped library PDF sessions and page rasterisation | `app/src-tauri/src/library/files/canvases/imports.rs` |
 | Element edits as replaceable maps | `app/src/lib/canvas/changes.ts` |
 | Layer order moves | `app/src/lib/canvas/layers.ts` |
 | Clipboard envelope and clone with remapped bindings | `app/src/lib/canvas/renderClipboard.ts` |
 | Retained Rust scene and WebAssembly bridge | `app/canvas-core/src/`, `app/src/lib/canvas/engine.ts` |
-| Native file commands and scoped paths | `app/src-tauri/src/library/files/canvases.rs` |
+| Native file commands, both kinds, and scoped paths | `app/src-tauri/src/library/files/canvases.rs` |
 | Shared-canvas authority: validator, transactions, sessions, receipts, commands | `app/src-tauri/src/library/files/canvases/authority/` |
 | `files` row updates from Rust | `app/src-tauri/src/db/store/files.rs` (`touch_file_row`, `rename_file_row`, `delete_file_row`) |
 | Format and transaction parity fixtures (run by the TypeScript and Rust tests) | `app/tests/fixtures/canvas-model/`, `app/tests/fixtures/canvas-collab/`, `app/tests/lib/canvas/collabFixtures.test.ts` |
 | WebAssembly build | `app/scripts/build-canvas.mjs` |
-| Format, geometry, labels, style, bindings, layer order, WASM parity and save-session tests | `app/tests/lib/canvas/` |
-| Pen, touch, undo and outside-document tests that drive the hook's handlers | `app/tests/hooks/canvas/` |
+| Format, geometry, labels, style, bindings, layer order, pages, WASM parity and save-session tests | `app/tests/lib/canvas/` |
+| Pen, touch, undo, notebook and outside-document tests that drive the hook's handlers | `app/tests/hooks/canvas/` |
 
-## Drive groups authored files without changing their storage
+## The kind is the file's folder and extension
 
-Drive combines `document` rows (shown as Notes) and `canvas` rows, with
-All, Notes and Canvases filters. New file chooses Note or Canvas. Each type
-keeps its own editor and persistence rules; adding another editor must not
-change the canvas scene format to represent an unrelated document type.
+| Kind | File | `files` row |
+| --- | --- | --- |
+| Canvas | `courses/<code>/canvases/<title>.canvas` | `category = canvas`, `file_type = canvas` |
+| Notebook | `courses/<code>/notebooks/<title>.notebook` | `category = notebook`, `file_type = notebook` |
 
-Notes are ordinary Markdown documents under the subject’s documents folder
-([editor.md](./editor.md)). A drawing is
-`courses/<code>/canvases/<title>.canvas`, with `category = canvas` and
-`file_type = canvas`. Its title is its filename. Reconciliation brings files
-created outside the app into Drive and removes rows whose file is gone.
-A rename keeps the database ID and updates routes that hold that file.
+Both are the same JSON. The kind comes from the path (`DrawingKind::of`,
+`drawingKindOfPath`) or the row's category (`drawingKindOf`), never from what
+the document holds. `FilePage` passes it to `CanvasEditor`, the companion page
+reads it from the snapshot's `x-oculus-kind` header
+([device-sharing.md](./device-sharing.md)), and below the editor it is one
+boolean, `notebook`.
 
-The canvas JSON envelope is `type: oculus-canvas`, `version: 1`, with elements,
-a viewport and background. Element coordinates are world coordinates;
-viewport x/y translate in screen units before applying zoom. Polyline points
-are local to their element’s x/y. IDs are unique within one document.
+- **Commands.** `create_canvas` and `list_canvases` take an optional
+  `kind` (`"canvas"` by default; `createDrawing`, `createCanvas`,
+  `createNotebook` in `files.ts`). Read, write, rename and delete take a path
+  and accept either kind's; a rename keeps the file's own folder and
+  extension. A notebook's content must have valid `paper`
+  (`validate` in `canvases.rs`), so a write that drops it is refused.
+- **Reconciles.** Each kind has its own (`reconcileCanvases`,
+  `reconcileNotebooks`, both `reconcileDrawings`), planned by
+  `planDrawingRows`: it adds rows for its files on disk and removes rows of
+  its own category whose file is gone, and never touches the other kind's
+  rows or folder. A removed row's page pictures, if any, go with it.
+- **Drive** combines `document` rows (Notes), `canvas` rows and `notebook`
+  rows, with All, Notes, Canvases and Notebooks filters. New file offers Note,
+  Canvas and Notebook… (a dialog, below). Notes are ordinary Markdown
+  documents ([editor.md](./editor.md)). A title is its filename; a rename keeps
+  the database ID and updates routes that hold that file.
+
+## The format is one open envelope
+
+The envelope is `type: oculus-canvas`, `version: 1`, with elements, a viewport
+and background. Element coordinates are world coordinates; viewport x/y
+translate in screen units before applying zoom. Polyline points are local to
+their element's x/y. IDs are unique within one document.
 
 The format describes geometry and appearance, independently of the editor
 implementation. Sketch and clean are per-element appearance choices. Extra
@@ -100,19 +127,25 @@ version stays 1, and an absent field means its default (`CANVAS_DEFAULTS` in
 | `startArrowhead`, `endArrowhead` | `none` `arrow` `triangle` `dot` `bar` `diamond` (none, arrow) | arrow |
 | `roundness` | `sharp` `round` (round for a rectangle, sharp for a diamond) | rectangle, diamond |
 | `arrowType` | `sharp` `curved` `elbow` (sharp) | arrow |
-| `startBinding`, `endBinding` | `{elementId, mode: 'center'}` or `{elementId, mode: 'edge', anchor}` with `anchor` x/y in 0..1 of the target’s bounds | arrow |
-| `fixedSegments` | an array in path order of `{x}` (a vertical segment on that line) or `{y}` (a horizontal one), local to the element’s x/y (none) | elbow arrow |
-| `text`, `fontSize` on rectangle, ellipse, diamond | the shape’s label | shapes |
+| `startBinding`, `endBinding` | `{elementId, mode: 'center'}` or `{elementId, mode: 'edge', anchor}` with `anchor` x/y in 0..1 of the target's bounds | arrow |
+| `fixedSegments` | an array in path order of `{x}` (a vertical segment on that line) or `{y}` (a horizontal one), local to the element's x/y (none) | elbow arrow |
+| `text`, `fontSize` on rectangle, ellipse, diamond | the shape's label | shapes |
 | `locked` | boolean (false) | every element |
 
-A binding’s target ID is not checked at load, so a dangling binding never
+A binding's target ID is not checked at load, so a dangling binding never
 blocks opening a file; its end stays where it is.
 
-## A notebook is a canvas with pages
+`locked: true` marks a backdrop, such as a page image taken from an
+assignment, on either kind. It is drawn like any element, but the pointer
+never picks it: no click, box or select-all selects it, nothing moves, resizes,
+crops or erases it, and layer moves treat locked elements as a fixed bottom
+layer, so ink is never sent beneath a page image. `selectableElements` hands
+the hit test the unlocked elements, returning the same array when none is
+locked so a whiteboard's cached geometry is reused.
 
-A document with a top-level `paper` is a notebook: fixed-size pages stacked
-down the canvas. One without it is a whiteboard, and nothing else about the
-file differs.
+## Pages exist only in a notebook
+
+A notebook has a top-level `paper`: fixed-size pages stacked down the board.
 
 ```jsonc
 "paper": { "gap": 24, "pages": [ { "id": "p1", "width": 595, "height": 842, "template": "grid" } ] }
@@ -121,87 +154,135 @@ file differs.
 - **Layout.** A page's rectangle is derived from its place in `pages`, never
   stored: world units are points (A4 is 595 × 842), pages stack top to bottom
   separated by `gap` (24), each centred on x = 0. `pageRects` in `paper.ts` is
-  the one layout; `pageAt` and `pageOfElement` answer which page a point or an
-  element belongs to (the page holding the centre of its bounds).
+  the one layout. An element belongs to the page holding the centre of its
+  drawn bounds (`elementPage` in `renderPaper.ts`, cached per paper and
+  element); clipping, page operations and pictures all use that owner.
 - **Fields.** `pages` has 1 to 500 entries with unique non-empty `id`s and a
   `width` and `height` above 0 and up to 14400. `template` is `blank` (the
   default), `grid`, `ruled` or `dotted`; `gap` is 0 to 1000. Other fields are
   kept. `paperProblem` and `validate_paper` in `authority/model.rs` apply the
   same rule, and the model fixtures hold them together.
-- **Locked elements.** `locked: true` marks a backdrop, such as a page image
-  taken from an assignment. It is drawn like any element, but the pointer
-  never picks it: no click, box or select-all selects it, nothing moves, resizes
-  or erases it, and layer moves treat locked elements as a fixed bottom layer,
-  so ink is never sent beneath a page image. `selectableElements` hands the
-  hit test the unlocked elements, returning the same array when none is
-  locked so a whiteboard's cached geometry is reused.
-- **Sharing.** A change to the pages (one added or removed) travels in a
-  transaction as `paper: { before, after }`, both whole papers, and merges like
-  the background: it applies when the current paper equals either side, and
-  otherwise fails with `conflict-background`. A document with no paper never
-  gains or loses one through a transaction.
+- **A canvas ignores `paper`.** A `.canvas` that holds one keeps it: the model
+  validates and saves it back as written, and the file is never rewritten for
+  it. Nothing else reads it: no sheets, page camera, clipping, page tools,
+  pictures, chat context or PDF export, so it opens and exports exactly like
+  the same canvas without it. Every page behaviour asks `notebookPaper(document,
+  notebook)` rather than reading `paper`.
+- **Sharing.** A change to the pages travels in a transaction as
+  `paper: { before, after }`, both whole papers, and merges like the
+  background: it applies when the current paper equals either side, and
+  otherwise fails with `conflict-background`. Two devices editing pages at once
+  therefore conflict, and the draft is kept. A document with no paper never
+  gains or loses one through a transaction, and a canvas never sends one.
 
-### Drawing, pages and the camera
+### The pages bound the camera and the pen
 
-- **Drawing.** `paintCanvas` paints each page on screen as a white sheet with a
-  soft shadow on the desk (the document's `background`), then its template, then
-  the elements; the whiteboard's dot grid and its toggle are off. Templates are
-  a line or dot every 14 points (ruled: 23, below a 60-point top margin).
-  `templateMarks` is the one geometry for the screen, the SVG export
-  (`paperSvg`) and the thumbnails; a pattern finer than 4 screen pixels a step
-  is skipped.
-- **Camera.** A notebook opens fitted to its page width (up to 140%) once, while
-  its camera is still the untouched default; Fit and the page controls use
-  `pageView`. The page in view is the one at the centre of the screen.
-- **Adding and removing pages.** `addPage` appends a page like the last one.
-  `removePage` deletes the page and every element whose centre is on it, and
-  moves the pages below, with their elements, up into its place, so a
-  notebook is never left with a gap. Both are one undo step, taken through the
-  same transactions as a stroke, so a page added on the iPad appears on the Mac.
-  A notebook keeps at least one page.
-- **Export.** PNG and SVG cover every page and anything drawn past a page's edge.
-  PDF (desktop only, `CanvasPlatform.exportPdf`) draws each page on white at
-  2.5 pixels a point and `canvas_export_pdf` writes one PDF page per notebook
-  page at its size: the picture is stored as PNG's own compressed rows (a Flate
-  stream with a PNG predictor), so nothing is recompressed.
+- **Drawing.** `paintCanvas` paints each page as a white sheet with a soft
+  shadow on the desk (the document's `background`, `NOTEBOOK_DESK` grey for a
+  new notebook), then its template, then the elements, each clipped to its own
+  page; a run of elements on one page shares one clip. The whiteboard's dot
+  grid and its toggle are off. Templates are a line or dot every 14 points
+  (ruled: 23, below a 60-point top margin); `templateMarks` is the one geometry
+  for the screen, the SVG export (`paperSvg`) and the thumbnails, and a pattern
+  finer than 4 screen pixels a step is skipped.
+- **Camera.** A notebook opens fitted to its page width (up to 140%) once,
+  while its camera is still the untouched default; Fit (1) and the page
+  controls use `pageView`. Every camera write goes through `setView`, which
+  keeps it on the pages (`clampCamera`): a page column narrower than the view is
+  centred, a wider one pans until its edge is 24 px inside the view, and at
+  most 40% of the view's height may show desk above the first page or below
+  the last. Zoom runs from 60% of the fitted zoom to 800% (`zoomLimits`); wheel,
+  pinch and buttons share it, and a whiteboard keeps 10% to 800%
+  (`CANVAS_ZOOM_LIMITS`). A resize or new paper from elsewhere re-clamps.
+- **The pen.** A stroke, shape or text that starts on the desk is refused, and
+  pen recovery does not restart it as the pen crosses onto a page. A move or
+  nudge is shortened so the selection's centre stays on a page. A duplicate
+  whose centre would land on the desk moves to the nearest page edge, and such
+  a paste to the middle of the page in view. Images go onto the page under the drop, else the page in view, no
+  larger than that page, flowing onto the next page when one fills
+  (`placeNotebookImages`); a drop previews where they will land.
+- **Hit testing** sees only what the page shows: the pointer reaches an
+  element only on its own page (`elementsAtPage`), and a box selection needs
+  the shown part of an element inside it (`shownBounds`).
+- **Export.** PNG and SVG cover the pages alone, each element clipped to its
+  page, and an area capture clips the same way. PDF (desktop only,
+  `CanvasPlatform.exportPdf`) draws each page on white at 2.5 pixels a point
+  and `canvas_export_pdf` writes one PDF page per notebook page at its size:
+  the picture is stored as PNG's own compressed rows (a Flate stream with a
+  PNG predictor), so nothing is recompressed.
+
+### Page tools edit the paper as one undo step
+
+The bar at the bottom shows the page in view with steps either side and
+toggles the **Pages** sidebar: a column of thumbnails at each page's
+proportions, the page in view marked. A click goes to a page. **Add page** at
+the end of the list (`AddPageMenu`) offers a new page, at the last page's
+template and size, or pages from a library PDF (`CanvasImageDialog` with
+`pdfPages`); the companion has no library, so there it adds the page straight
+away. Each thumbnail's ⋯ menu adds a page before or after, duplicates,
+changes the template or size (A4 and Letter, portrait or landscape) and
+deletes. Dragging a thumbnail reorders the pages on pointer
+events, so a mouse lifts after a few pixels and a finger or Pencil after a
+short hold, and the list scrolls near its edges (`usePageReorder`). On a
+narrow canvas the sidebar lies over the drawing like a drawer, behind it a dim
+scrim that closes it when pressed.
+
+- Every operation in `pages.ts` moves elements with their page, keeping each
+  one's offset from its page's top-centre. Removing a page takes everything on
+  it and moves the pages below up; a notebook keeps at least one page.
+  Duplicating clones the page's elements under new IDs. A smaller page size
+  moves an element only as far as keeps its centre on the page. Inserted PDF
+  pages are new pages at the PDF page's size with the picture as a locked
+  backdrop.
+- Each is one undo step through `editPages` in the hook, the same transaction
+  path as a stroke, so a page added on the iPad appears on the Mac. A gesture
+  or pinch in progress blocks it; a capture or crop in progress ends.
+- Thumbnails are drawn with `renderPagePng` one page at a time once the
+  document rests, only for pages whose `pageFingerprints` key changed, nearest
+  the page in view first (`usePageThumbnails`).
 
 ### Creating a notebook
 
-Drive's New file menu has Notebook…, a dialog with two starts. **Blank paper**
-is one A4 page, portrait or landscape, in a template. **From a PDF** lists the
-subject's PDFs and copies their pages: each is rendered as for any PDF import
+New file → Notebook… opens a dialog with two starts. **Blank paper** is one A4
+page, portrait or landscape, in a template. **From a PDF** lists the subject's
+PDFs and copies their pages: each is rendered as for any PDF import
 (`canvas_open_library_pdf`, `canvas_render_pdf_page`) and laid on its own page
 as a `locked` image the size of the PDF page, so the original is only read and
 the notebook outlives it. A PDF over 100 pages, or whose pages come to over
-64 MB, is refused with a sentence that says so. The new file is
-`courses/<code>/canvases/<name>.canvas` like any canvas, and Drive lists it
-beside them. A PDF's own page has a **Write on a copy** button (`WriteOnCopy`)
-that does the same for that file and opens the notebook beside it.
+64 MB, is refused with a sentence that says so (`readPdfPages`).
+
+A PDF's own page has a **Draw** button (`DrawOnCopy`) with two choices, each
+a copy named after the PDF and opened beside it. **Notebook** is the copy
+above. **Canvas** is a `.canvas` with no paper holding the PDF pages as
+ordinary, unlocked images at their size, stacked top to bottom with a gap like
+an image import, to sketch around (`boardFromPages`).
 
 ### What a chat agent sees
 
-An agent reads no `.canvas` file: it is JSON holding every stroke and the
+An agent reads neither file: it is JSON holding every stroke and the
 assignment's pictures. While a notebook is open, `useNotebookSnapshots` redraws
 the pages that changed 1.5 seconds after the content stops changing and sends
-only those to `canvas_write_page_snapshots`.
+only those to `canvas_write_page_snapshots`. A canvas gets none of this.
 
 - **Change detection** is by page, from the elements that touch it
   (`pageFingerprints`), so a stroke on page 2 redraws page 2, and a pan, a
-  zoom or a stroke elsewhere redraws nothing. Writes run one at a time and the
-  last scheduled document wins; a failed write is shown in the editor and tried
-  again on the next change.
+  zoom or a stroke elsewhere redraws nothing. Each picture shows its page as
+  the screen does, clipped, without ink from the next page. Writes run one at a
+  time and the last scheduled document wins; a failed write is shown in the
+  editor and tried again on the next change.
 - **Storage** is `canvas-pages/<file id>/` under the library: `page-NNN.png`
   per page (2 pixels a point, about 1190 × 1680 for A4) and `pages.json`, the
   notebook's path, page count and, for each page, its id, picture and the Unix
   time it was last redrawn (`library::paths::notebook`). It is keyed by the
   `files` row, so a rename only rewrites the manifest, and it is removed when
-  the canvas is deleted or reconciled away. The command refuses a path that is
-  not a canvas's, a page the notebook does not have, anything but a PNG, and a
-  symlinked folder.
+  the notebook is deleted or reconciled away. The command refuses a path that
+  is not a notebook's, a page the notebook does not have, anything but a PNG,
+  and a symlinked folder.
 - **`oculus read <notebook>`** prints each page's picture path and how long
-  ago it was redrawn; `--pages` picks pages. A whiteboard, or a notebook never
-  opened since it was made, has no pictures and the command says so. The
-  agent opens the PNG with its own image tool
+  ago it was redrawn; `--pages` picks pages. A notebook never opened since it
+  was made has no pictures and the command says so; a canvas is not text and
+  says so. The agent opens the PNG with its own image tool, and a chat message
+  names the open notebooks and the page in view
   ([harness.md](./harness.md#a-notebook-the-student-has-open-rides-the-prompt)).
 
 ## The pointer stays local and Rust answers geometry queries
@@ -266,8 +347,8 @@ so reopening reads disk again. Delete runs through the same queue and marks
 the session deleted, preventing a late autosave from recreating the file.
 
 Native writes stage a sibling temporary file and rename it into place after
-fsync. File commands accept only the four-part subject canvas path and reject
-symlinks in its components. Canvas paths use their own guard; note mutation
+fsync. File commands accept only a four-part subject canvas or notebook path
+and reject symlinks in its components. Canvas paths use their own guard; note mutation
 commands remain scoped to notes.
 
 ## A shared canvas has one writer
@@ -275,7 +356,7 @@ commands remain scoped to notes.
 While a canvas is shared, the canvas authority
 (`library/files/canvases/authority/`) is the only writer of its file. Desktop
 panes and paired devices send content transactions (`collaboration.ts`:
-per-element `before`/`after`, an optional layer order, background and paper); the
+per-element `before`/`after`, an optional layer order, background and a notebook's paper); the
 viewport never travels in one. An added element (`before: null`) goes on top
 unless the edit names `afterId`, the element just below it in the sender's
 scene (`null` for the bottom); it is then inserted above that element, or on
@@ -548,7 +629,7 @@ that deletion is one undo step.
 ### Capture duplicates an area; cropping trims an image
 
 **Capture area** (S) drags a rectangle anywhere on the canvas. The resulting
-PNG includes the background, paper, images and annotations inside that area,
+PNG includes the background, a notebook's pages, images and annotations inside that area,
 clipped at its edges, without tool overlays or the whiteboard grid. The area
 stays selected with a dashed border and eight handles; the rest of the viewport
 dims while the captured pixels stay clear. Drag its edges or
@@ -558,13 +639,20 @@ small icon action on an opaque, blurred card beside the area, or Cmd/Ctrl+C
 writes a PNG to the system
 clipboard where the browser supports image writes. Paste inserts that image
 through the ordinary image-paste path. Clipboard encoding starts as a promise during the button click so Safari keeps user
-activation while images decode.
+activation while images decode. LAN HTTP pages cannot use the system image
+clipboard; their error points to Duplicate for copying within the canvas.
 
-On iPad, holding inside the area for 450 ms before dragging lifts a captured
-copy. Its pixels preview under the pointer and dropping adds one image at that
-position, leaving the source content in place. A short drag just moves the
-selection; handles always adjust its bounds. Pencil and finger movement below
-10 screen pixels does not start either drag, and two fingers still navigate.
+**Duplicate** beside Copy adds the captured pixels as a selected image,
+offset 24 units and ready to move. It works on a LAN HTTP page without system
+clipboard access. A pointer held inside the selection for 1.2 seconds shows a
+filling progress ring, then lifts a shadowed ghost with a Drag to place copy
+indicator before any movement. Mouse, Pencil and touch all use this behavior.
+Dragging the lifted ghost and releasing places one image; releasing without
+dragging cancels the lift. Moving before the hold completes moves the capture
+zone and cancels the timer, even if the pointer pauses later. Handles resize
+without arming a hold; short selections keep a smaller edge hit band so their
+interior remains movable. Escape, pointer cancellation and two-finger
+navigation discard a pending or lifted copy.
 
 **Crop image** opens from the inspector, including its narrow-screen Style
 popover on iPad, or by double-clicking an image on desktop. The full image
@@ -572,10 +660,12 @@ starts framed by eight visible handles: corners crop both axes freely, edges
 crop one, and dragging inside repositions the crop rectangle. The discarded
 area dims and the kept area shows thirds. Handles stay within the original
 image and have larger hit targets for Pencil and touch. Enter applies the
-crop and Escape discards its preview. A Pencil or touch handle release applies
+crop; an outside click or tap also confirms it, and Escape discards its preview.
+Dragging outside pans instead of confirming, and a second finger starts
+navigation without applying the crop. A Pencil or touch handle release applies
 the crop immediately; Undo restores the original image. Applying replaces only
 the image's raster and bounds, preserving its ID and opacity; annotations stay
-separate. There is no crop action panel. A locked notebook backdrop cannot be
+separate. There is no crop action panel. A locked backdrop cannot be
 cropped.
 
 Captures render at two pixels per world unit; crops use the source's pixel
@@ -650,7 +740,9 @@ release.
 
 The panel is `CanvasStylePanel.tsx`, which only places it: a card on wide
 panes and a popover behind a Style button on narrow ones, scrolling inside
-instead of overflowing. One file per section lives in
+instead of overflowing. It and the other floating bars (tools, zoom, history,
+pages, utilities) share `.canvas-chrome` in `canvas.css`: a translucent,
+blurred card that turns nearly opaque under the pointer or keyboard focus. One file per section lives in
 `app/src/components/canvas/inspector/` and `InspectorControls.tsx` assembles
 them. Colour and Fill show five top picks and a button for the current
 colour, which opens `ColorPalette` (`app/src/components/ui/color/`) on the
@@ -855,6 +947,8 @@ formatting and Clippy as well as frontend format and WASM parity tests.
 
 ## Gotchas
 
+- Read pages through `notebookPaper(document, notebook)`, never `document.paper`; a `.canvas` may hold paper and must still behave as a whiteboard.
+- Never decide the kind from the document: it is the path's (`DrawingKind::of`, `drawingKindOfPath`), or a canvas holding paper turns into a notebook.
 - Replace elements and their array immutably; the retained spatial scene and Path2D cache use identity.
 - Keep gesture previews separate from the committed scene or every pointer move rebuilds the BVH.
 - Never write the scene during a gesture: previews live in overrides, so an outside document can replace the base underneath and the gesture commits onto it.

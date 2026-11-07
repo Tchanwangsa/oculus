@@ -219,7 +219,7 @@ mod notebook_read {
             std::fs::write(dir.join(&entry.image), b"png").unwrap();
         }
         let manifest = NotebookPages {
-            canvas: "courses/X/canvases/Work.canvas".into(),
+            canvas: "courses/X/notebooks/Work.notebook".into(),
             page_count: pages,
             pages: entries,
         };
@@ -234,7 +234,8 @@ mod notebook_read {
     fn lists_every_page_with_its_picture_and_age() {
         let root = root("nb-list");
         written(&root, 7, 3, &[]);
-        let view = notebook_view(&root, 7, "courses/X/canvases/Work.canvas", None, 1_060).unwrap();
+        let view =
+            notebook_view(&root, 7, "courses/X/notebooks/Work.notebook", None, 1_060).unwrap();
         assert_eq!(view.page_count, 3);
         assert_eq!(
             view.pages.iter().map(|p| p.page).collect::<Vec<_>>(),
@@ -250,7 +251,7 @@ mod notebook_read {
     fn pages_narrows_the_list_and_a_missing_page_names_the_range() {
         let root = root("nb-pages");
         written(&root, 7, 3, &[]);
-        let path = "courses/X/canvases/Work.canvas";
+        let path = "courses/X/notebooks/Work.notebook";
         let two = notebook_view(&root, 7, path, Some(&[(2, 2)]), 2_000).unwrap();
         assert_eq!(two.pages.iter().map(|p| p.page).collect::<Vec<_>>(), [2]);
         let error = notebook_view(&root, 7, path, Some(&[(9, 9)]), 2_000)
@@ -260,9 +261,25 @@ mod notebook_read {
     }
 
     #[test]
+    fn only_a_notebook_reads_as_page_pictures() {
+        use super::super::notebook::reads_as_pictures;
+        assert!(reads_as_pictures("notebook"));
+        assert!(!reads_as_pictures("pdf") && !reads_as_pictures("md"));
+    }
+
+    #[test]
+    fn a_canvas_is_neither_pictures_nor_text_whatever_it_holds() {
+        use super::super::notebook::reads_as_pictures;
+        assert!(!reads_as_pictures("canvas"));
+        assert!(!super::super::library::is_text_file(
+            "courses/X/canvases/Work.canvas"
+        ));
+    }
+
+    #[test]
     fn a_notebook_with_no_pictures_yet_says_how_to_get_them() {
         let root = root("nb-none");
-        let error = notebook_view(&root, 7, "courses/X/canvases/Work.canvas", None, 1)
+        let error = notebook_view(&root, 7, "courses/X/notebooks/Work.notebook", None, 1)
             .err()
             .unwrap();
         assert!(
@@ -275,13 +292,14 @@ mod notebook_read {
     fn a_picture_that_has_gone_missing_is_left_out_not_listed() {
         let root = root("nb-missing");
         written(&root, 7, 3, &[2]);
-        let view = notebook_view(&root, 7, "courses/X/canvases/Work.canvas", None, 5_000).unwrap();
+        let view =
+            notebook_view(&root, 7, "courses/X/notebooks/Work.notebook", None, 5_000).unwrap();
         assert_eq!(
             view.pages.iter().map(|p| p.page).collect::<Vec<_>>(),
             [1, 3]
         );
         written(&root, 8, 1, &[1]);
-        assert!(notebook_view(&root, 8, "courses/X/canvases/Work.canvas", None, 5_000).is_err());
+        assert!(notebook_view(&root, 8, "courses/X/notebooks/Work.notebook", None, 5_000).is_err());
     }
 
     #[test]

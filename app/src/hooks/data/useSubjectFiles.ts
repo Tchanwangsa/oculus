@@ -49,7 +49,7 @@ export function useSubjectFiles(subjectId: number | null) {
   const byCategory = useMemo(() => {
     const groups = {
       home: [] as DbFile[], module: [] as DbFile[], page: [] as DbFile[],
-      file: [] as DbFile[], upload: [] as DbFile[], document: [] as DbFile[], canvas: [] as DbFile[],
+      file: [] as DbFile[], upload: [] as DbFile[], document: [] as DbFile[], canvas: [] as DbFile[], notebook: [] as DbFile[],
       announcement: [] as DbFile[], assignment: [] as DbFile[], quiz: [] as DbFile[],
       ed: [] as DbFile[], lessons: [] as DbFile[], image: [] as DbFile[], syllabus: [] as DbFile[],
     };

@@ -1,6 +1,6 @@
-import { pageRects, paperBounds, type PageRect, type Paper, type PaperTemplate } from './paper';
-import { selectionBounds, type Bounds } from './geometry';
-import type { CanvasDocument } from './model';
+import { pageLocator, pageRects, paperBounds, type PageRect, type Paper, type PaperTemplate } from './paper';
+import { elementBounds, selectionBounds, type Bounds } from './geometry';
+import type { CanvasDocument, CanvasElement } from './model';
 
 export const PAGE_COLOR = '#ffffff';
 export const RULE_COLOR = '#cfd8ea';
@@ -88,13 +88,22 @@ export function paperSvg(paper: Paper): string {
   }).join('');
 }
 
-const union = (a: Bounds, b: Bounds): Bounds => {
-  const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
-  return { x, y, width: Math.max(a.x + a.width, b.x + b.width) - x, height: Math.max(a.y + a.height, b.y + b.height) - y };
-};
 
-/** A notebook exports its pages whole, with whatever overhangs them. */
-export function exportBounds(document: CanvasDocument): Bounds | null {
-  const content = selectionBounds(document.elements), sheets = document.paper ? paperBounds(document.paper) : null;
-  return content && sheets ? union(content, sheets) : content ?? sheets;
+/** What an export covers: a notebook's pages (`paper`, from `notebookPaper`) alone, since ink is clipped to them, or a whiteboard's elements. */
+export function exportBounds(document: CanvasDocument, paper: Paper | undefined): Bounds | null {
+  return paper ? paperBounds(paper) : selectionBounds(document.elements);
+}
+
+const owners = new WeakMap<Paper, { locate: ReturnType<typeof pageLocator>; pages: WeakMap<CanvasElement, PageRect> }>();
+
+/** The page a notebook clips `element` to: the one holding the centre of its drawn bounds (`pageAt`). Cached per paper and element. */
+export function elementPage(paper: Paper, element: CanvasElement): PageRect {
+  let entry = owners.get(paper);
+  if (!entry) owners.set(paper, entry = { locate: pageLocator(paper), pages: new WeakMap() });
+  let page = entry.pages.get(element);
+  if (!page) {
+    const b = elementBounds(element);
+    entry.pages.set(element, page = entry.locate({ x: b.x + b.width / 2, y: b.y + b.height / 2 }));
+  }
+  return page;
 }

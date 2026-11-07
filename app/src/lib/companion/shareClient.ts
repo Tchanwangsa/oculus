@@ -5,7 +5,7 @@ import { ShareApi, ShareHttpError } from "./api";
 import { clearRecovery, readDraft, readRecovery, writeDraft, writeRecovery, type ShareDraftRecord, type ShareRecovery } from "./drafts";
 import { backoffDelay, type ShareClientEnv, type ShareLifecycleEvent, type WebSocketLike } from "./env";
 import { redactSecret, type ShareCredentials } from "./link";
-import { parseFrame, type ServerFrame, type ShareAck, type ShareOp, type ShareSnapshot } from "./protocol";
+import { parseFrame, type ServerFrame, type ShareAck, type ShareKind, type ShareOp, type ShareSnapshot } from "./protocol";
 
 /**
  * A paired browser's side of a shared canvas (wire protocol v1, docs/device-sharing.md).
@@ -25,6 +25,8 @@ export interface ShareClientState {
   status: ShareStatus;
   /** The drawing as this device sees it; null until the first snapshot. */
   document: CanvasDocument | null;
+  /** Whether the shared file is a canvas or a notebook, from the first snapshot. */
+  kind: ShareKind;
   /** Unconfirmed ops: the one in flight plus the edits waiting behind it (0–2). */
   pendingOps: number;
   /** Edits the Mac has not confirmed exist, so "Download draft" has something to save. */
@@ -71,6 +73,7 @@ export class ShareClient {
   private readonly persistDelayMs: number;
 
   private canonical: CanvasDocument | null = null;
+  private kind: ShareKind = "canvas";
   private local: CanvasDocument | null = null;
   private epoch: string | null = null;
   private revision = 0;
@@ -223,6 +226,7 @@ export class ShareClient {
     return {
       status,
       document: this.local,
+      kind: this.kind,
       pendingOps,
       hasDraft: unconfirmed,
       clients: this.clients,
@@ -336,6 +340,7 @@ export class ShareClient {
   private adopt(snapshot: ShareSnapshot, document: CanvasDocument): void {
     this.canonical = document;
     this.local = document;
+    this.kind = snapshot.kind;
     this.epoch = snapshot.epoch;
     this.revision = this.announced = snapshot.revision;
     this.everLoaded = true;

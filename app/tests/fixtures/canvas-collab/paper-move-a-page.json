@@ -1,0 +1,205 @@
+{
+  "name": "paper move a page with the ink on both pages",
+  "document": {
+    "type": "oculus-canvas",
+    "version": 1,
+    "elements": [
+      {
+        "id": "a",
+        "type": "rectangle",
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 60,
+        "stroke": "#1e1e1e",
+        "fill": "transparent",
+        "strokeWidth": 2,
+        "style": "clean",
+        "seed": 7
+      },
+      {
+        "id": "b",
+        "type": "rectangle",
+        "x": 0,
+        "y": 900,
+        "width": 100,
+        "height": 60,
+        "stroke": "#1e1e1e",
+        "fill": "transparent",
+        "strokeWidth": 2,
+        "style": "clean",
+        "seed": 7
+      }
+    ],
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "zoom": 1
+    },
+    "background": "#ffffff",
+    "paper": {
+      "pages": [
+        {
+          "id": "p1",
+          "width": 595,
+          "height": 842,
+          "template": "grid"
+        },
+        {
+          "id": "p2",
+          "width": 595,
+          "height": 842
+        }
+      ]
+    }
+  },
+  "transaction": {
+    "edits": [
+      {
+        "id": "a",
+        "before": {
+          "id": "a",
+          "type": "rectangle",
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 60,
+          "stroke": "#1e1e1e",
+          "fill": "transparent",
+          "strokeWidth": 2,
+          "style": "clean",
+          "seed": 7
+        },
+        "after": {
+          "id": "a",
+          "type": "rectangle",
+          "x": 0,
+          "y": 866,
+          "width": 100,
+          "height": 60,
+          "stroke": "#1e1e1e",
+          "fill": "transparent",
+          "strokeWidth": 2,
+          "style": "clean",
+          "seed": 7
+        }
+      },
+      {
+        "id": "b",
+        "before": {
+          "id": "b",
+          "type": "rectangle",
+          "x": 0,
+          "y": 900,
+          "width": 100,
+          "height": 60,
+          "stroke": "#1e1e1e",
+          "fill": "transparent",
+          "strokeWidth": 2,
+          "style": "clean",
+          "seed": 7
+        },
+        "after": {
+          "id": "b",
+          "type": "rectangle",
+          "x": 0,
+          "y": 34,
+          "width": 100,
+          "height": 60,
+          "stroke": "#1e1e1e",
+          "fill": "transparent",
+          "strokeWidth": 2,
+          "style": "clean",
+          "seed": 7
+        }
+      }
+    ],
+    "paper": {
+      "before": {
+        "pages": [
+          {
+            "id": "p1",
+            "width": 595,
+            "height": 842,
+            "template": "grid"
+          },
+          {
+            "id": "p2",
+            "width": 595,
+            "height": 842
+          }
+        ]
+      },
+      "after": {
+        "pages": [
+          {
+            "id": "p2",
+            "width": 595,
+            "height": 842
+          },
+          {
+            "id": "p1",
+            "width": 595,
+            "height": 842,
+            "template": "grid"
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "ok": {
+      "type": "oculus-canvas",
+      "version": 1,
+      "elements": [
+        {
+          "id": "a",
+          "type": "rectangle",
+          "x": 0,
+          "y": 866,
+          "width": 100,
+          "height": 60,
+          "stroke": "#1e1e1e",
+          "fill": "transparent",
+          "strokeWidth": 2,
+          "style": "clean",
+          "seed": 7
+        },
+        {
+          "id": "b",
+          "type": "rectangle",
+          "x": 0,
+          "y": 34,
+          "width": 100,
+          "height": 60,
+          "stroke": "#1e1e1e",
+          "fill": "transparent",
+          "strokeWidth": 2,
+          "style": "clean",
+          "seed": 7
+        }
+      ],
+      "viewport": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1
+      },
+      "background": "#ffffff",
+      "paper": {
+        "pages": [
+          {
+            "id": "p2",
+            "width": 595,
+            "height": 842
+          },
+          {
+            "id": "p1",
+            "width": 595,
+            "height": 842,
+            "template": "grid"
+          }
+        ]
+      }
+    }
+  }
+}

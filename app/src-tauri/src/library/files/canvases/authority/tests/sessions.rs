@@ -1,3 +1,4 @@
+use super::super::super::DrawingKind;
 use super::super::error::Code;
 use super::super::events::{Event, Phase};
 use super::super::session::{Op, Resolution};
@@ -43,15 +44,16 @@ impl Fixture {
     fn new(name: &str) -> Self {
         Self::with(
             name,
+            DrawingKind::Canvas,
             json!({"type": "oculus-canvas", "version": 1, "elements": [shape("a", 0.0)],
             "viewport": {"x": 0, "y": 0, "zoom": 1}, "background": "#ffffff", "meta": {"kept": 1}}),
         )
     }
 
-    fn with(name: &str, document: Value) -> Self {
+    fn with(name: &str, kind: DrawingKind, document: Value) -> Self {
         let root = Scratch::new(name);
         let text = format::serialize(&document).unwrap();
-        let rel = super::super::super::create_at(&root, "TEST", "Shared", &text)
+        let rel = super::super::super::create_at(&root, kind, "TEST", "Shared", &text)
             .unwrap()
             .relative_path;
         let rows = Arc::new(Rows::default());
@@ -376,6 +378,51 @@ fn rename_keeps_the_session() {
 }
 
 #[test]
+fn a_notebook_shares_commits_and_renames_like_a_canvas() {
+    let f = Fixture::with(
+        "authority-notebook",
+        DrawingKind::Notebook,
+        json!({"type": "oculus-canvas", "version": 1, "elements": [shape("a", 0.0)],
+        "viewport": {"x": 0, "y": 0, "zoom": 1}, "background": "#e4e5ea",
+        "paper": {"pages": [{"id": "p1", "width": 595, "height": 842, "template": "ruled"}]}}),
+    );
+    assert_eq!(f.rel, "courses/TEST/notebooks/Shared.notebook");
+    f.open();
+    let ack = f.authority.commit(FILE, op("ipad", 1, add("b"))).unwrap();
+    assert_eq!(ack.revision, 1);
+    assert_eq!(ids(&f.disk()), ["a", "b"]);
+    let moved = f.authority.rename(FILE, "Week 4").unwrap();
+    assert_eq!(
+        moved.relative_path,
+        "courses/TEST/notebooks/Week_4.notebook"
+    );
+    assert_eq!(moved.file_type, "notebook");
+    f.authority.commit(FILE, op("ipad", 2, add("c"))).unwrap();
+    let text = std::fs::read_to_string(f.root.join(&moved.relative_path)).unwrap();
+    assert_eq!(ids(&text), ["a", "b", "c"]);
+    let value: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(value["paper"]["pages"][0]["template"], "ruled");
+}
+
+#[test]
+fn a_canvas_holding_paper_keeps_it_as_written_through_commits() {
+    let paper =
+        json!({"gap": 7, "pages": [{"id": "p1", "width": 595, "height": 842, "x": "kept"}]});
+    let f = Fixture::with(
+        "authority-canvas-paper",
+        DrawingKind::Canvas,
+        json!({"type": "oculus-canvas", "version": 1, "elements": [shape("a", 0.0)],
+        "viewport": {"x": 0, "y": 0, "zoom": 1}, "background": "#ffffff", "paper": paper.clone()}),
+    );
+    assert_eq!(f.rel, "courses/TEST/canvases/Shared.canvas");
+    f.open();
+    f.authority.commit(FILE, op("ipad", 1, add("b"))).unwrap();
+    let value: Value = serde_json::from_str(&f.disk()).unwrap();
+    assert_eq!(ids(&f.disk()), ["a", "b"]);
+    assert_eq!(value["paper"], paper);
+}
+
+#[test]
 fn a_viewport_hint_is_saved_with_the_next_write_without_a_revision() {
     let f = Fixture::new("authority-viewport");
     f.open();
@@ -496,9 +543,10 @@ fn whole_file_mutations_cannot_bypass_a_live_or_paused_authority() {
 fn whole_file_fence_allows_other_canvases() {
     let f = Fixture::new("authority-other-file");
     f.open();
-    let other = super::super::super::create_at(&f.root, "TEST", "Other", &f.text)
-        .unwrap()
-        .relative_path;
+    let other =
+        super::super::super::create_at(&f.root, DrawingKind::Canvas, "TEST", "Other", &f.text)
+            .unwrap()
+            .relative_path;
     f.authority
         .unshared(&f.root, &other, || {
             super::super::super::write_at(&f.root, &other, &f.text)

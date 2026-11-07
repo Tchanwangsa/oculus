@@ -68,8 +68,8 @@ fn write_at(
     pages: Vec<PageImage>,
     now: u64,
 ) -> Result<(), String> {
-    if !super::is_canvas_rel(relative_path) {
-        return Err("Expected courses/<subject>/canvases/<title>.canvas".into());
+    if super::DrawingKind::of(relative_path) != Some(super::DrawingKind::Notebook) {
+        return Err("Expected courses/<subject>/notebooks/<title>.notebook".into());
     }
     if page_count == 0 || page_count > MAX_PAGES {
         return Err(format!("A notebook has between 1 and {MAX_PAGES} pages"));
@@ -170,7 +170,7 @@ mod tests {
     use super::*;
     use crate::library::paths::notebook_pages_dir;
 
-    const REL: &str = "courses/MAST30027_2026_SM2/canvases/Assignment 1.canvas";
+    const REL: &str = "courses/MAST30027_2026_SM2/notebooks/Assignment 1.notebook";
 
     fn png() -> String {
         let mut bytes = PNG_MAGIC.to_vec();
@@ -239,11 +239,24 @@ mod tests {
     fn a_rename_only_rewrites_the_manifest() {
         let root = root();
         write_at(&root, 7, REL, 1, vec![page(0)], 100).unwrap();
-        let moved = "courses/MAST30027_2026_SM2/canvases/Renamed.canvas";
+        let moved = "courses/MAST30027_2026_SM2/notebooks/Renamed.notebook";
         write_at(&root, 7, moved, 1, vec![], 300).unwrap();
         let manifest = read_notebook_pages(&root, 7).unwrap();
         assert_eq!(manifest.canvas, moved);
         assert_eq!(manifest.pages[0].updated_at, 100);
+    }
+
+    #[test]
+    fn only_a_notebook_takes_pictures() {
+        let root = root();
+        for wrong in [
+            "courses/X/canvases/Week 3.canvas",
+            "courses/X/notebooks/Week 3.canvas",
+            "courses/X/canvases/Week 3.notebook",
+        ] {
+            assert!(write_at(&root, 9, wrong, 1, vec![page(0)], 1).is_err());
+        }
+        assert!(read_notebook_pages(&root, 9).is_none());
     }
 
     #[test]

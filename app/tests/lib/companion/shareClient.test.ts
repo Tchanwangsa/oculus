@@ -84,6 +84,18 @@ describe("ShareClient", () => {
     });
   }
 
+  test("the shared file's kind comes from the snapshot, never from whether it has pages", async () => {
+    const paged = { ...createCanvasDocument(), paper: { pages: [{ id: "p1", width: 595, height: 842 }] } };
+    server.doc = paged;
+    expect((await connected()).client.getState().kind).toBe("canvas");
+    server.kind = "notebook";
+    expect((await connected()).client.getState().kind).toBe("notebook");
+    server.kind = "canvas";
+    expect((await connected()).client.getState().kind).toBe("canvas");
+    server.kind = "something-new";
+    expect((await connected()).client.getState().kind).toBe("canvas");
+  });
+
   test("successive edits to the same shape do not conflict with our own echo", async () => {
     server.doc = withElements(createCanvasDocument(), rect("x"));
     const { client: a } = await connected();

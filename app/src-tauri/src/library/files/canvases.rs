@@ -1,4 +1,5 @@
-//! Versioned drawing documents under each subject's own canvases folder.
+//! Versioned drawing documents under each subject's own folders: canvases
+//! (`canvases/<title>.canvas`) and notebooks (`notebooks/<title>.notebook`).
 pub(crate) mod authority;
 pub(crate) mod drafts;
 pub(crate) mod export;
@@ -8,27 +9,80 @@ pub(crate) mod imports;
 pub(crate) mod snapshots;
 
 use super::ImportedFile;
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-pub(super) fn is_canvas_rel(rel: &str) -> bool {
-    let parts: Vec<_> = rel.split('/').collect();
-    !rel.contains(['\\', ':'])
-        && parts.len() == 4
-        && parts[0] == "courses"
-        && parts[2] == "canvases"
-        && parts
-            .iter()
-            .all(|p| !p.is_empty() && *p != "." && *p != "..")
-        && parts[3].len() > 7
-        && parts[3].ends_with(".canvas")
-        && !parts[3].starts_with('.')
+/// The two drawing documents. Both are the same `oculus-canvas` JSON; a
+/// notebook lives in its own folder with its own extension and always has
+/// `paper`. Only a notebook has pages: `paper` in a canvas is kept as written
+/// and means nothing, and the kind always comes from the path.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DrawingKind {
+    #[default]
+    Canvas,
+    Notebook,
 }
 
-fn name(title: &str) -> String {
-    let stem = crate::library::paths::safe_filename(title.trim().trim_end_matches(".canvas"));
+impl DrawingKind {
+    /// Its folder under `courses/<code>/`.
+    fn folder(self) -> &'static str {
+        match self {
+            Self::Canvas => "canvases",
+            Self::Notebook => "notebooks",
+        }
+    }
+
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Canvas => ".canvas",
+            Self::Notebook => ".notebook",
+        }
+    }
+
+    /// The `files` row's `file_type`, the same word as its category.
+    pub fn file_type(self) -> &'static str {
+        match self {
+            Self::Canvas => "canvas",
+            Self::Notebook => "notebook",
+        }
+    }
+
+    /// The kind a library path names: `courses/<code>/canvases/<x>.canvas` or
+    /// `courses/<code>/notebooks/<x>.notebook`, and nothing else.
+    pub fn of(rel: &str) -> Option<Self> {
+        let parts: Vec<_> = rel.split('/').collect();
+        if rel.contains(['\\', ':'])
+            || parts.len() != 4
+            || parts[0] != "courses"
+            || parts
+                .iter()
+                .any(|p| p.is_empty() || *p == "." || *p == "..")
+            || parts[3].starts_with('.')
+        {
+            return None;
+        }
+        [Self::Canvas, Self::Notebook].into_iter().find(|kind| {
+            parts[2] == kind.folder()
+                && parts[3].len() > kind.extension().len()
+                && parts[3].ends_with(kind.extension())
+        })
+    }
+}
+
+const EXPECTED: &str = "Expected courses/<subject>/canvases/<title>.canvas \
+     or courses/<subject>/notebooks/<title>.notebook";
+
+pub(super) fn is_canvas_rel(rel: &str) -> bool {
+    DrawingKind::of(rel).is_some()
+}
+
+fn name(kind: DrawingKind, title: &str) -> String {
+    let ext = kind.extension();
+    let stem = crate::library::paths::safe_filename(title.trim().trim_end_matches(ext));
     let stem = stem.trim_end_matches('.');
     format!(
-        "{}.canvas",
+        "{}{ext}",
         if stem.trim_matches('_').is_empty() {
             "Untitled"
         } else {
@@ -41,7 +95,7 @@ fn name(title: &str) -> String {
 // alias a different library file.
 fn checked(root: &Path, rel: &str, create_parents: bool) -> Result<PathBuf, String> {
     if !is_canvas_rel(rel) {
-        return Err("Expected courses/<subject>/canvases/<title>.canvas".into());
+        return Err(EXPECTED.into());
     }
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let mut path = root.clone();
@@ -79,16 +133,17 @@ fn checked(root: &Path, rel: &str, create_parents: bool) -> Result<PathBuf, Stri
     Ok(path)
 }
 
-fn file(rel: String, size_bytes: u64) -> ImportedFile {
+fn file(kind: DrawingKind, rel: String, size_bytes: u64) -> ImportedFile {
     ImportedFile {
         filename: rel.rsplit('/').next().unwrap_or_default().into(),
         relative_path: rel,
-        file_type: "canvas".into(),
+        file_type: kind.file_type().into(),
         size_bytes,
     }
 }
 
-pub(super) fn validate(content: &str) -> Result<(), String> {
+/// The envelope every drawing has; a notebook also needs valid `paper`.
+pub(super) fn validate(kind: DrawingKind, content: &str) -> Result<(), String> {
     let value: serde_json::Value = serde_json::from_str(content).map_err(|e| e.to_string())?;
     if value.get("type").and_then(|v| v.as_str()) != Some("oculus-canvas")
         || value.get("version").and_then(|v| v.as_u64()) != Some(1)
@@ -97,11 +152,15 @@ pub(super) fn validate(content: &str) -> Result<(), String> {
     {
         return Err("Unsupported canvas document".into());
     }
+    if kind == DrawingKind::Notebook {
+        let paper = value.get("paper").ok_or("A notebook needs pages")?;
+        authority::model::validate_paper(paper)?;
+    }
     Ok(())
 }
 
 pub(super) fn write_at(root: &Path, rel: &str, content: &str) -> Result<u64, String> {
-    validate(content)?;
+    validate(DrawingKind::of(rel).ok_or(EXPECTED)?, content)?;
     let path = checked(root, rel, false)?;
     if !path.is_file() {
         return Err("Canvas no longer exists".into());
@@ -111,20 +170,30 @@ pub(super) fn write_at(root: &Path, rel: &str, content: &str) -> Result<u64, Str
     Ok(content.len() as u64)
 }
 
+fn folder_of(kind: DrawingKind, code: &str) -> String {
+    format!(
+        "courses/{}/{}",
+        crate::library::paths::safe_dir(code),
+        kind.folder()
+    )
+}
+
 pub(super) fn create_at(
     root: &Path,
+    kind: DrawingKind,
     code: &str,
     title: &str,
     content: &str,
 ) -> Result<ImportedFile, String> {
-    validate(content)?;
-    let prefix = format!("courses/{}/canvases", crate::library::paths::safe_dir(code));
-    let wanted = name(title);
+    validate(kind, content)?;
+    let prefix = folder_of(kind, code);
+    let wanted = name(kind, title);
+    let ext = kind.extension();
     for index in 1.. {
         let candidate = if index == 1 {
             wanted.clone()
         } else {
-            format!("{}-{index}.canvas", wanted.trim_end_matches(".canvas"))
+            format!("{}-{index}{ext}", wanted.trim_end_matches(ext))
         };
         let rel = format!("{prefix}/{candidate}");
         let path = checked(root, &rel, true)?;
@@ -138,7 +207,7 @@ pub(super) fn create_at(
                     std::fs::remove_file(path).ok();
                     return Err(error);
                 }
-                return Ok(file(rel, content.len() as u64));
+                return Ok(file(kind, rel, content.len() as u64));
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e.to_string()),
@@ -147,15 +216,18 @@ pub(super) fn create_at(
     unreachable!()
 }
 
+/// A new canvas, or with `kind: "notebook"` a new notebook.
 #[tauri::command]
 pub async fn create_canvas(
     subject_code: String,
     title: String,
     content: String,
+    kind: Option<DrawingKind>,
 ) -> Result<ImportedFile, String> {
     crate::runtime::blocking::run(move || {
         create_at(
             &crate::library::paths::data_dir(),
+            kind.unwrap_or_default(),
             &subject_code,
             &title,
             &content,
@@ -199,20 +271,30 @@ pub async fn rename_canvas(relative_path: String, title: String) -> Result<Impor
     .await
 }
 
+/// Renames within the file's own folder, keeping its extension: a rename
+/// never turns a canvas into a notebook or back.
 pub(super) fn rename_at(root: &Path, rel: &str, title: &str) -> Result<ImportedFile, String> {
+    let kind = DrawingKind::of(rel).ok_or(EXPECTED)?;
     let path = checked(root, rel, false)?;
     let size = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
     let (prefix, current) = rel.rsplit_once('/').ok_or("Missing filename")?;
-    let wanted = name(title);
+    let wanted = name(kind, title);
     if wanted == current {
-        return Ok(file(rel.into(), size));
+        return Ok(file(kind, rel.into(), size));
     }
     let destination =
         super::uploads::step_aside(path.parent().ok_or("Missing parent")?, &wanted, |_| false);
     let moved = format!("{prefix}/{destination}");
+    if DrawingKind::of(&moved) != Some(kind) {
+        return Err(kind_changed());
+    }
     let target = checked(root, &moved, false)?;
     std::fs::rename(path, target).map_err(|e| e.to_string())?;
-    Ok(file(moved, size))
+    Ok(file(kind, moved, size))
+}
+
+fn kind_changed() -> String {
+    "A rename cannot change what kind of drawing a file is".into()
 }
 
 #[tauri::command]
@@ -226,17 +308,33 @@ pub async fn delete_canvas(relative_path: String) -> Result<(), String> {
     .await
 }
 
+/// A subject's canvases, or with `kind: "notebook"` its notebooks; never both.
 #[tauri::command]
-pub async fn list_canvases(subject_code: String) -> Result<Vec<ImportedFile>, String> {
+pub async fn list_canvases(
+    subject_code: String,
+    kind: Option<DrawingKind>,
+) -> Result<Vec<ImportedFile>, String> {
     crate::runtime::blocking::run(move || {
-        list_at(&crate::library::paths::data_dir(), &subject_code)
+        list_at(
+            &crate::library::paths::data_dir(),
+            kind.unwrap_or_default(),
+            &subject_code,
+        )
     })
     .await
 }
 
-pub(super) fn list_at(root: &Path, code: &str) -> Result<Vec<ImportedFile>, String> {
-    let prefix = format!("courses/{}/canvases", crate::library::paths::safe_dir(code));
-    let probe = match checked(root, &format!("{prefix}/Untitled.canvas"), false) {
+pub(super) fn list_at(
+    root: &Path,
+    kind: DrawingKind,
+    code: &str,
+) -> Result<Vec<ImportedFile>, String> {
+    let prefix = folder_of(kind, code);
+    let probe = match checked(
+        root,
+        &format!("{prefix}/Untitled{}", kind.extension()),
+        false,
+    ) {
         Ok(path) => path,
         Err(_) if !root.join(&prefix).exists() => return Ok(Vec::new()),
         Err(e) => return Err(e),
@@ -247,11 +345,12 @@ pub(super) fn list_at(root: &Path, code: &str) -> Result<Vec<ImportedFile>, Stri
     {
         let entry = entry.map_err(|e| e.to_string())?;
         let rel = format!("{prefix}/{}", entry.file_name().to_string_lossy());
-        if !is_canvas_rel(&rel) {
+        if DrawingKind::of(&rel) != Some(kind) {
             continue;
         }
         let path = checked(root, &rel, false)?;
         files.push(file(
+            kind,
             rel,
             std::fs::metadata(path).map_err(|e| e.to_string())?.len(),
         ));

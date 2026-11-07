@@ -1,5 +1,6 @@
 import { arrowheadOf, hasLabel, roundnessOf, type CanvasArrowhead, type CanvasElement, type CanvasViewport, type Point } from './model';
 import { arrowPath, linePath, pathEnd, polylineEnd, polylineLength, type PathEnd } from './arrow/path';
+import { clampZoom, type ZoomLimits } from './zoom';
 
 export { arrowPath, polylinePoints } from './arrow/path';
 
@@ -46,9 +47,9 @@ export function pointInBounds(p: Point, b: Bounds, padding = 0): boolean {
 /** Viewport x/y are the screen-space translation before the world-space zoom. */
 export function screenToWorld(p: Point, v: CanvasViewport): Point { return { x: (p.x - v.x) / v.zoom, y: (p.y - v.y) / v.zoom }; }
 export function worldToScreen(p: Point, v: CanvasViewport): Point { return { x: p.x * v.zoom + v.x, y: p.y * v.zoom + v.y }; }
-export function zoomAt(v: CanvasViewport, p: Point, zoom: number): CanvasViewport {
+export function zoomAt(v: CanvasViewport, p: Point, zoom: number, limits?: ZoomLimits): CanvasViewport {
   const world = screenToWorld(p, v);
-  const next = Math.min(8, Math.max(0.1, zoom));
+  const next = clampZoom(zoom, limits);
   return { ...v, zoom: next, x: p.x - world.x * next, y: p.y - world.y * next };
 }
 

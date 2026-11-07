@@ -8,7 +8,12 @@ export interface ShareOp { clientId: string; seq: number; opId: string; epoch: s
 /** A replayed ack carries the original revision and no transaction. */
 export interface ShareAck { epoch: string; revision: number; seq: number; opId: string; replayed: boolean; transaction: CanvasTransaction | null }
 export interface ShareChange { epoch: string; revision: number; clientId: string | null; transaction: CanvasTransaction }
-export interface ShareSnapshot { epoch: string; revision: number; text: string }
+/** `kind` is the shared file's (`X-Oculus-Kind`), from its path, never from what the document holds. */
+export interface ShareSnapshot { epoch: string; revision: number; text: string; kind: ShareKind }
+export type ShareKind = "canvas" | "notebook";
+
+/** The kind a snapshot names; anything else, or none, is a canvas. */
+export const parseKind = (value: string | null): ShareKind => value === "notebook" ? "notebook" : "canvas";
 
 export type SharePhase = "live" | "paused" | "ended";
 export type ServerFrame =

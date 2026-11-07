@@ -14,14 +14,21 @@ import { bindArrowEnd, findBindingSnap, followBindings, moveElements, sameSnap, 
 import { moveSegment, releaseSegment } from '@/lib/canvas/elbow/segments';
 import { commitTextEdit, labelTargetAt, stylePatchChanges } from '@/lib/canvas/labels';
 import { resizeBounds, resizeElements } from '@/lib/canvas/resize';
-import { placeCanvasImages, type CanvasImageSource } from '@/lib/canvas/mediaPlacement';
+import { placeImagesIn, type CanvasImageSource } from '@/lib/canvas/mediaPlacement';
 import { TouchViewportGesture } from '@/lib/canvas/touchViewport';
 import { applyCanvasTransaction, diffCanvasContent, hasCanvasChanges, sameValue, type CanvasTransaction } from '@/lib/canvas/collaboration';
-import { copyRegionImage, rasterizeRegion, regionHandleAt, moveRegion, regionBounds, resizeRegion, type CanvasRegion } from '@/lib/canvas/region';
+import { CAPTURE_LIFT_DELAY_MS, type CaptureHoldIndicator, copyRegionImage, rasterizeRegion, regionHandleAt, moveRegion, regionBounds, resizeRegion, type CanvasRegion } from '@/lib/canvas/region';
 import { asDataUrl } from '@/lib/canvas/importMedia';
 import { secureId } from '@/lib/canvas/ids';
-import { isLocked, pageAt, pageView, selectableElements } from '@/lib/canvas/paper';
-import { addPage as addNotebookPage, removePage as removeNotebookPage } from '@/lib/canvas/pages';
+import {
+  clampCamera, isLocked, keepOnPage, notebookPaper, pageContaining, pageInView, pageView, selectableElements, visiblePageCentre, zoomLimits, type CanvasKind, type PaperTemplate,
+} from '@/lib/canvas/paper';
+import { CANVAS_ZOOM_LIMITS } from '@/lib/canvas/zoom';
+import {
+  addPage as addNotebookPage, duplicatePage, insertPage, insertPdfPages, movePage, removePage as removeNotebookPage, setPageSize, setPageTemplate, type PageSize,
+} from '@/lib/canvas/pages';
+import { elementsAtPage, shownBounds } from '@/lib/canvas/pageHits';
+import type { CanvasImportedImage } from '@/lib/canvas/importMedia';
 import {
   adoptElementStyle, colorLabel, DEFAULT_DRAWING_STYLE, inspectorSections, inspectorTarget, inspectorValues, newElementStyle, patchDrawingStyle,
   patchElementStyle, type DrawingStyle, type InspectorTarget, type StylePatch,
@@ -34,10 +41,15 @@ export interface CanvasInteractionOptions {
   onViewportChange?: (viewport: CanvasViewport) => void;
   /** Lifting the eraser after a completed erase returns to the tool chosen before it. */
   eraserAutoReturn?: boolean;
+  /**
+   * `notebook` binds the document to its pages: they are drawn, the camera stays on them, ink starts only on a page, stays
+   * on one and is clipped to it. `canvas` (the default) is a whiteboard; any `paper` it holds is kept and never used.
+   */
+  kind?: CanvasKind;
 }
 type Gesture = {
   /** `write` is a touch tap with the Text tool, which opens the overlay on release so a second finger can still start navigating. */
-  mode: 'pan' | 'draw' | 'move' | 'resize' | 'point' | 'segment' | 'marquee' | 'erase' | 'write' | 'capture' | 'crop' | 'capture-copy';
+  mode: 'pan' | 'draw' | 'move' | 'resize' | 'point' | 'segment' | 'marquee' | 'erase' | 'write' | 'capture' | 'crop' | 'capture-copy' | 'crop-confirm';
   start: Point;
   screen: Point;
   original: CanvasDocument;
@@ -51,7 +63,6 @@ type Gesture = {
   index?: number;
   bounds?: Bounds;
   shift?: boolean;
-  pressedAt?: number;
 };
 /** One undo step: the transactions each way, plus the layer order to put back elements the step re-adds (a transaction appends them). */
 type HistoryEntry = { undo: CanvasTransaction; redo: CanvasTransaction; undoOrder?: string[]; redoOrder?: string[] };
@@ -104,6 +115,8 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   const regionRef = useRef<CanvasRegion | null>(null);
   const [regionCopyState, setRegionCopyState] = useState<'idle' | 'copying' | 'copied' | 'duplicating'>('idle');
   const [regionError, setRegionError] = useState<string | null>(null);
+  const [captureHold, setCaptureHold] = useState<CaptureHoldIndicator | null>(null);
+  const captureHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const captureGhost = useRef<{ snapshot: CanvasDocument; from: Bounds; to: Bounds } | undefined>(undefined);
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
   /** The open draft and its latest text, read synchronously so a style change can commit it first and a later blur is a no-op. */
@@ -124,8 +137,64 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   const viewSave = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** A notebook opens fitted to its page width once, when its camera is still the untouched default. */
   const fitted = useRef(false);
-  const paintOptions = useRef({ grid, editingId: textDraft?.element.id });
-  paintOptions.current = { grid, editingId: textDraft?.element.id };
+  /** A pen whose press was refused off the page; its later moves must not start the stroke through pen recovery. */
+  const refusedPointer = useRef<number | null>(null);
+  /** The one flag every page behaviour keys off, read through `paintOptions` by the handlers. */
+  const notebook = options.kind === 'notebook';
+  const paintOptions = useRef({ grid, editingId: textDraft?.element.id, notebook });
+  paintOptions.current = { grid, editingId: textDraft?.element.id, notebook };
+  /** A notebook's pages, or nothing on a canvas. */
+  const boundPaper = () => notebookPaper(documentRef.current, paintOptions.current.notebook);
+  const zoomRange = () => {
+    const paper = boundPaper();
+    return paper && size.current.width > 0 ? zoomLimits(paper, size.current) : CANVAS_ZOOM_LIMITS;
+  };
+  /** `viewport` kept on a notebook's pages (`clampCamera`); unchanged, the same object, anywhere else. */
+  const clampView = (viewport: CanvasViewport) => {
+    const paper = boundPaper();
+    return paper ? clampCamera(paper, size.current, viewport) : viewport;
+  };
+  /** Whether `point` is on a notebook's desk, where nothing new may start. */
+  const offPage = (point: Point) => {
+    const paper = boundPaper();
+    return !!paper && !pageContaining(paper, point);
+  };
+  /** What the pointer at `point` can reach: in a notebook only elements whose own page holds it, since the rest is clipped. */
+  const reachable = (elements: readonly CanvasElement[], point: Point) => {
+    const paper = boundPaper();
+    return paper ? elementsAtPage(paper, elements, point) : elements;
+  };
+  /** The bounds a box selection must enclose: in a notebook only the part of an element its page shows. */
+  const boxBounds = (element: CanvasElement) => {
+    const paper = boundPaper();
+    return paper ? shownBounds(paper, element) : elementBounds(element);
+  };
+  /** The selection's centre, which a notebook keeps on a page. */
+  const selectionCentre = (elements: readonly CanvasElement[]) => {
+    const bounds = selectionBounds(elements.filter(element => selected.current.has(element.id)));
+    return bounds && { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+  };
+  /** A move of the selection by `dx`, `dy`, shortened in a notebook so the selection's centre stays on a page. */
+  const moveDelta = (elements: readonly CanvasElement[], dx: number, dy: number) => {
+    const paper = boundPaper(), centre = paper && selectionCentre(elements);
+    return paper && centre ? keepOnPage(paper, centre, { x: dx, y: dy }) : { x: dx, y: dy };
+  };
+  /**
+   * New elements moved as one so their centre is on a page in a notebook: to the nearest page edge, or with `toView` to
+   * the middle of the page in view (for a paste from elsewhere).
+   */
+  const placeOnPage = (elements: CanvasElement[], toView = false): CanvasElement[] => {
+    const paper = boundPaper(), bounds = paper && selectionBounds(elements);
+    if (!paper || !bounds) return elements;
+    const centre = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+    let delta = keepOnPage(paper, centre, { x: 0, y: 0 });
+    if (!delta.x && !delta.y) return elements;
+    if (toView) {
+      const { viewport } = documentRef.current, target = visiblePageCentre(pageInView(paper, viewport, size.current), viewport, size.current);
+      delta = { x: target.x - centre.x, y: target.y - centre.y };
+    }
+    return elements.map(element => ({ ...element, x: element.x + delta.x, y: element.y + delta.y }));
+  };
 
   const redraw = useCallback(() => {
     if (frame.current) return;
@@ -209,8 +278,9 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     publish(next);
   }, [choose, publish]);
 
-  /** Moves the camera without a render, for every pointer sample of a pan. */
-  const setView = useCallback((viewport: CanvasViewport) => {
+  /** Moves the camera without a render, for every pointer sample of a pan. The one writer: a notebook's camera is clamped here. */
+  const setView = useCallback((requested: CanvasViewport) => {
+    const viewport = clampView(requested);
     documentRef.current = { ...documentRef.current, viewport };
     optionsRef.current.onViewportChange?.(viewport);
   }, []);
@@ -238,6 +308,8 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if (sameContent(local, incoming)) return;
     const base = { ...incoming, viewport: local.viewport };
     documentRef.current = base;
+    // New paper (a page added or removed elsewhere) can leave the camera off the pages.
+    if (clampView(base.viewport) !== base.viewport) setView(base.viewport);
     const ids = new Set(base.elements.map(element => element.id)), had = new Set(local.elements.map(element => element.id));
     const gone = (id: string) => had.has(id) && !ids.has(id);
     const active = gesture.current;
@@ -267,11 +339,14 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       size.current = { width: rect.width, height: rect.height, pixelRatio };
       element.width = Math.round(rect.width * pixelRatio);
       element.height = Math.round(rect.height * pixelRatio);
-      const { paper, viewport } = documentRef.current;
+      const paper = boundPaper(), { viewport } = documentRef.current;
       if (paper && !fitted.current && rect.width > 0) {
         fitted.current = true;
         if (viewport.x === 0 && viewport.y === 0 && viewport.zoom === 1) { setView(pageView(paper, rect)); setRevision(value => value + 1); }
       }
+      // A notebook's saved camera, or one a resize has left off the pages, comes back onto them.
+      const settled = documentRef.current.viewport;
+      if (rect.width > 0 && clampView(settled) !== settled) { setView(settled); setRevision(value => value + 1); }
       redraw();
     };
     const observer = new ResizeObserver(resize);
@@ -313,7 +388,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       const viewport = documentRef.current.viewport;
       const rect = element.getBoundingClientRect();
       const screen = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-      if (event.ctrlKey || event.metaKey) updateViewport(zoomAt(viewport, screen, Math.max(0.1, Math.min(8, viewport.zoom * Math.exp(-event.deltaY * 0.01)))));
+      if (event.ctrlKey || event.metaKey) updateViewport(zoomAt(viewport, screen, viewport.zoom * Math.exp(-event.deltaY * 0.01), zoomRange()));
       else updateViewport({ ...viewport, x: viewport.x - event.deltaX, y: viewport.y - event.deltaY });
     };
     element.addEventListener('wheel', wheel, { passive: false });
@@ -339,13 +414,19 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   /** Text under the pointer, a shape's outline, or the inside of a shape that can take a label. */
   const writableAt = (point: Point) => {
     const current = documentRef.current, tolerance = 6 / current.viewport.zoom;
-    const id = hitTest(current.elements, point, tolerance);
-    const hit = current.elements.find(element => element.id === id);
+    const elements = reachable(current.elements, point), id = hitTest(elements, point, tolerance);
+    const hit = elements.find(element => element.id === id);
     if (hit && (hit.type === 'text' || LABELLED_TYPES.has(hit.type))) return hit;
-    return labelTargetAt(current.elements, point, tolerance);
+    return labelTargetAt(elements, point, tolerance);
   };
   const startWriting = (point: Point, element: CanvasElement) => element.type === 'text' ? startText(point, element) : startLabel(element);
+  const clearCaptureHold = () => {
+    if (captureHoldTimer.current !== null) clearTimeout(captureHoldTimer.current);
+    captureHoldTimer.current = null; setCaptureHold(null);
+  };
+  useEffect(() => () => { if (captureHoldTimer.current !== null) clearTimeout(captureHoldTimer.current); }, []);
   const updateRegion = (next: CanvasRegion | null) => {
+    clearCaptureHold();
     regionRef.current = next; setRegion(next); setRegionCopyState('idle'); setRegionError(null); marquee.current = next?.bounds; redraw();
   };
   const cancelRegion = () => { cancelGesture(); updateRegion(null); setTool('select'); root.current?.focus({ preventScroll: true }); };
@@ -359,11 +440,11 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if (!expected || regionRef.current !== expected || gesture.current) return false;
     const { bounds, source } = expected;
     if (source && !sameValue(documentRef.current.elements.find(item => item.id === source.id), source)) throw new Error('This image changed while cropping. Cancel and crop it again.');
-    const element: CanvasElement = {
+    const [element] = placeOnPage([{
       ...(source ?? { id: newId(), type: 'image', stroke: 'transparent', fill: 'transparent', strokeWidth: 0, style: 'clean', seed: 0 }),
       x: at?.x ?? bounds.x + (source ? 0 : 24), y: at?.y ?? bounds.y + (source ? 0 : 24), width: bounds.width, height: bounds.height,
       dataUrl: image.dataUrl, naturalWidth: image.width, naturalHeight: image.height, sourceName: image.name,
-    };
+    }]);
     commitChanges(new Map([[element.id, element]]));
     cancelRegion(); choose([element.id]);
     return true;
@@ -372,7 +453,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if (expected?.kind !== 'crop' || gesture.current) return;
     setRegionError(null);
     try {
-      const result = await rasterizeRegion(expected);
+      const result = await rasterizeRegion(expected, paintOptions.current.notebook);
       completeRegion(expected, { dataUrl: await asDataUrl(result.blob), width: result.width, height: result.height, name: expected.source?.sourceName ?? 'Cropped image.png' });
     } catch (error) {
       if (regionRef.current === expected) setRegionError(error instanceof Error ? error.message : String(error));
@@ -383,7 +464,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if (expected?.kind !== 'capture' || gesture.current) return;
     setRegionCopyState('copying'); setRegionError(null);
     try {
-      await copyRegionImage({ ...expected, snapshot: documentRef.current });
+      await copyRegionImage({ ...expected, snapshot: documentRef.current }, paintOptions.current.notebook);
       if (regionRef.current === expected) setRegionCopyState('copied');
     } catch (error) {
       if (regionRef.current === expected) { setRegionCopyState('idle'); setRegionError(error instanceof Error ? error.message : String(error)); }
@@ -392,11 +473,29 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   const duplicateCapture = async (expected: CanvasRegion, at: Point) => {
     setRegionCopyState('duplicating'); setRegionError(null);
     try {
-      const result = await rasterizeRegion({ ...expected, snapshot: documentRef.current });
+      const result = await rasterizeRegion({ ...expected, snapshot: documentRef.current }, paintOptions.current.notebook);
       completeRegion(expected, { dataUrl: await asDataUrl(result.blob), width: result.width, height: result.height, name: 'Canvas capture.png' }, at);
     } catch (error) {
       if (regionRef.current === expected) setRegionError(error instanceof Error ? error.message : String(error));
     } finally { if (regionRef.current === expected) setRegionCopyState('idle'); }
+  };
+  const duplicateRegion = () => {
+    const expected = regionRef.current;
+    if (expected?.kind === 'capture' && !gesture.current) void duplicateCapture(expected, { x: expected.bounds.x + 24, y: expected.bounds.y + 24 });
+  };
+  const armCaptureHold = (active: Gesture) => {
+    const expected = regionRef.current;
+    if (active.mode !== 'capture' || !active.bounds || active.handle !== -1 || expected?.kind !== 'capture') return;
+    setCaptureHold({ point: active.start, phase: 'holding' });
+    captureHoldTimer.current = setTimeout(() => {
+      captureHoldTimer.current = null;
+      if (gesture.current !== active || active.moved || regionRef.current !== expected) return;
+      active.mode = 'capture-copy';
+      const offset = 10 / documentRef.current.viewport.zoom;
+      marquee.current = moveRegion(active.bounds!, { x: offset, y: -offset });
+      captureGhost.current = { snapshot: documentRef.current, from: expected.bounds, to: marquee.current };
+      setCaptureHold({ point: active.start, phase: 'lifted' }); setResizeCursor('grabbing'); redraw();
+    }, CAPTURE_LIFT_DELAY_MS);
   };
   const chooseTool = (next: CanvasTool) => {
     if (next === 'crop') { startCrop(); return; }
@@ -418,16 +517,17 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     try { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* already released */ }
   };
   /** Drops the gesture's preview without committing it; the scene was never changed during the gesture. */
-  const dropGesture = () => { captureGhost.current = undefined; gesture.current = null; overrides.current.clear(); marquee.current = undefined; bindHint.current = null; };
+  const dropGesture = () => { clearCaptureHold(); captureGhost.current = undefined; gesture.current = null; overrides.current.clear(); marquee.current = undefined; bindHint.current = null; };
   /** Commits the preview unchanged so lifting the pointer preserves the ink already drawn. */
   const commitGesture = () => commitChanges(new Map(overrides.current));
   const eraseAt = (elements: CanvasElement[], point: Point) => {
-    const erasable = elements.filter(element => element.type !== 'image' && !isLocked(element) && overrides.current.get(element.id) !== null);
+    const erasable = reachable(elements, point).filter(element => element.type !== 'image' && !isLocked(element) && overrides.current.get(element.id) !== null);
     const id = hitTest(erasable, point, 10 / documentRef.current.viewport.zoom);
     if (id) previewChanges(new Map([[id, null]]));
   };
   const pointerDown = (event: PointerEvent<HTMLCanvasElement>, recoveringContact = false) => {
     if (!recoveringContact && event.button !== 0 && event.button !== 1) return;
+    if (!recoveringContact) refusedPointer.current = null;
     if (event.pointerType === 'pen') {
       penSeen.current = true;
       // A fresh pen down proves the last contact ended even when WebKit dropped its up: keep that stroke's ink as its own stroke.
@@ -461,14 +561,17 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     const initial: Gesture = { mode: 'draw', start: point, screen, original: current, moved: false, pointerId: event.pointerId, pointerType: event.pointerType, shift: event.shiftKey };
     overrides.current.clear();
     const region = regionRef.current;
-    const inCapture = region?.kind === 'capture' && point.x >= region.bounds.x - 16 / current.viewport.zoom && point.x <= region.bounds.x + region.bounds.width + 16 / current.viewport.zoom && point.y >= region.bounds.y - 16 / current.viewport.zoom && point.y <= region.bounds.y + region.bounds.height + 16 / current.viewport.zoom;
-    if (tool === 'hand' || space || event.button === 1 || (event.pointerType === 'touch' && penSeen.current && !inCapture)) initial.mode = 'pan';
+    const inRegion = !!region && point.x >= region.bounds.x - 16 / current.viewport.zoom && point.x <= region.bounds.x + region.bounds.width + 16 / current.viewport.zoom && point.y >= region.bounds.y - 16 / current.viewport.zoom && point.y <= region.bounds.y + region.bounds.height + 16 / current.viewport.zoom;
+    const outsideCrop = tool === 'crop' && region?.kind === 'crop' && regionHandleAt(region.bounds, point, current.viewport.zoom, event.pointerType) === undefined && (point.x < region.bounds.x || point.y < region.bounds.y || point.x > region.bounds.x + region.bounds.width || point.y > region.bounds.y + region.bounds.height);
+    if (tool === 'hand' || space || event.button === 1) initial.mode = 'pan';
+    else if (outsideCrop) initial.mode = 'crop-confirm';
+    else if (event.pointerType === 'touch' && penSeen.current && !inRegion) initial.mode = 'pan';
     else if (tool === 'capture' && !region) initial.mode = 'capture';
     else if (tool === 'crop' || tool === 'capture') {
       const region = regionRef.current;
       if (!region) { releasePointer(event); return; }
-      initial.mode = tool; initial.bounds = region.bounds; initial.base = region.source; initial.pressedAt = event.timeStamp ?? performance.now();
-      initial.handle = regionHandleAt(region.bounds, point, current.viewport.zoom, event.pointerType);
+      initial.mode = tool; initial.bounds = region.bounds; initial.base = region.source;
+      initial.handle = regionHandleAt(region.bounds, point, current.viewport.zoom, event.pointerType, tool === 'capture');
       if (initial.handle === undefined) {
         if (point.x < region.bounds.x || point.y < region.bounds.y || point.x > region.bounds.x + region.bounds.width || point.y > region.bounds.y + region.bounds.height) {
           if (tool === 'capture') { updateRegion(null); initial.bounds = undefined; initial.base = undefined; }
@@ -480,7 +583,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       if (event.pointerType === 'touch') initial.mode = 'write';
       else {
         const target = writableAt(point);
-        if (target) startWriting(point, target); else startText(point);
+        if (target) startWriting(point, target); else if (!offPage(point)) startText(point);
         return;
       }
     } else if (tool === 'eraser') {
@@ -492,7 +595,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       const selectedElements = current.elements.filter(element => selected.current.has(element.id));
       const handle = bounds ? elementResizeHandles(selectedElements, bounds).findIndex(p => Math.hypot(p.x - point.x, p.y - point.y) < 10 / current.viewport.zoom) : -1;
       const editing = pointEditTarget(selectedElements), pointHandle = editing && pointHandleAt(editing, point, current.viewport.zoom);
-      const id = hitTest(selectableElements(current.elements), point, 6 / current.viewport.zoom);
+      const id = hitTest(reachable(selectableElements(current.elements), point), point, 6 / current.viewport.zoom);
       if (editing && pointHandle) {
         initial.id = editing.id;
         if (pointHandle.kind === 'segment') Object.assign(initial, { mode: 'segment', base: editing, index: pointHandle.segment });
@@ -517,6 +620,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
         if (found) setStyle(current => adoptElementStyle(current, found));
       } else { initial.mode = 'marquee'; if (!event.shiftKey) choose([]); }
     } else {
+      if (offPage(point)) { refusedPointer.current = event.pointerId; releasePointer(event); return; }
       let element: CanvasElement = {
         id: newId(), type: tool, x: point.x, y: point.y, width: 0, height: 0,
         ...newElementStyle(tool, style), seed: newSeed(),
@@ -528,22 +632,23 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       choose([]);
     }
     gesture.current = initial;
+    clearCaptureHold(); armCaptureHold(initial);
     redraw();
   };
 
   const pointerMove = (event: PointerEvent<HTMLCanvasElement>) => {
     // A pen move with the contact button down whose pointerdown never arrived starts the stroke here. Pencil hover
     // can report pressure, so only `buttons` counts.
-    if ((!gesture.current || gesture.current.pointerType === 'touch') && event.pointerType === 'pen' && (event.buttons & 1) !== 0 && !textDraft) pointerDown(event, true);
+    if ((!gesture.current || gesture.current.pointerType === 'touch') && event.pointerType === 'pen' && (event.buttons & 1) !== 0 && !textDraft && refusedPointer.current !== event.pointerId) pointerDown(event, true);
     if (event.pointerType === 'touch') {
-      const viewport = touchViewport.current.move(event.pointerId, coordinates(event).screen);
+      const viewport = touchViewport.current.move(event.pointerId, coordinates(event).screen, zoomRange());
       if (touchViewport.current.active) { event.preventDefault(); if (viewport) updateViewport(viewport, false); return; }
     }
     const active = gesture.current;
     if (!active) {
       if ((tool === 'crop' || tool === 'capture') && regionRef.current) {
         const { point } = coordinates(event), region = regionRef.current;
-        const handle = regionHandleAt(region.bounds, point, documentRef.current.viewport.zoom, event.pointerType);
+        const handle = regionHandleAt(region.bounds, point, documentRef.current.viewport.zoom, event.pointerType, tool === 'capture');
         const inside = point.x >= region.bounds.x && point.x <= region.bounds.x + region.bounds.width && point.y >= region.bounds.y && point.y <= region.bounds.y + region.bounds.height;
         setResizeCursor(handle === undefined ? inside ? 'move' : 'default' : ['nwse-resize', 'nesw-resize', 'nwse-resize', 'nesw-resize', 'ns-resize', 'ew-resize', 'ns-resize', 'ew-resize'][handle]);
         return;
@@ -567,10 +672,11 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     event.preventDefault();
     const { point, screen } = coordinates(event);
     const distance = Math.hypot(screen.x - active.screen.x, screen.y - active.screen.y);
-    if (active.mode === 'capture' && active.bounds && active.handle === -1 && active.pointerType !== 'mouse' && !active.moved && distance > 10 && (event.timeStamp ?? performance.now()) - (active.pressedAt ?? 0) >= 450) active.mode = 'capture-copy';
-    const selectionGesture = ['marquee', 'move', 'resize', 'point', 'segment'].includes(active.mode) || (active.mode === 'capture' && !!active.bounds);
-    const threshold = selectionGesture ? active.pointerType === 'mouse' ? 4 : 10 : 2;
+    const selectionGesture = ['marquee', 'move', 'resize', 'point', 'segment', 'crop-confirm'].includes(active.mode) || (active.mode === 'capture' && !!active.bounds);
+    const threshold = selectionGesture || active.mode === 'capture-copy' ? active.pointerType === 'mouse' ? 4 : 10 : 2;
+    if (distance > threshold && captureHoldTimer.current !== null) clearCaptureHold();
     active.moved ||= distance > threshold;
+    if (active.mode === 'crop-confirm' && active.moved) active.mode = 'pan';
     if (selectionGesture && !active.moved) {
       if (active.mode === 'marquee') marquee.current = normalize(active.start, active.start);
       return;
@@ -606,7 +712,8 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     } else if (active.mode === 'move') {
       let dx = point.x - active.start.x, dy = point.y - active.start.y;
       if (event.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
-      previewChanges(moveElements(active.original.elements, selected.current, dx, dy));
+      const delta = moveDelta(active.original.elements, dx, dy);
+      previewChanges(moveElements(active.original.elements, selected.current, delta.x, delta.y));
     } else if (active.mode === 'point' && active.base && active.index !== undefined) {
       // An arrow end binds where the pointer is; Shift aligns the dragged point's segment to 45°.
       const next = movePoint(active.base, active.index, point, event.shiftKey);
@@ -619,7 +726,8 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       const original = active.bounds;
       previewChanges(resizeElements(active.original.elements, selected.current, original, resizeBounds(original, active.handle, point, event.shiftKey)));
     } else if (active.mode === 'capture-copy' && active.bounds && regionRef.current) {
-      marquee.current = moveRegion(active.bounds, { x: point.x - active.start.x, y: point.y - active.start.y });
+      const offset = 10 / documentRef.current.viewport.zoom;
+      marquee.current = moveRegion(active.bounds, { x: point.x - active.start.x + offset, y: point.y - active.start.y - offset });
       captureGhost.current = { snapshot: documentRef.current, from: regionRef.current.bounds, to: marquee.current };
     } else if ((active.mode === 'crop' || active.mode === 'capture') && active.bounds && active.handle !== undefined) {
       marquee.current = active.handle < 0 ? moveRegion(active.bounds, { x: point.x - active.start.x, y: point.y - active.start.y }, active.base) : resizeRegion(active.bounds, active.handle, point, active.base, documentRef.current.viewport.zoom);
@@ -644,17 +752,21 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     return true;
   };
   const pointerUp = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (refusedPointer.current === event.pointerId) refusedPointer.current = null;
     if (endTouch(event)) return;
     const active = gesture.current;
     if (!active || active.pointerId !== event.pointerId) return;
     // A quick down and up may have no move between them; the release is the stroke's last sample.
     pointerMove(event);
+    clearCaptureHold();
     gesture.current = null; bindHint.current = null;
     releasePointer(event);
+    if (active.mode === 'crop-confirm') { void applyCrop(); redraw(); return; }
     if (active.mode === 'capture-copy' && regionRef.current?.kind === 'capture' && marquee.current) {
       const expected = regionRef.current, at = { x: marquee.current.x, y: marquee.current.y };
       captureGhost.current = undefined; marquee.current = expected.bounds;
-      void duplicateCapture(expected, at); redraw(); return;
+      if (active.moved) void duplicateCapture(expected, at);
+      setResizeCursor(null); redraw(); return;
     }
     if (active.mode === 'capture' || active.mode === 'crop') {
       const bounds = marquee.current;
@@ -668,14 +780,17 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if (active.mode === 'pan') settleView();
     else if (active.mode === 'write' && !active.moved) {
       const target = writableAt(active.start);
-      if (target) startWriting(active.start, target); else startText(active.start);
+      if (target) startWriting(active.start, target); else if (!offPage(active.start)) startText(active.start);
     } else if (active.mode === 'marquee' && marquee.current) {
       const bounds = marquee.current;
       const ids = active.shift ? new Set(selected.current) : new Set<string>();
       if (!active.moved && active.id) {
         if (ids.has(active.id)) ids.delete(active.id); else ids.add(active.id);
       } else {
-        for (const element of active.original.elements) if (!isLocked(element) && boundsContain(bounds, elementBounds(element))) ids.add(element.id);
+        for (const element of active.original.elements) {
+          const shown = !isLocked(element) && boxBounds(element);
+          if (shown && boundsContain(bounds, shown)) ids.add(element.id);
+        }
       }
       choose(ids);
     } else if (overrides.current.size && (active.moved || active.mode === 'erase' || (active.mode === 'draw' && overrides.current.get(active.id!)?.type === 'freedraw'))) {
@@ -696,6 +811,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     dropGesture(); marquee.current = regionRef.current?.bounds; redraw();
   };
   const pointerCancel = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (refusedPointer.current === event.pointerId) refusedPointer.current = null;
     if (endTouch(event)) return;
     // Only the contact that owns the gesture cancels it; a palm's cancel leaves the pen's stroke alone.
     if (gesture.current?.pointerId === event.pointerId) cancelGesture();
@@ -722,7 +838,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if (gesture.current || !images.length) return;
     flushDraft();
     if (regionRef.current) cancelRegion();
-    const elements = placeCanvasImages(images, documentRef.current.viewport, size.current, at);
+    const elements = placeImagesIn(documentRef.current, paintOptions.current.notebook, images, size.current, at);
     commitChanges(new Map(elements.map(element => [element.id, element])));
     choose(elements.map(element => element.id));
     setTool('select');
@@ -756,37 +872,60 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     redraw();
   };
   const currentPageIndex = () => {
-    const { paper, viewport } = documentRef.current;
-    return paper ? pageAt(paper, screenToWorld({ x: size.current.width / 2, y: size.current.height / 2 }, viewport)).index : 0;
+    const paper = boundPaper();
+    return paper ? pageInView(paper, documentRef.current.viewport, size.current).index : 0;
   };
   const goToPage = (index: number) => {
-    const { paper, viewport } = documentRef.current;
-    if (paper) updateViewport(pageView(paper, size.current, index, viewport.zoom));
+    const paper = boundPaper();
+    if (paper) updateViewport(pageView(paper, size.current, index, documentRef.current.viewport.zoom));
   };
-  const addPage = () => {
-    if (gesture.current || !documentRef.current.paper) return;
+  /**
+   * A notebook page operation as one undo step, through the same transaction as a stroke so it reaches shared devices,
+   * then the view moves to page `focus` (of the result). Selected elements the operation removed leave the selection,
+   * and a capture or crop in progress ends, since it holds the old layout.
+   */
+  const editPages = (change: (document: CanvasDocument) => CanvasDocument, focus: (next: CanvasDocument) => number) => {
+    if (gesture.current || touchViewport.current.active || !boundPaper()) return;
     flushDraft();
-    publish(addNotebookPage(documentRef.current), true);
-    goToPage(documentRef.current.paper!.pages.length - 1);
-  };
-  const removePage = (index: number) => {
-    if (gesture.current) return;
-    flushDraft();
-    const current = documentRef.current, page = current.paper?.pages[index];
-    const next = page ? removeNotebookPage(current, page.id) : current;
+    const current = documentRef.current, next = change(current);
     if (next === current) return;
-    choose([]);
+    if (regionRef.current) cancelRegion();
+    const ids = new Set(next.elements.map(element => element.id));
+    if ([...selected.current].some(id => !ids.has(id))) choose([...selected.current].filter(id => ids.has(id)));
     publish(next, true);
-    goToPage(Math.min(index, next.paper!.pages.length - 1));
+    goToPage(focus(next));
+  };
+  const pageCount = (document: CanvasDocument) => document.paper!.pages.length;
+  const addPage = () => editPages(addNotebookPage, next => pageCount(next) - 1);
+  const removePage = (index: number) => {
+    const page = boundPaper()?.pages[index];
+    if (page) editPages(current => removeNotebookPage(current, page.id), next => Math.min(index, pageCount(next) - 1));
+  };
+  /** A blank page beside page `index`, like it in size and template. */
+  const insertPageBeside = (index: number, side: 'before' | 'after') => {
+    const page = boundPaper()?.pages[index], at = side === 'before' ? index : index + 1;
+    if (page) editPages(current => insertPage(current, at, page), () => at);
+  };
+  const pageControls = {
+    insert: insertPageBeside,
+    duplicate: (index: number) => editPages(current => duplicatePage(current, index), () => index + 1),
+    move: (from: number, to: number) => editPages(current => movePage(current, from, to), () => to),
+    setTemplate: (index: number, template: PaperTemplate) => editPages(current => setPageTemplate(current, index, template), () => index),
+    setSize: (index: number, size: PageSize) => editPages(current => setPageSize(current, index, size), () => index),
+    /** PDF pages, each on a new page of its own size, after page `index`. */
+    insertPdfPages: (index: number, sizes: readonly PageSize[], images: readonly CanvasImportedImage[]) =>
+      editPages(current => insertPdfPages(current, index + 1, sizes, images), () => index + 1),
   };
   const fit = () => {
-    if (documentRef.current.paper) { updateViewport(pageView(documentRef.current.paper, size.current, currentPageIndex())); return; }
+    const paper = boundPaper();
+    if (paper) { updateViewport(pageView(paper, size.current, currentPageIndex())); return; }
     const bounds = selectionBounds(documentRef.current.elements);
     if (!bounds) { updateViewport({ x: 0, y: 0, zoom: 1 }); return; }
-    const zoom = Math.min(2, Math.max(0.1, Math.min((size.current.width - 160) / Math.max(bounds.width, 1), (size.current.height - 180) / Math.max(bounds.height, 1))));
+    const zoom = Math.min(2, Math.max(CANVAS_ZOOM_LIMITS.min, Math.min((size.current.width - 160) / Math.max(bounds.width, 1), (size.current.height - 180) / Math.max(bounds.height, 1))));
     updateViewport({ x: (size.current.width - bounds.width * zoom) / 2 - bounds.x * zoom, y: (size.current.height - bounds.height * zoom) / 2 - bounds.y * zoom, zoom });
   };
-  const zoom = (factor: number) => updateViewport(zoomAt(documentRef.current.viewport, { x: size.current.width / 2, y: size.current.height / 2 }, Math.max(0.1, Math.min(8, documentRef.current.viewport.zoom * factor))));
+  const zoomTo = (zoom: number) => updateViewport(zoomAt(documentRef.current.viewport, { x: size.current.width / 2, y: size.current.height / 2 }, zoom, zoomRange()));
+  const zoom = (factor: number) => zoomTo(documentRef.current.viewport.zoom * factor);
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest('input,textarea,[contenteditable=true]')) return;
     const key = event.key.toLowerCase(), mod = event.metaKey || event.ctrlKey;
@@ -802,7 +941,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       event.preventDefault();
       const source = documentRef.current.elements.filter(element => selected.current.has(element.id));
       if (!source.length) return;
-      const elements = cloneCanvasElements(source);
+      const elements = placeOnPage(cloneCanvasElements(source));
       commitChanges(new Map(elements.map(element => [element.id, element])));
       choose(elements.map(element => element.id));
     } else if (key === 'delete' || key === 'backspace') { event.preventDefault(); deleteSelected(); }
@@ -818,13 +957,14 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       event.preventDefault(); const amount = event.shiftKey ? 10 : 1;
       const dx = key === 'arrowleft' ? -amount : key === 'arrowright' ? amount : 0;
       const dy = key === 'arrowup' ? -amount : key === 'arrowdown' ? amount : 0;
-      commitChanges(moveElements(documentRef.current.elements, selected.current, dx, dy));
+      const delta = moveDelta(documentRef.current.elements, dx, dy);
+      commitChanges(moveElements(documentRef.current.elements, selected.current, delta.x, delta.y));
     } else if (!mod && !event.altKey) {
       const tools: Record<string, CanvasTool> = { v: 'select', h: 'hand', r: 'rectangle', o: 'ellipse', d: 'diamond', l: 'line', a: 'arrow', p: 'freedraw', t: 'text', e: 'eraser', s: 'capture' };
       if (tools[key]) { event.preventDefault(); chooseTool(tools[key]); }
       else if (key === 'g') setGrid(value => !value);
       else if (key === '1') fit();
-      else if (key === '0') updateViewport(zoomAt(documentRef.current.viewport, { x: size.current.width / 2, y: size.current.height / 2 }, 1));
+      else if (key === '0') zoomTo(1);
       else if (key === '+' || key === '=') zoom(1.2);
       else if (key === '-') zoom(1 / 1.2);
     }
@@ -852,7 +992,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     event.preventDefault(); event.stopPropagation();
     const count = lastPaste.current.text === text ? lastPaste.current.count + 1 : 1;
     lastPaste.current = { text, count };
-    const elements = cloneCanvasElements(source, { x: 24 * count, y: 24 * count });
+    const elements = placeOnPage(cloneCanvasElements(source, { x: 24 * count, y: 24 * count }), true);
     commitChanges(new Map(elements.map(element => [element.id, element])));
     choose(elements.map(element => element.id));
     setTool('select');
@@ -865,7 +1005,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     const handle = editing && pointHandleAt(editing, point, current.viewport.zoom);
     if (editing && handle?.kind === 'point' && !endAt(editing, handle.index)) { commitChanges(new Map([[editing.id, removePoint(editing, handle.index)]])); return; }
     if (editing && handle?.kind === 'segment') { commitChanges(new Map([[editing.id, releaseSegment(editing, handle.segment, sceneLookup(current.elements))]])); return; }
-    const imageId = hitTest(selectableElements(current.elements), point, 0);
+    const imageId = hitTest(reachable(selectableElements(current.elements), point), point, 0);
     const image = current.elements.find(item => item.id === imageId && item.type === 'image');
     if (image) { startCrop(image); return; }
     const element = writableAt(point);
@@ -876,10 +1016,11 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     : selection.length ? documentRef.current.elements.filter(element => selected.current.has(element.id)).map(element => inspectorTarget(element))
     : NON_DRAWING.has(tool) ? [] : [{ type: tool as CanvasElement['type'], label: false }];
   const inspector = { sections: inspectorSections(targets), values: inspectorValues(targets, style), colorLabel: colorLabel(targets) };
+  const zoomPercent = Math.round(documentRef.current.viewport.zoom * 100), range = zoomRange(), paper = boundPaper();
   const layerMoves = (['front', 'forward', 'backward', 'back'] as const).filter(move => canReorder(documentRef.current.elements, selected.current, move));
   return {
     root, canvas, documentRef, tool, setTool: chooseTool, inspector, changeStyle, previewStyle, grid, setGrid, selection,
-    region, startCrop, cancelRegion, completeRegion, copyRegion, regionCopyState, regionError,
+    region, startCrop, cancelRegion, completeRegion, copyRegion, duplicateRegion, captureHold, regionCopyState, regionError,
     canCrop: selection.length === 1 && documentRef.current.elements.some(item => selected.current.has(item.id) && item.type === 'image' && !isLocked(item)),
     textDraft, commitText, editText: (text: string) => { draftValue.current = text; },
     pointerDown: (event: PointerEvent<HTMLCanvasElement>) => pointerDown(event), pointerMove, pointerUp, pointerCancel, cancelGesture,
@@ -887,9 +1028,11 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     keyUp: (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === ' ') setSpace(false); },
     blur: () => setSpace(false), cursor: space || tool === 'hand' ? 'grab' : tool === 'select' || tool === 'crop' || (tool === 'capture' && region) ? resizeCursor ?? 'default' : tool === 'text' ? 'text' : 'crosshair',
     history, canUndo: past.current.length > 0, canRedo: future.current.length > 0, historyError, clearHistoryError: () => setHistoryError(null),
-    deleteSelected, insertImages, reorder, layerMoves, fit, zoom, resetZoom: () => updateViewport(zoomAt(documentRef.current.viewport, { x: size.current.width / 2, y: size.current.height / 2 }, 1)), redraw,
-    zoomPercent: Math.round(documentRef.current.viewport.zoom * 100),
-    /** A notebook's page controls; null on a whiteboard. */
-    pages: documentRef.current.paper ? { count: documentRef.current.paper.pages.length, index: currentPageIndex(), go: goToPage, add: addPage, remove: removePage } : null,
+    deleteSelected, insertImages, reorder, layerMoves, fit, zoom, resetZoom: () => zoomTo(1), redraw,
+    zoomPercent, canZoomOut: zoomPercent > Math.round(range.min * 100), canZoomIn: zoomPercent < Math.round(range.max * 100), notebook,
+    /** A notebook's page controls and the page at the centre of the view; null on a canvas. */
+    pages: paper ? {
+      paper, count: paper.pages.length, index: currentPageIndex(), go: goToPage, add: addPage, remove: removePage, ...pageControls,
+    } : null,
   };
 }

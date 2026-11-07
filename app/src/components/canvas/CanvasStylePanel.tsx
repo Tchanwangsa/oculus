@@ -15,12 +15,12 @@ export function CanvasStylePanel(props: InspectorProps) {
   useScrollFade(scroller);
   return <Popover>
     <div data-canvas-inspector="true" className="pointer-events-none absolute top-[5.5rem] bottom-[4.5rem] left-4 z-10 flex flex-col items-start">
-      <PopoverTrigger asChild><Button variant="outline" size="sm" className="canvas-style-trigger pointer-events-auto gap-2 bg-card shadow-xs"><SlidersHorizontalIcon size={16} />Style</Button></PopoverTrigger>
-      <div onMouseDown={keepTextFocus} className="canvas-style-desktop pointer-events-auto flex max-h-full w-[212px] flex-col overflow-hidden rounded-xl border border-border-subtle bg-card shadow-xs">
+      <PopoverTrigger asChild><Button variant="outline" size="sm" className="canvas-style-trigger canvas-chrome pointer-events-auto gap-2 shadow-xs"><SlidersHorizontalIcon size={16} />Style</Button></PopoverTrigger>
+      <div onMouseDown={keepTextFocus} className="canvas-style-desktop pointer-events-auto flex max-h-full w-[212px] flex-col overflow-hidden rounded-xl border border-border-subtle shadow-xs canvas-chrome">
         <div ref={scroller} className="min-h-0 overflow-y-auto overscroll-contain p-3.5"><InspectorControls {...props} /></div>
       </div>
     </div>
-    <PopoverContent {...inspectorPopoverProps} onMouseDown={keepTextFocus} side="bottom" align="start" className="max-h-[var(--radix-popover-content-available-height)] w-[212px] overflow-y-auto p-3.5">
+    <PopoverContent {...inspectorPopoverProps} onMouseDown={keepTextFocus} side="bottom" align="start" className="canvas-chrome max-h-[var(--radix-popover-content-available-height)] w-[212px] overflow-y-auto p-3.5">
       <InspectorControls {...props} />
     </PopoverContent>
   </Popover>;

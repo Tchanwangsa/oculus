@@ -14,30 +14,35 @@ import { useSubject } from "@/layouts/SubjectLayout";
 import { useSubjectFiles } from "@/hooks/data/useSubjectFiles";
 import type { DbFile } from "@/lib/db";
 import { createDocument, deleteDocument, reconcileDocuments } from "@/lib/notes/documents";
-import { createCanvas, reconcileCanvases } from "@/lib/canvas/files";
+import { createCanvas, reconcileCanvases, reconcileNotebooks } from "@/lib/canvas/files";
 import { canvasSessions } from "@/lib/canvas/sessionRuntime";
 import { fmtSize, sqliteUtcToMs } from "@/lib/format/format";
 import { filePagePath, fileTitle } from "@/lib/files/openFile";
 import { navigateActive } from "@/lib/shell/tabRouters";
 
-type DriveKind = "document" | "canvas";
+type DriveKind = "document" | "canvas" | "notebook";
+const removeDrawing = (file: DbFile) => canvasSessions.open(file).remove();
+/** Each kind's row label and icon; `create` is the New file menu's one-click start (a notebook asks first). */
 const FILE_KINDS = {
-  document: { label: "Note", icon: NotePencil, create: createDocument, remove: deleteDocument },
-  canvas: { label: "Canvas", icon: Scribble, create: createCanvas, remove: (file: DbFile) => canvasSessions.open(file).remove() },
+  document: { label: "Note", plural: "notes", icon: NotePencil, create: createDocument, remove: deleteDocument },
+  canvas: { label: "Canvas", plural: "canvases", icon: Scribble, create: createCanvas, remove: removeDrawing },
+  notebook: { label: "Notebook", plural: "notebooks", icon: Notebook, create: null, remove: removeDrawing },
 } satisfies Record<DriveKind, {
   label: string;
+  plural: string;
   icon: typeof NotePencil;
-  create: (subject: { id: number; code: string }) => Promise<DbFile>;
+  create: ((subject: { id: number; code: string }) => Promise<DbFile>) | null;
   remove: (file: DbFile) => Promise<void>;
 }>;
 const FILTERS = [
   { value: "all", label: "All" },
   { value: "document", label: "Notes" },
   { value: "canvas", label: "Canvases" },
+  { value: "notebook", label: "Notebooks" },
 ] as const;
 type Filter = typeof FILTERS[number]["value"];
 
-/** Notes and drawing canvases share a library; each opens its own file editor. */
+/** Notes, canvases and notebooks share a library; each opens its own file editor. */
 export default function SubjectDrivePage() {
   const subject = useSubject();
   const { byCategory, loading } = useSubjectFiles(subject.id);
@@ -47,26 +52,29 @@ export default function SubjectDrivePage() {
   const [problem, setProblem] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<DbFile | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const files = useMemo(() => [...byCategory.document, ...byCategory.canvas].sort(byLastEdit), [byCategory.document, byCategory.canvas]);
+  const files = useMemo(
+    () => [...byCategory.document, ...byCategory.canvas, ...byCategory.notebook].sort(byLastEdit),
+    [byCategory.document, byCategory.canvas, byCategory.notebook],
+  );
   const filtered = useMemo(() => filter === "all" ? files : files.filter(file => file.category === filter), [files, filter]);
 
   const { id: subjectId, code: subjectCode } = subject;
   useEffect(() => {
     let live = true;
     const identity = { id: subjectId, code: subjectCode };
-    void Promise.allSettled([reconcileDocuments(identity), reconcileCanvases(identity)]).then(results => {
+    void Promise.allSettled([reconcileDocuments(identity), reconcileCanvases(identity), reconcileNotebooks(identity)]).then(results => {
       const errors = results.flatMap(result => result.status === "rejected" ? [String(result.reason)] : []);
       if (live && errors.length) setProblem(errors.join("\n"));
     });
     return () => { live = false; };
   }, [subjectId, subjectCode]);
 
-  const create = useCallback(async (kind: DriveKind) => {
+  const create = useCallback(async (start: (subject: { id: number; code: string }) => Promise<DbFile>) => {
     if (creating) return;
     setCreating(true);
     setProblem(null);
     try {
-      const row = await FILE_KINDS[kind].create(subject);
+      const row = await start(subject);
       navigateActive(filePagePath(subject.id, row.relative_path));
     } catch (error) {
       setProblem(String(error));
@@ -96,8 +104,8 @@ export default function SubjectDrivePage() {
         {loading && !files.length ? <SkeletonRows count={4} /> : !filtered.length ? (
           <EmptyState
             icon={<FolderSimple size={24} className="text-muted-foreground/40" aria-hidden />}
-            title={!files.length ? "No files yet" : filter === "document" ? "No notes yet" : "No canvases yet"}
-            body={!files.length ? "Choose New file to start a note or a canvas." : filter === "document" ? "Create a note from the New file menu." : "Create a canvas from the New file menu."}
+            title={!files.length || filter === "all" ? "No files yet" : `No ${FILE_KINDS[filter].plural} yet`}
+            body={!files.length || filter === "all" ? "Choose New file to start a note, a canvas or a notebook." : `Create a ${FILE_KINDS[filter].label.toLowerCase()} from the New file menu.`}
           >{null}</EmptyState>
         ) : (
           <>
@@ -119,7 +127,7 @@ export default function SubjectDrivePage() {
       <ConfirmDialog
         open={!!pendingDelete}
         onCancel={() => setPendingDelete(null)}
-        title={`Delete this ${pendingDelete?.category === "canvas" ? "canvas" : "note"}?`}
+        title={`Delete this ${pendingDelete ? FILE_KINDS[pendingDelete.category as DriveKind].label.toLowerCase() : "file"}?`}
         description={pendingDelete ? `“${fileTitle(pendingDelete)}” is deleted from your library. There is no trash to get it back from.` : ""}
         confirmLabel="Delete" busyLabel="Deleting…" busy={deleting}
         onConfirm={async () => {
@@ -135,7 +143,13 @@ export default function SubjectDrivePage() {
   );
 }
 
-function NewFileMenu({ busy, onCreate, onNotebook }: { busy: boolean; onCreate: (kind: DriveKind) => void; onNotebook: () => void }) {
+const NEW_FILE = [
+  { kind: "document", body: null },
+  { kind: "canvas", body: "An infinite board to sketch and diagram on." },
+  { kind: "notebook", body: "Pages you write on, like paper." },
+] as const satisfies readonly { kind: DriveKind; body: string | null }[];
+
+function NewFileMenu({ busy, onCreate, onNotebook }: { busy: boolean; onCreate: (start: (subject: { id: number; code: string }) => Promise<DbFile>) => void; onNotebook: () => void }) {
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
@@ -145,16 +159,17 @@ function NewFileMenu({ busy, onCreate, onNotebook }: { busy: boolean; onCreate: 
         </Button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content align="end" sideOffset={6} className="z-50 min-w-40 rounded-xl border border-border-subtle bg-popover p-1 text-popover-foreground shadow-lg outline-none">
-          {(Object.keys(FILE_KINDS) as DriveKind[]).map(kind => {
-            const { icon: Icon, label } = FILE_KINDS[kind];
-            return <DropdownMenu.Item key={kind} onSelect={() => onCreate(kind)} className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] outline-none data-highlighted:bg-accent">
-              <Icon size={15} className="text-reference-page" aria-hidden />{label}
+        <DropdownMenu.Content align="end" sideOffset={6} className="z-50 w-60 rounded-xl border border-border-subtle bg-popover p-1 text-popover-foreground shadow-lg outline-none">
+          {NEW_FILE.map(({ kind, body }) => {
+            const { icon: Icon, label, create } = FILE_KINDS[kind];
+            return <DropdownMenu.Item key={kind} onSelect={() => create ? onCreate(create) : onNotebook()} className="flex cursor-pointer items-start gap-2.5 rounded-lg px-2.5 py-2 outline-none data-highlighted:bg-accent">
+              <Icon size={15} className="mt-px shrink-0 text-reference-page" aria-hidden />
+              <span className="min-w-0">
+                <span className="block text-[12px] text-foreground">{create ? label : `${label}…`}</span>
+                {body ? <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{body}</span> : null}
+              </span>
             </DropdownMenu.Item>;
           })}
-          <DropdownMenu.Item onSelect={onNotebook} className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] outline-none data-highlighted:bg-accent">
-            <Notebook size={15} className="text-reference-page" aria-hidden />Notebook…
-          </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

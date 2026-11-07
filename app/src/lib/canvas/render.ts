@@ -1,7 +1,7 @@
 import { CANVAS_DEFAULTS, hasLabel, LABELLED_TYPES, roundnessOf, type CanvasDocument, type CanvasElement, type Point } from './model';
-import { boundsIntersect, diamondCorners, diamondVertices, elementArrowheads, elementBounds, rectangleRadius, selectionBounds, strokeDash, type Bounds } from './geometry';
-import { pageRects } from './paper';
-import { PAGE_COLOR, exportBounds, paintPaper, paintTemplate } from './renderPaper';
+import { diamondCorners, diamondVertices, elementArrowheads, elementBounds, rectangleRadius, selectionBounds, strokeDash, type Bounds } from './geometry';
+import { notebookPaper, pageRects, type PageRect, type Paper } from './paper';
+import { PAGE_COLOR, elementPage, exportBounds, paintPaper, paintTemplate } from './renderPaper';
 import { linePath } from './arrow/path';
 import { pointHandles } from './arrow/handles';
 import { canvasFont, LINE_HEIGHT, layoutShapeLabel, layoutTextElement, lineBaseline, type TextLayout } from './renderText';
@@ -26,7 +26,11 @@ export interface CanvasPaintOptions {
   overrides?: Map<string, CanvasElement | null>;
   /** The shape an arrow end would bind to while one is drawn or dragged; never exported. */
   bindingHint?: BindingSnap | null;
+  /** A notebook paints its pages and clips each element to its own; a canvas is a whiteboard, whatever `paper` it holds. */
+  notebook?: boolean;
 }
+
+export interface CanvasRenderOptions { notebook?: boolean }
 
 interface ElementPaths { body: Path2D; heads?: Path2D; filledHeads?: Path2D }
 const pathCache = new WeakMap<CanvasElement, ElementPaths>();
@@ -125,6 +129,25 @@ export function drawElement(context: CanvasRenderingContext2D, element: CanvasEl
   context.restore();
 }
 
+/**
+ * Draws `elements` in order. With `paper` each is clipped to its page (`elementPage`), and a run of elements on one page
+ * shares a clip; without it they are drawn as they are.
+ */
+export function drawElementsOnPages(context: CanvasRenderingContext2D, elements: Iterable<CanvasElement>, paper: Paper | undefined, draw = (element: CanvasElement) => drawElement(context, element)) {
+  if (!paper) { for (const element of elements) draw(element); return; }
+  let page: PageRect | null = null;
+  for (const element of elements) {
+    const owner = elementPage(paper, element);
+    if (owner !== page) {
+      if (page) context.restore();
+      context.save(); context.beginPath(); context.rect(owner.x, owner.y, owner.width, owner.height); context.clip();
+      page = owner;
+    }
+    draw(element);
+  }
+  if (page) context.restore();
+}
+
 export function resizeHandles(bounds: Bounds): Point[] {
   return [
     { x: bounds.x, y: bounds.y }, { x: bounds.x + bounds.width, y: bounds.y },
@@ -196,7 +219,8 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
   context.clearRect(0, 0, width, height);
   context.fillStyle = document.background;
   context.fillRect(0, 0, width, height);
-  if (grid && !document.paper) {
+  const paper = notebookPaper(document, options.notebook);
+  if (grid && !paper) {
     let step = 24 * zoom;
     while (step < 16) step *= 4;
     context.fillStyle = selectionColor;
@@ -210,15 +234,14 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
   }
   context.translate(x, y); context.scale(zoom, zoom);
   const viewport = { x: -x / zoom, y: -y / zoom, width: width / zoom, height: height / zoom };
-  if (document.paper) paintPaper(context, document.paper, viewport, zoom);
+  if (paper) paintPaper(context, paper, viewport, zoom);
   const draw = (element: CanvasElement) => {
     if (element.id !== options.editingId) drawElement(context, element);
     else if (element.type !== 'text') drawElement(context, element, false);
   };
-  for (const element of visibleElements(document.elements, viewport)) {
-    if (!options.overrides?.has(element.id)) draw(element);
-  }
-  if (options.overrides) for (const element of options.overrides.values()) if (element) draw(element);
+  const scene = visibleElements(document.elements, viewport);
+  drawElementsOnPages(context, options.overrides?.size ? scene.filter(element => !options.overrides!.has(element.id)) : scene, paper, draw);
+  if (options.overrides) drawElementsOnPages(context, [...options.overrides.values()].filter(element => element !== null), paper, draw);
   if (options.bindingHint) paintBindingHint(context, options.bindingHint, selectionColor, document.background, zoom);
   context.strokeStyle = selectionColor;
   context.lineWidth = 1 / zoom;
@@ -240,11 +263,15 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
   }
   if (options.captureGhost) {
     const { snapshot, from, to } = options.captureGhost;
+    context.save(); context.fillStyle = snapshot.background;
+    context.shadowColor = 'rgba(0, 0, 0, 0.3)'; context.shadowBlur = 18 * pixelRatio; context.shadowOffsetY = 5 * pixelRatio;
+    context.fillRect(to.x, to.y, to.width, to.height); context.restore();
     context.save(); context.beginPath(); context.rect(to.x, to.y, to.width, to.height); context.clip();
     context.translate(to.x - from.x, to.y - from.y);
     context.fillStyle = snapshot.background; context.fillRect(from.x, from.y, from.width, from.height);
-    if (snapshot.paper) paintPaper(context, snapshot.paper, from, zoom);
-    for (const element of visibleElements(snapshot.elements, from)) drawElement(context, element);
+    const pages = notebookPaper(snapshot, options.notebook);
+    if (pages) paintPaper(context, pages, from, zoom);
+    drawElementsOnPages(context, visibleElements(snapshot.elements, from), pages);
     context.restore();
   }
   if (options.marquee) {
@@ -298,8 +325,10 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
   }
 }
 
-export async function exportCanvasPng(document: CanvasDocument): Promise<Blob | null> {
-  const bounds = exportBounds(document);
+/** The whole drawing as a PNG; a notebook (`options.notebook`) is its pages, each element clipped to its own. */
+export async function exportCanvasPng(document: CanvasDocument, options: CanvasRenderOptions = {}): Promise<Blob | null> {
+  const paper = notebookPaper(document, options.notebook);
+  const bounds = exportBounds(document, paper);
   if (!bounds) return null;
   await loadCanvasImages(document.elements);
   const padding = 32;
@@ -312,16 +341,19 @@ export async function exportCanvasPng(document: CanvasDocument): Promise<Blob | 
   context.scale(ratio, ratio);
   context.fillStyle = document.background; context.fillRect(0, 0, canvas.width / ratio, canvas.height / ratio);
   context.translate(padding - bounds.x, padding - bounds.y);
-  if (document.paper) paintPaper(context, document.paper, bounds, ratio);
-  for (const element of document.elements) drawElement(context, element);
+  if (paper) paintPaper(context, paper, bounds, ratio);
+  drawElementsOnPages(context, document.elements, paper);
   return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
 }
 
-/** One notebook page as a PNG at `scale` pixels per point: its sheet, template and every element on it, clipped to the page. */
+/**
+ * A notebook's page as a PNG at `scale` pixels per point: its sheet, template and the elements that belong to it
+ * (`elementPage`), clipped to the page as on screen; ink from the next page stays there.
+ */
 export async function renderPagePng(document: CanvasDocument, pageId: string, scale = 2): Promise<Blob | null> {
-  const rect = document.paper && pageRects(document.paper).find(page => page.id === pageId);
-  if (!rect) return null;
-  const elements = document.elements.filter(element => boundsIntersect(elementBounds(element), rect));
+  const paper = document.paper, rect = paper && pageRects(paper).find(page => page.id === pageId);
+  if (!paper || !rect) return null;
+  const elements = document.elements.filter(element => elementPage(paper, element).id === rect.id);
   await loadCanvasImages(elements);
   const ratio = Math.min(scale, 4096 / Math.max(rect.width, rect.height));
   const canvas = window.document.createElement('canvas');

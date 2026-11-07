@@ -14,7 +14,7 @@ impl Ctx {
         let wanted = args.pages.as_deref().map(parse_page_spec).transpose()?;
 
         // A notebook has no text: its pages are pictures the app redraws as the student writes.
-        if file.file_type == "canvas" {
+        if super::notebook::reads_as_pictures(&file.file_type) {
             return self.read_notebook(file, wanted.as_deref());
         }
 

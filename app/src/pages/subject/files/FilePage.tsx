@@ -3,7 +3,8 @@ import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from "
 import { isWebUrl } from "@/lib/browser";
 import { edThreadId } from "@/lib/ed/links";
 import { OpenOriginal } from "@/components/files/OpenOriginal";
-import { WriteOnCopy } from "@/components/canvas/WriteOnCopy";
+import { DrawOnCopy } from "@/components/canvas/DrawOnCopy";
+import { drawingKindOf } from "@/lib/canvas/drawingKinds";
 import { markEdViewed } from "@/lib/ed/views";
 import {
   DocumentControls,
@@ -31,8 +32,12 @@ import { useLocateHighlight } from "@/hooks/find/useLocateHighlight";
 import { LoadingFill } from "@/components/ui/layout/PageParts";
 import { PaneHeaderRow, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
 import { useDocumentPrefsStore } from "@/stores/documents/documentPrefsStore";
+import type { DbFile } from "@/lib/db";
 
 const CanvasEditor = lazy(() => import("@/components/canvas/CanvasEditor"));
+
+/** A file the student writes in the app, whose editor follows it across a rename. */
+const authored = (file: DbFile) => file.category === "document" || drawingKindOf(file) !== null;
 
 const DocumentEditor = lazy(() =>
   import("@/components/documents/DocumentEditor").then((m) => ({ default: m.DocumentEditor })),
@@ -64,14 +69,14 @@ export default function SubjectFilePage() {
 
   // An authored file renamed under this page keeps its row but loses its path:
   // follow the row by id and update the route, so the editor stays mounted.
-  // Notes and canvases retain their editors; other stale paths leave the file.
+  // Notes, canvases and notebooks retain their editors; other stale paths leave the file.
   const heldId = useRef<number | null>(null);
-  if (found) heldId.current = (found.category === "document" || found.category === "canvas") ? found.id : null;
+  if (found) heldId.current = authored(found) ? found.id : null;
   const moved = useMemo(
     () =>
       found || heldId.current == null
         ? null
-        : files.find((f) => f.id === heldId.current && (f.category === "document" || f.category === "canvas")) ?? null,
+        : files.find((f) => f.id === heldId.current && authored(f)) ?? null,
     [found, files],
   );
   const file = found ?? moved;
@@ -80,7 +85,8 @@ export default function SubjectFilePage() {
   }, [moved, navigate]);
 
   const pdf = usePdfMd(file);
-  const isCanvas = file?.category === "canvas";
+  // A drawing's kind is its file's (folder and extension), never whether it has pages.
+  const drawingKind = file ? drawingKindOf(file) : null;
   const isDocument = file?.category === "document";
   // An Ed lesson whose index lists its slides opens as the lesson view.
   const lesson = useLessonIndex(file);
@@ -175,8 +181,8 @@ export default function SubjectFilePage() {
             <MarkdownUnavailable file={file} openSeq={parseDetails} />
           ))
         )}
-        {/* A PDF can be copied into a notebook to write on. */}
-        {!isDocument && !isCanvas && /\.pdf$/i.test(file.filename) && <WriteOnCopy file={file} />}
+        {/* A PDF can be copied into a notebook or a canvas to draw on. */}
+        {!isDocument && !drawingKind && /\.pdf$/i.test(file.filename) && <DrawOnCopy file={file} />}
         {/* A synced page is our markdown of a Canvas page or an Ed thread;
             this opens the original, embeds and styling included, in a
             browser tab. The lesson view has its own, for the shown slide. */}
@@ -185,8 +191,8 @@ export default function SubjectFilePage() {
         )}
       </PaneHeaderRow>
       <div ref={setBody} className="flex-1 min-h-0 overflow-hidden flex flex-col">
-        {isCanvas ? (
-          <Suspense fallback={<LoadingFill />}><CanvasEditor key={file.id} file={file} /></Suspense>
+        {drawingKind ? (
+          <Suspense fallback={<LoadingFill />}><CanvasEditor key={file.id} file={file} kind={drawingKind} /></Suspense>
         ) : isDocument ? (
           <Suspense fallback={<LoadingFill />}>
             <DocumentEditor

@@ -4,7 +4,7 @@ import { NotebookSnapshots } from '@/lib/canvas/snapshots';
 
 /**
  * Keeps a notebook's page pictures current for chat agents (`oculus read` hands them over). Returns why the
- * last write failed, or null. A whiteboard has no pages and writes nothing.
+ * last write failed, or null. A canvas has no pages and writes nothing (`NotebookSnapshots.schedule`).
  */
 export function useNotebookSnapshots(file: { id: number; relative_path: string }, document: CanvasDocument | undefined): string | null {
   const [error, setError] = useState<string | null>(null);

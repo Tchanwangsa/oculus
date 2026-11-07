@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { noteNotebookPage, openNotebookContext, registerOpenNotebook } from '../../../src/lib/canvas/openNotebooks';
 
-const a = { path: 'courses/X/canvases/Assignment 1.canvas', title: 'Assignment 1', pages: 4, page: 1 };
-const b = { path: 'courses/X/canvases/Notes "quoted" $5.canvas', title: 'Notes', pages: 2, page: 1 };
+const a = { path: 'courses/X/notebooks/Assignment 1.notebook', title: 'Assignment 1', pages: 4, page: 1 };
+const b = { path: 'courses/X/notebooks/Notes "quoted" $5.notebook', title: 'Notes', pages: 2, page: 1 };
 
 describe('openNotebookContext', () => {
   test('is null with no notebook open', () => {
@@ -13,7 +13,7 @@ describe('openNotebookContext', () => {
     const text = openNotebookContext()!;
     expect(text).toContain('Assignment 1');
     expect(text).toContain('page 1 of 4 in view');
-    expect(text).toContain('oculus read "courses/X/canvases/Assignment 1.canvas"');
+    expect(text).toContain('oculus read "courses/X/notebooks/Assignment 1.notebook"');
     forget();
     expect(openNotebookContext()).toBeNull();
   });
@@ -25,7 +25,7 @@ describe('openNotebookContext', () => {
   });
   test('quotes a path so the shell reads it as one argument', () => {
     const forget = registerOpenNotebook(2, b);
-    expect(openNotebookContext()).toContain('oculus read "courses/X/canvases/Notes \\"quoted\\" \\$5.canvas"');
+    expect(openNotebookContext()).toContain('oculus read "courses/X/notebooks/Notes \\"quoted\\" \\$5.notebook"');
     forget();
   });
   test('lists the notebook touched last first, at most three', () => {

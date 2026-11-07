@@ -84,6 +84,7 @@ export const routes: RouteObject[] = [
               { path: "drive", lazy: page(() => import("@/pages/subject/files/DrivePage")) },
               { path: "documents", element: <Navigate to="../drive" replace /> },
               { path: "canvases", element: <Navigate to="../drive" replace /> },
+              { path: "notebooks", element: <Navigate to="../drive" replace /> },
             ],
           },
           { path: "lectures", lazy: page(() => import("@/pages/subject/content/LecturesPage")) },

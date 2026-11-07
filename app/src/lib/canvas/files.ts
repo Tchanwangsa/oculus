@@ -4,25 +4,36 @@ import { deleteFileRow, getFileByRelativePath, getFilesForSubject, getSubjects, 
 import type { ImportedFile } from "@/lib/files/uploads";
 import { authorityCode, toAuthorityError, type CanvasAuthorityAck, type CanvasAuthorityEvent, type CanvasAuthorityIO, type CanvasAuthoritySnapshot } from "./authority";
 import type { CanvasTransaction } from "./collaboration";
+import { DRAWING_KINDS, drawingKindOf, planDrawingRows, type DrawingKind } from "./drawingKinds";
 import { createCanvasDocument, serializeCanvasDocument } from "./model";
 import { forgetPageSnapshots } from "./snapshots";
 
+/** Announced when a canvas or a notebook row is added, renamed, resized or removed. */
 export const CANVASES_CHANGED_EVENT = "oculus:canvases-changed";
 const announce = (subjectId: number) => window.dispatchEvent(new CustomEvent(CANVASES_CHANGED_EVENT, { detail: { subjectId } }));
 
-async function rowFor(subjectId: number, file: ImportedFile): Promise<DbFile> {
-  await upsertFile(subjectId, file.filename, file.relative_path, "canvas", file.size_bytes, "canvas");
+async function rowFor(subjectId: number, file: ImportedFile, kind: DrawingKind): Promise<DbFile> {
+  const { category } = DRAWING_KINDS[kind];
+  await upsertFile(subjectId, file.filename, file.relative_path, category, file.size_bytes, category);
   const row = await getFileByRelativePath(file.relative_path);
   if (!row) throw new Error(`No library row for ${file.relative_path}`);
   return row;
 }
 
-export async function createCanvas(subject: { id: number; code: string }, title = "Untitled", content = serializeCanvasDocument(createCanvasDocument())): Promise<DbFile> {
-  const imported = await invoke<ImportedFile>("create_canvas", { subjectCode: subject.code, title, content });
-  const row = await rowFor(subject.id, imported);
+/** A new drawing of `kind` in the subject's own folder for it. */
+export async function createDrawing(kind: DrawingKind, subject: { id: number; code: string }, title: string, content: string): Promise<DbFile> {
+  const imported = await invoke<ImportedFile>("create_canvas", { subjectCode: subject.code, title, content, kind });
+  const row = await rowFor(subject.id, imported, kind);
   announce(subject.id);
   return row;
 }
+
+export const createCanvas = (subject: { id: number; code: string }, title = "Untitled", content = serializeCanvasDocument(createCanvasDocument())): Promise<DbFile> =>
+  createDrawing("canvas", subject, title, content);
+
+/** `content` must have `paper`: the native side refuses a notebook without pages. */
+export const createNotebook = (subject: { id: number; code: string }, title: string, content: string): Promise<DbFile> =>
+  createDrawing("notebook", subject, title, content);
 
 export const readCanvas = (relativePath: string) => invoke<string>("read_canvas", { relativePath });
 
@@ -47,11 +58,11 @@ export async function deleteCanvasFile(file: DbFile): Promise<void> {
   announce(file.subject_id);
 }
 
-/** Keeps a draft the shared canvas refused as a new canvas beside the original. */
+/** Keeps a draft the shared drawing refused as a new file of the same kind beside the original. */
 export async function saveCanvasCopy(file: DbFile, title: string, content: string): Promise<DbFile> {
   const subject = (await getSubjects()).find((s) => s.id === file.subject_id);
   if (!subject) throw new Error("This canvas's subject is no longer in the library.");
-  return createCanvas(subject, title, content);
+  return createDrawing(drawingKindOf(file) ?? "canvas", subject, title, content);
 }
 
 const CHANGE_EVENT = "canvas-authority-change";
@@ -112,18 +123,17 @@ export const canvasAuthority: CanvasAuthorityIO<DbFile> = {
   },
 };
 
-export async function reconcileCanvases(subject: { id: number; code: string }): Promise<void> {
+/** Brings `kind`'s rows in line with its folder on disk; it never touches the other kind's rows. */
+export async function reconcileDrawings(kind: DrawingKind, subject: { id: number; code: string }): Promise<void> {
   const [onDisk, rows] = await Promise.all([
-    invoke<ImportedFile[]>("list_canvases", { subjectCode: subject.code }), getFilesForSubject(subject.id),
+    invoke<ImportedFile[]>("list_canvases", { subjectCode: subject.code, kind }), getFilesForSubject(subject.id),
   ]);
-  const existing = new Map(rows.filter((f) => f.category === "canvas").map((f) => [f.relative_path, f]));
-  let changed = false;
-  for (const file of onDisk) {
-    const row = existing.get(file.relative_path);
-    existing.delete(file.relative_path);
-    if (!row) { await rowFor(subject.id, file); changed = true; }
-    else if (row.size_bytes !== file.size_bytes) { await touchFileRow(row.id, file.size_bytes, false); changed = true; }
-  }
-  for (const row of existing.values()) { await deleteFileRow(row.id); forgetPageSnapshots(row.id); changed = true; }
-  if (changed) announce(subject.id);
+  const plan = planDrawingRows(kind, onDisk, rows);
+  for (const file of plan.add) await rowFor(subject.id, file, kind);
+  for (const { row, size } of plan.touch) await touchFileRow(row.id, size, false);
+  for (const row of plan.remove) { await deleteFileRow(row.id); forgetPageSnapshots(row.id); }
+  if (plan.add.length || plan.touch.length || plan.remove.length) announce(subject.id);
 }
+
+export const reconcileCanvases = (subject: { id: number; code: string }) => reconcileDrawings("canvas", subject);
+export const reconcileNotebooks = (subject: { id: number; code: string }) => reconcileDrawings("notebook", subject);

@@ -19,6 +19,7 @@ import {
   ListChecks,
   MusicNotes,
   Palette,
+  Notebook,
   Scribble,
 } from "@phosphor-icons/react";
 import { browseId, hostOf, type BrowserTab } from "@/lib/browser";
@@ -167,6 +168,8 @@ export function tabInfo(
       const base = rel?.split("/").pop();
       if (base && rel?.includes("/canvases/"))
         return { title: base.replace(/\.canvas$/i, ""), icon: <Scribble size={size} /> };
+      if (base && rel?.includes("/notebooks/"))
+        return { title: base.replace(/\.notebook$/i, ""), icon: <Notebook size={size} /> };
       if (base && rel?.includes("/documents/"))
         return { title: base.replace(/\.md$/i, ""), icon };
       if (base)
@@ -176,7 +179,7 @@ export function tabInfo(
       return { title: new URLSearchParams(search).get("t") ?? "Lecture", icon };
     }
     const code = subject ? displayCode(subject.code) : "Subject";
-    if (m[2] === "files" && /^\/subjects\/\d+\/files\/(drive|documents|canvases)\/?$/.test(pathname)) {
+    if (m[2] === "files" && /^\/subjects\/\d+\/files\/(drive|documents|canvases|notebooks)\/?$/.test(pathname)) {
       return { title: `${code} · Drive`, icon };
     }
     // The first segment only: other Files sub-tabs share the Files title.

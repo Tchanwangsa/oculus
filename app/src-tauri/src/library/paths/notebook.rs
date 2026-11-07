@@ -26,7 +26,7 @@ pub struct NotebookPage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotebookPages {
-    /// The notebook's library path, `courses/<code>/canvases/<title>.canvas`.
+    /// The notebook's library path, `courses/<code>/notebooks/<title>.notebook`.
     pub canvas: String,
     pub page_count: usize,
     pub pages: Vec<NotebookPage>,

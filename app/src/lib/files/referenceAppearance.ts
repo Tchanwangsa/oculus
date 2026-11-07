@@ -1,4 +1,4 @@
-import { CheckSquare, File, Kanban, Scribble, VideoCamera } from "@phosphor-icons/react";
+import { CheckSquare, File, Kanban, Notebook, Scribble, VideoCamera } from "@phosphor-icons/react";
 import { categoryIconFor, fileIconFor, isLessonAsset, isSheetFile } from "./fileTypes";
 import { lecturePageId } from "@/lib/lectures/pagePath";
 
@@ -7,6 +7,7 @@ export function fileReferenceAppearance(file: { category: string | null; filenam
   if (path.startsWith("lectures/")) return { Icon: VideoCamera, tone: "text-reference-lecture", kind: "Lecture" };
   const category = file.category;
   if (category === "canvas") return { Icon: Scribble, tone: "text-reference-page", kind: "Canvas" };
+  if (category === "notebook") return { Icon: Notebook, tone: "text-reference-page", kind: "Notebook" };
   if (category === "page" || category === "document" || category === "home" || category === "syllabus")
     return { Icon: File, tone: "text-reference-page", kind: category === "document" ? "Note" : "Page" };
   if (category === "ed") return { Icon: categoryIconFor(file), tone: "text-reference-discussion", kind: "Discussion" };

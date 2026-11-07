@@ -115,7 +115,7 @@ oculus files INFO30006 -m assignment
 Use it to *locate* before reading, when a filename is half-remembered.
 `-c/--category` is the same flag `oculus grep` takes, spelled the same way and
 repeatable: `file`, `page`, `announcement`, `ed`, `module`, `assignment`,
-`quiz`, `syllabus`, `home`, `image`, `upload`, `document`, `canvas`, `other`. `--indexed` keeps only
+`quiz`, `syllabus`, `home`, `image`, `upload`, `document`, `canvas`, `notebook`, `other`. `--indexed` keeps only
 what retrieval can see.
 
 **The `indexed` column is how many pages are searchable.** A PDF showing none
@@ -149,7 +149,7 @@ longer fragment or `-s`; do not pick for it.
 ## A notebook — the student's handwritten working
 
 The student writes assignments and derivations by hand in an Oculus
-**notebook**: a `.canvas` file under `canvases/`, one or more pages, sometimes
+**notebook**: a `.notebook` file under `notebooks/`, one or more pages, sometimes
 laid over a copy of the assignment. It is not text, so `oculus read` prints
 its **page pictures** instead:
 
@@ -160,21 +160,23 @@ oculus read "Assignment 1 (notebook)" --pages 2
 Each line is a page number, the path of that page's PNG and how long ago it
 was redrawn (a few seconds after each stroke while the notebook is open). **Open
 the PNG with your own image tool** and read what is written. Do not open the
-`.canvas` file: it is JSON holding every stroke, and an assignment's pages
+`.notebook` file: it is JSON holding every stroke, and an assignment's pages
 inside it are megabytes of base64.
 
 - When the student says "my working", "my solution" or "the canvas", this is
   what they mean. A chat message names a notebook that is open, and the page in
-  view; if none is named, `oculus files -c canvas` lists them.
+  view; if none is named, `oculus files -c notebook` lists them.
 - Give feedback on **their** working: say which line is right, which step
   does not follow and why, and what to try. Do not rewrite their page for them
   or paste the finished answer unless asked. If their handwriting is unclear,
   ask rather than guess.
 - A picture older than the student's last edit is stale; if the age looks wrong
   for what they say they just wrote, say so rather than commenting on old work.
-- A notebook is the student's. You cannot and should not write into `canvases/`.
-- `oculus read` says so when a canvas has no pages (a whiteboard) or no
-  pictures yet (never opened since it was made); relay that, do not retry.
+- A notebook is the student's. You cannot and should not write into
+  `notebooks/` or `canvases/`.
+- `oculus read` says so when a notebook has no pictures yet (never opened
+  since it was made); relay that, do not retry. A canvas (`canvases/`) is a
+  whiteboard drawing with neither pages nor text.
 
 ## The argument that is not where you expect
 

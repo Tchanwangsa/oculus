@@ -1,4 +1,4 @@
-import { parseAck, parseChange, type ShareAck, type ShareChange, type ShareOp, type ShareSnapshot } from "./protocol";
+import { parseAck, parseChange, parseKind, type ShareAck, type ShareChange, type ShareOp, type ShareSnapshot } from "./protocol";
 
 /** HTTP side of the share protocol. The secret travels only in the
  * Authorization header; no URL, error message or log line carries it. */
@@ -80,7 +80,7 @@ export class ShareApi {
       if (error instanceof ShareHttpError) throw error;
       throw new ShareNetworkError("The canvas stopped downloading.");
     }
-    return { epoch, revision, text };
+    return { epoch, revision, text, kind: parseKind(response.headers.get("X-Oculus-Kind")) };
   }
 
   async commit(op: ShareOp, signal?: AbortSignal): Promise<ShareAck> {

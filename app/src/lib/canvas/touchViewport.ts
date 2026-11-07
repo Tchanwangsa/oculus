@@ -1,4 +1,5 @@
 import type { CanvasViewport, Point } from './model';
+import { clampZoom, type ZoomLimits } from './zoom';
 
 const midpoint = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 const distance = (a: Point, b: Point) => Math.hypot(b.x - a.x, b.y - a.y);
@@ -23,7 +24,8 @@ export class TouchViewportGesture {
     return this.active;
   }
 
-  move(id: number, point: Point): CanvasViewport | null {
+  /** The camera for this sample; `limits` bound the zoom, and the world point under the fingers' first midpoint stays under their midpoint. */
+  move(id: number, point: Point, limits?: ZoomLimits): CanvasViewport | null {
     if (!this.contacts.has(id)) return null;
     this.contacts.set(id, point);
     const base = this.baseline;
@@ -31,7 +33,7 @@ export class TouchViewportGesture {
     const a = this.contacts.get(base.ids[0]), b = this.contacts.get(base.ids[1]);
     if (!a || !b) return null;
     const center = midpoint(a, b);
-    const zoom = Math.max(0.1, Math.min(8, base.viewport.zoom * distance(a, b) / base.distance));
+    const zoom = clampZoom(base.viewport.zoom * distance(a, b) / base.distance, limits);
     return {
       ...base.viewport, zoom,
       x: center.x - (base.center.x - base.viewport.x) * zoom / base.viewport.zoom,

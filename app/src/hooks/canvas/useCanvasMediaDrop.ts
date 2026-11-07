@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent, type ClipboardEvent, type RefObject } from 'react';
 import { readCanvasImages, type CanvasImportedImage } from '@/lib/canvas/importMedia';
-import { placeCanvasImages } from '@/lib/canvas/mediaPlacement';
+import { placeImagesIn } from '@/lib/canvas/mediaPlacement';
 import { screenToWorld } from '@/lib/canvas/geometry';
 import type { CanvasDocument, Point } from '@/lib/canvas/model';
 import { useCanvasPlatform } from '@/lib/canvas/platform';
@@ -14,8 +14,8 @@ const imageUrl = (data: DataTransfer) => {
   return src && /^(data:image\/(png|jpeg|webp|gif);base64,|asset:\/\/|https?:\/\/asset\.localhost\/)/i.test(src) ? src : null;
 };
 
-/** Drops and pastes use the modal's decoder, placement and one-step insertion. */
-export function useCanvasMediaDrop(root: RefObject<HTMLDivElement | null>, documentRef: RefObject<CanvasDocument>, insert: (images: CanvasImportedImage[], at?: Point) => void) {
+/** Drops and pastes use the modal's decoder, placement and one-step insertion; a `notebook` previews them where its placement puts them. */
+export function useCanvasMediaDrop(root: RefObject<HTMLDivElement | null>, documentRef: RefObject<CanvasDocument>, insert: (images: CanvasImportedImage[], at?: Point) => void, notebook = false) {
   const platform = useCanvasPlatform();
   const [preview, setPreview] = useState<{ at: Point; images: CanvasImportedImage[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +103,6 @@ export function useCanvasMediaDrop(root: RefObject<HTMLDivElement | null>, docum
     void finish(read(files, abort.current.signal));
   };
   const rect = root.current?.getBoundingClientRect();
-  const boxes = preview?.images.length && rect ? placeCanvasImages(preview.images, documentRef.current.viewport, rect, world(preview.at)) : [];
+  const boxes = preview?.images.length && rect ? placeImagesIn(documentRef.current, notebook, preview.images, rect, world(preview.at)) : [];
   return { preview, boxes, error, clearError: () => setError(null), dragOver, drop, paste, dragLeave: () => setPreview(null) };
 }

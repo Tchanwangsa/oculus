@@ -108,7 +108,16 @@ impl Harness {
 
     /// Write a canvas for `file_id` and open its authority session.
     pub fn open(&self, file_id: i64, document: &Value) -> String {
-        let rel = format!("courses/TEST/canvases/File{file_id}.canvas");
+        self.open_at(
+            file_id,
+            &format!("courses/TEST/canvases/File{file_id}.canvas"),
+            document,
+        )
+    }
+
+    /// Write `document` at `rel` (a canvas or a notebook) and open its authority session.
+    pub fn open_at(&self, file_id: i64, rel: &str, document: &Value) -> String {
+        let rel = rel.to_string();
         let path = self.root.join(&rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let text = format::serialize(document).unwrap();

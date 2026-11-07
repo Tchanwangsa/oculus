@@ -1,6 +1,7 @@
-import { describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { parseCanvasDocument, serializeCanvasDocument } from '../../../src/lib/canvas/model';
-import { blankNotebook, NOTEBOOK_DESK, notebookFromPages } from '../../../src/lib/canvas/notebook';
+import { blankNotebook, createBlankNotebook, NOTEBOOK_DESK, notebookFromPages } from '../../../src/lib/canvas/notebook';
+import { createCanvas } from '../../../src/lib/canvas/files';
 import { pageRects, selectableElements } from '../../../src/lib/canvas/paper';
 
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
@@ -51,5 +52,30 @@ describe('notebookFromPages', () => {
   test('needs one picture per page', () => {
     expect(() => notebookFromPages(sizes, [image('only')])).toThrow();
     expect(() => notebookFromPages([], [])).toThrow();
+  });
+});
+
+describe('creating', () => {
+  const calls: { command: string; args: Record<string, unknown> }[] = [];
+  const stop = new Error('stopped after the native call');
+  /** Records the native command and refuses it, so nothing reaches the database. */
+  beforeEach(() => {
+    calls.length = 0;
+    mock.module('@tauri-apps/api/core', () => ({
+      invoke: async (command: string, args: Record<string, unknown>) => { calls.push({ command, args }); throw stop; },
+    }));
+  });
+
+  test('a new notebook is a .notebook with pages', async () => {
+    await expect(createBlankNotebook({ id: 1, code: 'X' }, 'Week 3', 'grid', 'portrait')).rejects.toBe(stop);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ command: 'create_canvas', args: { subjectCode: 'X', title: 'Week 3', kind: 'notebook' } });
+    expect(parseCanvasDocument(calls[0].args.content as string).paper?.pages).toHaveLength(1);
+  });
+
+  test('a new canvas is a .canvas without pages', async () => {
+    await expect(createCanvas({ id: 1, code: 'X' })).rejects.toBe(stop);
+    expect(calls[0]).toMatchObject({ command: 'create_canvas', args: { kind: 'canvas' } });
+    expect(parseCanvasDocument(calls[0].args.content as string).paper).toBeUndefined();
   });
 });

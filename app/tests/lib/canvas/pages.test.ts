@@ -105,16 +105,16 @@ describe('page templates', () => {
 });
 
 describe('notebook export', () => {
-  test('bounds cover the pages and anything drawn off them', () => {
+  test('a notebook exports its pages alone, since ink is clipped to them', () => {
     const doc = notebook(three, [box('far', 400, 50)]);
-    expect(exportBounds(doc)).toEqual({ x: -50, y: 0, width: 470, height: 620 });
+    expect(exportBounds(doc, doc.paper)).toEqual({ x: -50, y: 0, width: 100, height: 620 });
   });
   test('a whiteboard exports around its elements, and an empty one has nothing to export', () => {
-    expect(exportBounds(createCanvasDocument())).toBeNull();
-    expect(exportBounds({ ...createCanvasDocument(), elements: [box('a', 5, 6)] })).toMatchObject({ x: 5, y: 6 });
+    expect(exportBounds(createCanvasDocument(), undefined)).toBeNull();
+    expect(exportBounds({ ...createCanvasDocument(), elements: [box('a', 5, 6)] }, undefined)).toMatchObject({ x: 5, y: 6 });
   });
   test('the SVG has a white sheet for each page, under the elements', () => {
-    const svg = exportCanvasSvg(notebook(createPaper('grid'), [box('a', 0, 0)]), () => 0);
+    const svg = exportCanvasSvg(notebook(createPaper('grid'), [box('a', 0, 0)]), () => 0, { notebook: true });
     expect((svg.match(/fill="#ffffff"\/>/g) ?? []).length).toBeGreaterThanOrEqual(2);
     expect(svg.indexOf('stroke="#cfd8ea"')).toBeGreaterThan(-1);
     expect(svg.indexOf('stroke="#cfd8ea"')).toBeLessThan(svg.indexOf('<g transform'));

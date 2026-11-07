@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createCanvasDocument, type CanvasElement } from '@/lib/canvas/model';
-import { regionHandleAt, moveRegion, regionBounds, resizeRegion } from '@/lib/canvas/region';
+import { CAPTURE_LIFT_DELAY_MS, regionHandleAt, moveRegion, regionBounds, resizeRegion } from '@/lib/canvas/region';
 import { createHarness, key, pointer, type Harness } from './harness';
 
 const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=';
@@ -178,7 +178,7 @@ describe('standard image crop handles', () => {
     expect(resizeRegion(bounds, 0, { x: 500, y: 600 }, image, 1)).toEqual({ x: 292, y: 392, width: 8, height: 8 });
     expect(moveRegion(bounds, { x: 500, y: -500 }, image)).toEqual({ x: 300, y: 0, width: 200, height: 300 });
   });
-  test('inside drags reposition an existing crop, and outside drags do nothing', () => {
+  test('inside drags reposition an existing crop, and outside drags pan without applying', () => {
     const h = setup(); crop(h);
     drag(h, 'mouse', [0, 0], [100, 100]);
     drag(h, 'mouse', [500, 700], [300, 400]);
@@ -282,4 +282,57 @@ test('two fingers cancel a held capture copy without inserting a raster', () => 
   expect(h.editor.region?.bounds).toEqual({ x: 100, y: 100, width: 200, height: 300 });
   expect(h.editor.documentRef.current.elements).toEqual([image, ink]);
   expect(h.editor.canUndo).toBe(false);
+});
+
+
+test('short capture selections keep a usable interior between the resize edges', () => {
+  const bounds = { x: 100, y: 100, width: 240, height: 18 };
+  expect(regionHandleAt(bounds, { x: 220, y: 109 }, 1, 'pen')).toBe(4);
+  expect(regionHandleAt(bounds, { x: 220, y: 109 }, 1, 'pen', true)).toBeUndefined();
+  expect(regionHandleAt(bounds, { x: 220, y: 101 }, 1, 'pen', true)).toBe(4);
+  expect(regionHandleAt(bounds, { x: 220, y: 117 }, 1, 'pen', true)).toBe(6);
+});
+
+for (const type of ['mouse', 'pen', 'touch']) test(type + ' holds show progress and lift a copy before movement', async () => {
+  const h = setup(); h.editor.setTool('capture'); h.render(); drag(h, 'pen', [100, 100], [300, 400]);
+  h.editor.pointerDown(pointer(2, type, 200, 250)); h.render();
+  expect(h.editor.captureHold?.phase).toBe('holding');
+  try {
+    await Bun.sleep(CAPTURE_LIFT_DELAY_MS + 30); h.render();
+    expect(h.editor.captureHold?.phase).toBe('lifted');
+    expect(h.editor.cursor).toBe('grabbing');
+    expect(h.published).toHaveLength(0);
+    h.editor.pointerUp(pointer(2, type, 200, 250)); h.render();
+    expect(h.editor.captureHold).toBeNull();
+    expect(h.editor.region?.bounds).toEqual({ x: 100, y: 100, width: 200, height: 300 });
+    expect(h.published).toHaveLength(0);
+  } finally { h.editor.cancelGesture(); h.render(); }
+});
+
+test('moving the selection early cancels the hold timer even if the pointer pauses', async () => {
+  const h = setup(); h.editor.setTool('capture'); h.render(); drag(h, 'pen', [100, 100], [300, 400]);
+  h.editor.pointerDown(pointer(2, 'mouse', 200, 250));
+  h.editor.pointerMove(pointer(2, 'mouse', 220, 270)); h.render();
+  expect(h.editor.captureHold).toBeNull();
+  await Bun.sleep(CAPTURE_LIFT_DELAY_MS + 30); h.render();
+  expect(h.editor.captureHold).toBeNull();
+  h.editor.pointerUp(pointer(2, 'mouse', 220, 270)); h.render();
+  expect(h.editor.region?.bounds).toEqual({ x: 120, y: 120, width: 200, height: 300 });
+  expect(h.published).toHaveLength(0);
+});
+
+test('resizing a capture never starts the hold indicator', () => {
+  const h = setup(); h.editor.setTool('capture'); h.render(); drag(h, 'pen', [100, 100], [300, 400]);
+  h.editor.pointerDown(pointer(2, 'pen', 300, 250)); h.render();
+  expect(h.editor.captureHold).toBeNull();
+  h.editor.pointerMove(pointer(2, 'pen', 380, 250)); h.editor.pointerUp(pointer(2, 'pen', 380, 250)); h.render();
+  expect(h.editor.region?.bounds.width).toBe(280);
+});
+
+test('Escape clears a pending hold before it can lift a ghost', async () => {
+  const h = setup(); h.editor.setTool('capture'); h.render(); drag(h, 'pen', [100, 100], [300, 400]);
+  h.editor.pointerDown(pointer(2, 'pen', 200, 250)); h.render();
+  h.editor.keyDown(key('Escape')); h.render();
+  await Bun.sleep(CAPTURE_LIFT_DELAY_MS + 30); h.render();
+  expect(h.editor.captureHold).toBeNull(); expect(h.editor.region).toBeNull(); expect(h.published).toHaveLength(0);
 });

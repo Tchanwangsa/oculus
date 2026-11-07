@@ -1,5 +1,6 @@
 import {
   ChalkboardTeacher,
+  Notebook,
   Scribble,
   ChatsCircle,
   File,
@@ -137,6 +138,7 @@ export function categoryIconFor(file: {
     case "image": return fileIconFor(file.filename);
     case "document": return NotePencil;
     case "canvas": return Scribble;
+    case "notebook": return Notebook;
     default: return FileText;
   }
 }
@@ -145,6 +147,7 @@ export function categoryIconFor(file: {
 export function fileIconFor(filename: string): Icon {
   switch (ext(filename)) {
     case "canvas": return Scribble;
+    case "notebook": return Notebook;
     case "pdf": return FilePdf;
     case "doc":
     case "docx": return FileDoc;

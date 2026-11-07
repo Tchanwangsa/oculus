@@ -79,7 +79,7 @@ export interface CanvasDocument {
   elements: CanvasElement[];
   viewport: CanvasViewport;
   background: string;
-  /** Set on a notebook: fixed-size pages stacked down the canvas. Absent on a whiteboard. */
+  /** A notebook's pages, stacked down the board. A `.canvas` may hold one too: kept as written, never drawn (`notebookPaper`). */
   paper?: Paper;
   [key: string]: unknown;
 }

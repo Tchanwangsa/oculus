@@ -1,9 +1,13 @@
 import { elementBounds, type Bounds } from './geometry';
 import type { CanvasDocument, CanvasElement, Point } from './model';
-import { drawElement, resizeHandles } from './render';
+import { drawElement, drawElementsOnPages, resizeHandles } from './render';
 import { paintPaper } from './renderPaper';
+import { notebookPaper } from './paper';
 import { visibleElements } from './engine';
 import { loadCanvasImages } from './renderImages';
+
+export const CAPTURE_LIFT_DELAY_MS = 1200;
+export interface CaptureHoldIndicator { point: Point; phase: 'holding' | 'lifted' }
 
 export interface CanvasRegion {
   kind: 'capture' | 'crop';
@@ -22,9 +26,9 @@ export function regionBounds(start: Point, end: Point, source?: CanvasElement): 
   return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y) };
 }
 
-/** Crops preserve source pixels and transparency; captures flatten the paper and all intersecting layers. */
-export async function rasterizeRegion(region: CanvasRegion): Promise<{ blob: Blob; width: number; height: number }> {
-  const { bounds, snapshot, source } = region;
+/** Crops preserve source pixels and transparency; captures flatten all intersecting layers, and in a `notebook` its pages, clipping ink to them. */
+export async function rasterizeRegion(region: CanvasRegion, notebook = false): Promise<{ blob: Blob; width: number; height: number }> {
+  const { bounds, snapshot, source } = region, paper = notebookPaper(snapshot, notebook);
   if (bounds.width <= 0 || bounds.height <= 0) throw new Error('Drag an area with a width and height.');
   const elements = source ? [{ ...source, opacity: 1 }] : visibleElements(snapshot.elements, bounds);
   await Promise.all([loadCanvasImages(elements), window.document.fonts?.ready]);
@@ -40,22 +44,23 @@ export async function rasterizeRegion(region: CanvasRegion): Promise<{ blob: Blo
   if (!source) {
     context.fillStyle = snapshot.background;
     context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-    if (snapshot.paper) paintPaper(context, snapshot.paper, bounds, scale);
+    if (paper) paintPaper(context, paper, bounds, scale);
   }
-  for (const element of elements) drawElement(context, element);
+  if (source) drawElement(context, elements[0]);
+  else drawElementsOnPages(context, elements, paper);
   const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
   if (!blob) throw new Error('Could not encode this image.');
   return { blob, width: canvas.width, height: canvas.height };
 }
 
 /** Supply the PNG promise during the click so Safari keeps clipboard user activation while pixels decode. */
-export function copyRegionImage(region: CanvasRegion): Promise<void> {
-  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('Image copying is unavailable here. Use a browser with image clipboard support to copy this capture.');
-  return navigator.clipboard.write([new ClipboardItem({ 'image/png': rasterizeRegion(region).then(result => result.blob) })]);
+export function copyRegionImage(region: CanvasRegion, notebook = false): Promise<void> {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error(globalThis.isSecureContext === false ? 'Copying to other apps requires an HTTPS connection. Use Duplicate to copy within the canvas.' : 'Image copying is unavailable here. Use Duplicate to copy within the canvas.');
+  return navigator.clipboard.write([new ClipboardItem({ 'image/png': rasterizeRegion(region, notebook).then(result => result.blob) })]);
 }
 
 /** Corners win over edges; the whole edge is grabbable, with extra room for a Pencil or finger. */
-export function regionHandleAt(bounds: Bounds, point: Point, zoom: number, pointerType = 'mouse'): number | undefined {
+export function regionHandleAt(bounds: Bounds, point: Point, zoom: number, pointerType = 'mouse', capture = false): number | undefined {
   const tolerance = (pointerType === 'mouse' ? 9 : 16) / zoom;
   let corner: number | undefined, distance = tolerance;
   for (const [index, handle] of resizeHandles(bounds).slice(0, 4).entries()) {
@@ -63,14 +68,16 @@ export function regionHandleAt(bounds: Bounds, point: Point, zoom: number, point
     if (next <= distance) { corner = index; distance = next; }
   }
   if (corner !== undefined) return corner;
-  const candidates: { handle: number; distance: number }[] = [];
+  const candidates: { handle: number; distance: number; tolerance: number }[] = [];
+  const horizontalTolerance = capture ? Math.min(tolerance, bounds.height / 6) : tolerance;
+  const verticalTolerance = capture ? Math.min(tolerance, bounds.width / 6) : tolerance;
   if (point.x >= bounds.x - tolerance && point.x <= bounds.x + bounds.width + tolerance) {
-    candidates.push({ handle: 4, distance: Math.abs(point.y - bounds.y) }, { handle: 6, distance: Math.abs(point.y - bounds.y - bounds.height) });
+    candidates.push({ handle: 4, distance: Math.abs(point.y - bounds.y), tolerance: horizontalTolerance }, { handle: 6, distance: Math.abs(point.y - bounds.y - bounds.height), tolerance: horizontalTolerance });
   }
   if (point.y >= bounds.y - tolerance && point.y <= bounds.y + bounds.height + tolerance) {
-    candidates.push({ handle: 5, distance: Math.abs(point.x - bounds.x - bounds.width) }, { handle: 7, distance: Math.abs(point.x - bounds.x) });
+    candidates.push({ handle: 5, distance: Math.abs(point.x - bounds.x - bounds.width), tolerance: verticalTolerance }, { handle: 7, distance: Math.abs(point.x - bounds.x), tolerance: verticalTolerance });
   }
-  return candidates.filter(candidate => candidate.distance <= tolerance).sort((a, b) => a.distance - b.distance)[0]?.handle;
+  return candidates.filter(candidate => candidate.distance <= candidate.tolerance).sort((a, b) => a.distance - b.distance)[0]?.handle;
 }
 
 export function resizeRegion(bounds: Bounds, handle: number, point: Point, source: CanvasElement | undefined, zoom: number): Bounds {

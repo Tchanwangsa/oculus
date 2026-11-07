@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FilePdfIcon, ImageIcon, SpinnerGapIcon, XIcon } from '@phosphor-icons/react';
+import { CaretLeftIcon, FilePdfIcon, ImageIcon, SpinnerGapIcon, XIcon } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useScrollFade } from '@/hooks/ui/useScrollFade';
@@ -11,13 +11,23 @@ import { CanvasLibraryPdfs } from './CanvasLibraryPdfs';
 type Busy = 'images' | 'pdf' | 'import' | null;
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
-export function CanvasImageDialog({ open, onOpenChange, onImport }: {
+/** A notebook's "Insert PDF pages": only library PDFs, and the chosen pages come back with their sizes in points. */
+export interface PdfPagesTarget {
+  /** The page number (from 1) the new pages follow, for the dialog's wording. */
+  after: number;
+  onInsert: (sizes: { width: number; height: number }[], images: CanvasImportedImage[]) => void | Promise<void>;
+}
+
+/** Add image: local images or library PDF pages as images. With `pdfPages`, it picks PDF pages to become notebook pages. */
+export function CanvasImageDialog({ open, onOpenChange, onImport, pdfPages }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onImport: (images: CanvasImportedImage[]) => void | Promise<void>;
+  onImport?: (images: CanvasImportedImage[]) => void | Promise<void>;
+  pdfPages?: PdfPagesTarget;
 }) {
   const platform = useCanvasPlatform();
-  const [browsingPdfs, setBrowsingPdfs] = useState(false);
+  const pagesOnly = !!pdfPages;
+  const [browsingPdfs, setBrowsingPdfs] = useState(pagesOnly);
   const [images, setImages] = useState<CanvasImportedImage[]>([]);
   const [pdf, setPdf] = useState<CanvasImportPdf | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -42,8 +52,8 @@ export function CanvasImageDialog({ open, onOpenChange, onImport }: {
   const reset = useCallback(() => {
     release();
     setImages([]); setPdf(null); setSelected(new Set());
-    setBusy(null); setProgress(''); setError(null); setBrowsingPdfs(false);
-  }, [release]);
+    setBusy(null); setProgress(''); setError(null); setBrowsingPdfs(pagesOnly);
+  }, [release, pagesOnly]);
   const changeOpen = (next: boolean) => {
     if (!next) reset();
     onOpenChange(next);
@@ -95,8 +105,8 @@ export function CanvasImageDialog({ open, onOpenChange, onImport }: {
     setBusy('import'); setError(null);
     try {
       const imported = [...images];
+      const pages = pdf ? [...selected].sort((a, b) => a - b) : [];
       if (pdf) {
-        const pages = [...selected].sort((a, b) => a - b);
         for (let index = 0; index < pages.length; index++) {
           if (token !== generation.current) return;
           setProgress(`Preparing page ${index + 1} of ${pages.length}…`);
@@ -106,8 +116,13 @@ export function CanvasImageDialog({ open, onOpenChange, onImport }: {
       }
       if (token !== generation.current) return;
       assertCanvasImportSize(imported);
-      setProgress('Adding to canvas…');
-      await onImport(imported);
+      if (pdfPages && pdf) {
+        setProgress('Adding pages…');
+        await pdfPages.onInsert(pages.map(page => pdf.pages[page - 1]), imported);
+      } else {
+        setProgress('Adding to canvas…');
+        await onImport?.(imported);
+      }
       if (token === generation.current) changeOpen(false);
     } catch (problem) {
       if (token === generation.current) setError(message(problem));
@@ -121,12 +136,12 @@ export function CanvasImageDialog({ open, onOpenChange, onImport }: {
   return <Dialog open={open} onOpenChange={changeOpen}>
     <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col sm:max-w-2xl" onKeyDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
       <DialogHeader>
-        <DialogTitle>Add images</DialogTitle>
-        <DialogDescription>Choose your own images or select pages from a PDF in your library.</DialogDescription>
+        <DialogTitle>{pdfPages ? 'Insert PDF pages' : 'Add images'}</DialogTitle>
+        <DialogDescription>{pdfPages ? `Each page you select becomes a new page after page ${pdfPages.after}, at the PDF page's size, to write on. The PDF itself is not changed.` : 'Choose your own images or select pages from a PDF in your library.'}</DialogDescription>
       </DialogHeader>
       <input ref={input} className="hidden" type="file" accept={CANVAS_IMAGE_ACCEPT} multiple aria-label="Choose image files"
         onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; void chooseImages(files); }} />
-      <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
+      {pagesOnly ? null : <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
         <Button variant="outline" className="h-auto justify-start rounded-xl px-4 py-3 text-left" disabled={busy !== null} onClick={() => input.current?.click()}>
           <ImageIcon size={22} className="text-muted-foreground" />
           <span className="flex min-w-0 flex-col gap-0.5"><span>Choose images</span><span className="text-xs font-normal text-muted-foreground">PNG, JPG, WebP or GIF</span></span>
@@ -135,7 +150,8 @@ export function CanvasImageDialog({ open, onOpenChange, onImport }: {
           <FilePdfIcon size={22} className="text-reference-pdf" />
           <span className="flex min-w-0 flex-col gap-0.5"><span>Choose PDF</span><span className="text-xs font-normal text-muted-foreground">Search your library</span></span>
         </Button>
-      </div>
+      </div>}
+      {pagesOnly && pdf ? <Button variant="ghost" size="xs" className="self-start" disabled={busy !== null} onClick={reset}><CaretLeftIcon />Choose another PDF</Button> : null}
       {browsingPdfs && <CanvasLibraryPdfs disabled={busy !== null} onChoose={file => void choosePdf(file)} />}
       {busy === 'images' || busy === 'pdf' ? <div className="flex items-center gap-2 py-5 text-sm text-muted-foreground" role="status"><SpinnerGapIcon className="animate-spin" />{busy === 'images' ? 'Reading images…' : 'Opening PDF…'}</div> : null}
       {pdf || images.length ? <div ref={scroller} className="min-h-0 overflow-y-auto py-1">
@@ -149,12 +165,12 @@ export function CanvasImageDialog({ open, onOpenChange, onImport }: {
       </div> : null}
       {(selectionError || error) && <p className="text-[13px] text-destructive" data-selectable role="alert">{selectionError ?? error}</p>}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-3">
-        <p className="text-xs text-muted-foreground" role="status" aria-live="polite">{busy === 'import' ? progress : count ? `${count} ${pdf ? (count === 1 ? 'page' : 'pages') : (count === 1 ? 'image' : 'images')} selected` : pdf ? 'Click pages to select them.' : 'Images are embedded in your canvas.'}</p>
+        <p className="text-xs text-muted-foreground" role="status" aria-live="polite">{busy === 'import' ? progress : count ? `${count} ${pdf ? (count === 1 ? 'page' : 'pages') : (count === 1 ? 'image' : 'images')} selected` : pdf ? 'Click pages to select them.' : pagesOnly ? 'Pages are copied into your notebook.' : 'Images are embedded in your canvas.'}</p>
         <DialogFooter className="flex-row">
           <Button variant="outline" onClick={() => changeOpen(false)}>Cancel</Button>
           <Button disabled={busy !== null || count === 0 || selectionError !== null} onClick={() => void importImages()}>
             {busy === 'import' && <SpinnerGapIcon className="animate-spin" aria-hidden />}
-            {pdf ? 'Import selected' : 'Add to canvas'}
+            {pdfPages ? 'Insert pages' : pdf ? 'Import selected' : 'Add to canvas'}
           </Button>
         </DialogFooter>
       </div>

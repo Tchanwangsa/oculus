@@ -1,7 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { blobToBase64 } from '@/lib/encoding/base64';
-import { boundsIntersect, elementBounds } from './geometry';
-import type { CanvasDocument, CanvasElement } from './model';
+import { drawingKindOfPath } from './drawingKinds';
+import type { CanvasDocument } from './model';
+import { pageFingerprints } from './pageFingerprints';
 import { pageRects } from './paper';
 import { renderPagePng } from './render';
 
@@ -21,28 +22,6 @@ export const nativeSnapshotDeps: SnapshotDeps = {
   encode: blobToBase64,
   send: ({ fileId, relativePath, pageCount, pages }) => invoke('canvas_write_page_snapshots', { fileId, relativePath, pageCount, pages }),
 };
-
-/** An element's text, kept per element object so an untouched one is never serialised twice. An embedded picture counts by its size and tail. */
-const elementKeys = new WeakMap<CanvasElement, string>();
-function elementKey(element: CanvasElement): string {
-  let key = elementKeys.get(element);
-  if (key === undefined) {
-    const { dataUrl, ...rest } = element;
-    key = JSON.stringify(rest) + (dataUrl ? `|${dataUrl.length}:${dataUrl.slice(-48)}` : '');
-    elementKeys.set(element, key);
-  }
-  return key;
-}
-
-/** What each page's picture depends on, by page id: its number, size and template, and every element touching it. */
-export function pageFingerprints(document: CanvasDocument): Map<string, string> {
-  const { paper } = document;
-  if (!paper) return new Map();
-  return new Map(pageRects(paper).map(rect => {
-    const touching = document.elements.filter(element => boundsIntersect(elementBounds(element), rect));
-    return [rect.id, `${rect.index} ${rect.width}x${rect.height} ${rect.template}\n${touching.map(elementKey).join('\n')}`];
-  }));
-}
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
@@ -66,8 +45,9 @@ export class NotebookSnapshots {
     private readonly delay = SNAPSHOT_DELAY_MS,
   ) {}
 
+  /** Only a `.notebook` has pages to picture; any other path (a `.canvas`, whatever it holds) is ignored. */
   schedule(document: CanvasDocument, path: string): void {
-    if (!document.paper) return;
+    if (drawingKindOfPath(path) !== 'notebook' || !document.paper) return;
     this.latest = { document, path };
     clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.flush(), this.delay);

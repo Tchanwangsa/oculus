@@ -1,6 +1,7 @@
 import { CANVAS_DEFAULTS, hasLabel, roundnessOf, type CanvasDocument, type CanvasElement } from './model';
 import { diamondCorners, diamondVertices, elementArrowheads, rectangleRadius, strokeDash } from './geometry';
-import { exportBounds, paperSvg } from './renderPaper';
+import { elementPage, exportBounds, paperSvg } from './renderPaper';
+import { notebookPaper, pageRects, type PageRect, type Paper } from './paper';
 import { linePath } from './arrow/path';
 import { CANVAS_FONT_STACKS, layoutShapeLabel, layoutTextElement, measureCanvasText, type TextLayout, type TextMeasure } from './renderText';
 import { isCanvasImageDataUrl } from './imageSource';
@@ -59,9 +60,25 @@ function elementSvg(element: CanvasElement, measure: TextMeasure): string {
   return `${group}${shape}${sketch}${label}</g>`;
 }
 
-/** `measure` wraps shape labels; tests pass a deterministic one. */
-export function exportCanvasSvg(document: CanvasDocument, measure: TextMeasure = measureCanvasText): string {
-  const bounds = exportBounds(document) ?? { x: 0, y: 0, width: 800, height: 600 };
+const clipId = (page: PageRect) => `oculus-page-${page.index}`;
+
+/** A notebook's elements, each run on one page wrapped in a group clipped to that page, after a clip path per page. */
+function clippedSvg(paper: Paper, elements: readonly CanvasElement[], measure: TextMeasure): string {
+  const clips = pageRects(paper).map(rect => `<clipPath id="${clipId(rect)}"><rect x="${rect.x}" y="${rect.y}" width="${rect.width}" height="${rect.height}"/></clipPath>`).join('');
+  let out = `<defs>${clips}</defs>`, page: PageRect | null = null;
+  for (const element of elements) {
+    const owner = elementPage(paper, element);
+    if (owner !== page) { out += `${page ? '</g>' : ''}<g clip-path="url(#${clipId(owner)})">`; page = owner; }
+    out += elementSvg(element, measure);
+  }
+  return page ? `${out}</g>` : out;
+}
+
+/** `measure` wraps shape labels; tests pass a deterministic one. A notebook (`options.notebook`) is its pages, each element clipped to its own. */
+export function exportCanvasSvg(document: CanvasDocument, measure: TextMeasure = measureCanvasText, options: { notebook?: boolean } = {}): string {
+  const paper = notebookPaper(document, options.notebook);
+  const bounds = exportBounds(document, paper) ?? { x: 0, y: 0, width: 800, height: 600 };
   const x = bounds.x - 32, y = bounds.y - 32, width = bounds.width + 64, height = bounds.height + 64;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${x} ${y} ${width} ${height}"><rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${escape(document.background)}"/>${document.paper ? paperSvg(document.paper) : ''}${document.elements.map(element => elementSvg(element, measure)).join('')}</svg>`;
+  const elements = paper ? clippedSvg(paper, document.elements, measure) : document.elements.map(element => elementSvg(element, measure)).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${x} ${y} ${width} ${height}"><rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${escape(document.background)}"/>${paper ? paperSvg(paper) : ''}${elements}</svg>`;
 }

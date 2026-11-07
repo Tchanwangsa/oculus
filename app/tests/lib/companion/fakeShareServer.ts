@@ -106,6 +106,9 @@ export class FakeShareServer {
   /** Inline transactions up to this size in `change` frames (the plan's 32 KiB). */
   inlineLimit = 32 * 1024;
 
+  /** The `X-Oculus-Kind` the snapshot carries; null sends none, as an older Mac would. */
+  kind: string | null = null;
+
   constructor(doc: CanvasDocument = createCanvasDocument()) { this.doc = doc; }
 
   env(overrides: Partial<ShareClientEnv> & { clock: FakeClock; storage?: DraftStorage | null }): ShareClientEnv & { emit(event: ShareLifecycleEvent): void } {
@@ -193,7 +196,7 @@ export class FakeShareServer {
     const route = url.pathname.slice(`/api/s/${this.shareId}`.length);
     if (route === "/snapshot") {
       const text = serializeCanvasDocument(this.doc);
-      return new Response(text, { status: 200, headers: { "Content-Type": "text/plain", "X-Oculus-Epoch": this.epoch, "X-Oculus-Revision": String(this.revision), "Content-Length": String(new TextEncoder().encode(text).byteLength) } });
+      return new Response(text, { status: 200, headers: { "Content-Type": "text/plain", "X-Oculus-Epoch": this.epoch, "X-Oculus-Revision": String(this.revision), "Content-Length": String(new TextEncoder().encode(text).byteLength), ...(this.kind ? { "X-Oculus-Kind": this.kind } : {}) } });
     }
     if (route === "/changes") {
       const from = Number(url.searchParams.get("from"));

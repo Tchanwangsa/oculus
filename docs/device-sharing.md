@@ -1,6 +1,6 @@
 # Device sharing
 
-A shared canvas can be opened and edited from a browser on another device on
+A shared canvas or notebook can be opened and edited from a browser on another device on
 the same network (an iPad with a Pencil, a phone) through a small HTTP and
 WebSocket server in the app. The server is a transport into the canvas
 authority ([drawing-canvas.md](./drawing-canvas.md#a-shared-canvas-has-one-writer)),
@@ -135,7 +135,7 @@ send to a server or in a Referer. The page sends it only as
 | Request | Answer |
 | --- | --- |
 | `GET /c/`, `GET /c/assets/**` | The browser bundle (public; Host check only) |
-| `GET /api/s/<id>/snapshot` | The canvas file text with its exact `Content-Length`, `X-Oculus-Epoch`, `X-Oculus-Revision`, `X-Oculus-Phase` |
+| `GET /api/s/<id>/snapshot` | The drawing's file text with its exact `Content-Length`, `X-Oculus-Epoch`, `X-Oculus-Revision`, `X-Oculus-Phase`, and `X-Oculus-Kind` (`canvas` or `notebook`, from the file's path) |
 | `POST /api/s/<id>/commit` | `{clientId, seq, opId, epoch, transaction}` → `{epoch, revision, seq, opId, replayed, transaction}` |
 | `GET /api/s/<id>/changes?from=<rev>[&epoch=<e>]` | `[{epoch, revision, clientId, transaction}]` after `from` |
 | `GET /api/s/<id>/ws` | The push socket |
@@ -270,9 +270,12 @@ its separate disk recovery record is described in [drawing-canvas.md](./drawing-
 - A changed address is not followed by a device: one that only knows a
   vanished address cannot find the Mac again; the Mac shows the new link
   and the device rejoins under a new origin, whose drafts do not follow.
-- A shared notebook edits like any canvas, and a page added on the device reaches
-  the Mac. Creating a notebook, copying a PDF into one and exporting it as a PDF
-  are desktop-only: the device's page has no library and no save dialog.
+- The device's page opens a notebook in notebook mode only when the snapshot's
+  `X-Oculus-Kind` says `notebook` (anything else is a canvas, whatever the
+  document holds), and a downloaded draft keeps that kind's extension. A page
+  added, moved or deleted on the device reaches the Mac through the same
+  commits. Creating a notebook, inserting PDF pages and exporting a PDF are
+  desktop-only: the device's page has no library and no save dialog.
 - Replay is guaranteed only inside a live epoch. Stopping and restarting a
   share makes a new key.
 

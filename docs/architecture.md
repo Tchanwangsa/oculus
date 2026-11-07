@@ -320,10 +320,10 @@ uses the shared profile folder described in [windows.md](./windows.md). Inside:
 - `oculus.db` — SQLite, everything structured.
 - `courses/<code>/…` — scraped files in Canvas's layout, with the parser's
   `.md`, `.pages.json` and `<stem>_images/` siblings and the embedder's
-  `.emb.json`. Three subfolders are the student's own, never written by a sync:
+  `.emb.json`. Four subfolders are the student's own, never written by a sync:
   `uploads/` (copied in by `import_uploads`), `documents/` (notes written in
   the app by `create_document`, with pasted images in `documents/assets/`),
-  `canvases/` (versioned drawing documents; [drawing-canvas.md](./drawing-canvas.md)),
+  `canvases/` and `notebooks/` (versioned drawing documents; [drawing-canvas.md](./drawing-canvas.md)),
   all in `app/src-tauri/src/library/files/`. Rename and delete commands are scoped
   to those shapes (`is_document_rel` in `app/src-tauri/src/library/paths/own_files.rs`
   and the canvas guard in `app/src-tauri/src/library/files/canvases.rs`), which is

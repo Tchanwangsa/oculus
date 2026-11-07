@@ -28,6 +28,7 @@ const FILE_TAB: Record<string, CrumbTab> = {
   upload: { to: "files/uploads", label: "Files" },
   document: { to: "files/drive", label: "Drive" },
   canvas: { to: "files/drive", label: "Drive" },
+  notebook: { to: "files/drive", label: "Drive" },
   announcement: { to: "announcements", label: "Announcements" },
   assignment: { to: "assignments", label: "Assignments" },
   quiz: { to: "assignments", label: "Assignments" },

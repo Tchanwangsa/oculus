@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { useSharing } from "@/lib/sharing/store";
 import { devices } from "@/lib/sharing/view";
 import { CanvasShareDialog } from "./CanvasShareDialog";
+import type { CanvasKind } from "@/lib/canvas/paper";
 import { CanvasSurface } from "./CanvasSurface";
 
 const SHARING: Partial<Record<CanvasSnapshot["authority"], string>> = { attaching: "Starting sharing", live: "Sharing", paused: "Sharing paused", ended: "Sharing ended" };
@@ -22,7 +23,11 @@ const saveLabel = (status: CanvasSnapshot["status"]) =>
 // Scrolling and zooming are not edits: the camera is written only alongside a real change.
 const keepCameraLocal = () => {};
 
-export default function CanvasEditor({ file }: { file: DbFile }) {
+/**
+ * `kind` is the file's. A `.notebook` gets its pages (`CanvasSurface`), page pictures for chat agents and the open-notebook
+ * chat context; a `.canvas` is a whiteboard, and any `paper` in it is saved back untouched and otherwise ignored.
+ */
+export default function CanvasEditor({ file, kind = "canvas" }: { file: DbFile; kind?: CanvasKind }) {
   const session = useMemo(() => canvasSessions.open(file), [file.id]);
   const snapshot = useSyncExternalStore(session.subscribe, session.snapshot);
   const lastDocument = useRef<{ text: string; document: CanvasDocument } | null>(null);
@@ -69,8 +74,9 @@ export default function CanvasEditor({ file }: { file: DbFile }) {
   const clients = snapshot.authority === "live" && share?.clients ? ` · ${devices(share.clients)}` : "";
   const sharing = SHARING[snapshot.authority] && `${SHARING[snapshot.authority]}${clients}`;
   const blocked = !!snapshot.recovery || !!snapshot.conflict;
-  const snapshotError = useNotebookSnapshots(session.file, parsed.document);
-  const pageCount = parsed.document?.paper?.pages.length;
+  const notebook = kind === "notebook";
+  const snapshotError = useNotebookSnapshots(session.file, notebook ? parsed.document : undefined);
+  const pageCount = notebook ? parsed.document?.paper?.pages.length : undefined;
   const pageInView = useRef(0);
   const openTitle = fileTitle(session.file), openPath = session.file.relative_path;
   // While a notebook is open, a chat message tells the agent which one and where to read it.
@@ -121,7 +127,7 @@ export default function CanvasEditor({ file }: { file: DbFile }) {
       </div>}
       <div className="relative min-h-0 flex-1">
         {snapshot.recoveryError && <p role="status" className="absolute right-3 bottom-16 left-3 z-30 rounded-xl border border-border-subtle bg-card px-3 py-2 text-xs text-muted-foreground">{snapshot.recoveryError}</p>}
-        <div inert={blocked} className="h-full"><CanvasSurface document={parsed.document} title={openTitle} onPageChange={(index) => { pageInView.current = index; noteNotebookPage(file.id, index + 1); }} onViewportChange={keepCameraLocal} onChange={(document) => { const text = serializeCanvasDocument(document); lastDocument.current = { text, document }; session.update(text); }} /></div>
+        <div inert={blocked} className="h-full"><CanvasSurface document={parsed.document} title={openTitle} kind={kind} onPageChange={(index) => { pageInView.current = index; noteNotebookPage(file.id, index + 1); }} onViewportChange={keepCameraLocal} onChange={(document) => { const text = serializeCanvasDocument(document); lastDocument.current = { text, document }; session.update(text); }} /></div>
       </div>
     </div>
   );

@@ -19,12 +19,17 @@ pub(crate) struct NotebookView {
     pub(crate) pages: Vec<NotebookPageView>,
 }
 
+/// Whether `oculus read` prints page pictures for a file of `file_type`: only
+/// a notebook (`.notebook`) has pages; a `.canvas` is a whiteboard.
+pub(crate) fn reads_as_pictures(file_type: &str) -> bool {
+    file_type == "notebook"
+}
+
 fn none_yet(path: &str) -> String {
     format!(
         "{path} has no page pictures yet.\n       \
          They are drawn while the notebook is open in the Oculus app: open it there, \
-         wait a few seconds, and read it again. Only a notebook (a canvas with pages) \
-         can be read; a whiteboard has none."
+         wait a few seconds, and read it again."
     )
 }
 

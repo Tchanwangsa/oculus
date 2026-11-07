@@ -59,6 +59,15 @@ describe('two-finger canvas navigation', () => {
     expect(minimum.zoom).toBe(0.1);
     expect(Number.isFinite(minimum.x)).toBe(true);
   });
+  test('custom limits (a notebook) bound the pinch and still keep the world anchor', () => {
+    const gesture = start(), limits = { min: 1.5, max: 3 };
+    const tight = gesture.move(2, { x: 10000, y: 100 }, limits)!;
+    expect(tight.zoom).toBe(3);
+    expect((5050 - tight.x) / tight.zoom).toBe((150 - initial.x) / initial.zoom);
+    const loose = gesture.move(2, { x: 120, y: 100 }, limits)!;
+    expect(loose.zoom).toBe(1.5);
+    expect((110 - loose.x) / loose.zoom).toBeCloseTo((150 - initial.x) / initial.zoom);
+  });
   test('cancellation resets contacts so the next single finger can draw', () => {
     const gesture = start(); gesture.reset();
     expect(gesture.count).toBe(0);

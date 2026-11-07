@@ -21,7 +21,8 @@ html, body, #root { height: 100%; overflow: hidden; overscroll-behavior: none; }
 .companion-shell { flex: 1 1 auto; width: 100%; min-width: 0; }
 .companion-focused { position: fixed; inset: 0; height: 100dvh; padding: 0; }
 .companion-focused .canvas-toolbox { top: max(16px, env(safe-area-inset-top)); }
-.companion-focused .canvas-bottom, .companion-focused .canvas-pages, .companion-focused .canvas-utilities { bottom: max(16px, env(safe-area-inset-bottom)); }
+.companion-focused .canvas-editor { --canvas-bottom-edge: max(16px, env(safe-area-inset-bottom)); }
+.companion-focused .canvas-bottom, .companion-focused .canvas-utilities { bottom: var(--canvas-bottom-edge); }
 .companion-focused .canvas-expand { top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); }
 .companion-shell:fullscreen { width: 100%; height: 100%; }
 .companion-shell { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }

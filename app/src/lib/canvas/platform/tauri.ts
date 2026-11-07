@@ -32,6 +32,7 @@ export const tauriCanvasPlatform: CanvasPlatform = {
     const files = await searchLibraryFiles(query, 30, { fileType: "pdf" });
     return files.map(file => ({ id: file.id, filename: file.filename, relativePath: file.relative_path, subjectCode: file.subject_code }));
   },
+  libraryPdfs: isTauri(),
   openPdf: openCanvasLibraryPdf,
   async exportPdf(title, pages) {
     const sent = await Promise.all(pages.map(async ({ width, height, png }) => ({ width, height, png: await blobToBase64(png) })));
