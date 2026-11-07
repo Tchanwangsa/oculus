@@ -20,6 +20,5 @@ export const STROKE_PALETTE: PaletteColor[] = [WHITE, ...(['Grey', 'Graphite', '
 export const FILL_PALETTE: PaletteColor[] = [{ name: 'None', color: 'transparent' }, WHITE, ...(['Grey', 'Brown', 'Indigo', ...ROWS] as Hue[]).map(name => hue(name, true))];
 
 const pick = (palette: PaletteColor[], names: string[]) => names.map(name => palette.find(c => c.name === name)!);
-/** The row shown in the panel, beside the button for the whole palette. */
+/** The row shown in the style bar, beside the button for the whole palette. */
 export const STROKE_PICKS = pick(STROKE_PALETTE, ['Graphite', 'Red', 'Green', 'Blue', 'Orange']);
-export const FILL_PICKS = pick(FILL_PALETTE, ['None', 'Red', 'Green', 'Blue', 'Amber']);

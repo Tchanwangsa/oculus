@@ -1,20 +1,27 @@
 .canvas-frame { container: canvas-frame / inline-size; }
 .canvas-editor { container-type: inline-size; isolation: isolate; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .canvas-editor canvas { touch-action: none; -webkit-user-select: none; user-select: none; }
-.canvas-style-trigger { display: none; }
 /* Floating chrome lets the drawing show through, and firms up under the pointer or keyboard focus. The blur is always on, so hover never promotes a new layer. */
 .canvas-chrome { --canvas-chrome-mix: 70%; background-color: color-mix(in oklab, var(--color-card) var(--canvas-chrome-mix), transparent); -webkit-backdrop-filter: blur(14px) saturate(1.4); backdrop-filter: blur(14px) saturate(1.4); transition: background-color 150ms ease; }
 /* A dark card over white paper turns grey sooner, so it keeps more of itself. */
 .dark .canvas-chrome { --canvas-chrome-mix: 82%; }
 .canvas-chrome:is(:hover, :focus-within) { background-color: color-mix(in oklab, var(--color-card) 96%, transparent); }
-/* The bottom bars' edge; the companion lifts it clear of the home indicator. */
-.canvas-editor { --canvas-bottom-edge: 1rem; }
+/* The bars' top and bottom edges; the companion moves them clear of the status bar and the home indicator. */
+.canvas-editor { --canvas-top-edge: 1rem; --canvas-bottom-edge: 1rem; }
+.canvas-toolbox { top: var(--canvas-top-edge); }
+/* Under the tool bar: its 54px plus an 8px gap. */
+.canvas-style-bar { top: calc(var(--canvas-top-edge) + 62px); }
+.canvas-style-scroller { scrollbar-width: none; }
+.canvas-style-scroller::-webkit-scrollbar { display: none; }
+/* Below both bars, so an error never covers the style bar. */
+.canvas-alert { top: calc(var(--canvas-top-edge) + 114px); }
 .canvas-pages { bottom: var(--canvas-bottom-edge); }
 .canvas-text-input { field-sizing: content; min-width: 3ch; min-height: 1.4em; max-width: 70vw; outline: 1px solid var(--color-brand); outline-offset: 5px; resize: none; overflow: hidden; border: 0; padding: 0; margin: 0; background: transparent; line-height: 1.4; white-space: pre; -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .canvas-label-input { field-sizing: fixed; min-width: 1ch; max-width: none; outline-offset: 3px; white-space: pre-wrap; overflow-wrap: anywhere; }
 @container (max-width: 760px) {
-  .canvas-style-desktop { display: none; }
-  .canvas-style-trigger { display: inline-flex; }
+  /* The tool bar is 48px here. */
+  .canvas-style-bar { top: calc(var(--canvas-top-edge) + 56px); }
+  .canvas-style-size-field { display: none; }
   .canvas-short-hint { display: none; }
   .canvas-toolbox { gap: 0; padding: 4px; }
   .canvas-toolbox button { width: 34px; height: 38px; }
@@ -25,6 +32,7 @@
   .canvas-toolbox button { width: 29px; }
   .canvas-toolbox button > span { display: none; }
   .canvas-reset-view { display: none; }
+  .canvas-style-picks { display: none; }
   .canvas-bottom { gap: 4px; }
 }
 @container (max-width: 400px) {

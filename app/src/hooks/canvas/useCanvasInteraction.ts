@@ -1,15 +1,18 @@
 import { measureCanvas, traceCanvas } from '@/lib/canvas/diagnostics';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type MouseEvent, type ClipboardEvent } from 'react';
 import { LABELLED_TYPES, type CanvasDocument, type CanvasElement, type CanvasTool, type CanvasViewport, type Point } from '@/lib/canvas/model';
-import { boundsContain, elementBounds, pointInBounds, screenToWorld, selectionBounds, zoomAt, type Bounds } from '@/lib/canvas/geometry';
-import { hitTest } from '@/lib/canvas/engine';
+import { elementBounds, pointInBounds, screenToWorld, selectionBounds, zoomAt, type Bounds } from '@/lib/canvas/geometry';
+import { hitTest, visibleElements } from '@/lib/canvas/engine';
 import { paintCanvas, pointEditTarget, elementResizeHandles, selectedBounds } from '@/lib/canvas/render';
 import { pointDrag, pointHandleAt } from '@/lib/canvas/arrow/handles';
 import { endAt, movePoint, removePoint } from '@/lib/canvas/arrow/points';
 import { EDITABLE, onEdit } from '@/lib/menu/editRouting';
 import { onBackForward } from '@/lib/menu/backForwardRouting';
 import { CANVAS_CLIPBOARD_MIME, serializeCanvasClipboard, parseCanvasClipboard, cloneCanvasElements } from '@/lib/canvas/renderClipboard';
-import { applyElementChanges, type ElementChanges } from '@/lib/canvas/changes';
+import { applyElementChanges, type ElementChanges, type StackedAdditions } from '@/lib/canvas/changes';
+import { cutAlong, cutPieces, ERASER_SIZES, startCut, sweepTouches, type EraserMode, type EraserSize, type StrokeCut } from '@/lib/canvas/erase';
+import { boxBounds, boxSelection } from '@/lib/canvas/boxSelect';
+import { elementPage } from '@/lib/canvas/renderPaper';
 import { canReorder, reorderElements, type LayerMove } from '@/lib/canvas/layers';
 import { bindArrowEnd, findBindingSnap, followBindings, moveElements, sameSnap, sceneLookup, type BindingSnap } from '@/lib/canvas/bindings';
 import { moveSegment, releaseSegment } from '@/lib/canvas/elbow/segments';
@@ -17,6 +20,7 @@ import { commitTextEdit, labelTargetAt, stylePatchChanges } from '@/lib/canvas/l
 import { resizeBounds, resizeElements } from '@/lib/canvas/resize';
 import { placeImagesIn, type CanvasImageSource } from '@/lib/canvas/mediaPlacement';
 import { TouchViewportGesture } from '@/lib/canvas/touchViewport';
+import { VelocityTracker, glide, gliding } from '@/lib/canvas/momentum';
 import { applyCanvasTransaction, diffCanvasContent, hasCanvasChanges, sameValue, type CanvasTransaction } from '@/lib/canvas/collaboration';
 import { CAPTURE_LIFT_DELAY_MS, type CaptureHoldIndicator, copyRegionImage, rasterizeRegion, regionHandleAt, moveRegion, regionBounds, resizeRegion, type CanvasRegion } from '@/lib/canvas/region';
 import { asDataUrl } from '@/lib/canvas/importMedia';
@@ -28,7 +32,7 @@ import { CANVAS_ZOOM_LIMITS } from '@/lib/canvas/zoom';
 import {
   addPage as addNotebookPage, duplicatePage, insertPage, insertPdfPages, movePage, removePage as removeNotebookPage, setPageSize, setPageTemplate, type PageSize,
 } from '@/lib/canvas/pages';
-import { elementsAtPage, shownBounds } from '@/lib/canvas/pageHits';
+import { elementsAtPage } from '@/lib/canvas/pageHits';
 import type { CanvasImportedImage } from '@/lib/canvas/importMedia';
 import {
   adoptElementStyle, colorLabel, DEFAULT_DRAWING_STYLE, inspectorSections, inspectorTarget, inspectorValues, newElementStyle, patchDrawingStyle,
@@ -42,6 +46,10 @@ export interface CanvasInteractionOptions {
   onViewportChange?: (viewport: CanvasViewport) => void;
   /** Lifting the eraser after a completed erase returns to the tool chosen before it. */
   eraserAutoReturn?: boolean;
+  /** `stroke` (the default) erases whole elements; `partial` cuts strokes where the eraser passes. */
+  eraserMode?: EraserMode;
+  /** The partial eraser's size (`ERASER_SIZES`, screen pixels); medium by default. */
+  eraserSize?: EraserSize;
   /**
    * `notebook` binds the document to its pages: they are drawn, the camera stays on them, ink starts only on a page, stays
    * on one and is clipped to it. `canvas` (the default) is a whiteboard; any `paper` it holds is kept and never used.
@@ -65,6 +73,26 @@ type Gesture = {
   bounds?: Bounds;
   shift?: boolean;
 };
+/**
+ * An erase in progress. Nothing leaves the scene until release: overrides hold the result (null for an erased
+ * element, a cut stroke's first piece under its ID, its other pieces under new IDs) and `ghosts` what goes.
+ */
+type EraseState = {
+  partial: boolean;
+  /** World units: the partial eraser's radius, or the whole-stroke eraser's hit tolerance. */
+  radius: number;
+  last: Point;
+  cuts: Map<string, StrokeCut>;
+  /** A cut stroke's ID → its other pieces' IDs, which commit directly above it. */
+  pieces: Map<string, string[]>;
+  ghosts: Map<string, CanvasElement[]>;
+  ghostList: CanvasElement[];
+};
+const erasable = (element: CanvasElement) => element.type !== 'image' && !isLocked(element);
+/** The whole-stroke eraser's hit tolerance in screen pixels. */
+const STROKE_ERASER_TOLERANCE = 10;
+/** A partial cut drops pieces shorter than this many screen pixels (or half the stroke's width). */
+const SHORTEST_PIECE = 2;
 /** One undo step: the transactions each way, plus the layer order to put back elements the step re-adds (a transaction appends them). */
 type HistoryEntry = { undo: CanvasTransaction; redo: CanvasTransaction; undoOrder?: string[]; redoOrder?: string[] };
 const normalize = (a: Point, b: Point): Bounds => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y) });
@@ -126,8 +154,18 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   const selected = useRef(new Set<string>());
   const gesture = useRef<Gesture | null>(null);
   const touchViewport = useRef(new TouchViewportGesture());
+  /** The camera samples of the pan in progress, and the frame of the glide a released pan leaves (0 when none). */
+  const panVelocity = useRef(new VelocityTracker());
+  const glideFrame = useRef(0);
   const overrides = useRef(new Map<string, CanvasElement | null>());
   const marquee = useRef<Bounds | undefined>(undefined);
+  /** What releasing the selection box now would select, and the bounds painted for the elements it would add. */
+  const marqueePreview = useRef<{ ids: Set<string>; boxes: Bounds[] } | null>(null);
+  const erasing = useRef<EraseState | null>(null);
+  /** The whole-stroke eraser's targets: what a point can reach minus what this erase already took; rebuilt only when either changes. */
+  const eraseTargets = useRef<{ owner: EraseState; source: readonly CanvasElement[]; taken: number; targets: CanvasElement[] } | null>(null);
+  /** Where a hovering mouse or pen is, for the partial eraser's ring. */
+  const eraserHover = useRef<Point | null>(null);
   const bindHint = useRef<BindingSnap | null>(null);
   const size = useRef({ width: 0, height: 0, pixelRatio: 1 });
   const frame = useRef(0);
@@ -165,11 +203,6 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     const paper = boundPaper();
     return paper ? elementsAtPage(paper, elements, point) : elements;
   };
-  /** The bounds a box selection must enclose: in a notebook only the part of an element its page shows. */
-  const boxBounds = (element: CanvasElement) => {
-    const paper = boundPaper();
-    return paper ? shownBounds(paper, element) : elementBounds(element);
-  };
   /** The selection's centre, which a notebook keeps on a page. */
   const selectionCentre = (elements: readonly CanvasElement[]) => {
     const bounds = selectionBounds(elements.filter(element => selected.current.has(element.id)));
@@ -203,8 +236,11 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       frame.current = 0;
       const context = canvas.current?.getContext('2d');
       if (!context) return;
+      const erase = erasing.current, zoom = documentRef.current.viewport.zoom;
+      const eraser = erase?.partial ? { center: erase.last, radius: erase.radius }
+        : !erase && eraserHover.current && optionsRef.current.eraserMode === 'partial' ? { center: eraserHover.current, radius: ERASER_SIZES[optionsRef.current.eraserSize ?? 'medium'] / zoom } : undefined;
       paintCanvas(context, documentRef.current, {
-        ...size.current, ...paintOptions.current, selected: selected.current,
+        ...size.current, ...paintOptions.current, selected: selected.current, ghosts: erase?.ghostList, eraser, pendingSelection: marqueePreview.current?.boxes,
         selectionColor: getComputedStyle(root.current!).getPropertyValue('--color-brand').trim() || '#5e6ad2',
         marquee: marquee.current ?? regionRef.current?.bounds, captureSelection: regionRef.current?.kind === 'capture' || gesture.current?.mode === 'capture', captureGhost: captureGhost.current, cropSource: regionRef.current?.source ? elementBounds(regionRef.current.source) : undefined, overrides: overrides.current, bindingHint: bindHint.current,
       });
@@ -244,9 +280,9 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     for (const [id, element] of followBindings(documentRef.current.elements, overrides.current)) overrides.current.set(id, element);
   };
   /** Every committed element edit goes through here, bound arrows following; returns whether the scene changed. One undo step. */
-  const commitChanges = (changes: ElementChanges) => {
+  const commitChanges = (changes: ElementChanges, above?: StackedAdditions) => {
     const current = documentRef.current;
-    const elements = applyElementChanges(current.elements, followBindings(current.elements, changes));
+    const elements = applyElementChanges(current.elements, followBindings(current.elements, changes), above);
     if (elements === current.elements) return false;
     publish({ ...current, elements }, true);
     return true;
@@ -285,7 +321,15 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     documentRef.current = { ...documentRef.current, viewport };
     optionsRef.current.onViewportChange?.(viewport);
   }, []);
+  /** Stops a glide where it is; returns whether one was running. */
+  const haltGlide = useCallback(() => {
+    if (!glideFrame.current) return false;
+    cancelAnimationFrame(glideFrame.current); glideFrame.current = 0;
+    return true;
+  }, []);
+  /** Every other camera move ends a glide; this one saves or re-renders the camera itself. */
   const updateViewport = useCallback((viewport: CanvasViewport, save = true) => {
+    haltGlide();
     setView(viewport);
     redraw();
     setRevision(value => value + 1);
@@ -293,11 +337,33 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       if (viewSave.current) clearTimeout(viewSave.current);
       viewSave.current = setTimeout(() => { viewSave.current = null; emit(documentRef.current); }, 180);
     }
-  }, [emit, redraw, setView]);
+  }, [emit, haltGlide, redraw, setView]);
   /** A pan or two-finger navigation has ended: save the camera in the document, or only re-render when the host keeps it. */
   const settleView = () => {
     if (optionsRef.current.onViewportChange) setRevision(value => value + 1);
     else publish(documentRef.current);
+  };
+  const stopGlide = () => { if (haltGlide()) settleView(); };
+  /**
+   * A touch or pen pan released while moving glides on, decelerating (`momentum.ts`), and settles once it stops; an axis
+   * the pages stop loses its speed so the glide ends at their edge. A mouse drag, or a release held still, settles at once.
+   */
+  const endPan = (glides: boolean) => {
+    const released = glides ? panVelocity.current.release(performance.now()) : null;
+    if (!released) { settleView(); return; }
+    let velocity = released, last = performance.now();
+    const step = (time: number) => {
+      const { dx, dy, velocity: next } = glide(velocity, Math.max(0, time - last));
+      last = time;
+      const before = documentRef.current.viewport;
+      setView({ ...before, x: before.x + dx, y: before.y + dy });
+      const after = documentRef.current.viewport;
+      velocity = { x: Math.abs(after.x - before.x - dx) > 0.01 ? 0 : next.x, y: Math.abs(after.y - before.y - dy) > 0.01 ? 0 : next.y };
+      redraw();
+      if (gliding(velocity)) glideFrame.current = requestAnimationFrame(step);
+      else { glideFrame.current = 0; settleView(); }
+    };
+    glideFrame.current = requestAnimationFrame(step);
   };
 
   /**
@@ -322,6 +388,15 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       }
     }
     for (const id of [...overrides.current.keys()]) if (gone(id)) overrides.current.delete(id);
+    // What an erase was taking that is gone elsewhere stops being a ghost; a stroke being cut that changed keeps their version.
+    const erase = erasing.current;
+    if (erase?.ghosts.size) {
+      const byId = new Map(base.elements.map(element => [element.id, element]));
+      for (const id of [...erase.ghosts.keys()]) {
+        const cut = erase.cuts.get(id);
+        if (!byId.has(id) || (cut && !sameValue(byId.get(id), cut.source))) dropCut(erase, id);
+      }
+    }
     if ([...selected.current].some(gone)) choose([...selected.current].filter(id => !gone(id)));
     setRevision(value => value + 1);
   };
@@ -357,9 +432,10 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       observer.disconnect();
       cancelAnimationFrame(frame.current);
       frame.current = 0;
+      if (haltGlide() && !optionsRef.current.onViewportChange) emit(documentRef.current);
       if (viewSave.current) { clearTimeout(viewSave.current); viewSave.current = null; emit(documentRef.current); }
     };
-  }, [emit, redraw]);
+  }, [emit, haltGlide, redraw]);
   useEffect(() => onEdit(redo => {
     if (!root.current?.contains(window.document.activeElement) || window.document.activeElement?.matches('input,textarea,[contenteditable=true]')) return false;
     history(redo); return true;
@@ -504,6 +580,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if (next === 'crop') { startCrop(); return; }
     if (regionRef.current) { cancelGesture(); updateRegion(null); }
     if (next === 'eraser' && tool !== 'eraser') previousTool.current = tool;
+    if (next !== 'eraser' && eraserHover.current) { eraserHover.current = null; redraw(); }
     setTool(next); bindHint.current = null; if (next !== 'select') choose([]);
   };
   /** Binds an arrow end at the pointer (⌘/Ctrl places it freely) and shows the target it binds to. */
@@ -520,18 +597,92 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     try { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* already released */ }
   };
   /** Drops the gesture's preview without committing it; the scene was never changed during the gesture. */
-  const dropGesture = () => { traceCanvas('gesture.drop', { gesture: gesture.current?.mode ?? 'none' }); clearCaptureHold(); captureGhost.current = undefined; gesture.current = null; overrides.current.clear(); marquee.current = undefined; bindHint.current = null; };
-  /** Commits the preview unchanged so lifting the pointer preserves the ink already drawn. */
-  const commitGesture = () => commitChanges(new Map(overrides.current));
-  const eraseAt = (elements: CanvasElement[], point: Point) => {
-    const erasable = reachable(elements, point).filter(element => element.type !== 'image' && !isLocked(element) && overrides.current.get(element.id) !== null);
-    const id = hitTest(erasable, point, 10 / documentRef.current.viewport.zoom);
-    if (id) previewChanges(new Map([[id, null]]));
+  const dropGesture = () => {
+    traceCanvas('gesture.drop', { gesture: gesture.current?.mode ?? 'none' });
+    clearCaptureHold(); captureGhost.current = undefined; gesture.current = null; overrides.current.clear(); marquee.current = undefined; bindHint.current = null;
+    marqueePreview.current = null; erasing.current = null; eraseTargets.current = null;
+  };
+  /** Commits the preview unchanged so lifting the pointer preserves the ink already drawn; a cut stroke's pieces stay where it was. */
+  const commitGesture = () => commitChanges(new Map(overrides.current), erasing.current?.pieces);
+  const dropCut = (erase: EraseState, id: string) => {
+    for (const piece of erase.pieces.get(id) ?? []) overrides.current.delete(piece);
+    overrides.current.delete(id);
+    erase.cuts.delete(id); erase.pieces.delete(id); erase.ghosts.delete(id);
+    erase.ghostList = [...erase.ghosts.values()].flat();
+  };
+  /** The whole-stroke eraser at `point`: the topmost element it reaches that this erase has not already taken. */
+  const eraseWhole = (erase: EraseState, elements: readonly CanvasElement[], point: Point) => {
+    const source = reachable(elements, point);
+    let cached = eraseTargets.current;
+    if (cached?.owner !== erase || cached.source !== source || cached.taken !== erase.ghosts.size) {
+      cached = eraseTargets.current = { owner: erase, source, taken: erase.ghosts.size, targets: source.filter(element => erasable(element) && !erase.ghosts.has(element.id)) };
+    }
+    const id = hitTest(cached.targets, point, erase.radius), element = id && cached.targets.find(item => item.id === id);
+    if (!element) return false;
+    erase.ghosts.set(element.id, [element]);
+    previewChanges(new Map([[element.id, null]]));
+    return true;
+  };
+  /** The partial eraser swept from `from` to `to`: strokes are cut where it passes, anything else it touches goes whole. */
+  const erasePartial = (erase: EraseState, elements: readonly CanvasElement[], from: Point, to: Point) => {
+    const r = erase.radius, paper = boundPaper(), zoom = documentRef.current.viewport.zoom;
+    const area = { x: Math.min(from.x, to.x) - r, y: Math.min(from.y, to.y) - r, width: Math.abs(to.x - from.x) + r * 2, height: Math.abs(to.y - from.y) + r * 2 };
+    const changes = new Map<string, CanvasElement | null>();
+    for (const element of visibleElements(reachable(elements, to), area)) {
+      if (!erasable(element)) continue;
+      if (element.type !== 'freedraw') {
+        if (!erase.ghosts.has(element.id) && sweepTouches(element, from, to, r)) { erase.ghosts.set(element.id, [element]); changes.set(element.id, null); }
+        continue;
+      }
+      const cut = erase.cuts.get(element.id) ?? startCut(element, r / 4, paper ? elementPage(paper, element) : undefined);
+      if (!cutAlong(cut, from, to, r)) continue;
+      erase.cuts.set(element.id, cut);
+      const { kept, removed } = cutPieces(cut, newId, SHORTEST_PIECE / zoom);
+      for (const piece of erase.pieces.get(element.id) ?? []) overrides.current.delete(piece);
+      changes.set(element.id, kept[0] ?? null);
+      for (const piece of kept.slice(1)) changes.set(piece.id, piece);
+      erase.pieces.set(element.id, kept.slice(1).map(piece => piece.id));
+      erase.ghosts.set(element.id, removed);
+    }
+    if (changes.size) previewChanges(changes);
+    return changes.size > 0;
+  };
+  /** Carries the erase through each pointer sample in turn, so a fast sweep between samples is still covered. */
+  const eraseThrough = (elements: readonly CanvasElement[], points: readonly Point[]) => {
+    const erase = erasing.current;
+    if (!erase) return;
+    let changed = false;
+    for (const point of points) {
+      changed = (erase.partial ? erasePartial(erase, elements, erase.last, point) : eraseWhole(erase, elements, point)) || changed;
+      erase.last = point;
+    }
+    if (changed) erase.ghostList = [...erase.ghosts.values()].flat();
+  };
+  const startErase = (elements: readonly CanvasElement[], point: Point) => {
+    const partial = optionsRef.current.eraserMode === 'partial', zoom = documentRef.current.viewport.zoom;
+    const radius = (partial ? ERASER_SIZES[optionsRef.current.eraserSize ?? 'medium'] : STROKE_ERASER_TOLERANCE) / zoom;
+    erasing.current = { partial, radius, last: point, cuts: new Map(), pieces: new Map(), ghosts: new Map(), ghostList: [] };
+    eraserHover.current = null;
+    eraseThrough(elements, [point]);
+  };
+  /** The selection the box `bounds` leaves on release; the live preview asks the same. */
+  const boxResult = (active: Gesture, bounds: Bounds) =>
+    boxSelection(active.original.elements, bounds, boundPaper(), selected.current, { add: !!active.shift, toggle: active.moved ? undefined : active.id });
+  const previewBox = (active: Gesture, bounds: Bounds) => {
+    const ids = boxResult(active, bounds), paper = boundPaper();
+    const boxes = active.original.elements.flatMap(element => {
+      const shown = ids.has(element.id) && !selected.current.has(element.id) && boxBounds(element, paper);
+      return shown ? [shown] : [];
+    });
+    marqueePreview.current = { ids, boxes };
   };
   const pointerDown = (event: PointerEvent<HTMLCanvasElement>, recoveringContact = false) => {
     traceCanvas('gesture.down', { tool, pointerId: event.pointerId, pointerType: event.pointerType, recoveringContact, gesture: gesture.current?.mode ?? 'none', penSeen: penSeen.current, touches: touchViewport.current.count });
     if (!recoveringContact && event.button !== 0 && event.button !== 1) return;
     if (!recoveringContact) refusedPointer.current = null;
+    // A contact during a glide stops it; a finger then holds the page, so lifting it does nothing and dragging scrolls on.
+    const caught = glideFrame.current !== 0;
+    stopGlide();
     if (event.pointerType === 'pen') {
       penSeen.current = true;
       // A fresh pen down proves the last contact ended even when WebKit dropped its up: keep that stroke's ink as its own stroke.
@@ -551,6 +702,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       if (touchViewport.current.down(event.pointerId, coordinates(event).screen, documentRef.current.viewport)) {
         // A second finger turns the first finger's gesture into navigation, without committing its preview.
         event.preventDefault();
+        panVelocity.current.start(performance.now(), documentRef.current.viewport);
         dropGesture(); redraw(); return;
       }
     } else if (touchViewport.current.active) { event.preventDefault(); return; }
@@ -564,10 +716,11 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     const current = documentRef.current;
     const initial: Gesture = { mode: 'draw', start: point, screen, original: current, moved: false, pointerId: event.pointerId, pointerType: event.pointerType, shift: event.shiftKey };
     overrides.current.clear();
+    panVelocity.current.start(performance.now(), current.viewport);
     const region = regionRef.current;
     const inRegion = !!region && point.x >= region.bounds.x - 16 / current.viewport.zoom && point.x <= region.bounds.x + region.bounds.width + 16 / current.viewport.zoom && point.y >= region.bounds.y - 16 / current.viewport.zoom && point.y <= region.bounds.y + region.bounds.height + 16 / current.viewport.zoom;
     const outsideCrop = tool === 'crop' && region?.kind === 'crop' && regionHandleAt(region.bounds, point, current.viewport.zoom, event.pointerType) === undefined && (point.x < region.bounds.x || point.y < region.bounds.y || point.x > region.bounds.x + region.bounds.width || point.y > region.bounds.y + region.bounds.height);
-    if (tool === 'hand' || space || event.button === 1) initial.mode = 'pan';
+    if (tool === 'hand' || space || event.button === 1 || (caught && event.pointerType === 'touch')) initial.mode = 'pan';
     else if (outsideCrop) initial.mode = 'crop-confirm';
     else if (event.pointerType === 'touch' && penSeen.current && !inRegion) initial.mode = 'pan';
     else if (tool === 'capture' && !region) initial.mode = 'capture';
@@ -592,7 +745,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       }
     } else if (tool === 'eraser') {
       initial.mode = 'erase';
-      eraseAt(current.elements, point);
+      startErase(current.elements, point);
       choose([]);
     } else if (tool === 'select') {
       const bounds = selectedBounds(current, selected.current);
@@ -646,10 +799,19 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if ((!gesture.current || gesture.current.pointerType === 'touch') && event.pointerType === 'pen' && (event.buttons & 1) !== 0 && !textDraft && refusedPointer.current !== event.pointerId) pointerDown(event, true);
     if (event.pointerType === 'touch') {
       const viewport = touchViewport.current.move(event.pointerId, coordinates(event).screen, zoomRange());
-      if (touchViewport.current.active) { event.preventDefault(); if (viewport) updateViewport(viewport, false); return; }
+      if (touchViewport.current.active) {
+        event.preventDefault();
+        if (viewport) { updateViewport(viewport, false); panVelocity.current.add(performance.now(), documentRef.current.viewport); }
+        return;
+      }
     }
     const active = gesture.current;
     if (!active) {
+      if (tool === 'eraser') {
+        if (event.pointerType === 'touch' || optionsRef.current.eraserMode !== 'partial') return;
+        eraserHover.current = coordinates(event).point; redraw();
+        return;
+      }
       if ((tool === 'crop' || tool === 'capture') && regionRef.current) {
         const { point } = coordinates(event), region = regionRef.current;
         const handle = regionHandleAt(region.bounds, point, documentRef.current.viewport.zoom, event.pointerType, tool === 'capture');
@@ -688,6 +850,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if (active.mode === 'pan') {
       const viewport = active.original.viewport;
       setView({ ...viewport, x: viewport.x + screen.x - active.screen.x, y: viewport.y + screen.y - active.screen.y });
+      panVelocity.current.add(performance.now(), documentRef.current.viewport);
     } else if (active.mode === 'draw' && active.id) {
       const element = overrides.current.get(active.id)!;
       let width = point.x - active.start.x, height = point.y - active.start.y;
@@ -737,9 +900,13 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       marquee.current = active.handle < 0 ? moveRegion(active.bounds, { x: point.x - active.start.x, y: point.y - active.start.y }, active.base) : resizeRegion(active.bounds, active.handle, point, active.base, documentRef.current.viewport.zoom);
     } else if (active.mode === 'capture') {
       marquee.current = regionBounds(active.start, point);
-    } else if (active.mode === 'marquee') marquee.current = normalize(active.start, point);
-    else if (active.mode === 'erase') {
-      eraseAt(active.original.elements, point);
+    } else if (active.mode === 'marquee') {
+      marquee.current = normalize(active.start, point);
+      previewBox(active, marquee.current);
+    } else if (active.mode === 'erase') {
+      // Safari batches pen samples into one event; each coalesced one is a step of the sweep.
+      const coalesced = event.nativeEvent?.getCoalescedEvents?.() ?? [];
+      eraseThrough(active.original.elements, [...coalesced, event].map(sample => coordinates(sample).point));
     }
     redraw();
   };
@@ -752,7 +919,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if (!navigating) return false;
     event.preventDefault();
     releasePointer(event);
-    if (!touchViewport.current.count) settleView();
+    if (!touchViewport.current.count) endPan(true);
     return true;
   };
   const pointerUp = (event: PointerEvent<HTMLCanvasElement>) => {
@@ -782,34 +949,24 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       } else marquee.current = regionRef.current?.bounds;
       redraw(); return;
     }
-    if (active.mode === 'pan') settleView();
+    if (active.mode === 'pan') endPan(active.pointerType !== 'mouse');
     else if (active.mode === 'write' && !active.moved) {
       const target = writableAt(active.start);
       if (target) startWriting(active.start, target); else if (!offPage(active.start)) startText(active.start);
-    } else if (active.mode === 'marquee' && marquee.current) {
-      const bounds = marquee.current;
-      const ids = active.shift ? new Set(selected.current) : new Set<string>();
-      if (!active.moved && active.id) {
-        if (ids.has(active.id)) ids.delete(active.id); else ids.add(active.id);
-      } else {
-        for (const element of active.original.elements) {
-          const shown = !isLocked(element) && boxBounds(element);
-          if (shown && boundsContain(bounds, shown)) ids.add(element.id);
-        }
-      }
-      choose(ids);
-    } else if (overrides.current.size && (active.moved || active.mode === 'erase' || (active.mode === 'draw' && overrides.current.get(active.id!)?.type === 'freedraw'))) {
+    } else if (active.mode === 'marquee' && marquee.current) choose(boxResult(active, marquee.current));
+    else if (overrides.current.size && (active.moved || active.mode === 'erase' || (active.mode === 'draw' && overrides.current.get(active.id!)?.type === 'freedraw'))) {
       // A freedraw tap is a dot, so it commits without moving.
       commitGesture();
       if (active.mode === 'draw' && active.id && tool !== 'freedraw') { choose([active.id]); setTool('select'); }
     }
     if (active.mode === 'erase' && optionsRef.current.eraserAutoReturn) chooseTool(previousTool.current);
-    overrides.current.clear(); marquee.current = undefined;
+    overrides.current.clear(); marquee.current = undefined; marqueePreview.current = null; erasing.current = null; eraseTargets.current = null;
     setRevision(value => value + 1);
     redraw();
   };
   /** Escape or a cancelled pointer: the preview is dropped and a pan returns to where it started. Never switches tools. */
   const cancelGesture = () => {
+    stopGlide();
     touchViewport.current.reset();
     const active = gesture.current;
     if (active?.mode === 'pan') setView(active.original.viewport);
@@ -1032,9 +1189,14 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     pointerDown: (event: PointerEvent<HTMLCanvasElement>) => measureCanvas('handler.pointerdown', () => pointerDown(event)),
     pointerMove: (event: PointerEvent<HTMLCanvasElement>) => measureCanvas('handler.pointermove', () => pointerMove(event), { tool, gesture: gesture.current?.mode ?? 'none' }),
     pointerUp: (event: PointerEvent<HTMLCanvasElement>) => measureCanvas('handler.pointerup', () => pointerUp(event)), pointerCancel, cancelGesture,
-    pointerLeave: () => { setResizeCursor(null); if (!gesture.current && bindHint.current) { bindHint.current = null; redraw(); } }, doubleClick, keyDown, copy, cut: (event: ClipboardEvent<HTMLDivElement>) => copy(event, true), paste,
+    pointerLeave: () => {
+      setResizeCursor(null);
+      if (!gesture.current && (bindHint.current || eraserHover.current)) { bindHint.current = null; eraserHover.current = null; redraw(); }
+    }, doubleClick, keyDown, copy, cut: (event: ClipboardEvent<HTMLDivElement>) => copy(event, true), paste,
     keyUp: (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === ' ') setSpace(false); },
     blur: () => setSpace(false), cursor: space || tool === 'hand' ? 'grab' : tool === 'select' || tool === 'crop' || (tool === 'capture' && region) ? resizeCursor ?? 'default' : tool === 'text' ? 'text' : 'crosshair',
+    /** What releasing the selection box being dragged would select, as its preview paints it; empty without one. */
+    previewSelection: () => [...marqueePreview.current?.ids ?? []],
     history, canUndo: past.current.length > 0, canRedo: future.current.length > 0, historyError, clearHistoryError: () => setHistoryError(null),
     deleteSelected, insertImages, reorder, layerMoves, fit, zoom, resetZoom: () => zoomTo(1), redraw,
     zoomPercent, canZoomOut: zoomPercent > Math.round(range.min * 100), canZoomIn: zoomPercent < Math.round(range.max * 100), notebook,

@@ -66,6 +66,30 @@ describe('box selection encloses whole objects', () => {
   });
 });
 
+describe('the box previews what its release selects', () => {
+  function preview(h: Harness, from: [number, number], to: [number, number], shiftKey = false) {
+    h.editor.pointerDown(pointer(1, 'mouse', ...from, { shiftKey }));
+    h.editor.pointerMove(pointer(1, 'mouse', ...to, { shiftKey }));
+    const shown = h.editor.previewSelection();
+    h.editor.pointerUp(pointer(1, 'mouse', ...to, { shiftKey })); h.render();
+    return shown;
+  }
+  test('the preview while dragging is the selection on release', () => {
+    const h = setup();
+    expect(preview(h, [80, 80], [150, 140])).toEqual(['shape']);
+    expect(h.editor.selection).toEqual(['shape']);
+    expect(h.editor.previewSelection()).toEqual([]);
+    expect(preview(h, [-10, -10], [510, 710])).toEqual(['page', 'shape', 'ink']);
+    expect(h.editor.selection).toEqual(['page', 'shape', 'ink']);
+  });
+  test('with Shift it keeps the selection and adds what the box holds', () => {
+    const h = setup();
+    drag(h, [80, 80], [150, 140]);
+    expect(preview(h, [160, 80], [230, 140], true)).toEqual(['shape', 'ink']);
+    expect(h.editor.selection).toEqual(['shape', 'ink']);
+  });
+});
+
 test('a canvas press clears the chat selection before giving the drawing focus', () => {
   const previousWindow = globalThis.window;
   const calls: string[] = [];

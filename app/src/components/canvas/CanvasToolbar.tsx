@@ -30,7 +30,7 @@ export function CanvasIconButton({ label, children, active, className, ...props 
 }
 
 export function CanvasToolbar({ tool, onTool, onAddImage }: { tool: CanvasTool; onTool: (tool: CanvasTool) => void; onAddImage: () => void }) {
-  return <div className="canvas-toolbox absolute top-4 left-1/2 z-10 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-0.5 overflow-x-auto rounded-2xl border border-border-subtle p-1.5 shadow-sm canvas-chrome" role="toolbar" aria-label="Drawing tools">
+  return <div className="canvas-toolbox absolute left-1/2 z-10 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-0.5 overflow-x-auto rounded-2xl border border-border-subtle p-1.5 shadow-sm canvas-chrome" role="toolbar" aria-label="Drawing tools">
     {canvasTools.map(({ tool: value, label, key, icon: Glyph }, index) => <div key={value} className={cn('flex', index === 3 && 'ml-1 border-l border-border-subtle pl-1')}>
       <CanvasIconButton label={`${label} (${key})`} active={tool === value} aria-pressed={tool === value} onClick={() => onTool(value)} className="relative size-10">
         <Glyph size={19} weight={tool === value ? 'fill' : 'regular'} />

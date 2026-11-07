@@ -20,8 +20,7 @@ html, body, #root { height: 100%; overflow: hidden; overscroll-behavior: none; }
    content; the canvas root's inline-size containment gives it no content width at all. */
 .companion-shell { flex: 1 1 auto; width: 100%; min-width: 0; }
 .companion-focused { position: fixed; inset: 0; height: 100dvh; padding: 0; }
-.companion-focused .canvas-toolbox { top: max(16px, env(safe-area-inset-top)); }
-.companion-focused .canvas-editor { --canvas-bottom-edge: max(16px, env(safe-area-inset-bottom)); }
+.companion-focused .canvas-editor { --canvas-top-edge: max(16px, env(safe-area-inset-top)); --canvas-bottom-edge: max(16px, env(safe-area-inset-bottom)); }
 .companion-focused .canvas-bottom, .companion-focused .canvas-utilities { bottom: var(--canvas-bottom-edge); }
 .companion-focused .canvas-expand { top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); }
 .companion-shell:fullscreen { width: 100%; height: 100%; }

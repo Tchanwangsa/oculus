@@ -18,12 +18,15 @@ page.
 | Desktop recovery drafts | `app/src/lib/canvas/drafts.ts`, `app/src-tauri/src/library/files/canvases/drafts.rs` |
 | Authority command wrappers and event listeners | `app/src/lib/canvas/files.ts` (`canvasAuthority`) |
 | Title, save state, recovery, conflict and pause controls, the Share button and editor host | `app/src/components/canvas/CanvasEditor.tsx` |
-| Drawing surface, label text overlay, tool bar and style panel shell | `app/src/components/canvas/CanvasSurface.tsx`, `app/src/components/canvas/CanvasToolbar.tsx`, `app/src/components/canvas/CanvasStylePanel.tsx` |
+| Drawing surface, label text overlay, tool bar and style bar | `app/src/components/canvas/CanvasSurface.tsx`, `app/src/components/canvas/CanvasToolbar.tsx`, `app/src/components/canvas/CanvasStyleBar.tsx` |
 | Pointer gestures, history, keyboard commands and the notebook's page rules | `app/src/hooks/canvas/useCanvasInteraction.ts` |
 | Two-finger pan and pinch | `app/src/lib/canvas/touchViewport.ts` |
+| Pan momentum: release speed and glide | `app/src/lib/canvas/momentum.ts` |
 | Zoom ranges | `app/src/lib/canvas/zoom.ts` |
 | Content transactions (undo steps and shared edits) and rebasing | `app/src/lib/canvas/collaboration.ts`, `app/src/lib/canvas/clientReconciliation.ts` |
-| Device-local drawing preferences | `app/src/lib/canvas/toolPreferences.ts` |
+| Device-local drawing preferences (the eraser's settings) | `app/src/lib/canvas/toolPreferences.ts` |
+| Partial erasing: cutting strokes along the eraser's sweep | `app/src/lib/canvas/erase.ts` |
+| What a selection box selects (release and live preview) | `app/src/lib/canvas/boxSelect.ts` |
 | Native selection, callout and touch defaults kept off the canvas | `app/src/lib/canvas/browserSelectionGuard.ts` |
 | Canvas2D drawing and image export | `app/src/lib/canvas/render.ts`, `app/src/lib/canvas/renderSvg.ts` |
 | Text fonts, measuring, wrapping and label layout | `app/src/lib/canvas/renderText.ts` |
@@ -41,7 +44,7 @@ page.
 | `oculus read` on a notebook | `app/src-tauri/src/bin/oculus/commands/query/notebook.rs` |
 | PDF export | `app/src-tauri/src/library/files/canvases/export_pdf.rs`, `exportPdf` in `app/src/lib/canvas/platform/` |
 | Style fields, which element types take them, inspector sections | `app/src/lib/canvas/style.ts` |
-| Contextual inspector sections, palettes and popover guards | `app/src/components/canvas/inspector/` |
+| The style bar's controls, its More styles and selection popovers, palettes and popover guards | `app/src/components/canvas/inspector/` |
 | Colour palette popover | `app/src/components/ui/color/ColorPalette.tsx` |
 | Shape labels: commit, grow rule, restyling | `app/src/lib/canvas/labels.ts` |
 | Bindable outlines | `app/src/lib/canvas/outline.ts` |
@@ -56,7 +59,7 @@ page.
 | Area captures, crop geometry and clipped PNG rendering | `app/src/lib/canvas/region.ts`, `app/src/components/canvas/CanvasRegionActions.tsx`, `app/src/components/canvas/CanvasCaptureHold.tsx` |
 | Embedded raster validation and Canvas2D image cache | `app/src/lib/canvas/imageSource.ts`, `app/src/lib/canvas/renderImages.ts` |
 | Scoped library PDF sessions and page rasterisation | `app/src-tauri/src/library/files/canvases/imports.rs` |
-| Element edits as replaceable maps | `app/src/lib/canvas/changes.ts` |
+| Element edits as replaceable maps, and additions stacked above an element | `app/src/lib/canvas/changes.ts` |
 | Layer order moves | `app/src/lib/canvas/layers.ts` |
 | Clipboard envelope and clone with remapped bindings | `app/src/lib/canvas/renderClipboard.ts` |
 | Retained Rust scene and WebAssembly bridge | `app/canvas-core/src/`, `app/src/lib/canvas/engine.ts` |
@@ -194,6 +197,12 @@ A notebook has a top-level `paper`: fixed-size pages stacked down the board.
   the last. Zoom runs from 60% of the fitted zoom to 800% (`zoomLimits`); wheel,
   pinch and buttons share it, and a whiteboard keeps 10% to 800%
   (`CANVAS_ZOOM_LIMITS`). A resize or new paper from elsewhere re-clamps.
+  A touch or pen pan, one finger or two, released while moving glides on and
+  decelerates like iOS scrolling (`momentum.ts`); it stops at the end of the
+  pages, and the next touch, wheel or camera button stops it where it is (a
+  finger that stops it holds the page rather than drawing). The camera is saved
+  once, when it comes to rest. Mouse drags stop dead, and the trackpad's wheel
+  brings its own momentum.
 - **The pen.** A stroke, shape or text that starts on the desk is refused, and
   pen recovery does not restart it as the pen crosses onto a page. A move or
   nudge is shortened so the selection's centre stays on a page. A duplicate
@@ -500,7 +509,10 @@ selection frame or corner handles, only its point handles (`selectionFrame`
 in `render.ts`); any other selection, including several lines, has the frame.
 
 A selection box includes an element only when its entire bounds fit inside,
-in either drag direction. Dragging on an unselected image or PDF page starts
+in either drag direction. While it is dragged, each element its release would
+add is outlined in a lighter selection colour; the preview and the release ask
+the same `boxSelection` (`boxSelect.ts`), over bounds cached per element, so
+they cannot disagree. Dragging on an unselected image or PDF page starts
 a selection box for its annotations. Clicking the page selects it; dragging
 an already selected page moves it. Shift adds enclosed elements to the current
 selection. Dragging anywhere inside the current dashed selection frame moves
@@ -572,10 +584,40 @@ neither cancels nor redirects a Pencil stroke.
 - Pointer capture can throw when the pointer is already gone; the gesture
   continues without it.
 
-Drawing preferences (the sliders button beside the grid) hold settings for this
-device only, in localStorage (`toolPreferences.ts`). Return after erasing, off
-by default, switches back to the tool chosen before the eraser when an erase
-gesture ends; a cancelled erase or a pinch that takes over does not.
+## The eraser takes whole elements or cuts strokes
+
+With the eraser chosen, the style bar holds its settings, kept for this device
+only in localStorage (`toolPreferences.ts`; a missing or unreadable field falls
+back to its default):
+
+- **Mode.** Whole stroke (the default) removes the topmost element within 10
+  screen pixels of each pointer sample. Partial cuts freedraw strokes: every
+  part within the eraser's radius plus half the stroke's width of the segment
+  between consecutive samples, coalesced ones included, goes, so a fast sweep
+  skips nothing. A stroke is subdivided to a quarter of the radius first, so a
+  cut lands that close to the eraser's edge (`erase.ts`). Shapes, lines, arrows
+  and text the sweep touches go whole.
+- **Size**, shown only in Partial: a radius of 6, 12 (the default) or 24 screen
+  pixels. A thin ring of that size follows the pointer while erasing and while
+  a mouse or Pencil hovers.
+- **Return after erasing**, off by default, switches back to the tool chosen
+  before the eraser when an erase gesture ends; a cancelled erase or a pinch
+  that takes over does not.
+
+A cut stroke keeps its ID for its first remaining piece; each further piece is
+a new freedraw element directly above it in layer order (`applyElementChanges`
+with stacked additions, sent with `afterId`). A piece is normalised as a new
+stroke is, x/y at its first point and `width`/`height` to its last, and holds
+only the stroke's own points plus the two at each cut. A piece shorter than 2
+screen pixels or half the stroke's width is dropped, and a stroke with nothing
+left is deleted. Images and locked elements are never erased.
+
+Nothing disappears mid-gesture. What the erase will remove is painted as a
+ghost at a quarter of its opacity (`ghosts` in `paintCanvas`), a cut stroke's
+kept pieces as they will be, and hit testing passes over what is ghosted. The
+release commits the whole gesture as one undo step through `commitChanges`, so
+it reaches a shared canvas like any edit; Escape, a cancelled pointer or a
+second finger restores everything.
 
 ## Undo is per pane and touches only its own edits
 
@@ -632,9 +674,9 @@ dimensions alongside its world bounds. The `.canvas` stays self-contained:
 reopening, copying and exporting do not depend on the original source file.
 Remote URLs and SVG input are rejected. Images use their rectangular bounds
 for selection and culling in both the JavaScript reference and Rust core.
-The inspector offers opacity, layer controls and Crop image for a single image. The eraser skips
+The style bar offers opacity, layer controls and Crop image for a single image. The eraser skips
 images, including imported PDF pages, and erases shapes and ink through them.
-To delete an image, select it and use the inspector's trash button or Delete;
+To delete an image, select it and use the style bar's trash button or Delete;
 that deletion is one undo step.
 
 ### Capture duplicates an area; cropping trims an image
@@ -665,8 +707,8 @@ without arming a hold; short selections keep a smaller edge hit band so their
 interior remains movable. Escape, pointer cancellation and two-finger
 navigation discard a pending or lifted copy.
 
-**Crop image** opens from the inspector, including its narrow-screen Style
-popover on iPad, or by double-clicking an image on desktop. The full image
+**Crop image** opens from the style bar's crop button, on iPad too, or by
+double-clicking an image on desktop. The full image
 starts framed by eight visible handles: corners crop both axes freely, edges
 crop one, and dragging inside repositions the crop rectangle. The discarded
 area dims and the kept area shows thirds. Handles stay within the original
@@ -730,7 +772,7 @@ textarea, Canvas2D, SVG and the width measurer use the same stacks.
 ## The inspector shows what applies to the selection
 
 `style.ts` is the single table of which style field applies to which element
-type, and `inspectorSections` derives the panel from it: the union of
+type, and `inspectorSections` derives the style bar from it: the union of
 sections that apply to any selected element (or to the active tool’s next
 element when nothing is selected, or to the element being written in).
 Sections are Color or Stroke, Fill, Font and Align, Stroke width, Stroke
@@ -749,23 +791,41 @@ element of those kinds, and selecting an element adopts its look as the
 default. Opacity previews live while dragging and commits one undo step on
 release.
 
-The panel is `CanvasStylePanel.tsx`, which only places it: a card on wide
-panes and a popover behind a Style button on narrow ones, scrolling inside
-instead of overflowing. It and the other floating bars (tools, zoom, history,
-pages, utilities) share `.canvas-chrome` in `canvas.css`: a translucent,
-blurred card that turns nearly opaque under the pointer or keyboard focus. One file per section lives in
-`app/src/components/canvas/inspector/` and `InspectorControls.tsx` assembles
-them. Colour and Fill show five top picks and a button for the current
-colour, which opens `ColorPalette` (`app/src/components/ui/color/`) on the
-canvas palette in `inspector/palette.ts`: a grid of hues, the shades of the
-hue the colour belongs to (`colorShades`), the hex code and the full picker
-behind Custom. Strokes pick a hue's base and fills its palest shade. Edges is a Sharp/Round pair and Arrow type a
-Sharp/Curved/Elbow trio. Each arrow end is a button showing its head that opens
-a grid of the six types. These popovers focus themselves rather than their
-first option, leave focus in an open text overlay, and keep their keys from the
-canvas's shortcuts (`inspector/popoverGuards.ts`). Arrowhead glyphs are drawn
-by `arrowheadShape`, so the picker previews exactly what the arrow gets. The panel keeps focus in an open text overlay so a
-style change restyles the text instead of committing it.
+The inspector is `CanvasStyleBar.tsx`, a slim bar centred under the tool bar
+that shows only when sections apply or the eraser is chosen, so nothing covers
+the drawing at the side. With the eraser it holds the eraser's settings
+(`inspector/EraserControls.tsx`, [above](#the-eraser-takes-whole-elements-or-cuts-strokes)). Left to right, divided into groups: the stroke colour, Fill as one
+bucket-and-swatch button, the three stroke widths, and the font size (S, M, L,
+XL and an exact-size field). The other sections (font family and alignment,
+stroke style, sketch, edges, arrow type, arrowheads, opacity) sit in one
+column behind the More styles button (`inspector/MoreStyles.tsx`). With a
+selection the bar ends with its actions (`inspector/SelectionActions.tsx`):
+Crop image for a lone image, Layer, which opens the layer moves, and Delete.
+Every popover opens below the bar. `canvas.css` places the bar by
+`--canvas-top-edge`, the same edge as the tool bar, which the companion
+lowers below the iPad's status bar; on panes 760px wide or less it drops the
+exact-size field, and at 470px or less the five colour picks, keeping the
+current-colour button. A pane still too narrow scrolls the bar sideways with
+faded edges. Error notices sit below both bars.
+
+The bar and the other floating bars (tools, zoom, history, pages, utilities)
+share `.canvas-chrome` in `canvas.css`: a translucent, blurred card that turns
+nearly opaque under the pointer or keyboard focus. One file per control lives
+in `app/src/components/canvas/inspector/`. The colour shows five top picks and
+a button for the current colour (`ColorRow`); that button and Fill open
+`ColorPalette` (`app/src/components/ui/color/`) on the canvas palette in
+`inspector/palette.ts`: a grid of hues, the shades of the hue the colour
+belongs to (`colorShades`), the hex code and the full picker behind Custom.
+Strokes pick a hue's base and fills its palest shade. Edges is a Sharp/Round
+pair and Arrow type a Sharp/Curved/Elbow trio. Each arrow end is a button
+showing its head that opens a grid of the six types. These popovers focus
+themselves rather than their first option, leave focus in an open text
+overlay, and keep their keys from the canvas's shortcuts
+(`inspector/popoverGuards.ts`). Arrowhead glyphs are drawn by
+`arrowheadShape`, so the picker previews exactly what the arrow gets. A press
+on the bar or its popovers outside a field (`keepTextFocus`) keeps focus in an
+open text overlay, so a style change restyles the text instead of committing
+it.
 
 ## Layer order is array order
 
@@ -778,7 +838,7 @@ itself, so an element stops beneath (or above) the next selected one. A move
 that changes nothing returns the input array; `canReorder` disables those
 buttons.
 
-The inspector's Layer section and the shortcuts run the same `reorder` in the
+The style bar's Layer popover and the shortcuts run the same `reorder` in the
 hook, which publishes the reordered document as one undo step. It cannot go
 through `commitChanges`, because `applyElementChanges` keeps order. ⌘] and ⌘[
 step forward and backward, ⌘⇧] and ⌘⇧[ go to the front and back. The View

@@ -8,7 +8,7 @@ import { Segmented } from './Segmented';
 
 const HEADS: [CanvasArrowhead, string][] = [['none', 'None'], ['arrow', 'Arrow'], ['triangle', 'Triangle'], ['dot', 'Dot'], ['bar', 'Bar'], ['diamond', 'Diamond']];
 
-/** One end's head as a button showing it; the six types open in a grid beside the panel. */
+/** One end's head as a button showing it; the six types open in a grid beside the More styles popover. */
 export function ArrowheadPicker({ end, value, onChange }: { end: 'start' | 'end'; value: CanvasArrowhead; onChange: (head: CanvasArrowhead) => void }) {
   const [open, setOpen] = useState(false);
   const name = end === 'start' ? 'Start' : 'End';

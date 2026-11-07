@@ -28,7 +28,16 @@ export interface CanvasPaintOptions {
   bindingHint?: BindingSnap | null;
   /** A notebook paints its pages and clips each element to its own; a canvas is a whiteboard, whatever `paper` it holds. */
   notebook?: boolean;
+  /** What an erase in progress will remove, painted faint (`GHOST_ALPHA`) until the release commits it. */
+  ghosts?: readonly CanvasElement[];
+  /** The partial eraser's outline, in world units. */
+  eraser?: { center: Point; radius: number };
+  /** Bounds of the elements a selection box would add if released now, outlined lighter than a selection. */
+  pendingSelection?: readonly Bounds[];
 }
+
+/** A ghost's share of its element's opacity. */
+export const GHOST_ALPHA = 0.25;
 
 export interface CanvasRenderOptions { notebook?: boolean }
 
@@ -94,10 +103,11 @@ function drawLines(context: CanvasRenderingContext2D, element: CanvasElement, la
   for (const line of layout.lines) context.fillText(line.text, line.x, line.y - top + baseline);
 }
 
-export function drawElement(context: CanvasRenderingContext2D, element: CanvasElement, label = true) {
+/** `alpha` scales the element's own opacity (a ghost). */
+export function drawElement(context: CanvasRenderingContext2D, element: CanvasElement, label = true, alpha = 1) {
   context.save();
   context.translate(element.x, element.y);
-  const opacity = element.opacity ?? CANVAS_DEFAULTS.opacity;
+  const opacity = (element.opacity ?? CANVAS_DEFAULTS.opacity) * alpha;
   context.globalAlpha = opacity;
   context.strokeStyle = element.stroke;
   context.fillStyle = element.fill;
@@ -212,6 +222,15 @@ function paintBindingHint(context: CanvasRenderingContext2D, { target, binding, 
   context.restore();
 }
 
+/** A thin ring, white under grey, so it reads over ink and paper alike. */
+function paintEraser(context: CanvasRenderingContext2D, center: Point, radius: number, zoom: number) {
+  context.save();
+  context.beginPath(); context.arc(center.x, center.y, radius, 0, Math.PI * 2);
+  context.strokeStyle = 'rgba(255, 255, 255, 0.9)'; context.lineWidth = 3 / zoom; context.stroke();
+  context.strokeStyle = 'rgba(60, 60, 67, 0.75)'; context.lineWidth = 1 / zoom; context.stroke();
+  context.restore();
+}
+
 export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasDocument, options: CanvasPaintOptions) {
   const { width, height, pixelRatio, grid, selected, selectionColor } = options;
   const { x, y, zoom } = document.viewport;
@@ -241,6 +260,7 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
   };
   const scene = visibleElements(document.elements, viewport);
   drawElementsOnPages(context, options.overrides?.size ? scene.filter(element => !options.overrides!.has(element.id)) : scene, paper, draw);
+  if (options.ghosts?.length) drawElementsOnPages(context, options.ghosts, paper, element => drawElement(context, element, true, GHOST_ALPHA));
   if (options.overrides) drawElementsOnPages(context, [...options.overrides.values()].filter(element => element !== null), paper, draw);
   if (options.bindingHint) paintBindingHint(context, options.bindingHint, selectionColor, document.background, zoom);
   context.strokeStyle = selectionColor;
@@ -261,6 +281,13 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
       context.beginPath(); context.roundRect(handle.x - 4 / zoom, handle.y - 4 / zoom, 8 / zoom, 8 / zoom, 2 / zoom); context.fill(); context.stroke();
     }
   }
+  if (options.pendingSelection?.length) {
+    const pad = 3 / zoom;
+    context.globalAlpha = 0.55;
+    for (const b of options.pendingSelection) context.strokeRect(b.x - pad, b.y - pad, b.width + pad * 2, b.height + pad * 2);
+    context.globalAlpha = 1;
+  }
+  if (options.eraser) paintEraser(context, options.eraser.center, options.eraser.radius, zoom);
   if (options.captureGhost) {
     const { snapshot, from, to } = options.captureGhost;
     context.save(); context.fillStyle = snapshot.background;

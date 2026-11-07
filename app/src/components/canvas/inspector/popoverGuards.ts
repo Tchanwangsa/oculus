@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from 'react';
+import type { KeyboardEvent, MouseEvent } from 'react';
 
 const writing = () => document.activeElement instanceof HTMLTextAreaElement;
 
@@ -17,3 +17,6 @@ export const inspectorPopoverProps = {
   onCloseAutoFocus: (event: Event) => { if (writing()) event.preventDefault(); },
   onKeyDown: (event: KeyboardEvent) => event.stopPropagation(),
 };
+
+/** For the style bar and its popovers: a press outside a field keeps focus in an open text overlay, so a style change restyles what is being written instead of committing it. */
+export const keepTextFocus = (event: MouseEvent) => { if (!(event.target as Element).closest('input')) event.preventDefault(); };

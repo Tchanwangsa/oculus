@@ -1,5 +1,5 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowsInSimpleIcon, ArrowSquareOutIcon, DownloadSimpleIcon, FileImageIcon, FilePdfIcon, FileSvgIcon, GridFourIcon, MinusIcon, PlusIcon, QuestionIcon, SlidersHorizontalIcon, SpinnerGapIcon } from '@phosphor-icons/react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ArrowsInSimpleIcon, ArrowSquareOutIcon, DownloadSimpleIcon, FileImageIcon, FilePdfIcon, FileSvgIcon, GridFourIcon, MinusIcon, PlusIcon, QuestionIcon, SpinnerGapIcon } from '@phosphor-icons/react';
 import { CANVAS_DEFAULTS, textAlignOf, type CanvasDocument } from '@/lib/canvas/model';
 import { loadCanvasEngine } from '@/lib/canvas/engine';
 import { installBrowserSelectionGuard } from '@/lib/canvas/browserSelectionGuard';
@@ -13,19 +13,17 @@ import { useCanvasInteraction, type TextDraft } from '@/hooks/canvas/useCanvasIn
 import { useCanvasMediaDrop } from '@/hooks/canvas/useCanvasMediaDrop';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { shortcut } from '@/lib/platform';
 import { cn } from '@/lib/utils';
 import { useCanvasPlatform } from '@/lib/canvas/platform';
 import { CanvasHistory, CanvasIconButton, CanvasToolbar } from './CanvasToolbar';
-import { CanvasStylePanel } from './CanvasStylePanel';
+import { CanvasStyleBar } from './CanvasStyleBar';
 import { CanvasCaptureHold } from './CanvasCaptureHold';
 import { CanvasRegionActions } from './CanvasRegionActions';
 import { NotebookPageBar } from './pages/NotebookPageBar';
 import { PageSidebar } from './pages/PageSidebar';
 import { CanvasImageDialog } from './CanvasImageDialog';
-import { inspectorPopoverProps } from './inspector/popoverGuards';
 import './canvas.css';
 
 /** Standalone text grows with its content; a label is fixed to its shape's label box, wraps, and sits per its vertical alignment. */
@@ -82,25 +80,8 @@ const hints: Record<string, string> = {
   rectangle: 'Drag to draw · Hold Shift for a square', ellipse: 'Drag to draw · Hold Shift for a circle',
   diamond: 'Drag to draw · Hold Shift to constrain', line: 'Drag to draw · Hold Shift to snap angle',
   arrow: `Drag to connect · Hold Shift to snap angle · Hold ${shortcut('mod')} to place freely`, freedraw: 'Draw freely · Escape to select',
-  text: `Click anywhere or on a shape to write · Escape or ${shortcut('mod+Enter')} to finish`, eraser: 'Drag over shapes to erase · Select an image and use the trash to delete it',
+  text: `Click anywhere or on a shape to write · Escape or ${shortcut('mod+Enter')} to finish`, eraser: 'Drag over ink and shapes to erase · Escape to cancel · Select an image and use the trash to delete it',
 };
-
-/** Preferences for this device only; collaborators never see them. */
-function CanvasDrawingPreferences({ preferences, onChange }: { preferences: CanvasToolPreferences; onChange: (preferences: CanvasToolPreferences) => void }) {
-  const id = useId();
-  return <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Drawing preferences" className="rounded-lg text-muted-foreground"><SlidersHorizontalIcon size={17} /></Button></PopoverTrigger>
-    <PopoverContent side="top" align="end" className="w-72" {...inspectorPopoverProps}><div className="mb-3 text-[13px] font-medium">Drawing preferences</div>
-      <div className="flex items-start justify-between gap-4">
-        <label htmlFor={id} className="min-w-0 cursor-pointer">
-          <span className="text-xs text-foreground">Return after erasing</span>
-          <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">Lifting the eraser goes back to the tool you used before it.</p>
-        </label>
-        <Switch id={id} checked={preferences.eraserAutoReturn} onCheckedChange={eraserAutoReturn => onChange({ ...preferences, eraserAutoReturn })} className="mt-0.5 shrink-0" />
-      </div>
-      <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">Saved on this device.</p>
-    </PopoverContent>
-  </Popover>;
-}
 
 /**
  * `onViewportChange` keeps pan and zoom with the host instead of saving them in the document. `kind="notebook"` binds the
@@ -109,9 +90,13 @@ function CanvasDrawingPreferences({ preferences, onChange }: { preferences: Canv
 export function CanvasSurface({ document, onChange, onViewportChange, onPageChange, title, kind = 'canvas', suppressNativeGestures = false }: { document: CanvasDocument; onChange: (document: CanvasDocument) => void; onViewportChange?: (viewport: CanvasDocument['viewport']) => void; onPageChange?: (index: number) => void; title?: string; kind?: CanvasKind; suppressNativeGestures?: boolean }) {
   const platform = useCanvasPlatform();
   const [toolPreferences, setToolPreferences] = useState(loadCanvasToolPreferences);
-  const editor = useCanvasInteraction(document, onChange, { onViewportChange, eraserAutoReturn: toolPreferences.eraserAutoReturn, kind });
+  const editor = useCanvasInteraction(document, onChange, { onViewportChange, ...toolPreferences, kind });
   const media = useCanvasMediaDrop(editor.root, editor.documentRef, editor.insertImages, editor.notebook);
-  const changeToolPreferences = (preferences: CanvasToolPreferences) => { setToolPreferences(preferences); saveCanvasToolPreferences(preferences); };
+  // Saved on this device only; collaborators never see them.
+  const changeToolPreferences = (patch: Partial<CanvasToolPreferences>) => {
+    const next = { ...toolPreferences, ...patch };
+    setToolPreferences(next); saveCanvasToolPreferences(next);
+  };
   useEffect(() => { const element = editor.root.current; return element ? installBrowserSelectionGuard(element, { suppressNativeGestures, touchEventRoot: suppressNativeGestures ? element.ownerDocument.body : element }) : undefined; }, [editor.root, suppressNativeGestures]);
   const [engineError, setEngineError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -173,7 +158,8 @@ export function CanvasSurface({ document, onChange, onViewportChange, onPageChan
       <CanvasImageDialog open={imageDialogOpen} onOpenChange={setImageDialogOpen} onImport={editor.insertImages} />
       {editor.region && !editor.captureHold ? <CanvasRegionActions key={JSON.stringify(editor.region.bounds)} region={editor.region} viewport={current.viewport} onCopy={editor.copyRegion} onDuplicate={editor.duplicateRegion} copyState={editor.regionCopyState} copyError={editor.regionError} /> : null}
       {editor.captureHold ? <CanvasCaptureHold hold={editor.captureHold} viewport={current.viewport} /> : null}
-      {editor.inspector.sections.length ? <CanvasStylePanel {...editor.inspector} onChange={editor.changeStyle} onPreview={editor.previewStyle} selectionCount={editor.selection.length} onDelete={editor.deleteSelected} onCrop={editor.canCrop ? () => editor.startCrop() : undefined} layerMoves={editor.layerMoves} onReorder={editor.reorder} /> : null}
+      {editor.inspector.sections.length || editor.tool === 'eraser' ? <CanvasStyleBar {...editor.inspector} onChange={editor.changeStyle} onPreview={editor.previewStyle} selectionCount={editor.selection.length} onDelete={editor.deleteSelected} onCrop={editor.canCrop ? () => editor.startCrop() : undefined} layerMoves={editor.layerMoves} onReorder={editor.reorder}
+        eraser={editor.tool === 'eraser' ? { preferences: toolPreferences, onChange: changeToolPreferences } : undefined} /> : null}
       {editor.textDraft ? <CanvasTextInput key={editor.textDraft.element.id} draft={editor.textDraft} viewport={current.viewport} onInput={editor.editText} onCommit={editor.commitText} /> : null}
       <div className="canvas-bottom absolute bottom-4 left-4 z-10 flex items-center gap-2">
         <div className="canvas-chrome flex items-center rounded-xl border border-border-subtle p-1 shadow-xs" role="group" aria-label="Canvas zoom">
@@ -187,7 +173,6 @@ export function CanvasSurface({ document, onChange, onViewportChange, onPageChan
       {editor.pages ? <div className="canvas-pages absolute left-1/2 z-10 -translate-x-1/2"><NotebookPageBar pages={editor.pages} sidebarOpen={pagesOpen} onToggleSidebar={() => setPagesOpen(open => !open)} /></div> : null}
       <div key={hint} className="canvas-short-hint pointer-events-none absolute right-0 bottom-[4.7rem] left-0 text-center text-[11px] text-muted-foreground/65">{hint}</div>
       <div className="canvas-utilities canvas-chrome absolute right-4 bottom-4 z-10 flex items-center gap-1.5 rounded-xl border border-border-subtle p-1 shadow-xs">
-        <CanvasDrawingPreferences preferences={toolPreferences} onChange={changeToolPreferences} />
         {editor.notebook ? null : <CanvasIconButton label="Toggle grid (G)" active={editor.grid} aria-pressed={editor.grid} onClick={() => editor.setGrid(value => !value)}><GridFourIcon size={17} /></CanvasIconButton>}
         <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Export drawing" disabled={(!current.elements.length && !editor.notebook) || exporting} className="rounded-lg text-muted-foreground">{exporting ? <SpinnerGapIcon className="animate-spin" /> : <DownloadSimpleIcon size={17} />}</Button></PopoverTrigger>
           <PopoverContent side="top" align="end" className="w-52 p-1.5"><div className="px-2.5 py-2 text-xs font-medium">Export drawing</div>
@@ -203,7 +188,7 @@ export function CanvasSurface({ document, onChange, onViewportChange, onPageChan
           </dl></PopoverContent>
         </Popover>
       </div>
-      {engineError || exportError || editor.historyError || media.error ? <div role="alert" className="absolute top-[5.5rem] right-4 z-30 max-w-80 rounded-xl border border-destructive/20 bg-card p-3 text-xs text-destructive shadow-sm">{engineError ?? exportError ?? editor.historyError ?? media.error}<button type="button" className="mt-2 block cursor-pointer text-foreground underline" onClick={() => { setEngineError(null); setExportError(null); editor.clearHistoryError(); media.clearError(); }}>Dismiss</button></div> : null}
+      {engineError || exportError || editor.historyError || media.error ? <div role="alert" className="canvas-alert absolute right-4 z-30 max-w-80 rounded-xl border border-destructive/20 bg-card p-3 text-xs text-destructive shadow-sm">{engineError ?? exportError ?? editor.historyError ?? media.error}<button type="button" className="mt-2 block cursor-pointer text-foreground underline" onClick={() => { setEngineError(null); setExportError(null); editor.clearHistoryError(); media.clearError(); }}>Dismiss</button></div> : null}
     </div>
   </div>;
 }

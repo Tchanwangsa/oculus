@@ -2,6 +2,7 @@ import { mock } from 'bun:test';
 import * as React from 'react';
 import { createCanvasDocument, type CanvasDocument } from '@/lib/canvas/model';
 import type { CanvasKind } from '@/lib/canvas/paper';
+import type { EraserMode, EraserSize } from '@/lib/canvas/erase';
 
 // Drives the real hook's handlers without a DOM renderer. State and refs live in slots that persist between
 // explicit `render` calls; layout effects run after each render. Passive effects (DOM sizing, menus, the wheel) run
@@ -41,7 +42,7 @@ export interface Harness {
   wheel: (event: { deltaX?: number; deltaY?: number; ctrlKey?: boolean; clientX?: number; clientY?: number }) => void;
   /** With a `size`: lays the editor out again at `size`, as its resize observer would. */
   resize: (size: { width: number; height: number }) => void;
-  options: { eraserAutoReturn: boolean; localViewport: boolean; kind?: CanvasKind; size?: { width: number; height: number } };
+  options: { eraserAutoReturn: boolean; eraserMode?: EraserMode; eraserSize?: EraserSize; localViewport: boolean; kind?: CanvasKind; size?: { width: number; height: number } };
 }
 
 /** Runs `effect` with a stand-in `window` when the test runtime has none, so DOM-sizing code can read it. */
@@ -55,6 +56,7 @@ function withWindow(effect: () => void) {
 export function createHarness(options: Partial<Harness['options']> = {}, initial: CanvasDocument = createCanvasDocument()): Harness {
   slots = [];
   globalThis.requestAnimationFrame = (() => 1) as typeof requestAnimationFrame;
+  globalThis.cancelAnimationFrame = () => {};
   const captures = new Set<number>();
   const listeners = new Map<string, (event: unknown) => void>();
   let layout = { width: 0, height: 0 }, observed: (() => void) | null = null;
@@ -81,6 +83,8 @@ export function createHarness(options: Partial<Harness['options']> = {}, initial
         harness.editor = useCanvasInteraction(document, published => { harness.published.push(published); }, {
           onViewportChange: harness.options.localViewport ? view => { harness.views.push(view); } : undefined,
           eraserAutoReturn: harness.options.eraserAutoReturn,
+          eraserMode: harness.options.eraserMode,
+          eraserSize: harness.options.eraserSize,
           kind: harness.options.kind,
         });
       } finally { rendering = false; }

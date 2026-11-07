@@ -3,6 +3,7 @@ import { useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { ColorPalette, type PaletteColor } from "@/components/ui/color/ColorPalette";
 import { ColorPicker } from "@/components/ui/color/ColorPicker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { parseHex } from "@/lib/ui/color";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,7 @@ export function ColorPopover({
   opaque,
   palette,
   contentProps,
+  tooltip,
   className,
   children,
 }: {
@@ -54,6 +56,8 @@ export function ColorPopover({
   palette?: PaletteColor[];
   /** Focus and key handling for the popover, for a host that must keep focus where it is. */
   contentProps?: Pick<ComponentProps<typeof PopoverContent>, "onOpenAutoFocus" | "onCloseAutoFocus" | "onKeyDown">;
+  /** Shown below the button on hover, for a face that is only a swatch or a glyph. */
+  tooltip?: string;
   className?: string;
   children: ReactNode;
 }) {
@@ -61,13 +65,23 @@ export function ColorPopover({
   const [open, setOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   useScrollFade(contentRef, "y", open);
+  const trigger = (
+    <PopoverTrigger asChild>
+      <button type="button" aria-label={`${label}: ${value}`} className={cn("cursor-pointer text-left", className)}>
+        {children}
+      </button>
+    </PopoverTrigger>
+  );
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button type="button" aria-label={`${label}: ${value}`} className={cn("cursor-pointer text-left", className)}>
-          {children}
-        </button>
-      </PopoverTrigger>
+      {tooltip ? (
+        <Tooltip>
+          <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={8}>{tooltip}</TooltipContent>
+        </Tooltip>
+      ) : (
+        trigger
+      )}
       <PopoverContent
         ref={contentRef}
         align={align}
