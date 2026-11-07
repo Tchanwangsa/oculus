@@ -168,6 +168,7 @@ export function LecturePlayer({ lecture, onRefresh, startAt }: LecturePlayerProp
     secondHostRef,
     startRef,
     attach,
+    togglePlay: player.togglePlay,
     onRefresh,
   });
 

@@ -1,5 +1,6 @@
-import { useEffect, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { useWindowEvent } from "@/hooks/backend/useEvents";
+import { panelOnScreen } from "@/components/media/player/constants";
 import type { Lecture, SourceNum } from "@/lib/db";
 import {
   LECTURE_PROGRESS_EVENT,
@@ -31,6 +32,8 @@ interface SharedElementArgs {
   /** What the adoption does once a user action claims playback here. */
   startRef: RefObject<{ at?: number } | null>;
   attach: (v: HTMLVideoElement | null) => () => void;
+  /** Play or pause; a click on the stacked frame's picture calls it. */
+  togglePlay: () => void;
   onRefresh: () => void;
 }
 
@@ -53,8 +56,12 @@ export function useSharedElement({
   secondHostRef,
   startRef,
   attach,
+  togglePlay,
   onRefresh,
 }: SharedElementArgs) {
+  const toggleRef = useRef(togglePlay);
+  toggleRef.current = togglePlay;
+
   /** The inset picture's own aspect, read in the reconcile effect below. */
   const [pipAspect, setPipAspect] = useState(16 / 9);
 
@@ -101,9 +108,18 @@ export function useSharedElement({
     readAspect();
     inset?.addEventListener("loadedmetadata", readAspect);
 
+    // `attach` listens for clicks on the leader only. The stacked frame's
+    // picture plays and pauses too; the PIP's is a drag handle.
+    const clickable = layout === "stack" ? inset : null;
+    const onInsetClick = () => {
+      if (!panelOnScreen()) toggleRef.current();
+    };
+    clickable?.addEventListener("click", onInsetClick);
+
     return () => {
       detach();
       inset?.removeEventListener("loadedmetadata", readAspect);
+      clickable?.removeEventListener("click", onInsetClick);
       // Unmounting is a tab switch, not a stop: the elements go back to their
       // off-screen host and carry on. Closing the lecture is what stops them.
       parkLectureVideos(claim);

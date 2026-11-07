@@ -703,7 +703,9 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
   1×, a second at 2×), so a late follower trimmed on and off cycled 0.3–0.9 s
   behind for good. `syncLectureSources` takes the whole plan, so only it can tell
   a fresh lecture (resume) from a source switch (keep the second). Speed and
-  volume re-apply per leader element, since both reset on load.
+  volume re-apply per leader element, since both reset on load. A click on
+  either stacked picture plays and pauses (`attach` listens on the leader,
+  `useSharedElement` on the follower); the PIP is a drag handle.
 - **Fullscreen is the Tauri window plus a `fixed inset-0` overlay**: element
   fullscreen shows only its subtree, and the player's Radix popups portal
   outside it. A lecture in the side panel is the full lecture page, dock and
