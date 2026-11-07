@@ -1,5 +1,7 @@
+import { useContext } from "react";
 import { SaveQuestions } from "@/components/revision/SaveWidget";
-import { defineComponent } from "@openuidev/react-lang";
+import { defineComponent, useIsStreaming } from "@openuidev/react-lang";
+import { MoreComing, StreamingStatus, StreamingPending } from "../Streaming";
 import { z } from "zod/v4";
 import { ArrowCounterClockwise, Check, X } from "@phosphor-icons/react";
 import { Frame, Pill, Rich } from "./Frame";
@@ -31,6 +33,8 @@ export const Flashcards = defineComponent({
     cards: z.array(Card.ref),
   }),
   component: function FlashcardsView({ props }) {
+    const streaming = useIsStreaming();
+    const pending = useContext(StreamingPending);
     const cards = (props.cards ?? []).map((c) => (c?.props ?? {}) as CardProps);
     const progress = useWidgetProgress({ queue: null as number[] | null, known: 0, misses: 0, flipped: false });
     const { queue, known, misses, flipped } = progress.value;
@@ -51,12 +55,12 @@ export const Flashcards = defineComponent({
       progress.setValue({ queue: null, known: 0, misses: 0, flipped: false });
     };
 
-    if (!total) return null;
+    if (!total) return streaming ? <Frame title={typeof props.title === "string" ? props.title : undefined}><MoreComing /></Frame> : null;
     return (
       <Frame
         title={typeof props.title === "string" ? props.title : undefined}
         meta={`${known} of ${total} known${misses ? ` · ${misses} missed` : ""}`}
-        footer={<>
+        footer={streaming ? <StreamingStatus /> : <>
           <SaveQuestions items={cards.map(c=>({kind:"card",prompt:String(c.front??""),answer:String(c.back??"")}))}/>
           {card ? (
             flipped ? (
@@ -78,10 +82,11 @@ export const Flashcards = defineComponent({
           )
         }</>}
       >
-        {card ? (
+        {streaming && (!card || typeof card.front !== "string" || typeof card.back !== "string") ? <MoreComing /> : card ? (
           <button
             type="button"
             onClick={flip}
+            disabled={streaming}
             aria-pressed={flipped}
             className="flex min-h-28 w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-surface px-4 py-5 text-center"
           >
@@ -95,6 +100,7 @@ export const Flashcards = defineComponent({
             All {total} cards known{misses ? `, after ${misses} ${misses === 1 ? "miss" : "misses"}` : " first time"}.
           </p>
         )}
+        {streaming && pending && card && typeof card.front === "string" && typeof card.back === "string" && <MoreComing />}
       </Frame>
     );
   },

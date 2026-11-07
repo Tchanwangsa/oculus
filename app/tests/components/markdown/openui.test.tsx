@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, spyOn, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
 
@@ -10,7 +10,13 @@ for (const k of stubbed) globals[k] = Object.assign(new EventTarget(), { documen
 afterAll(() => {
   for (const k of stubbed) delete globals[k];
 });
-const { parseProgram } = await import("@/components/markdown/openui/parse");
+const { parseProgram, streamVerdict } = await import("@/components/markdown/openui/parse");
+const { Renderer } = await import("@openuidev/react-lang");
+const { library } = await import("@/components/markdown/openui/library");
+const maths = await import("@/lib/maths/useMathsReady");
+const { OpenUIFailure, StreamingPending } = await import("@/components/markdown/openui/Streaming");
+const { AssistantSend } = await import("@/components/markdown/openui/assistant");
+const { fixRequest } = await import("@/components/markdown/widget/fixRequest");
 const { PROMPT_EXAMPLES } = await import("@/components/markdown/openui/prompt");
 const { repairTex } = await import("@/components/markdown/openui/components/Frame");
 const { MD_COMPONENTS } = await import("@/components/markdown/MdComponents");
@@ -67,7 +73,7 @@ describe("openui programs", () => {
     if (!v.ok) expect(v.errors.join()).toContain("unknown-component");
   });
 
-  test("a fence cut mid-stream is incomplete, not drawn", () => {
+  test("strict validation rejects an unresolved final fence", () => {
     const cut = PROGRAMS.combined.slice(0, PROGRAMS.combined.indexOf("quiz = Quiz"));
     const v = parseProgram(cut);
     expect(v.ok).toBe(false);
@@ -81,9 +87,8 @@ describe("openui programs", () => {
   });
 });
 
-// The widgets themselves aren't rendered here: their text goes through
-// `InlineMd`, whose `useMathsReady` has no server snapshot, so a static
-// render throws. Drawing is checked in a browser.
+// Only the browser readiness hook is stubbed for static component renders;
+// the parser, evaluator, component tree and streaming context are real.
 describe("openui fence", () => {
   test("only widget fences get a stable syntax-order index", () => {
     const md = "```openui\nroot = Stack([])\n```\n\n```text\nordinary\n```\n\n```openui-lang\nroot = Stack([])\n```";
@@ -92,11 +97,12 @@ describe("openui fence", () => {
     expect(html).toContain('data-widget-index="1"');
     expect(html).not.toContain('data-widget-index="2"');
   });
-  test("a fence shows as code until it settles", () => {
+  test("a fence shows a shimmer immediately and never exposes source", () => {
     const md = "Try this:\n\n```openui\n" + PROGRAMS.steps + "\n```\n";
     const html = renderToStaticMarkup(<ReactMarkdown components={MD_COMPONENTS}>{md}</ReactMarkdown>);
-    expect(html).toContain("<pre");
-    expect(html).toContain("Steps(");
+    expect(html).toContain("Drawing…");
+    expect(html).not.toContain("<pre");
+    expect(html).not.toContain("Steps(");
   });
 });
 
@@ -172,7 +178,7 @@ describe("proposal signatures", () => {
     `NewTasks(null, [Under(1, [Task("Child", null, null, null, [Task("Grandchild")])])])`,
     `NewEvents([Event("Wrong span", "2026-10-27", "2026-10-28", "note")])`,
     `NewTasks(null, [Task("Wrong date", "tomorrow")])`,
-  ]) test("malformed proposal stays code: " + source.slice(0, 70), () => expect(parseProgram(`root = Stack([${source}])`).ok).toBe(false));
+  ]) test("malformed final proposal is rejected: " + source.slice(0, 70), () => expect(parseProgram(`root = Stack([${source}])`).ok).toBe(false));
   test("two proposals or jobs in one fence refuse the complete fence", () => {
     expect(parseProgram(`root = Stack([NewTasks(null, [Task("A")]), DeleteTasks([1])])`).ok).toBe(false);
     expect(parseProgram(`root = Stack([Sync(["COMP30026"]), Download("aligner")])`).ok).toBe(false);
@@ -234,4 +240,77 @@ describe("Revision and live widgets",()=>{
   cheat:'root = Stack([NewCheatNotes([CheatEntry("Chain rule", "Multiply by the inner derivative", "COMP10001", ["Calculus"])])])',
  })) test(`${name} parses`,()=>{const result=parseProgram(source);if(!result.ok)throw new Error(result.errors.join("; "));});
  test("cheat proposals require condensed content",()=>{expect(()=>validateProposal("NewCheatNotes",{notes:[{title:"",body:"text"}]})).toThrow();});
+});
+
+describe("streaming OpenUI", () => {
+  for (const [name, source] of Object.entries(PROMPT_EXAMPLES)) {
+    test(`${name}: every character prefix renders while streaming`, () => {
+      const ready = spyOn(maths, "useMathsReady").mockReturnValue(true);
+      try {
+        for (let end = 0; end <= source.length; end++) {
+          const prefix = source.slice(0, end);
+          const pending = streamVerdict(prefix).pending;
+          expect(() => renderToStaticMarkup(
+            <StreamingPending.Provider value={pending}><Renderer response={prefix} library={library} isStreaming publishObservability={false}>
+              <Renderer.Content />
+            </Renderer></StreamingPending.Provider>,
+          )).not.toThrow();
+          expect(() => streamVerdict(prefix)).not.toThrow();
+        }
+        expect(parseProgram(source).ok).toBe(true);
+        const html = renderToStaticMarkup(<Renderer response={source} library={library} isStreaming={false} publishObservability={false}><Renderer.Content /></Renderer>);
+        expect(html).toContain("<section");
+        expect(html).not.toContain("More coming");
+      } finally { ready.mockRestore(); }
+    });
+  }
+
+  test("partial props and malformed proposals remain drawable until completion", () => {
+    const partial = 'root = Stack([Flashcards("Deck", [card])])';
+    expect(streamVerdict(partial).drawable).toBe(true);
+    expect(parseProgram(partial).ok).toBe(false);
+    const invalid = 'root = Stack([TaskChanges([Change(1, {due:"old"}, {title:"new"})])])';
+    expect(streamVerdict(invalid).drawable).toBe(true);
+    expect(parseProgram(invalid).ok).toBe(false);
+    expect(streamVerdict("root = Stack([missing])").drawable).toBe(false);
+  });
+
+  test("even the opening line routes to a shimmer", () => {
+    for (const tag of ["openui", "openui-lang"]) {
+      const html = renderToStaticMarkup(<ReactMarkdown remarkPlugins={[remarkWidgets]} components={MD_COMPONENTS}>{`\`\`\`${tag}\n`}</ReactMarkdown>);
+      expect(html).toContain("Drawing…");
+      expect(html).not.toContain("<pre");
+    }
+  });
+
+  test("closure metadata handles backticks, tildes and an unfinished fence", () => {
+    for (const [md, closed] of [
+      ["```openui\nroot = Stack([])\n```", true],
+      ["~~~openui\nroot = Stack([])\n~~~~", true],
+      ["> ```openui\n> root = Stack([])\n> ```", true],
+      ["```openui\nroot = Stack([])", false],
+      ["````openui\nroot = Stack([])\n```", false],
+    ] as const) {
+      const html = renderToStaticMarkup(<ReactMarkdown remarkPlugins={[remarkWidgets]}>{md}</ReactMarkdown>);
+      expect(html).toContain(`data-fence-closed="${closed}"`);
+    }
+  });
+
+  test("a final failure discloses source and uses the widget fix-request path", () => {
+    const source = 'root = Stack([Broken()])';
+    const html = renderToStaticMarkup(<AssistantSend.Provider value={() => {}}><OpenUIFailure source={source} code={<pre>{source}</pre>} /></AssistantSend.Provider>);
+    expect(html).toContain("Couldn&#x27;t draw this");
+    expect(html).toContain("Show source");
+    expect(html).toContain("Ask to fix");
+    expect(html).toMatch(/<details[^>]*>.*<pre/s);
+    expect(html).not.toMatch(/<details[^>]* open/);
+    expect(fixRequest("OpenUI", "Couldn't draw this", source, "openui")).toContain(`\`\`\`openui\n${source}`);
+    expect(fixRequest("Widget", "Failed", "export default () => null")).toContain("```widget");
+  });
+});
+
+
+test("the oculus-ui skill matches its generated prompt", async () => {
+  const skill = await Bun.file(new URL("../../../src-tauri/templates/skills/oculus-ui/SKILL.md", import.meta.url)).text();
+  expect(skill.split("# Chat widgets and proposal cards\n\n")[1]).toBe(generateOculusUiPrompt() + "\n");
 });

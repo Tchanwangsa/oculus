@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
+import { OpenUISkeleton, StreamingPending } from "../Streaming";
 import { ArrowClockwise, ArrowDown, ArrowCounterClockwise, CalendarBlank, CheckSquare, FileText, FolderSimple, SpinnerGap, Tag } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -84,9 +85,16 @@ function columns(row: Row | null | undefined): Row[] {
 /** Every student-owned write draws in the shared `CardFrame`; `cardState`
  * names its phase, and only `pending` (or a refused Apply) takes input. */
 export function ProposalCard({ kind, input }: { kind: string; input: Row }) {
-  const card = useProposal(kind, input);
-  validateProposal(kind, card.initial);
   const streaming = useCardStreaming();
+  const pending = useContext(StreamingPending);
+  if (streaming && pending) return <OpenUISkeleton title={`Drawing ${kind}…`} />;
+  return <ProposalCardContent kind={kind} input={input} />;
+}
+
+function ProposalCardContent({ kind, input }: { kind: string; input: Row }) {
+  const card = useProposal(kind, input);
+  const streaming = useCardStreaming();
+  if (!streaming) validateProposal(kind, card.initial);
   const { state, proposal } = card;
   const key = rowKey(kind);
   const data = useProposalLive(kind, state);

@@ -7,7 +7,7 @@ Read this before any UI work.
 
 | Piece | Location |
 | --- | --- |
-| Tokens, base resets, utilities (`page-scroll`, `skip-offscreen`, `text-shimmer` for text still at work, scroll fades) | `app/src/styles/colors.css`, `app/src/styles/dark.css`, `app/src/styles/base.css`, `app/src/styles/utilities.css`, `app/src/styles/scroll-fade.css` (`app/src/index.css` only imports them) |
+| Tokens, base resets, utilities (`page-scroll`, `skip-offscreen`, `text-shimmer` and `block-shimmer` for content still at work, scroll fades) | `app/src/styles/colors.css`, `app/src/styles/dark.css`, `app/src/styles/base.css`, `app/src/styles/utilities.css`, `app/src/styles/scroll-fade.css` (`app/src/index.css` only imports them) |
 | Themes, appearance prefs and the frame | `app/src/lib/ui/themes/` (`samplesLight.ts`, `samplesDark.ts` for the palettes, `derive.ts` for the tokens, `store.ts` for the prefs) |
 | Settings → Appearance: mode, theme cards, accent, window frame, code font | `app/src/pages/settings/AppearancePage.tsx`, `app/src/components/settings/appearance/` |
 | Platform detection and shortcut labels | `app/src/lib/platform.ts` |
@@ -41,6 +41,12 @@ chart, border and muted-text tokens; controls use primary, brand, success and
 destructive tokens. Nothing inside the widget sets a fixed pixel width, so
 the cards reflow with the chat pane and page zoom. The runtime and its state
 contract are in [harness.md](./harness.md#openui-fences-draw-interactive-study-widgets).
+
+Streaming OpenUI cards use `text-shimmer` and `block-shimmer` for unresolved
+content. New sections fade in only while streaming; a committed-row remount
+has no entrance animation. Both shimmer and entrance motion respect
+`prefers-reduced-motion`, and placeholder sizes use CSS without measuring
+visual viewport rectangles.
 
 A ` ```widget ` fence runs in a sandboxed frame, so it can't use these
 components; its kit (`app/widget-kit/kit.css`) redraws the same card, pills

@@ -5,14 +5,7 @@ description: Draws interactive study widgets and editable proposal cards in an O
 
 # Chat widgets and proposal cards
 
-This skill owns OpenUI's grammar and component signatures. The Oculus chat
-instructions own output choice, fence placement and confirmation policy;
-`oculus-plan` owns planning and amendments, and `oculus-revision` owns study
-material and its filing. Use those workflows rather than duplicating them here.
-
-A fenced `openui` program draws as a live study widget or proposal card. A
-malformed block stays visible as raw code, so follow the grammar exactly.
-Each proposal or job needs its own fence; study widgets may share a Stack.
+Oculus draws a fenced code block tagged `openui` in your reply as a live study widget or a proposal the student reviews and confirms. Use study widgets when doing beats reading: flashcards to drill, a quiz to check understanding, a worked problem to try step by step, or a formula to explore with sliders. Always use a proposal before creating, changing or deleting the student's tasks, projects, tags, calendar events or notes, or starting a long or billed job. Nothing is written until the student clicks. Everything else in the reply stays ordinary markdown. Keep surrounding prose to a sentence or two. Each proposal or job needs its own fence; study widgets may share a Stack. The UI draws while the fence streams. Write root first, then $variables, then child components in reading order, then leaf data so the shell appears before its content. Follow the grammar below exactly; a malformed final program shows a failure card.
 
 The block holds a program in OpenUI Lang:
 
@@ -25,7 +18,7 @@ The block holds a program in OpenUI Lang:
 5. EVERY variable (except root) MUST be referenced by at least one other variable. Unreferenced variables are silently dropped and will NOT render. Always include defined variables in their parent's children/items array.
 6. Arguments are POSITIONAL (order matters, not names). Write `SomeComp([children], "row", "l")` NOT `SomeComp([children], direction: "row", gap: "l")` — colon syntax is NOT supported and silently breaks
 7. Optional arguments can be omitted from the end
-8. Mutable state is for Explorer: declare `$varName = literalNumber` and bind it as a Slider's first argument. Values, Charts and Text can compute from it.
+8. Declare mutable state with `$varName = defaultValue`. Components marked with `$binding` can read/write these. Undeclared $variables are auto-created with null default.
 9. String concatenation: `"text" + $var + "more"`
 10. Dot member access: `query.field` reads a field; on arrays it extracts that field from every element
 11. Index access: `arr[0]`, `data[index]`
@@ -34,7 +27,7 @@ The block holds a program in OpenUI Lang:
 14. Logical: &&, ||, ! (prefix)
 15. Ternary: `condition ? valueIfTrue : valueIfFalse`
 16. Parentheses for grouping: `(a + b) * c`
-- Strings are double-quoted on one line; use `\n` for newlines and `\"` for quotes. Maths uses `$…$` inside strings, with doubled TeX backslashes: `"$\\frac{a}{b}$"`.
+- Strings use double quotes with backslash escaping
 
 ## Component Signatures
 
@@ -52,6 +45,7 @@ Card(front: string, back: string) — One flashcard: a prompt on the front, the 
 Quiz(title: string, questions: Question[]) — A multiple-choice quiz, one question at a time, scored as it goes.
 Question(prompt: string, options: Option[], explanation?: string) — A multiple-choice question. Only inside Quiz.
 Option(text: string, correct?: boolean) — One answer choice; mark exactly one option per question correct = true. Only inside Question.
+- Mark exactly one answer per question with Option(text, true).
 - 5 to 12 cards or 3 to 8 questions; every one checks a single idea.
 
 ### Working
@@ -63,6 +57,7 @@ Explorer(title: string, items: (Slider | Value | Chart | Text)[]) — A card of 
 Slider(value: $binding<number>, label: string, min: number, max: number, step?: number, unit?: string) — Drags a $variable between min and max; unit like "%", "$" or "yr" formats the readout.
 Value(label: string, value: number | null, unit?: string, decimals?: number) — A computed number shown large, e.g. Value("Balance", $p * @Pow(1 + $r / 100, $n), "$", 2).
 Chart(points: {x: number, y: number | null}[], xLabel?: string, yLabel?: string, kind?: "line" | "bar") — A line (default) or bar chart of {x, y} points, usually computed from sliders with @Each(@Range(...), "t", {x: t, y: ...}).
+- A Slider's first argument is a $variable declared with a literal default; Values and Charts compute from those $variables.
 - There is no ^ operator: write @Pow(base, exponent).
 
 ### Live
@@ -84,12 +79,13 @@ NewProject(name: string, subject: string | null, tasks: Task[], due?: string, br
 Task(title: string | number, due?: string, estimate?: number, column?: string, subtasks?: Task[], tags?: string[], body?: string, starts?: string, files?: string[]) — Task(numericId) shows a live task. Task(title, due, ...) describes a new task inside a creation card; subtasks nest one level.
 Under(task: number, subtasks: Task[]) — New subtasks grouped under an existing task; only in NewTasks.
 NewEvents(events: Event[], amends?: string) — Propose the student's own calendar events, confirmed together.
-Event(title: string, start: string, end?: string, kind?: "note" | "due" | "class", subject?: string, notes?: string) — A proposed calendar event. kind defaults to note; a study session uses class and an end. Other kinds cannot have an end.
+Event(title: string, start: string, end?: string, kind?: "note" | "due" | "class", subject?: string, notes?: string) — A proposed calendar event. A study session uses kind class and an end. Other kinds cannot have an end.
 NewNote(subject: string, title: string, body: string, amends?: string) — Propose a note in a subject, with its complete markdown body.
 NewCheatNotes(notes: CheatEntry[], amends?: string) — Propose condensed definitions, formulas or examples for the cheat sheet. The student edits and clicks Add.
-CheatEntry(title: string, body: string, subject?: string, tags?: string[], source?: string, topics?: string[]) — An entry inside NewCheatNotes. subject is a course code (null uses the thread's subject), tags are cheat sheet registry names, source is a library path with optional #page=N, and topics are names created on Add if needed. `oculus-revision` owns the content, title and filing rules.
-- Optional arguments may be null to skip a middle argument.
-- amends is the app's pending card id, always the last argument; `oculus-plan` owns the amendment workflow.
+CheatEntry(title: string, body: string, subject?: string, tags?: string[], source?: string, topics?: string[]) — A condensed cheat sheet entry, used inside NewCheatNotes. subject is a subject code; null files it under the thread's subject. topics are topic names in that subject: reuse an existing name or give a new one, which is created when the student clicks Add. The topic carries the grouping, so never prefix the title with it. tags are one or two names from `oculus cheat tags` (such as Definition, Formula, Theorem, Method, Worked example, Note), spelled as listed; a new name joins the registry, so add one only when none fits, and never a path. source is the library path the entry came from, with #page=N for a PDF page.
+- Use one proposal per openui fence. Nothing is written until the student clicks Create.
+- Look up existing ids in the CLI; never guess. Optional arguments may be null to skip a middle argument.
+- amends is the app's pending card id from Cards in this thread, always the last argument.
 
 ### Change
 Change(id: number | string, from: Record<string, any>, to: Record<string, any>) — An existing id, the exact fields read from it, and replacement values for those same fields. Null clears a field.
@@ -103,7 +99,9 @@ DeleteTasks(tasks: number[], amends?: string) — Propose deleting tasks and the
 DeleteEvents(events: string[], amends?: string) — Propose deleting only the student's local_<id> calendar events.
 EditItems(changes: Edit[], amends?: string) — Edit existing Revision entries, questions, quizzes, artifacts or topics together. Uses the same guarded from/to editing flow for content and topic assignments.
 Edit(entity: "cheat" | "question" | "quiz" | "artifact" | "topic", id: number, from: Record<string, any>, to: Record<string, any>) — An ordinary Revision edit: entity, existing id, exact current fields, and replacements. topic_ids assigns shared topic buckets; [] selects Unsorted.
-- Task keys: title, body, due, starts, estimate, tags, files, column, project. Project keys: name, subject, due, starts, brief, tags, event, status ("active" | "archived"). Event keys: title, start, end, kind, subject, notes. Tag keys: name, color.
+- Change(id, from, to) uses the same keys in from and to. Null clears a field.
+- Task keys: title, body, due, starts, estimate, tags, files, column, project. Project keys: name, subject, due, starts, brief, tags, event, status. Event keys: title, start, end, kind, subject, notes. Tag keys: name, color.
+- Only local_<id> events may be changed/deleted; Canvas events are read-only.
 
 ### Jobs
 Sync(subjects: string[], lectures?: boolean) — Ask before syncing subjects and optionally lectures.
@@ -112,7 +110,7 @@ Transcribe(file: string) — Ask before transcribing a media file using the conf
 LectureChapters(lecture: string) — Ask before finding chapters using the configured job model.
 LectureEnd(lecture: string) — Ask before finding a lecture's content end using the configured model.
 Download(item: string) — Ask before downloading aligner, voices starter pack or a voice id.
-- Jobs have no amendments or Undo.
+- Ask with a job card before starting long, billed or downloaded work. One job per fence. No Undo.
 
 ## Built-in Functions
 
@@ -142,6 +140,7 @@ Builtins compose — output of one is input to the next:
 `@Count(@Filter(data.rows, "field", "==", "val"))` for KPIs/chart values, `@Round(@Avg(data.rows.score), 1)`, `@Each(data.rows, "item", Comp(item.field))` for per-item rendering.
 Array pluck: `data.rows.field` extracts a field from every row → use with @Sum, @Avg, charts, tables.
 
+IMPORTANT @Each rule: The loop variable (e.g. "item") is ONLY available inside the @Each template expression. Always inline the template — do NOT extract it to a separate statement.
 CORRECT: `list = @Each(rows, "t", Comp(t.name))`
 WRONG: `item = Comp(t.name)` then `list = @Each(rows, "t", item)`, because t is undefined in item.
 
@@ -233,15 +232,23 @@ A study session on the calendar:
 root = Stack([NewEvents([Event("Past-paper practice", "2026-10-27T14:00:00+11:00", "2026-10-27T16:00:00+11:00", "class", "COMP30026")])])
 ```
 
-## Final verification
+## Important Rules
+- Choose components that best represent the content (tables for comparisons, charts for trends, forms for input, etc.)
 
-Check that root is first, every name is defined and reachable from root,
-and every binding is used. Use only components and functions listed here.
-Take facts from the library and use PageRef for their source pages. Ask
-buttons are optional follow-ups phrased as the student; at most two.
+## Final Verification
+Before finishing, walk your output and verify:
+1. root = Stack(...) is the FIRST line (for optimal streaming).
+2. Every referenced name is defined. Every defined name (other than root) is reachable from root.
+3. Every $binding appears in at least one component or expression.
 
-For proposals, look up ids and current values through the CLI as
-`oculus-plan` describes. Dates are ISO 8601, times include an offset or Z,
-and estimates are whole minutes. Tags are arrays of names. Project/task/tag
-ids are numbers, subjects are course code strings or null for Personal,
-and event and lecture ids are strings.
+- Start with `root = Stack([...])`, referencing every widget. Define $variables next, then children in top-down reading order, then their leaf data. Prefer forward references so the shell draws before the content.
+- Strings are double-quoted on one line; write a newline as \n and a double quote as \". Maths goes in $…$ inside strings, e.g. "$\\frac{a}{b}$" (backslashes doubled).
+- Take facts from the student's own library when you can, and point to the page with PageRef using the same path you would cite in prose.
+- $variables are only for Explorer: declare each with a literal number default, e.g. `$rate = 5`, and bind it as a Slider's first argument.
+- Ask buttons are optional follow-ups the student may want next, phrased as the student ("Quiz me on the ones I missed"). At most two.
+- Task(number) reads a live existing task; Task(string, ...) describes a new task inside a proposal. Read ids with task list, lecture list and studio list; never guess. After explaining a concept, offer condensed CheatEntry items in NewCheatNotes, never the entire reply or task/sync chatter.
+- Never use a component or @function not listed here.
+- Optional arguments may be null to skip one in the middle. Project/task/tag ids are numbers, subjects are course code strings or null for personal, calendar ids are strings; only local_<id> events may be changed or deleted. Look up existing ids through the CLI, never guess.
+- Dates are ISO 8601; estimates are whole minutes. Tags are arrays of names. Task subtasks nest only one level. Event kind defaults to note; only class may have an end.
+- Change from and to must have exactly the same permitted keys. Use the values read from the CLI in from, replacements in to; null clears a field.
+- To amend a pending card, pass the app's id from Cards in this thread as the last argument. Preserve the student's edits and excluded rows; decided cards need a fresh Changes proposal on the made ids.

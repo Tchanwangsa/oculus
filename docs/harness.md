@@ -479,14 +479,32 @@ and a failure never retries; `clean_title` rejects prose.
 
 ## OpenUI fences draw interactive study widgets
 
-`MD_COMPONENTS.pre` catches `openui` and `openui-lang` fences beside mermaid.
-`OpenUIFence` waits 150 ms after the source stops changing before loading the
-runtime. The library in `app/src/components/markdown/openui/library.ts` admits
+`MD_COMPONENTS.pre` catches `openui` and `openui-lang` from the opening
+line. `OpenUIFence` loads the runtime immediately, with a card shimmer while
+it loads or waits for a drawable root. Source deltas coalesce on the next
+animation frame without re-keying `Renderer`, so its store survives the
+stream. `remarkWidgets` records whether the closing fence has arrived;
+`isStreaming` stays true until both the fence closes and its reply commits.
+
+The library in `app/src/components/markdown/openui/library.ts` admits
 Flashcards, Quiz, Steps, Explorer (sliders, values and charts), PageRef and Ask,
-with Stack and Text for composition. Any parse error, unresolved reference,
-incomplete source or runtime failure keeps the ordinary code fence visible.
-Widgets render only after the runtime commits its initial state, so computed
-values start with the declared defaults.
+with Stack and Text for composition. `streamVerdict` tolerates incomplete
+props and unresolved references; components show More coming rows as their
+children arrive. Runtime errors are held while streaming. Once streaming
+ends, `parseProgram` and `validateCardTree` strictly validate the final source.
+A failed program shows **Couldn't draw this**, **Show source** and, when the
+thread accepts a follow-up, **Ask to fix**, using the widget fix-request path
+with an OpenUI fence. Program text is only visible in the disclosure.
+
+Controls are inert during generation; proposal and job components show a
+placeholder for unresolved input, then their disabled preview. Streaming
+content receives no `WidgetRow`, so a proposal cannot open durable state
+before the fence closes and its reply commits. Widgets render only
+after the runtime commits its initial state, so computed values start with
+the declared defaults. Entrance fades apply only to sections mounted during
+a stream, never the committed-row remount; reduced motion disables them.
+Placeholder sizes are intrinsic CSS sizes, with no viewport measurements or
+scroll commands: card growth follows the timeline's ordinary resize handling.
 
 A ` ```widget ` fence is a different kind: agent-written TSX run in a
 sandboxed frame, for illustration rather than app data
@@ -498,7 +516,7 @@ composer drafts do. Flashcard progress, quiz answers and scores, revealed
 steps and slider bindings all use the runtime state. The saved program must
 match before hydration; changed source starts fresh. Delete and rewind prune
 the corresponding snapshots. A streaming tail has no committed row yet and
-does not persist progress. Both kinds offer Save to Revision
+does not persist progress. Both kinds offer Save to Revision after streaming ends
 ([revision.md](./revision.md#saved-artifacts-retain-the-widget-state)).
 
 `Timeline` supplies `AssistantSend` from its follow-up action, so an Ask

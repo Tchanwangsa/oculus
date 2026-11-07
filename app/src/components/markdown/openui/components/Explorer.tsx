@@ -1,5 +1,6 @@
-import { useId } from "react";
-import { defineComponent, reactive, useStateField } from "@openuidev/react-lang";
+import { useContext, useId } from "react";
+import { defineComponent, useIsStreaming, reactive, useStateField } from "@openuidev/react-lang";
+import { MoreComing, StreamingPending } from "../Streaming";
 import { z } from "zod/v4";
 import { Slider as SliderBar } from "@/components/ui/slider";
 import { Chart } from "./Chart";
@@ -79,9 +80,17 @@ export const Explorer = defineComponent({
     items: z.array(z.union([Slider.ref, Value.ref, Chart.ref, Text.ref])),
   }),
   component: function ExplorerView({ props, renderNode }) {
+    const streaming = useIsStreaming();
+    const pendingContent = useContext(StreamingPending);
     return (
       <Frame title={typeof props.title === "string" ? props.title : undefined}>
-        <div className="flex flex-col">{renderNode(props.items)}</div>
+        <div className="flex flex-col">{streaming ? (props.items ?? []).map((item, index) => {
+          const fields = item?.props as Record<string, unknown> | undefined;
+          const pending = !fields || (item.typeName === "Chart" && (!Array.isArray(fields.points) || fields.points.length < 2))
+            || (item.typeName === "Slider" && [fields.value, fields.label, fields.min, fields.max].some((value) => value == null))
+            || (item.typeName === "Value" && fields.value === undefined);
+          return streaming && pending ? <MoreComing key={index} /> : <div key={index}>{renderNode(item)}</div>;
+        }) : renderNode(props.items)}{streaming && pendingContent && <MoreComing />}</div>
       </Frame>
     );
   },

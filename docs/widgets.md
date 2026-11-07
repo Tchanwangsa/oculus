@@ -47,6 +47,17 @@ counter, so a reply's `widgetKey(thread, row, fence)` never collides between
 the two kinds. `MD_COMPONENTS.pre` hands a widget fence to `WidgetFence`
 from its opening line, so it never shows as code.
 
+## OpenUI fences draw while their reply streams
+
+OpenUI mounts its runtime from the opening fence and fills partial cards with
+shimmer rows. Its store survives source deltas, and controls stay inactive
+until the fence is closed and the reply commits. Final parse or render
+failures show a one-line card with **Show source** and **Ask to fix**; the
+request includes the original `openui` fence through `fixRequest` in
+`app/src/components/markdown/widget/fixRequest.ts`. The lifecycle and
+validation contract are in
+[harness.md](./harness.md#openui-fences-draw-interactive-study-widgets).
+
 ## A widget runs only once its reply is a committed row
 
 While the reply streams through `LiveTail` there is no `WidgetRow`, and the

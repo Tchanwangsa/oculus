@@ -1,4 +1,6 @@
-import { defineComponent } from "@openuidev/react-lang";
+import { useContext } from "react";
+import { defineComponent, useIsStreaming } from "@openuidev/react-lang";
+import { MoreComing, StreamingStatus, StreamingPending } from "../Streaming";
 import { z } from "zod/v4";
 import { Frame, Pill, Rich } from "./Frame";
 import { useWidgetProgress } from "../progress";
@@ -26,19 +28,21 @@ export const Steps = defineComponent({
     answer: z.string().optional(),
   }),
   component: function StepsView({ props }) {
+    const streaming = useIsStreaming();
+    const pending = useContext(StreamingPending);
     const steps = (props.steps ?? []).map((s) => (s?.props ?? {}) as StepProps);
     const progress = useWidgetProgress(0);
     const shown = progress.value;
     const setShown = progress.setValue;
     const total = steps.length;
-    if (!total) return null;
+    if (!total) return streaming ? <Frame title={typeof props.problem === "string" ? props.problem : undefined}><MoreComing /></Frame> : null;
     const all = shown >= total;
     return (
       <Frame
         title={typeof props.problem === "string" ? props.problem : undefined}
         meta={`${Math.min(shown, total)} of ${total} steps`}
         footer={
-          all ? (
+          streaming ? <StreamingStatus /> : all ? (
             <Pill onClick={() => setShown(0)}>Hide steps</Pill>
           ) : (
             <>
@@ -59,7 +63,7 @@ export const Steps = defineComponent({
                 {i + 1}
               </span>
               <div className="min-w-0 flex-1">
-                <Rich text={s.title} className="block text-sm font-medium text-foreground" />
+                {streaming && typeof s.title !== "string" ? <MoreComing /> : <Rich text={s.title} className="block text-sm font-medium text-foreground" />}
                 <Rich text={s.work} className="block text-sm leading-relaxed text-foreground/90" />
               </div>
             </li>
@@ -71,6 +75,7 @@ export const Steps = defineComponent({
             <Rich text={props.answer} className="font-medium text-foreground" />
           </div>
         )}
+        {streaming && pending && <MoreComing />}
       </Frame>
     );
   },

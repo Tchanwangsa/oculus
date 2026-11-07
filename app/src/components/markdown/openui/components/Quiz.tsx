@@ -1,5 +1,7 @@
+import { useContext } from "react";
 import { SaveQuestions } from "@/components/revision/SaveWidget";
-import { defineComponent } from "@openuidev/react-lang";
+import { defineComponent, useIsStreaming } from "@openuidev/react-lang";
+import { MoreComing, StreamingStatus, StreamingPending } from "../Streaming";
 import { z } from "zod/v4";
 import { CheckCircle, XCircle } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
@@ -39,12 +41,14 @@ export const Quiz = defineComponent({
     questions: z.array(Question.ref),
   }),
   component: function QuizView({ props }) {
+    const streaming = useIsStreaming();
+    const pending = useContext(StreamingPending);
     const questions = (props.questions ?? []).map((q) => (q?.props ?? {}) as QuestionProps);
     const progress = useWidgetProgress({ at: 0, picked: null as number | null, checked: false, score: 0 });
     const { at, picked, checked, score } = progress.value;
 
     const total = questions.length;
-    if (!total) return null;
+    if (!total) return streaming ? <Frame title={typeof props.title === "string" ? props.title : undefined}><MoreComing /></Frame> : null;
     const done = at >= total;
     const q = questions[Math.min(at, total - 1)];
     const options = (q.options ?? []).map((o) => (o?.props ?? {}) as OptionProps);
@@ -65,7 +69,7 @@ export const Quiz = defineComponent({
       <Frame
         title={typeof props.title === "string" ? props.title : undefined}
         meta={done ? `${score} / ${total}` : `${at + 1} of ${total} · ${score} right`}
-        footer={<>
+        footer={streaming ? <StreamingStatus /> : <>
           <SaveQuestions items={questions.map(q=>{const options=(q.options??[]).map(o=>o.props??{});return {kind:"choice",prompt:String(q.prompt??""),answer:String(options.find(o=>o.correct===true)?.text??""),options:options.map(o=>String(o.text??""))};})}/>
           {done ? (
             <Pill onClick={restart}>Try again</Pill>
@@ -80,7 +84,7 @@ export const Quiz = defineComponent({
           )
         }</>}
       >
-        {done ? (
+        {streaming && typeof q.prompt !== "string" ? <MoreComing /> : done ? (
           <p className="py-4 text-center text-sm text-foreground">
             You got <span className="tabular-nums font-semibold">{score}</span> of{" "}
             <span className="tabular-nums">{total}</span>.
@@ -90,6 +94,7 @@ export const Quiz = defineComponent({
             <Rich text={q.prompt} className="block text-sm leading-relaxed text-foreground" />
             <div role="group" aria-label="Answer choices" className="mt-2 flex flex-col gap-1.5">
               {options.map((o, i) => {
+                if (streaming && typeof o.text !== "string") return <MoreComing key={i} />;
                 const mine = picked === i;
                 const good = checked && right(i);
                 const bad = checked && mine && !right(i);
@@ -98,7 +103,7 @@ export const Quiz = defineComponent({
                     key={i}
                     type="button"
                     aria-pressed={mine}
-                    disabled={checked}
+                    disabled={streaming || checked}
                     onClick={() => progress.setValue({ ...progress.value, picked: i })}
                     className={cn(
                       "flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-[color,background-color,border-color] disabled:cursor-default",
@@ -120,6 +125,7 @@ export const Quiz = defineComponent({
             )}
           </>
         )}
+        {streaming && pending && <MoreComing />}
       </Frame>
     );
   },

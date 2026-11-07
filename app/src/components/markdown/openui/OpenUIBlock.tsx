@@ -1,22 +1,18 @@
-import { Component, useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Renderer, type ActionEvent, type OpenUIError } from "@openuidev/react-lang";
 import { useAssistantSend } from "./assistant";
 import { SaveArtifact } from "@/components/revision/SaveWidget";
 import { library } from "./library";
-import { parseProgram } from "./parse";
-import { useWidgetRow, WidgetFence } from "./state";
+import { OpenUISkeleton, StreamingPending } from "./Streaming";
+import { parseProgram, streamVerdict } from "./parse";
+import { useWidgetRow, WidgetFence, WidgetRow } from "./state";
 import { useWidgetStore, widgetKey } from "@/stores/chat/widgetStore";
 
-/**
- * A finished ```openui fence, drawn as live widgets. Loaded lazily by
- * `OpenUIFence`, so the runtime and the library stay out of the startup
- * bundle. Anything short of a clean program — a parse error, a component
- * that throws, a runtime error — shows `fallback`, the fence as code. A
- * proposal or job card is part of the chat, not a widget to keep, so it has
- * no Save to Revision.
- */
-export default function OpenUIBlock({ source, fallback, blockIndex, savedState, onPersistState, hideSave = false }: { source: string; fallback: ReactNode; blockIndex: number; savedState?: Record<string, unknown>; onPersistState?: (state: Record<string, unknown>) => void; hideSave?: boolean }) {
-  const verdict = useMemo(() => parseProgram(source), [source]);
+/** The runtime stays mounted across deltas. Strict validation and durable
+ * snapshots begin only when the closed fence belongs to a committed row. */
+export default function OpenUIBlock({ source, fallback, blockIndex, savedState, onPersistState, hideSave = false, isStreaming = false }: { source: string; fallback: ReactNode; blockIndex: number; savedState?: Record<string, unknown>; onPersistState?: (state: Record<string, unknown>) => void; hideSave?: boolean; isStreaming?: boolean }) {
+  const verdict = useMemo(() => isStreaming ? null : parseProgram(source), [source, isStreaming]);
+  const stream = useMemo(() => isStreaming ? streamVerdict(source) : null, [source, isStreaming]);
   const [failed, setFailed] = useState(false);
   const [ready, setReady] = useState(false);
   const row = useWidgetRow();
@@ -32,12 +28,13 @@ export default function OpenUIBlock({ source, fallback, blockIndex, savedState, 
   const send = useAssistantSend();
   const onStateUpdate = useCallback((state: Record<string, unknown>) => {
     latest.current = state;
+    if (isStreaming) return;
     onPersistState?.(state);
     if (key) useWidgetStore.getState().save(key, source, state);
-  }, [key, source, onPersistState]);
-  // Renderer initializes its store in an effect, before onParseResult. Mount
-  // its content only after that commit, so defaults never flash as zeros.
-  const onParseResult = useCallback(() => setReady(true), []);
+  }, [key, source, onPersistState, isStreaming]);
+  // A layout update flushes the runtime's initialization effects before the
+  // content's first paint, including on the LiveTail → committed remount.
+  useLayoutEffect(() => setReady(true), []);
 
   const onAction = useCallback(
     (event: ActionEvent) => {
@@ -48,21 +45,27 @@ export default function OpenUIBlock({ source, fallback, blockIndex, savedState, 
     [send],
   );
   const onError = useCallback((errors: OpenUIError[]) => {
-    if (errors.some((e) => e.severity !== "warning")) setFailed(true);
-  }, []);
+    if (!isStreaming && errors.some((e) => e.severity !== "warning")) setFailed(true);
+  }, [isStreaming]);
 
-  if (!verdict.ok || failed) return <>{fallback}</>;
+  if (!isStreaming && (!verdict?.ok || failed)) return <>{fallback}</>;
   return (
-    <Boundary fallback={fallback}>
-      <div data-md={`\`\`\`openui\n${source}\n\`\`\``} className="openui-block group/openui">
+    <Boundary fallback={isStreaming ? <OpenUISkeleton /> : fallback}>
+      <div data-md={`\`\`\`openui\n${source}\n\`\`\``} className="openui-block group/openui" data-openui-streaming={isStreaming} aria-busy={isStreaming}>
+        <WidgetRow.Provider value={isStreaming ? null : row}>
         <WidgetFence.Provider value={blockIndex}>
-        <Renderer response={source} library={library} onAction={onAction} onError={onError}
-          initialState={initialState} onStateUpdate={onStateUpdate} onParseResult={onParseResult}
+        <StreamingPending.Provider value={stream?.pending ?? false}>
+        <Renderer response={source} library={library} isStreaming={isStreaming} onAction={onAction} onError={onError}
+          initialState={initialState} onStateUpdate={onStateUpdate}
           publishObservability={false}>
-          {ready && <Renderer.Content />}
+          {ready && <div inert={isStreaming} className="contents"><Renderer.Content /></div>}
+          {isStreaming && (!ready || !stream?.drawable) && <OpenUISkeleton />}
         </Renderer>
+        </StreamingPending.Provider>
         </WidgetFence.Provider>
-        {!hideSave && !verdict.card && <div className="opacity-0 transition-opacity group-hover/openui:opacity-100 focus-within:opacity-100"><SaveArtifact source={source} state={() => latest.current} /></div>}
+        </WidgetRow.Provider>
+        {isStreaming && !hideSave && !stream?.card && <div aria-hidden="true" className="h-6" />}
+        {!isStreaming && !hideSave && verdict?.ok && !verdict.card && <div className="opacity-0 transition-opacity will-change-[opacity] group-hover/openui:opacity-100 focus-within:opacity-100"><SaveArtifact source={source} state={() => latest.current} /></div>}
       </div>
     </Boundary>
   );

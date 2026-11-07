@@ -217,7 +217,7 @@ export const MD_COMPONENTS: Components = {
   // Mermaid is caught at `pre`, not `code`: inside a `<pre>`, `white-space:
   // pre` renders the gaps in mermaid's SVG. `Mermaid` falls back to the `<pre>`.
   // A ```openui fence is a study widget (`openui/OpenUIFence.tsx`), caught
-  // here for the same reason; it too falls back to the `<pre>`. A ```widget
+  // here too; a failed program keeps its source behind a disclosure. A ```widget
   // fence is a sandboxed TSX widget (`widget/WidgetFence.tsx`), which shows
   // the `<pre>` only behind its Source toggle.
   pre: ({ children, ...p }: any) => {
@@ -231,7 +231,10 @@ export const MD_COMPONENTS: Components = {
     const el = Array.isArray(children) ? children.find(isValidElement) : children;
     const index = isValidElement(el) ? Number((el.props as Record<string, unknown>)["data-widget-index"] ?? 0) : 0;
     const widget = fenceSource(children, OPENUI_LANGS);
-    if (widget) return <OpenUIFence source={widget} blockIndex={index}>{block}</OpenUIFence>;
+    if (isFence(el, OPENUI_LANGS)) {
+      const closed = (el.props as Record<string, unknown>)["data-fence-closed"] === true;
+      return <OpenUIFence source={widget ?? ""} closed={closed} blockIndex={index}>{block}</OpenUIFence>;
+    }
     // Matched before it has a line, so a fence just opened never shows as code.
     if (isFence(el, WIDGET_LANG)) return <WidgetFence source={fenceSource(children, WIDGET_LANG) ?? ""} blockIndex={index} code={block} />;
     return block;

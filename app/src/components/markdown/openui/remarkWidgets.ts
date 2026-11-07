@@ -1,4 +1,5 @@
 import type { Code, Paragraph, Root } from "mdast";
+import type { VFile } from "vfile";
 import { visitParents } from "unist-util-visit-parents";
 
 /** The fences that hold a widget: OpenUI's and the sandboxed ```widget. */
@@ -15,12 +16,17 @@ export const mayHoldWidget = (text: string | null | undefined) =>
  * One counter for both kinds, so a reply's `widgetKey`s never collide.
  */
 export function remarkWidgets() {
-  return (tree: Root) => {
+  return (tree: Root, file: VFile) => {
     let index = 0;
     visitParents(tree, "code", (node) => {
       if (!NUMBERED.test(node.lang ?? "")) return;
       node.data ??= {};
-      node.data.hProperties = { ...node.data.hProperties, "data-widget-index": index++ };
+      const raw = String(file.value).slice(node.position?.start.offset, node.position?.end.offset);
+      const lines = raw.split("\n");
+      const opening = /^\s*(`{3,}|~{3,})/.exec(lines[0] ?? "")?.[1];
+      const closing = /^(?:[ \t]*>[ \t]*)*\s*(`{3,}|~{3,})\s*$/.exec(lines[lines.length - 1] ?? "")?.[1];
+      const closed = lines.length > 1 && !!opening && !!closing && opening[0] === closing[0] && closing.length >= opening.length;
+      node.data.hProperties = { ...node.data.hProperties, "data-widget-index": index++, "data-fence-closed": closed };
     });
   };
 }

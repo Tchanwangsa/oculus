@@ -67,3 +67,25 @@
     transform: translateY(-72%);
   }
 }
+
+/* Unresolved OpenUI content uses the same sweep as working text. */
+@utility block-shimmer {
+  background-image: linear-gradient(90deg, var(--color-surface) 40%, var(--color-border) 50%, var(--color-surface) 60%);
+  background-size: 300% 100%;
+  animation: text-shimmer 2s linear infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* Only streamed mounts enter; a committed-row remount has no animation. */
+.openui-block[data-openui-streaming="true"] section {
+  animation: openui-enter 180ms ease-out both;
+}
+@keyframes openui-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .openui-block[data-openui-streaming="true"] section { animation: none; }
+}

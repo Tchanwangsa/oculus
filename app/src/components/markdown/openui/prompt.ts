@@ -7,12 +7,12 @@ import { library } from "./library";
  * are markdown, and a widget is one fenced block inside one.
  */
 
-const PREAMBLE = `Oculus draws a fenced code block tagged \`openui\` in your reply as a live study widget or a proposal the student reviews and confirms. Use study widgets when doing beats reading: flashcards to drill, a quiz to check understanding, a worked problem to try step by step, or a formula to explore with sliders. Always use a proposal before creating, changing or deleting the student's tasks, projects, tags, calendar events or notes, or starting a long or billed job. Nothing is written until the student clicks. Everything else in the reply stays ordinary markdown. Keep surrounding prose to a sentence or two. Each proposal or job needs its own fence; study widgets may share a Stack. If a block does not parse, the student sees the raw code, so follow the grammar below exactly.
+const PREAMBLE = `Oculus draws a fenced code block tagged \`openui\` in your reply as a live study widget or a proposal the student reviews and confirms. Use study widgets when doing beats reading: flashcards to drill, a quiz to check understanding, a worked problem to try step by step, or a formula to explore with sliders. Always use a proposal before creating, changing or deleting the student's tasks, projects, tags, calendar events or notes, or starting a long or billed job. Nothing is written until the student clicks. Everything else in the reply stays ordinary markdown. Keep surrounding prose to a sentence or two. Each proposal or job needs its own fence; study widgets may share a Stack. The UI draws while the fence streams. Write root first, then $variables, then child components in reading order, then leaf data so the shell appears before its content. Follow the grammar below exactly; a malformed final program shows a failure card.
 
 The block holds a program in OpenUI Lang:`;
 
 const RULES = [
-  "Start the program with `root = Stack([...])` and list every widget in it.",
+  "Start with `root = Stack([...])`, referencing every widget. Define $variables next, then children in top-down reading order, then their leaf data. Prefer forward references so the shell draws before the content.",
   "Strings are double-quoted on one line; write a newline as \\n and a double quote as \\\". Maths goes in $…$ inside strings, e.g. \"$\\\\frac{a}{b}$\" (backslashes doubled).",
   "Take facts from the student's own library when you can, and point to the page with PageRef using the same path you would cite in prose.",
   "$variables are only for Explorer: declare each with a literal number default, e.g. `$rate = 5`, and bind it as a Slider's first argument.",

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
+import { OpenUISkeleton, StreamingPending } from "../Streaming";
 import { Badge } from "@/components/ui/badge";
 import { DownloadSimple, SpinnerGap, ArrowsClockwise, FileText, Microphone, ListNumbers, FlagCheckered } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,13 @@ import { object, type Row } from "./model";
 const LABELS: Record<string, string> = { Sync: "Sync", Reparse: "Re-parse", Transcribe: "Transcribe", LectureChapters: "Find lecture chapters", LectureEnd: "Find the lecture end", Download: "Download" };
 
 export function JobCard({ kind, input }: { kind: string; input: Row }) {
+  const streaming = useCardStreaming();
+  const pending = useContext(StreamingPending);
+  if (streaming && pending) return <OpenUISkeleton title={`Drawing ${kind}…`} />;
+  return <JobCardContent kind={kind} input={input} />;
+}
+
+function JobCardContent({ kind, input }: { kind: string; input: Row }) {
   const card = useProposal(kind, input);
   const streaming = useCardStreaming();
   const { subjects } = useSubjects();
@@ -22,12 +30,13 @@ export function JobCard({ kind, input }: { kind: string; input: Row }) {
   const [error, setError] = useState<string>();
   const source = JSON.stringify(input);
   useEffect(() => {
+    if (streaming) return;
     let active = true;
     setInfo(undefined);
     setError(undefined);
     void proposalJobInfo(kind, JSON.parse(source)).then((value) => { if (active) { setInfo(value.description); setError(undefined); } }).catch((e) => { if (active) setError(String(e)); });
     return () => { active = false; };
-  }, [kind, source]);
+  }, [kind, source, streaming]);
   const job = object(card.state.job);
   const frame = cardState({ streaming, id: card.id, status: card.proposal?.status, busy: card.busy, error: card.error, job: job.phase });
   const pending = !card.proposal || card.proposal.status === "pending";

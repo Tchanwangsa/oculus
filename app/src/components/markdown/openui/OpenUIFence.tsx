@@ -1,30 +1,32 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { useWidgetRow } from "./state";
+import { OpenUIFailure, OpenUISkeleton } from "./Streaming";
 
 const OpenUIBlock = lazy(() => import("./OpenUIBlock"));
 
-/** As `Mermaid`'s: a streaming fence settles before it is parsed, so the
- *  timeline never parses per delta, only once per pause in the stream. */
-const SETTLE_MS = 150;
-
-/**
- * A ```openui fence. Reached from `MD_COMPONENTS.pre`. Shows the fence as
- * code until its source stops changing, then hands it to the lazily loaded
- * `OpenUIBlock`, which draws it or keeps showing the code. A fence still
- * streaming usually fails to parse (cut mid-string or with a reference not
- * yet defined), so it stays code until the program is whole.
- */
-export function OpenUIFence({ source, children, blockIndex = 0 }: { source: string; children: ReactNode; blockIndex?: number }) {
-  const [settled, setSettled] = useState<string | null>(null);
+/** Coalesce deltas without postponing the next frame when another arrives. */
+export function OpenUIFence({ source, children, blockIndex = 0, closed = false }: { source: string; children: ReactNode; blockIndex?: number; closed?: boolean }) {
+  const row = useWidgetRow();
+  const isStreaming = !row || row.row <= 0 || !closed;
+  const [drawn, setDrawn] = useState(source);
+  const latest = useRef(source);
+  latest.current = source;
+  const frame = useRef<number | null>(null);
   useEffect(() => {
-    const timer = setTimeout(() => setSettled(source), SETTLE_MS);
-    return () => clearTimeout(timer);
+    if (frame.current === null) frame.current = requestAnimationFrame(() => {
+      frame.current = null;
+      setDrawn(latest.current);
+    });
   }, [source]);
-  if (settled === null) return <>{children}</>;
+  useEffect(() => () => {
+    if (frame.current !== null) cancelAnimationFrame(frame.current);
+    frame.current = null;
+  }, []);
+  // A close/commit flushes the final delta before strict validation.
   return (
-    <Suspense fallback={children}>
-      {/* Keyed so a fence that failed mid-stream gets a fresh try once more
-          of it arrives. */}
-      <OpenUIBlock key={settled} source={settled} fallback={children} blockIndex={blockIndex} />
+    <Suspense fallback={<OpenUISkeleton />}>
+      <OpenUIBlock source={isStreaming ? drawn : source} isStreaming={isStreaming}
+        fallback={<OpenUIFailure source={source} code={children} />} blockIndex={blockIndex} />
     </Suspense>
   );
 }

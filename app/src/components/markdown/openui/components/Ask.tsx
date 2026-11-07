@@ -1,4 +1,4 @@
-import { action, defineComponent, useTriggerAction } from "@openuidev/react-lang";
+import { action, defineComponent, useIsStreaming, useTriggerAction } from "@openuidev/react-lang";
 import { z } from "zod/v4";
 import { ChatCircle } from "@phosphor-icons/react";
 import { useAssistantSend } from "../assistant";
@@ -8,7 +8,8 @@ import { Pill } from "./Frame";
  * A follow-up the student can send with one click, e.g. "Quiz me on the ones
  * I missed". The click goes through the runtime's action plan so
  * `@ToAssistant(message)` works as the language documents; `OpenUIBlock`'s
- * `onAction` hands the message to the thread. Hidden where no thread listens.
+ * `onAction` hands the message to the thread. Hidden where no thread listens;
+ * disabled while the fence streams, like every other action.
  */
 export const Ask = defineComponent({
   name: "Ask",
@@ -21,9 +22,10 @@ export const Ask = defineComponent({
   component: function AskView({ props }) {
     const send = useAssistantSend();
     const trigger = useTriggerAction();
+    const streaming = useIsStreaming();
     if (!send || typeof props.label !== "string") return null;
     return (
-      <Pill onClick={() => void trigger(props.label, undefined, props.action as never)}>
+      <Pill disabled={streaming} onClick={() => void trigger(props.label, undefined, props.action as never)}>
         <ChatCircle size={13} /> {props.label}
       </Pill>
     );
