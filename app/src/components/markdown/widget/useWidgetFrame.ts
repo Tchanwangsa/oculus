@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { ErrorPhase } from "../../../../widget-kit/protocol";
 import { readWidgetMessage, sendReply, sendVisibility, visibilityToPost, type WidgetRequest } from "./messages";
 import type { AskReply } from "./ask/useWidgetAsk";
@@ -11,6 +11,13 @@ export interface FrameReport {
   /** Content wider than the frame. */
   wide: { width: number; frameWidth: number } | null;
 }
+
+/** The report; whether `doc`'s runtime has spoken (its first height), until
+ *  which a message to it would be lost; and `forget`, which drops the errors
+ *  and overflow reported so far, keeping the height. A streaming frame
+ *  forgets just before posting its committed program, so that program's own
+ *  reports, queued after, are the ones that count. */
+export type FrameState = FrameReport & { spoken: boolean; forget: () => void };
 
 const EMPTY: FrameReport = { height: null, error: null, wide: null };
 
@@ -36,7 +43,7 @@ export function useWidgetFrame(
   initialHeight: number | null = null,
   live = true,
   onRequest?: (req: WidgetRequest, reply: AskReply) => void,
-): FrameReport {
+): FrameState {
   const [report, setReport] = useState<FrameReport>({ ...EMPTY, height: initialHeight });
   // The document that has sent a height, and the flag last posted to which
   // document: both per document, so a rebuilt frame gets its own handshake.
@@ -49,8 +56,9 @@ export function useWidgetFrame(
   const requestRef = useRef(onRequest);
   requestRef.current = onRequest;
 
+  const forget = useCallback(() => setReport((r) => ({ ...EMPTY, height: r.height })), []);
   // A new document starts over, keeping the last height so the reply doesn't jump.
-  useEffect(() => setReport((r) => ({ ...EMPTY, height: r.height })), [doc]);
+  useEffect(forget, [doc, forget]);
 
   useEffect(() => {
     if (doc == null) return;
@@ -82,5 +90,5 @@ export function useWidgetFrame(
     return () => window.removeEventListener("message", onMessage);
   }, [frame]);
 
-  return report;
+  return { ...report, spoken: doc != null && spokenDoc === doc, forget };
 }

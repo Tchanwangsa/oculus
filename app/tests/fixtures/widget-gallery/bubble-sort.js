@@ -3,52 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Pill, Row, Slider, Value, Widget } from "oculus/ui";
 import { useWidgetState } from "oculus/state";
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-function bubbleSort(start) {
-	const a = [...start];
-	const frames = [{
-		values: [...a],
-		pair: null,
-		swapped: false,
-		sortedFrom: a.length,
-		comparisons: 0,
-		swaps: 0
-	}];
-	let comparisons = 0;
-	let swaps = 0;
-	for (let end = a.length - 1; end > 0; end--) {
-		for (let j = 0; j < end; j++) {
-			comparisons++;
-			const swapped = a[j] > a[j + 1];
-			if (swapped) {
-				[a[j], a[j + 1]] = [a[j + 1], a[j]];
-				swaps++;
-			}
-			frames.push({
-				values: [...a],
-				pair: [j, j + 1],
-				swapped,
-				sortedFrom: end + 1,
-				comparisons,
-				swaps
-			});
-		}
-	}
-	frames.push({
-		values: [...a],
-		pair: null,
-		swapped: false,
-		sortedFrom: 0,
-		comparisons,
-		swaps
-	});
-	return frames;
-}
-// Colour is state, never position: compared, just swapped, in place, waiting.
-function barColour(frame, k) {
-	if (k >= frame.sortedFrom) return "var(--color-success)";
-	if (frame.pair?.includes(k)) return frame.swapped ? "var(--color-warning)" : "var(--color-brand)";
-	return "var(--color-muted-foreground)";
-}
 const shuffled = () => Array.from({ length: 8 }, () => 1 + Math.floor(Math.random() * 9));
 function BubbleSort() {
 	const [start, setStart] = useWidgetState("start", [
@@ -143,6 +97,52 @@ function BubbleSort() {
 			] })]
 		})
 	] });
+}
+function bubbleSort(start) {
+	const a = [...start];
+	const frames = [{
+		values: [...a],
+		pair: null,
+		swapped: false,
+		sortedFrom: a.length,
+		comparisons: 0,
+		swaps: 0
+	}];
+	let comparisons = 0;
+	let swaps = 0;
+	for (let end = a.length - 1; end > 0; end--) {
+		for (let j = 0; j < end; j++) {
+			comparisons++;
+			const swapped = a[j] > a[j + 1];
+			if (swapped) {
+				[a[j], a[j + 1]] = [a[j + 1], a[j]];
+				swaps++;
+			}
+			frames.push({
+				values: [...a],
+				pair: [j, j + 1],
+				swapped,
+				sortedFrom: end + 1,
+				comparisons,
+				swaps
+			});
+		}
+	}
+	frames.push({
+		values: [...a],
+		pair: null,
+		swapped: false,
+		sortedFrom: 0,
+		comparisons,
+		swaps
+	});
+	return frames;
+}
+// Colour is state, never position: compared, just swapped, in place, waiting.
+function barColour(frame, k) {
+	if (k >= frame.sortedFrom) return "var(--color-success)";
+	if (frame.pair?.includes(k)) return frame.swapped ? "var(--color-warning)" : "var(--color-brand)";
+	return "var(--color-muted-foreground)";
 }
 
 const __oculusWidget = BubbleSort;

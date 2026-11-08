@@ -72,6 +72,12 @@ export default function BubbleSort() {
 - **First line `// title: …`**, a short noun phrase: the card's title.
 - **The default export is a component taking no props**, and its root is
   `<Widget>`.
+- **Root first, helpers after.** The student watches the widget draw while
+  your reply streams, top to bottom. After the imports and the constants it
+  reads, write the default export, then the components and functions it
+  uses. A component not written yet shows as a placeholder, so the card
+  fills in as you write; helpers written first draw nothing until the end.
+  The gallery is in this order.
 - **Imports**: only `react`, `oculus/ui`, `oculus/state`, `oculus/2d`,
   `oculus/math`, `oculus/3d`, `oculus/ask`, and `three` and
   `@react-three/fiber` as published (no `three/addons/…`, no drei). Nothing

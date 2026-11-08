@@ -9,13 +9,16 @@ import { Bundle, Item } from "./ItemRows";
 import { ArtifactRow, ContextDrift } from "./Messages";
 import { RunWorkGroup } from "./RunWorkGroup";
 import { LiveTail, Pending } from "./Pending";
-import { buildRows } from "./rows";
+import { buildRows, replyKey, streamingReply } from "./rows";
 import type { PendingActions, QuestionActions } from "./types";
 import { useRowWindow } from "./useRowWindow";
 import { useRowVisibility } from "./useRowVisibility";
 import { RetainedRow } from "./RetainedRow";
 import { AssistantSend } from "@/components/markdown/openui/assistant";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
+
+/** A ```widget fence opening in streamed text. */
+const WIDGET_FENCE = /(^|\n)[ \t]*(`{3,}|~{3,})[ \t]*widget\b/;
 
 /** A committed row: an anchor for `useStickToBottom`, with off-screen layout
  *  skipped by `useRowVisibility`. Padding on all edges preserves focus rings. */
@@ -58,6 +61,25 @@ export const Timeline = memo(function Timeline({
   const runs = useHarnessStore((s) => (threadId == null ? undefined : s.runs[threadId]));
   // Flips twice a reply, not per token.
   const streaming = useHarnessStore((s) => threadId != null && !!s.live[threadId]?.streaming);
+  // A reply with a widget fence streams as the row it will become, so the
+  // fence's frame boots once and survives the commit. Flips once a reply.
+  const streamsWidget = useHarnessStore((s) => threadId != null && WIDGET_FENCE.test(s.live[threadId]?.streaming ?? ""));
+  const streamRow = useMemo(() => {
+    if (!streamsWidget || threadId == null) return null;
+    const at = streamingReply(items);
+    if (!at) return null;
+    const item: HarnessItem = {
+      id: -1,
+      thread_id: threadId,
+      kind: "assistant",
+      ref_id: null,
+      content: null,
+      meta: null,
+      created_at: new Date().toISOString(),
+      run_id: at.run,
+    };
+    return { key: replyKey(at.run, at.ordinal), item };
+  }, [streamsWidget, threadId, items]);
   const rows = useMemo(() => buildRows(items, running, { runs, streaming }), [items, running, runs, streaming]);
   const last = rows[rows.length - 1];
   // A working fold already says so; the tail's "Working…" would repeat it.
@@ -95,7 +117,7 @@ export const Timeline = memo(function Timeline({
               <ArtifactRow item={r.item} />
             </RetainedRow>
           ) : (
-            <RetainedRow key={r.item.id} className={ROW} questionId={r.item.kind === "user" ? r.item.id : undefined}>
+            <RetainedRow key={r.key ?? r.item.id} className={ROW} questionId={r.item.kind === "user" ? r.item.id : undefined}>
               <Item
                 item={r.item}
                 dim={r.dim}
@@ -107,9 +129,16 @@ export const Timeline = memo(function Timeline({
               />
             </RetainedRow>
           ),
+        ).concat(
+          // In the same keyed list as the rows, under the key its committed row takes.
+          streamRow ? (
+            <RetainedRow key={streamRow.key} className={ROW}>
+              <Item item={streamRow.item} dim={false} actions={questions} role="provisional" stream />
+            </RetainedRow>
+          ) : [],
         )}
         {threadId != null && <ContextDrift threadId={threadId} />}
-        {threadId != null && <LiveTail threadId={threadId} quiet={!folding} />}
+        {threadId != null && <LiveTail threadId={threadId} quiet={!folding} text={!streamRow} />}
         {threadId != null && pending && <Pending threadId={threadId} actions={pending} />}
         {signIn && (
           <SignInDialog

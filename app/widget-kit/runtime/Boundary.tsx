@@ -1,9 +1,11 @@
 import { Component, type ReactNode } from "react";
 import { describe, post } from "./post";
 
-/** Catches a render throw anywhere in the widget, reports it and draws
- *  nothing: the parent shows the error under its title. */
-export class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+/** Catches a render throw anywhere in the widget and draws nothing. A
+ *  committed widget reports it (the parent shows the error under its
+ *  title); a preview passes `onError` instead, which puts the last good
+ *  preview back. */
+export class Boundary extends Component<{ children: ReactNode; onError?: (error: unknown) => void }, { failed: boolean }> {
   state = { failed: false };
 
   static getDerivedStateFromError() {
@@ -11,7 +13,8 @@ export class Boundary extends Component<{ children: ReactNode }, { failed: boole
   }
 
   componentDidCatch(error: unknown) {
-    post({ kind: "error", phase: "render", message: describe(error) });
+    if (this.props.onError) this.props.onError(error);
+    else post({ kind: "error", phase: "render", message: describe(error) });
   }
 
   render() {

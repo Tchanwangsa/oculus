@@ -35,8 +35,9 @@ export interface WorkFold {
 }
 
 export type ViewRow =
-  /** `asked`: for a reply, the student's question it answers (Retry). */
-  | { kind: "item"; item: HarnessItem; dim: boolean; role?: ReplyRole; asked?: HarnessItem }
+  /** `asked`: for a reply, the student's question it answers (Retry).
+   *  `key`: a run's reply is keyed by its place in the run (`replyKey`). */
+  | { kind: "item"; item: HarnessItem; dim: boolean; role?: ReplyRole; asked?: HarnessItem; key?: string }
   | { kind: "bundle"; id: string; items: HarnessItem[] }
   | WorkFold
   /** The widget fences of a folded reply, drawn once outside its fold. */
@@ -127,10 +128,28 @@ function runRows(
     }
   }
   const role: ReplyRole = state === "running" ? "provisional" : state === "completed" ? "answer" : "partial";
+  let replies = 0;
   for (const item of rest) {
-    if (item === answer) out.push({ kind: "item", item, dim: false, role, ...(head?.kind === "user" && { asked: head }) });
+    const key = item.kind === "assistant" ? replyKey(item.run_id!, replies++) : undefined;
+    if (item === answer) out.push({ kind: "item", item, dim: false, role, ...(head?.kind === "user" && { asked: head }), ...(key && { key }) });
     else if (!folded.has(item)) out.push({ kind: "item", item, dim: false });
   }
+}
+
+/** A run's reply's row key: its run and its place among the run's replies.
+ *  The reply still streaming takes the key it will have once committed
+ *  (`streamingReply`), so the row, and a widget's frame in it, carries over. */
+export const replyKey = (run: number, ordinal: number) => `reply:${run}:${ordinal}`;
+
+/** The run whose reply is streaming, and that reply's place in it: the
+ *  thread's last row is the running run's (its question is written at
+ *  send). Null for a turn with no run (one the agent started itself). */
+export function streamingReply(items: HarnessItem[]): { run: number; ordinal: number } | null {
+  const run = items[items.length - 1]?.run_id;
+  if (run == null) return null;
+  let ordinal = 0;
+  for (let i = items.length - 1; i >= 0 && items[i].run_id === run; i--) if (items[i].kind === "assistant") ordinal++;
+  return { run, ordinal };
 }
 
 /**

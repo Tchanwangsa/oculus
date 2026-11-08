@@ -76,6 +76,21 @@ export function Canvas({ children, className, style, onCreated, resize, ...props
     return subscribeVisibility(apply);
   }, [release]);
 
+  // Unmounted (a streaming preview replaced, the widget gone): the context
+  // goes now and its loss is expected. r3f's own drop comes 500 ms later
+  // and would read as a lost context.
+  useEffect(
+    () => () => {
+      const state = root.current?.get();
+      root.current = null;
+      if (!state) return;
+      released.add(state.gl.domElement);
+      state.gl.dispose();
+      state.gl.forceContextLoss();
+    },
+    [],
+  );
+
   const created = useCallback(
     (state: RootState) => {
       root.current = state;

@@ -28,30 +28,6 @@ const OPTIONS = Object.entries(FIELDS).map(([value, f]) => ({
 const SPAN = 4;
 const GRID = [];
 for (let x = -SPAN; x <= SPAN; x++) for (let y = -SPAN; y <= SPAN; y++) GRID.push([x, y]);
-/** The path a particle dropped at `start` takes, by small Euler steps. */
-function trace(at, start) {
-	const path = [start];
-	let [x, y] = start;
-	for (let i = 0; i < 400 && Math.abs(x) < SPAN + 1 && Math.abs(y) < SPAN + 1; i++) {
-		const [u, v] = at([x, y]);
-		x += u * .02;
-		y += v * .02;
-		path.push([x, y]);
-	}
-	return path;
-}
-/** Divergence and curl at `p`, by central differences. */
-function local(at, [x, y]) {
-	const h = .001;
-	const dudx = (at([x + h, y])[0] - at([x - h, y])[0]) / (2 * h);
-	const dvdy = (at([x, y + h])[1] - at([x, y - h])[1]) / (2 * h);
-	const dvdx = (at([x + h, y])[1] - at([x - h, y])[1]) / (2 * h);
-	const dudy = (at([x, y + h])[0] - at([x, y - h])[0]) / (2 * h);
-	return {
-		div: dudx + dvdy,
-		curl: dvdx - dudy
-	};
-}
 function VectorField() {
 	const [kind, setKind] = useWidgetState("kind", "rotation");
 	const [start, setStart] = useWidgetState("start", [2, 0]);
@@ -108,6 +84,30 @@ function VectorField() {
 			})]
 		})]
 	})] });
+}
+/** The path a particle dropped at `start` takes, by small Euler steps. */
+function trace(at, start) {
+	const path = [start];
+	let [x, y] = start;
+	for (let i = 0; i < 400 && Math.abs(x) < SPAN + 1 && Math.abs(y) < SPAN + 1; i++) {
+		const [u, v] = at([x, y]);
+		x += u * .02;
+		y += v * .02;
+		path.push([x, y]);
+	}
+	return path;
+}
+/** Divergence and curl at `p`, by central differences. */
+function local(at, [x, y]) {
+	const h = .001;
+	const dudx = (at([x + h, y])[0] - at([x - h, y])[0]) / (2 * h);
+	const dvdy = (at([x, y + h])[1] - at([x, y - h])[1]) / (2 * h);
+	const dvdx = (at([x + h, y])[1] - at([x - h, y])[1]) / (2 * h);
+	const dudy = (at([x, y + h])[0] - at([x, y - h])[0]) / (2 * h);
+	return {
+		div: dudx + dvdy,
+		curl: dvdx - dudy
+	};
 }
 
 const __oculusWidget = VectorField;

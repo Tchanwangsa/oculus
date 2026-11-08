@@ -2,13 +2,15 @@ import { useEffect, useState } from "react";
 import { knownKitBase, widgetKitBase } from "./kit";
 import { transpile, transpiled, type Transpiled } from "./transpile";
 
-/** `source` transpiled, or null while it is. */
-export function useTranspiled(source: string): Transpiled | null {
+/** `source` transpiled, or null while it is; nothing for a null source (a
+ *  fence still streaming, which `usePreview` reads instead). */
+export function useTranspiled(source: string | null): Transpiled | null {
   const [result, setResult] = useState<{ source: string; out: Transpiled } | null>(() => {
-    const hit = transpiled(source);
-    return hit ? { source, out: hit } : null;
+    const hit = source == null ? undefined : transpiled(source);
+    return hit && source != null ? { source, out: hit } : null;
   });
   useEffect(() => {
+    if (source == null) return;
     let live = true;
     void transpile(source).then((out) => live && setResult({ source, out }));
     return () => {

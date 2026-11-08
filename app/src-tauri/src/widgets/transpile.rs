@@ -7,16 +7,21 @@
 //! default export, so the frame appends a line that mounts that binding
 //! (`srcdoc.ts` repeats the name). A module without a default export is an
 //! error.
+//!
+//! `pending` names the components the module draws as JSX but never declares:
+//! a streaming prefix's parts not written yet, which a preview frame draws as
+//! placeholders (docs/widgets.md#a-widget-draws-while-it-streams).
 
 use oxc::allocator::Allocator;
 use oxc::ast::ast::{
     ExportAllDeclaration, ExportDefaultDeclarationKind, ExportFromDeclaration, ExportSpecifier,
-    ImportDeclaration, ImportExpression, ModuleDeclaration, TSExternalModuleReference,
+    ImportDeclaration, ImportExpression, JSXElementName, JSXOpeningElement, ModuleDeclaration,
+    TSExternalModuleReference,
 };
-use oxc::ast_visit::Visit;
+use oxc::ast_visit::{walk, Visit};
 use oxc::codegen::Codegen;
 use oxc::parser::Parser;
-use oxc::semantic::SemanticBuilder;
+use oxc::semantic::{Scoping, SemanticBuilder};
 use oxc::span::{GetSpan, SourceType};
 use oxc::transformer::{JsxRuntime, TransformOptions, Transformer};
 use std::path::Path;
@@ -42,6 +47,9 @@ pub const DEFAULT_BINDING: &str = "__oculusWidget";
 #[derive(serde::Serialize, Debug)]
 pub struct Transpiled {
     pub js: String,
+    /// Components drawn but never declared, in first-use order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pending: Vec<String>,
 }
 
 /// `Err` is `"<line>:<col> <message>"` (1-based) for a syntax error, the
@@ -66,6 +74,12 @@ pub fn transpile(tsx: &str) -> Result<Transpiled, String> {
         .build(&program)
         .semantic
         .into_scoping();
+    let mut unwritten = Unwritten {
+        scoping: &scoping,
+        names: Vec::new(),
+    };
+    unwritten.visit_program(&program);
+    let pending = unwritten.names;
     let mut opts = TransformOptions::default();
     opts.jsx.runtime = JsxRuntime::Automatic;
     opts.jsx.import_source = Some("react".into());
@@ -81,6 +95,7 @@ pub fn transpile(tsx: &str) -> Result<Transpiled, String> {
     }
     Ok(Transpiled {
         js: bind_default(&Codegen::new().build(&program).code)?,
+        pending,
     })
 }
 
@@ -208,6 +223,28 @@ impl<'a> Visit<'a> for Imports {
     }
 }
 
+/// JSX element names that resolve to no declaration (`pending`).
+struct Unwritten<'s> {
+    scoping: &'s Scoping,
+    names: Vec<String>,
+}
+
+impl<'a> Visit<'a> for Unwritten<'_> {
+    fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
+        if let JSXElementName::IdentifierReference(ident) = &it.name {
+            let unresolved = ident
+                .reference_id
+                .get()
+                .is_none_or(|id| self.scoping.get_reference(id).symbol_id().is_none());
+            let name = ident.name.as_str();
+            if unresolved && !self.names.iter().any(|n| n == name) {
+                self.names.push(name.to_string());
+            }
+        }
+        walk::walk_jsx_opening_element(self, it);
+    }
+}
+
 /// 1-based line and column (in characters) of a byte offset.
 pub(crate) fn line_col(src: &str, offset: usize) -> (usize, usize) {
     let before = src.get(..offset.min(src.len())).unwrap_or("");
@@ -219,6 +256,20 @@ pub(crate) fn line_col(src: &str, offset: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_names_undeclared_components_only() {
+        let out = transpile(
+            "import { Widget } from \"oculus/ui\";\nexport default function W() { const Local = () => null; return <Widget><Local/><Chart/><div/><Chart/><Legend/></Widget>; }\nfunction Later() { return <Legend/>; }",
+        )
+        .unwrap();
+        assert_eq!(out.pending, ["Chart", "Legend"]);
+        let whole = transpile(
+            "export default function W() { return <Part/>; }\nfunction Part() { return null; }",
+        )
+        .unwrap();
+        assert!(whole.pending.is_empty());
+    }
 
     const ALLOWED_MESSAGE: &str = "is not allowed; widgets may import: react, react/jsx-runtime, oculus/ui, oculus/state, oculus/2d, oculus/math, oculus/3d, oculus/ask, three, @react-three/fiber";
 

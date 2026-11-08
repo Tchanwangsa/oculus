@@ -377,6 +377,15 @@ thread, so each Chat tab and the lecture dock hold their own. Retry links retain
 their original question row object, and work bundles compare their constituent
 row identities; appending a row leaves earlier rows memoised. `LiveTail` reads
 only running, thinking and assistant text, so tool output updates its tool row.
+A reply streaming a ` ```widget ` fence is the one exception: `Timeline` draws
+its text as the row it will become, a `Reply` with `stream` under the key the
+committed answer takes (`replyKey`, `streamingReply` in `rows.ts`), and that
+row reads the text per delta in place of `LiveTail`, which keeps the reasoning
+and "Working…". The commit swaps the row's item in the same render, so the
+widget's frame survives it
+([widgets.md](./widgets.md#a-widget-draws-while-it-streams)). `Timeline`
+subscribes only to whether the text holds a widget fence, which flips once a
+reply.
 When the turn is running with neither text nor reasoning, `LiveTail` in
 `app/src/components/harness/timeline/Pending.tsx` shows three CSS bouncing dots
 beside a steady “Working…” status. The dots inherit the muted text colour and

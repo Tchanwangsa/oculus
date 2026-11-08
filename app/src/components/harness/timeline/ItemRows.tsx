@@ -27,6 +27,7 @@ export const Item = memo(function Item({
   latest,
   role,
   folded,
+  stream,
 }: {
   item: HarnessItem;
   dim: boolean;
@@ -42,12 +43,14 @@ export const Item = memo(function Item({
   role?: ReplyRole;
   /** Inside a run's fold: a reply is work, drawn without its widget fences. */
   folded?: boolean;
+  /** The reply still streaming, drawn as the row it will become (`Timeline`). */
+  stream?: boolean;
 }) {
   switch (item.kind) {
     case "user":
       return <User item={item} actions={actions} />;
     case "assistant":
-      return folded ? <FoldedReply item={item} /> : <Reply item={item} asked={asked} actions={actions} role={role} />;
+      return folded ? <FoldedReply item={item} /> : <Reply item={item} asked={asked} actions={actions} role={role} stream={stream} />;
     case "thinking":
       return <ThinkingRow text={item.content ?? ""} ms={thoughtMs(item)} dim={dim} />;
     case "tool":

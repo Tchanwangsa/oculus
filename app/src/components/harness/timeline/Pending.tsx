@@ -10,19 +10,29 @@ import type { PendingActions } from "./types";
 /** The turn in flight: reasoning and text with no row yet, or "Working…"
  *  (`quiet`; off while the run's fold shows its own clock). One anchor row,
  *  never `skip-offscreen`: it changes size every fold and is on screen
- *  whenever it is read. */
-export function LiveTail({ threadId, quiet: allowQuiet = true }: { threadId: number; quiet?: boolean }) {
+ *  whenever it is read. `text` off: the streaming reply holds a widget and
+ *  `Timeline` draws it as the row it will become. */
+export function LiveTail({
+  threadId,
+  quiet: allowQuiet = true,
+  text = true,
+}: {
+  threadId: number;
+  quiet?: boolean;
+  text?: boolean;
+}) {
   const { running, streaming, thinking } = useHarnessStore(useShallow((s) => ({
     running: s.live[threadId]?.running ?? false,
     streaming: s.live[threadId]?.streaming ?? "",
     thinking: s.live[threadId]?.thinking ?? "",
   })));
   const quiet = allowQuiet && running && !streaming && !thinking;
-  if (!thinking && !streaming && !quiet) return null;
+  const shown = text ? streaming : "";
+  if (!thinking && !shown && !quiet) return null;
   return (
     <div className={cn(ANCHOR_ROW, "flex flex-col gap-2")}>
       {thinking && <LiveThinkingRow text={thinking} />}
-      {streaming && <Assistant text={streaming} />}
+      {shown && <Assistant text={shown} />}
       {quiet && (
         <div role="status" className="mt-1 flex items-center gap-2 px-2 text-xs text-muted-foreground">
           <span aria-hidden="true" className="flex h-4 shrink-0 items-center gap-0.5">

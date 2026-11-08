@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { ArrowClockwise } from "@phosphor-icons/react";
 import { fmtClock, sqliteUtcToMs } from "@/lib/format/format";
 import { messageAt, unpromptedAfter, type HarnessItem } from "@/lib/harness";
@@ -9,6 +9,7 @@ import type { QuestionActions } from "./types";
 import type { ReplyRole } from "./rows";
 import { mayHoldWidget } from "@/components/markdown/openui/remarkWidgets";
 import { WidgetRow } from "@/components/markdown/openui/state";
+import { WidgetStream } from "@/components/markdown/widget/stream/context";
 
 /** Busy is read from the store here, not passed in: it changes twice a turn,
  *  and a prop would re-render every committed row. */
@@ -37,39 +38,57 @@ export const User = memo(function User({
 
 /** An answer, with Copy and Retry under it. A run still working shows its
  *  latest reply without them; a stopped or failed run's says it is partial.
- *  Copy takes this reply alone, never the folded work above it. */
+ *  Copy takes this reply alone, never the folded work above it.
+ *
+ *  `stream`: the reply still arriving, read from the store as it streams.
+ *  It draws through the same elements as the committed reply, which takes
+ *  its row key, so what it holds (a widget's frame) carries over; its
+ *  fences see no `WidgetRow` until then, only `WidgetStream`. */
 export const Reply = memo(function Reply({
   item,
   asked,
   actions,
   role,
+  stream = false,
 }: {
   item: HarnessItem;
   /** The question this answered, for Retry. */
   asked?: HarnessItem;
   actions?: QuestionActions;
   role?: ReplyRole;
+  stream?: boolean;
 }) {
   const busy = useHarnessStore((s) => s.live[item.thread_id]?.running ?? false);
-  const text = item.content ?? "";
+  // Null for every committed reply, so none re-renders per token.
+  const streamed = useHarnessStore((s) => (stream ? (s.live[item.thread_id]?.streaming ?? "") : null));
+  const text = streamed ?? item.content ?? "";
   const retry = actions?.retry;
   const settled = role !== "provisional";
+  const widgetRow = useMemo(() => (stream ? null : { thread: item.thread_id, row: item.id }), [stream, item.thread_id, item.id]);
+  const widgetStream = useMemo(
+    () => (stream && item.run_id != null ? { thread: item.thread_id, run: item.run_id } : null),
+    [stream, item.thread_id, item.run_id],
+  );
   return (
-    <div data-revision-row={item.id} className="group/msg flex w-full min-w-0 flex-col">
+    <div data-revision-row={stream ? undefined : item.id} className="group/msg flex w-full min-w-0 flex-col">
       {role === "partial" && <div className="px-2 pb-1 text-[11px] text-muted-foreground">Partial response</div>}
-      <WidgetRow.Provider value={{ thread: item.thread_id, row: item.id }}>
-        <Assistant text={text} />
+      <WidgetRow.Provider value={widgetRow}>
+        <WidgetStream.Provider value={widgetStream}>
+          <Assistant text={text} />
+        </WidgetStream.Provider>
       </WidgetRow.Provider>
-      <MessageActions when={fmtClock(sqliteUtcToMs(item.created_at))} side="left">
-        {settled && <CopyAction text={text} />}
-        {settled && retry && asked && !busy && (
-          <Action
-            label="Retry"
-            icon={ArrowClockwise}
-            onClick={() => retry(asked.id, asked.content ?? "")}
-          />
-        )}
-      </MessageActions>
+      {!stream && (
+        <MessageActions when={fmtClock(sqliteUtcToMs(item.created_at))} side="left">
+          {settled && <CopyAction text={text} />}
+          {settled && retry && asked && !busy && (
+            <Action
+              label="Retry"
+              icon={ArrowClockwise}
+              onClick={() => retry(asked.id, asked.content ?? "")}
+            />
+          )}
+        </MessageActions>
+      )}
     </div>
   );
 });

@@ -5,6 +5,9 @@ export function isHostMessage(data: unknown): data is HostMessage {
   const d = data as Record<string, unknown> | null;
   if (!d || typeof d !== "object" || d.type !== HOST_MESSAGE) return false;
   if (d.kind === "pause" || d.kind === "resume") return true;
+  if (d.kind === "module") {
+    return Number.isSafeInteger(d.id) && (d.id as number) > 0 && typeof d.code === "string" && typeof d.final === "boolean";
+  }
   if (d.kind === "reply") {
     if (typeof d.id !== "string" || !REQUEST_ID.test(d.id)) return false;
     return (d.ok === true && "value" in d) || (d.ok === false && typeof d.error === "string");

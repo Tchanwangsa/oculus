@@ -5,7 +5,8 @@
  * not waiting is ignored. Shared by the `ask` entry and the runtime through
  * one chunk, so there is one map per frame.
  */
-import type { ReplyMessage } from "../protocol";
+import { STILL_WRITING, type ReplyMessage } from "../protocol";
+import { isStreaming } from "../runtime/mode";
 import { post } from "../runtime/post";
 
 /** A request as the module makes it; `request` adds the id. */
@@ -15,8 +16,10 @@ const waiting = new Map<string, { resolve: (value: unknown) => void; reject: (er
 let made = 0;
 
 /** Posts `body` and answers with the parent's reply: its value, or an
- *  `Error` carrying the reason. */
+ *  `Error` carrying the reason. A preview of a widget still streaming
+ *  posts nothing; the parent would refuse it too. */
 export function request(body: Outgoing, send: (message: Outgoing & { id: string }) => void = post): Promise<unknown> {
+  if (isStreaming()) return Promise.reject(new Error(STILL_WRITING));
   const id = `r${++made}`;
   return new Promise((resolve, reject) => {
     waiting.set(id, { resolve, reject });

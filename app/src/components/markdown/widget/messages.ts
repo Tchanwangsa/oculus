@@ -63,6 +63,13 @@ export function sendState(frame: Window | null | undefined, state: Record<string
   frame?.postMessage(message, "*");
 }
 
+/** Hands a streaming frame its next program (`moduleCode`); `final` is the
+ *  committed one. */
+export function sendModule(frame: Window | null | undefined, id: number, code: string, final: boolean) {
+  const message: HostMessage = { type: HOST_MESSAGE, kind: "module", id, code, final };
+  frame?.postMessage(message, "*");
+}
+
 /** Answers the frame's request `id`: its value, or why it was refused. */
 export function sendReply(frame: Window | null | undefined, id: string, result: { value: unknown } | { error: string }) {
   const message: ReplyMessage =

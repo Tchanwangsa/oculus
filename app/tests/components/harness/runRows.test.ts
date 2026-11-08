@@ -13,7 +13,9 @@ import {
   foldMatches,
   foldOpens,
   foldRows,
+  replyKey,
   rowItems,
+  streamingReply,
   type ViewRow,
   type WorkFold,
 } from "@/components/harness/timeline/rows";
@@ -351,5 +353,35 @@ describe("a card's continuation run", () => {
     expect(answer.item.id).toBe(43);
     expect(answer.role).toBe("answer");
     expect(answer.asked).toBeUndefined();
+  });
+});
+
+describe("the streaming reply's row key", () => {
+  const row = (id: number, kind: HarnessItem["kind"], run: number | null): HarnessItem => ({
+    id,
+    thread_id: THREAD,
+    kind,
+    ref_id: null,
+    content: kind === "assistant" ? `reply ${id}` : "x",
+    meta: null,
+    created_at: "2026-11-08 00:00:00",
+    run_id: run,
+  });
+  const runs = (status: HarnessRun["status"]): Record<number, HarnessRun> => ({
+    7: { id: 7, status, delivery: "unknown", answer_item_id: null, started_ms: 0, ended_ms: null },
+  });
+
+  test("is the key its reply takes once committed", () => {
+    const before = [row(1, "user", 7), row(2, "assistant", 7), row(3, "tool", 7)];
+    expect(streamingReply(before)).toEqual({ run: 7, ordinal: 1 });
+    const committed = [...before, row(4, "assistant", 7)];
+    const rows = buildRows(committed, true, { runs: runs("running") });
+    const answer = rows.find((r) => r.kind === "item" && r.item.id === 4);
+    expect(answer?.kind === "item" && answer.key).toBe(replyKey(7, 1));
+  });
+
+  test("a turn with no run has none", () => {
+    expect(streamingReply([row(1, "user", 7), row(2, "unprompted", null)])).toBeNull();
+    expect(streamingReply([])).toBeNull();
   });
 });

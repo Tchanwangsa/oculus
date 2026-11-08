@@ -39,11 +39,17 @@ export type HostMessage =
   | { type: typeof HOST_MESSAGE; kind: "pause" }
   /** The frame is in view: a 3D scene draws again. */
   | { type: typeof HOST_MESSAGE; kind: "resume" }
+  /** A streaming widget's next program (docs/widgets.md#a-widget-draws-while-it-streams):
+   *  `code` is a module the runtime runs in place of the last one, `id`
+   *  increases per frame, and `final` is the committed program, after which
+   *  nothing more comes. Only a frame booted to stream takes it. */
+  | { type: typeof HOST_MESSAGE; kind: "module"; id: number; code: string; final: boolean }
   /** The answer to the frame's `ask` or `send` with this `id`. */
   | { type: typeof HOST_MESSAGE; kind: "reply"; id: string; ok: true; value: unknown }
   | { type: typeof HOST_MESSAGE; kind: "reply"; id: string; ok: false; error: string };
 
 export type ReplyMessage = Extract<HostMessage, { kind: "reply" }>;
+export type ModuleMessage = Extract<HostMessage, { kind: "module" }>;
 
 /** What a request's `id` may be: the frame makes them, the parent only
  *  echoes them. */
@@ -57,3 +63,12 @@ export const KIT_FLAG = "__oculusKit";
  *  the frame's appended mount line passes to the runtime. Must match
  *  `DEFAULT_BINDING` in `src-tauri/src/widgets/transpile.rs`. */
 export const DEFAULT_BINDING = "__oculusWidget";
+
+/** The flag the runtime sets on `window` while a streaming frame shows a
+ *  preview: the guard script then keeps a throw or rejection to itself,
+ *  since a half-written program is expected to fail. */
+export const QUIET_FLAG = "__oculusQuiet";
+
+/** Why a streaming widget's `ask` or `send` is refused, in the frame and in
+ *  the parent alike. */
+export const STILL_WRITING = "The widget is still being written.";

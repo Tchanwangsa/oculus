@@ -5,39 +5,6 @@ import { derivative, formula, parse } from "oculus/math";
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 const d = (n) => derivative(n, "x").toTex();
 const dx = (tex) => `\\frac{d}{dx}\\left(${tex}\\right)`;
-/** The rule the outermost operation calls for, written out with its parts. */
-function rule(text) {
-	let n = parse(text);
-	while (n.type === "ParenthesisNode" && n.content) n = n.content;
-	const [u, v] = n.args ?? [];
-	if (n.type === "OperatorNode" && u && v) {
-		const [ut, vt] = [u.toTex(), v.toTex()];
-		if (n.op === "+" || n.op === "-") return {
-			name: "Sum rule",
-			tex: `${dx(ut)} ${n.op} ${dx(vt)} = ${d(u)} ${n.op} ${d(v)}`
-		};
-		if (n.op === "*") return {
-			name: "Product rule",
-			tex: `u'v + uv' = \\left(${d(u)}\\right)${vt} + ${ut}\\left(${d(v)}\\right)`
-		};
-		if (n.op === "/") return {
-			name: "Quotient rule",
-			tex: `\\frac{u'v - uv'}{v^2} = \\frac{\\left(${d(u)}\\right)${vt} - ${ut}\\left(${d(v)}\\right)}{\\left(${vt}\\right)^2}`
-		};
-		if (n.op === "^" && d(v) === "0") return {
-			name: "Power rule",
-			tex: `${vt}\\left(${ut}\\right)^{${vt}-1}\\cdot ${d(u)}`
-		};
-	}
-	if (n.type === "FunctionNode" && u) return {
-		name: "Chain rule",
-		tex: `f'(g)\\,g' \\text{ with } g = ${u.toTex()},\\ g' = ${d(u)}`
-	};
-	return {
-		name: "A rule to know",
-		tex: `${dx(n.toTex())} = ${d(n)}`
-	};
-}
 function DerivativeSteps() {
 	const [text, setText] = useWidgetState("text", "x^2 * sin(x)");
 	const [page, setPage] = useWidgetState("page", 0);
@@ -123,6 +90,39 @@ function DerivativeSteps() {
 			] })
 		]
 	}) });
+}
+/** The rule the outermost operation calls for, written out with its parts. */
+function rule(text) {
+	let n = parse(text);
+	while (n.type === "ParenthesisNode" && n.content) n = n.content;
+	const [u, v] = n.args ?? [];
+	if (n.type === "OperatorNode" && u && v) {
+		const [ut, vt] = [u.toTex(), v.toTex()];
+		if (n.op === "+" || n.op === "-") return {
+			name: "Sum rule",
+			tex: `${dx(ut)} ${n.op} ${dx(vt)} = ${d(u)} ${n.op} ${d(v)}`
+		};
+		if (n.op === "*") return {
+			name: "Product rule",
+			tex: `u'v + uv' = \\left(${d(u)}\\right)${vt} + ${ut}\\left(${d(v)}\\right)`
+		};
+		if (n.op === "/") return {
+			name: "Quotient rule",
+			tex: `\\frac{u'v - uv'}{v^2} = \\frac{\\left(${d(u)}\\right)${vt} - ${ut}\\left(${d(v)}\\right)}{\\left(${vt}\\right)^2}`
+		};
+		if (n.op === "^" && d(v) === "0") return {
+			name: "Power rule",
+			tex: `${vt}\\left(${ut}\\right)^{${vt}-1}\\cdot ${d(u)}`
+		};
+	}
+	if (n.type === "FunctionNode" && u) return {
+		name: "Chain rule",
+		tex: `f'(g)\\,g' \\text{ with } g = ${u.toTex()},\\ g' = ${d(u)}`
+	};
+	return {
+		name: "A rule to know",
+		tex: `${dx(n.toTex())} = ${d(n)}`
+	};
 }
 
 const __oculusWidget = DerivativeSteps;

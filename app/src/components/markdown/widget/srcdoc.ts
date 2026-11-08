@@ -1,4 +1,4 @@
-import { DEFAULT_BINDING, KIT_FLAG, WIDGET_MESSAGE } from "../../../../widget-kit/protocol";
+import { DEFAULT_BINDING, KIT_FLAG, QUIET_FLAG, WIDGET_MESSAGE } from "../../../../widget-kit/protocol";
 
 /**
  * The document a widget frame loads (docs/widgets.md#the-sandbox): a CSP
@@ -11,8 +11,10 @@ export interface SrcdocInput {
   kitBase: string;
   /** Fresh per document; every inline script carries it. */
   nonce: string;
-  /** The transpiled widget: an ES module that binds its component to `DEFAULT_BINDING`. */
-  js: string;
+  /** The transpiled widget: an ES module that binds its component to
+   *  `DEFAULT_BINDING`. Null boots a frame for a reply still streaming,
+   *  which draws the programs the parent posts it (`moduleCode`). */
+  js: string | null;
   state: Record<string, unknown>;
   /** `--color-…` custom properties for the current theme. */
   tokens: Record<string, string>;
@@ -78,13 +80,19 @@ export function tokenCss(tokens: Record<string, string>): string {
  * React into an `error` message — a module that won't load (a kit file or a
  * blocked import), a throw in a handler or timer, a rejection, a CSP block —
  * and on `load` reports a kit that never evaluated. Classic, so it runs even
- * when no module can.
+ * when no module can. While a streaming frame shows a preview
+ * (`QUIET_FLAG`), throws and rejections are expected and stay quiet; a file
+ * that won't load is still reported.
  */
-export const GUARD = `(function(){var T=${JSON.stringify(WIDGET_MESSAGE)};function post(m){m.type=T;try{parent.postMessage(m,"*")}catch(_){}}function text(e){return e&&e.message?(e.name&&e.name!=="Error"?e.name+": ":"")+e.message:String(e)}addEventListener("error",function(e){var t=e.target;if(t&&t!==window&&t.tagName){var k=t.tagName==="SCRIPT"||t.tagName==="LINK";post({kind:"error",phase:k?"kit":"runtime",message:"Couldn't load "+(t.src||t.href||(k?"the widget's modules":"a resource"))});return}post({kind:"error",phase:"runtime",message:e.error?text(e.error):String(e.message||"Script error")})},true);addEventListener("unhandledrejection",function(e){post({kind:"error",phase:"runtime",message:"Unhandled rejection: "+text(e.reason)})});addEventListener("securitypolicyviolation",function(e){post({kind:"error",phase:"csp",message:"The sandbox blocked "+(e.blockedURI||"an inline resource")+" ("+e.violatedDirective+")"})});addEventListener("load",function(){if(!window[${JSON.stringify(KIT_FLAG)}])post({kind:"error",phase:"kit",message:"The widget kit did not load"})})})();`;
+export const GUARD = `(function(){var T=${JSON.stringify(WIDGET_MESSAGE)};function post(m){m.type=T;try{parent.postMessage(m,"*")}catch(_){}}function text(e){return e&&e.message?(e.name&&e.name!=="Error"?e.name+": ":"")+e.message:String(e)}addEventListener("error",function(e){var t=e.target;if(t&&t!==window&&t.tagName){var k=t.tagName==="SCRIPT"||t.tagName==="LINK";post({kind:"error",phase:k?"kit":"runtime",message:"Couldn't load "+(t.src||t.href||(k?"the widget's modules":"a resource"))});return}if(window[${JSON.stringify(QUIET_FLAG)}])return;post({kind:"error",phase:"runtime",message:e.error?text(e.error):String(e.message||"Script error")})},true);addEventListener("unhandledrejection",function(e){if(window[${JSON.stringify(QUIET_FLAG)}])return;post({kind:"error",phase:"runtime",message:"Unhandled rejection: "+text(e.reason)})});addEventListener("securitypolicyviolation",function(e){post({kind:"error",phase:"csp",message:"The sandbox blocked "+(e.blockedURI||"an inline resource")+" ("+e.violatedDirective+")"})});addEventListener("load",function(){if(!window[${JSON.stringify(KIT_FLAG)}])post({kind:"error",phase:"kit",message:"The widget kit did not load"})})})();`;
 
 export function buildSrcdoc({ kitBase, nonce, js, state, tokens, dark }: SrcdocInput): string {
   const n = escapeAttr(nonce);
-  const mount = `\nimport { mount as __oculusMount } from ${JSON.stringify(`${kitBase}runtime.js`)};\n__oculusMount(${DEFAULT_BINDING});\n`;
+  const runtime = JSON.stringify(`${kitBase}runtime.js`);
+  const program =
+    js == null
+      ? `import { stream as __oculusStream } from ${runtime};\n__oculusStream();\n`
+      : `${js}\nimport { mount as __oculusMount } from ${runtime};\n__oculusMount(${DEFAULT_BINDING});\n`;
   return [
     "<!doctype html>",
     '<html><head><meta charset="utf-8">',
@@ -96,7 +104,7 @@ export function buildSrcdoc({ kitBase, nonce, js, state, tokens, dark }: SrcdocI
     `<style>${tokenCss(tokens)}</style>`,
     `<script type="application/json" id="oculus-state">${scriptJson(state)}</script>`,
     '</head><body><div id="root"></div>',
-    `<script type="module" nonce="${n}">${escapeScript(js + mount)}</script>`,
+    `<script type="module" nonce="${n}">${escapeScript(program)}</script>`,
     "</body></html>",
   ].join("");
 }

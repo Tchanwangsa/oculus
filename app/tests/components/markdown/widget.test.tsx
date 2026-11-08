@@ -81,6 +81,20 @@ describe("buildSrcdoc", () => {
     dark: true,
   });
 
+  test("a streaming frame boots the runtime with no program, under the same policy", () => {
+    const stream = buildSrcdoc({ kitBase: KIT, nonce: "n0nce", js: null, state: {}, tokens: {}, dark: false });
+    expect(stream).toContain(`import { stream as __oculusStream } from "${KIT}runtime.js";`);
+    expect(stream).not.toContain("__oculusMount");
+    expect(stream).not.toContain(DEFAULT_BINDING);
+    expect(stream).toContain(`<meta http-equiv="Content-Security-Policy" content="${widgetCsp(KIT, "n0nce")}">`);
+  });
+
+  test("the guard keeps a preview's throws quiet, never a file that won't load", () => {
+    expect(doc).toContain('if(window["__oculusQuiet"])return;post({kind:"error",phase:"runtime"');
+    expect(doc).toContain('if(window["__oculusQuiet"])return;post({kind:"error",phase:"runtime",message:"Unhandled rejection: "');
+    expect(doc.indexOf("Couldn't load ")).toBeLessThan(doc.indexOf("__oculusQuiet"));
+  });
+
   test("the CSP names the kit and the nonce, nothing wider", () => {
     const csp = widgetCsp(KIT, "n0nce");
     expect(csp).toStartWith("default-src 'none'");

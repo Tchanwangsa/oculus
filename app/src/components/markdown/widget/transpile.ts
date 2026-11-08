@@ -1,6 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type Transpiled = { js: string; error?: undefined } | { js?: undefined; error: string };
+/** `pending`: components the module draws that it never declares (a
+ *  streaming prefix's not-yet-written parts); empty for a whole widget that
+ *  declares everything it draws. */
+export type Transpiled = { js: string; pending: string[]; error?: undefined } | { js?: undefined; error: string };
+
+type Output = { js: string; pending?: string[] };
+
+const call = (source: string): Promise<Transpiled> =>
+  invoke<Output>("widget_transpile", { source }).then(
+    ({ js, pending }): Transpiled => ({ js, pending: pending ?? [] }),
+    (e): Transpiled => ({ error: typeof e === "string" ? e : e instanceof Error ? e.message : String(e) }),
+  );
 
 const pending = new Map<string, Promise<Transpiled>>();
 const done = new Map<string, Transpiled>();
@@ -17,10 +28,7 @@ const MAX = 64;
 export function transpile(source: string): Promise<Transpiled> {
   const hit = pending.get(source);
   if (hit) return hit;
-  const run = invoke<{ js: string }>("widget_transpile", { source }).then(
-    ({ js }): Transpiled => ({ js }),
-    (e): Transpiled => ({ error: typeof e === "string" ? e : e instanceof Error ? e.message : String(e) }),
-  );
+  const run = call(source);
   run.then((result) => {
     done.set(source, result);
     if (done.size > MAX) {
@@ -35,3 +43,7 @@ export function transpile(source: string): Promise<Transpiled> {
 
 /** A finished transpile of `source`, if there is one. */
 export const transpiled = (source: string) => done.get(source);
+
+/** A streaming prefix through the same transpile, never cached: each is
+ *  tried once and would push committed widgets out of the cache. */
+export const transpilePreview = call;

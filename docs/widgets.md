@@ -16,6 +16,7 @@ with `oculus widget check` ([below](#the-agent-learns-widgets-from-oculus-widget
 | --- | --- |
 | Fence routing and numbering | `app/src/components/markdown/MdComponents.tsx` (`pre`), `app/src/components/markdown/openui/remarkWidgets.ts` |
 | The fence in a reply | `app/src/components/markdown/widget/` (`WidgetFence.tsx`, `LiveWidget.tsx`, `WidgetBar.tsx`, `WidgetExpand.tsx`) |
+| A fence while its reply streams | `app/src/components/markdown/widget/stream/` (`repair.ts`, `preview.ts`, `schedule.ts`, `usePreview.ts`, `gate.ts`, `context.ts`), `app/widget-kit/runtime/` (`stream.tsx`, `preview.ts`, `mode.ts`, `Pending.tsx`), `app/src/components/harness/timeline/rows.ts` (`replyKey`, `streamingReply`) |
 | The frame's document | `app/src/components/markdown/widget/srcdoc.ts` |
 | Messages from a frame | `app/src/components/markdown/widget/messages.ts`, `app/src/components/markdown/widget/useWidgetFrame.ts`, `app/widget-kit/protocol.ts` |
 | Telling a frame it is in view | `app/src/components/markdown/widget/useFrameInView.ts`, `app/widget-kit/runtime/visibility.ts` |
@@ -71,13 +72,76 @@ network request or a write; changes still require proposal cards. Query
 failures stay in the fence with Retry. Tool names, arguments and simulation
 limits live in [harness.md](./harness.md#openui-queries-read-local-rows-and-refresh-after-edits).
 
-## A widget runs only once its reply is a committed row
+## A widget draws while it streams
 
-While the reply streams through `LiveTail` there is no `WidgetRow`, and the
-fence is only its card saying "Building <title>…" — no source, no frame. The
-streamed reply remounts as a committed row, so a frame built while streaming
-would load twice. Markdown outside a chat row (a library file) has no row
-either, so a widget there stays "Building".
+From its opening line a ` ```widget ` fence is its card: the `// title:`
+shimmering, "Building…" beside it and a shimmering block where the widget
+will be. In a chat reply that belongs to a run, the card then previews the
+program as it grows, in the one frame the committed reply keeps. Markdown
+outside a chat row (a library file) and a turn with no run (one the agent
+started itself) show only the card, "Building <title>…".
+
+- **One frame per fence, booted once.** `Timeline` draws a reply streaming
+  a widget fence as the row it will become: the same `Reply` under the key
+  its committed row takes (`replyKey(run, ordinal)` from `streamingReply`
+  in `app/src/components/harness/timeline/rows.ts`), so at commit React keeps
+  the row, the `LiveWidget` and its iframe
+  ([harness.md](./harness.md#the-timeline-never-re-renders-per-token)).
+  `WidgetStream` (thread and run) tells the fence it streams; `WidgetRow`
+  takes over at commit. The document is built with no program
+  (`buildSrcdoc` with `js: null`), and the runtime's `stream` waits for
+  programs posted as `module` messages.
+- **A preview is a repaired prefix.** `usePreview` tries at a pause in the
+  stream (200 ms quiet, or a second after the last try if it never pauses),
+  one transpile in flight (an IPC round trip of about 24 ms), never the same
+  text twice (`stream/schedule.ts`). `previewSource` takes the complete
+  lines once there is an `export default`; `closePrefix` (`stream/repair.ts`)
+  appends what makes them parse: it ends a string, template or comment,
+  finishes an open JSX tag, then closes every open bracket and JSX element in
+  the order opened. It never edits the prefix or guesses past it, and refuses
+  a cut inside a `for`, `while` or `do` body, which could leave a loop
+  nothing can stop. Previews bypass the transpile cache.
+- **Parts not written yet are placeholders.** `widget_transpile` returns
+  `pending`, the components drawn as JSX but declared nowhere, and the
+  preview declares each as the kit's shimmering block (`runtime/Pending.tsx`).
+  A root written first therefore draws early, so `oculus-widgets` asks for
+  the default export first and helpers after, and its gallery is in that
+  order. A helper function not written yet throws, which keeps the last good
+  preview.
+- **A hot update, not a reload.** `moduleCode` (`stream/preview.ts`) makes
+  each preview a module that hands its component to the runtime's `update`,
+  run as an inline module script with the document's nonce, so the policy
+  is unchanged. `update` renders it into the same React root under a fresh
+  error boundary. `oculus/state` lives outside the tree, so values kept by
+  name carry over; plain `useState` starts over. A preview that throws, at
+  its top level, in render or in an effect, puts the newest good preview back
+  (the runtime keeps three). While the frame streams, the guard keeps throws
+  and rejections to itself (`window.__oculusQuiet`) but still reports a file
+  that won't load or a CSP block.
+- **A preview's work is capped.** Its module shadows `setTimeout`,
+  `setInterval`, `requestAnimationFrame` and their cancels with timers scoped
+  to it (`runtime/preview.ts`): the next program cancels whatever an older one
+  left running, and a scope stops once its callbacks have run for 1 s in all.
+  A 3D canvas an update unmounts drops its context at once.
+- **Nothing acts while it streams.** The frame refuses `oculus/ask`'s `ask`
+  and `send` before posting them and doesn't post its state; the parent
+  refuses both too (`stream/gate.ts`), since the frame is untrusted. The
+  frame sits in an `inert` box at 60% opacity, so nothing in it takes a click
+  or focus, and Source, Expand, Save to Revision, the Allow line and errors
+  are absent.
+- **The commit is one more message.** The row keeps the `LiveWidget`, which
+  transpiles the whole fence and posts it as the `final` module. Its first
+  statement is `commit`: older previews' timers stop, the gates open, and
+  from there it fails like any widget (the parent first forgets what the
+  previews reported). A final program that doesn't compile shows its error
+  and drops the frame. A later rebuild (a theme change) boots the program
+  inline like any committed widget.
+
+Measured on the student's widgets, a preview first draws at about half the
+fence's lines, then nearly every line; the plan's spike has the numbers. A
+reply that a later tool call folds into its run's work moves its fence to the
+run's widget row ([harness.md](./harness.md#a-runs-work-folds-above-its-answer)),
+which builds a frame of its own.
 
 A committed fence goes through `widget_transpile` (cached by source in
 `transpile.ts`, errors included), then `buildSrcdoc`, into an iframe with
@@ -142,18 +206,22 @@ The parent posts back `{ type: "oculus-host", kind, … }`:
 | `pause` | — | when the frame leaves the view or the expanded copy opens over it |
 | `resume` | — | when it is in view again ([below](#a-3d-scene-releases-its-context-off-screen)) |
 | `reply` | `id`, then `ok: true` and `value`, or `ok: false` and `error` | the answer to the frame's `ask` or `send` with that `id` |
+| `module` | `id` (increasing per frame), `code`, `final` | a streaming frame's next program ([above](#a-widget-draws-while-it-streams)); nothing follows the `final` one |
 
 The runtime takes a host message only from `parent` and only in exactly one
 of these shapes (`runtime/host.ts`); `pause` and `resume` go to the
-visibility store, which a frame without a 3D scene never reads, and `reply`
-to `oculus/ask`'s waiting requests. A request `id` is 1–64 letters, digits,
+visibility store, which a frame without a 3D scene never reads, `reply`
+to `oculus/ask`'s waiting requests, and `module` to a streaming frame's
+`stream` (a frame booted with its program ignores it). A request `id` is 1–64 letters, digits,
 `_` or `-`, made in the frame; the parent only echoes it.
 
 The guard is a classic inline script that runs before any module. It reports
 a script or stylesheet that failed to load, an uncaught throw (handlers,
 timers), an unhandled rejection and a CSP violation, and on `load` reports a
 kit that never evaluated (`runtime.js` sets `window.__oculusKit`). That is how
-a missing kit is caught without a timeout.
+a missing kit is caught without a timeout. While a streaming frame shows
+previews it reports only the failed loads and CSP blocks
+([above](#a-widget-draws-while-it-streams)).
 
 ## The frame is exactly its content's height and never scrolls
 
@@ -350,7 +418,10 @@ not reliably the oldest; the timeline keeps off-screen rows' frames attached
   transparency), puts the still in the canvas's place, calls the renderer's
   `dispose()` and `forceContextLoss()` itself, and unmounts r3f's canvas.
   On `resume` it mounts it again and drops the still after the first frame.
-  The box never changes size, so the frame's height doesn't either.
+  The box never changes size, so the frame's height doesn't either. An
+  unmounted `Canvas` (a streaming preview replaced) drops its context at
+  once and expects the loss; r3f's own drop, 500 ms later, would read as a
+  lost context.
 - **What survives.** React state above the canvas does; state inside its
   tree starts over, so it belongs in `useWidgetState`. `Scene3D` keeps the
   orbited camera and target outside the canvas and restores them; labels
@@ -559,7 +630,9 @@ guard treats `widget check` as a read.
 
 `widget_transpile(source)` (`app/src-tauri/src/widgets/transpile.rs`) parses the
 TSX with oxc, strips TypeScript and turns JSX into automatic-runtime
-`react/jsx-runtime` calls, returning `{ js }`. It keeps the widget's own
+`react/jsx-runtime` calls, returning `{ js, pending }`: `pending` names the
+components the module draws as JSX but never declares, which only a
+streaming prefix has (omitted when empty). It keeps the widget's own
 imports, restricted to `ALLOWED_IMPORTS`; relative paths, URLs, re-exports
 (`export … from`) and dynamic `import()` are errors, and syntax errors read
 `"<line>:<col> <message>"`.
@@ -595,6 +668,11 @@ The frontend builds the URL from `media_server_info`.
 - Never re-export r3f's own `Canvas` from `fiber.ts` — a widget's raw r3f scene would keep its context off-screen and bring back the sixteen-context cap.
 - Never let OrbitControls zoom by default — its wheel handler would `preventDefault` and the chat would stop scrolling over a scene.
 - Keep `DEFAULT_BINDING` the same in `transpile.rs` and `widget-kit/protocol.ts`; the frame mounts that name.
+- Never boot a second frame for a streaming fence or a preview — the committed row keeps the first, and a 3D scene per update would run into the context cap.
+- Never give a streaming row a key its committed row won't take (`replyKey`) — React would remount it and the frame would boot again at commit.
+- Never let a preview act — `oculus/ask`, state saves and Save to Revision wait for the `final` program, in the frame and in the parent.
+- Never shadow the timers in a final program or skip `commit` — its errors would stay quiet and its effects capped.
+- Never let `closePrefix` close a loop's body — a repaired `while` can spin the frame with nothing to stop it.
 - Don't clamp the frame's height below or scroll it inside — the budget is the only limit, and it is an error.
 - Never copy a `widgetStore` entry into a saved artifact — its Allow belongs to that fence; save `entryState` or the last reported state.
 - Never give a saved widget a chat key (`thread:row:fence`) — `prune` would drop its grant with that thread's.
