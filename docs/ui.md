@@ -36,7 +36,7 @@ OpenUI widgets use the same inline markdown and maths engine as replies,
 `CitationCode` / `CitationLink` for PageRef, and the shared Radix Slider.
 `Frame` supplies a rounded card with a hairline border, a wrapping title and
 counter, and a footer of small pill controls. Quiz choices are ordinary
-keyboard-focusable toggle buttons. Chart draws one SVG series with semantic
+keyboard-focusable toggle buttons. The explain charts draw SVG marks with semantic
 chart, border and muted-text tokens; controls use primary, brand, success and
 destructive tokens. Nothing inside the widget sets a fixed pixel width, so
 the cards reflow with the chat pane and page zoom. The runtime and its state

@@ -21,7 +21,6 @@ const { PROMPT_EXAMPLES } = await import("@/components/markdown/openui/prompt");
 const { repairTex } = await import("@/components/markdown/openui/components/Frame");
 const { MD_COMPONENTS } = await import("@/components/markdown/MdComponents");
 const { remarkWidgets } = await import("@/components/markdown/openui/remarkWidgets");
-const { Chart } = await import("@/components/markdown/openui/components/Chart");
 const { generateOculusUiPrompt } = await import("@/components/markdown/openui/prompt");
 const { includeChange, conflicts, effectiveChanges, initialProposal, validateProposal } = await import("@/components/markdown/openui/proposals/model");
 const { viewRows, replaceAt } = await import("@/components/markdown/openui/proposals/ProposalRows");
@@ -134,13 +133,12 @@ describe("repairTex", () => {
 });
 
 test("negative chart bars keep their zero baseline within the plot", () => {
-  const View = Chart.component;
-  const html = renderToStaticMarkup(<View props={{ points: [{ x: 0, y: -10 }, { x: 1, y: -5 }], kind: "bar" }} renderNode={() => null} />);
+  const html = renderToStaticMarkup(<Renderer response={'root = Stack([Chart([{x:0,y:-10},{x:1,y:-5}], null, null, "bar")])'} library={library} publishObservability={false}><Renderer.Content /></Renderer>);
   const bars = [...html.matchAll(/<rect[^>]* y="([^"]+)"[^>]* height="([^"]+)"/g)];
   expect(bars).toHaveLength(2);
   for (const [, y, height] of bars) {
-    expect(Number(y)).toBeGreaterThanOrEqual(8);
-    expect(Number(y) + Number(height)).toBeLessThanOrEqual(134);
+    expect(Number(y)).toBeGreaterThanOrEqual(0);
+    expect(Number(y) + Number(height)).toBeLessThanOrEqual(160);
   }
 });
 

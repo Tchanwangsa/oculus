@@ -489,8 +489,9 @@ stream. `remarkWidgets` records whether the closing fence has arrived;
 `isStreaming` stays true until both the fence closes and its reply commits.
 
 The library in `app/src/components/markdown/openui/library.ts` admits
-Flashcards, Quiz, Steps, Explorer (sliders, values and charts), PageRef and Ask,
-with Stack and Text for composition. `streamVerdict` tolerates incomplete
+Flashcards, Quiz, reveal Questions, Steps, Explorer, the explain chart and
+layout kits, PageRef and Ask, with Stack and Text for composition.
+`streamVerdict` tolerates incomplete
 props and unresolved references; components show More coming rows as their
 children arrive. Runtime errors are held while streaming. Once streaming
 ends, `parseProgram` and `validateCardTree` strictly validate the final source.
@@ -528,9 +529,40 @@ the ordinary citation chips and file-opening path. The agent learns the fence
 grammar from `app/src-tauri/templates/skills/oculus-ui/SKILL.md`, registered in
 `app/src-tauri/src/agents/docs.rs` and named in the harness brief, whose
 "Showing a picture or a page" sends recall, the student's data and changes
-to ` ```openui `, an illustration the student plays with to ` ```widget `
+and inline explanations to ` ```openui `, a picture with its own rules to ` ```widget `
 (the `oculus-widgets` skill) and a static picture or page to `outputs/`. Widget primitives follow the
 [UI tokens](./ui.md#study-widgets-use-the-replys-primitives-and-semantic-tokens).
+
+## The explain kit fits between paragraphs
+
+The agent writes several small OpenUI fences, each immediately after the
+sentence it illustrates: prose, a population histogram, prose, a slider that
+resamples means, then a standalone Question reveal. Each program writes root
+first, variables next, then children in reading order and leaf data last.
+`prompt.ts` in `app/src/components/markdown/openui/` owns this guidance and
+`bun run docs:widgets` regenerates the shared `oculus-ui` skill from it.
+
+`app/src/components/markdown/openui/components/charts/` draws Bar, Histogram, multi-series Line (with an
+optional area fill), Scatter, Donut (a ring), and Distribution with shaded
+ranges and an optional mean. Charts accept numbers or `{x,y}` points;
+named Series compare up to five lines or point sets. Histogram accepts raw
+values or `@Bins` output. Axis labels carry units; one series has no legend. Horizontal category
+bars and ring labels include values; other plots provide hover readouts. Density ranges merge before their
+area is calculated. SVG marks use chart tokens, starting with indigo, and
+enter only during streaming, respecting reduced motion. Accessible tables
+carry the plotted data. `Chart(points, xLabel, yLabel, kind)` remains registered
+for stored fences; new prompts teach the family.
+
+`app/src/components/markdown/openui/components/layout/` uses the reply's primitives: Panel, Columns, List, Table,
+Stat, Badge, Progress, Tabs/Tab, Callout, Button, Toggle, Select and Input.
+Panel supplies the titled card because Card names a flashcard. Consecutive
+stats and pills share rows, avoiding a separate Row signature. Columns wrap
+through CSS grid without measuring the viewport; tables scroll horizontally.
+Bound controls use literal `$variable` defaults and preserve runtime state;
+Input also reflects programmatic changes. Button allows only `@ToAssistant`,
+`@Set` and `@Run` (or chains of them), and controls are disabled while streaming.
+Unresolved content uses the shared shimmer states in `Streaming.tsx`.
+Live components keep their existing reads and compact entity-specific views.
 
 ## OpenUI queries read local rows and refresh after edits
 

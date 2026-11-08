@@ -2,10 +2,11 @@
 
 A ` ```widget ` fence in a reply is a small TSX program the agent wrote for one
 question, run in a sandboxed frame inside the reply and built from the Oculus
-kit so it looks like the app. ` ```openui ` stays for what only the app can
-do (live student data, proposals, jobs, quizzes that feed reviews —
-[harness.md](./harness.md#openui-fences-draw-interactive-study-widgets));
-a widget is for illustration.
+kit so it looks like the app. ` ```openui ` explains inline with charts,
+small layouts and bound controls, and shows live student data, proposals,
+jobs and quizzes that feed reviews
+([harness.md](./harness.md#openui-fences-draw-interactive-study-widgets));
+a widget illustrates a picture with its own rules.
 The agent learns to write one from the `oculus-widgets` skill and checks it
 with `oculus widget check` ([below](#the-agent-learns-widgets-from-oculus-widgets)).
 
@@ -488,8 +489,8 @@ the value: `$.steps[2].tex: expected string`, `$["a b"]: expected number`.
 ## The agent learns widgets from `oculus-widgets`
 
 The brief's "Showing a picture or a page" (`HARNESS.template.md`) routes by
-what the answer needs: ` ```openui ` for recall, the student's data and
-changes, ` ```widget ` for an illustration the student plays with, and
+what the answer needs: ` ```openui ` for inline explanations, recall, live data and
+changes, ` ```widget ` for geometry, physics or algorithm illustrations, and
 `outputs/` for a static picture or page. It names the skill and stops there,
 since every CLI reads the brief into every thread. Its "Diagrams" section
 sends "how does X work" about a mechanism, and a cycle, to a widget rather

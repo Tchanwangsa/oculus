@@ -140,10 +140,15 @@ Choose the lightest output that helps the student:
 | --- | --- |
 | A quick fact, formula or worked line | Prose; no extra visual |
 | Structure, connections, message order or a state machine | `mermaid` |
-| Recall practice, one fixed worked problem, or formula sliders with a value and chart | `openui`; read `oculus-ui` |
-| Student data or an app job | `openui` proposal; read `oculus-plan` and `oculus-ui` |
+| An inline explanation: charts, stats, tables, sliders, an intuition reveal, recall or a worked problem | `openui`; read `oculus-ui` |
+| Live student data | `openui` with Query; read `oculus-ui` |
+| A change to student data or an app job | `openui` proposal; read `oculus-plan` and `oculus-ui` |
 | A mechanism to drive, a cycle or algorithm to step through, typed formula input, or an interactive 2D/3D picture | `widget`; read `oculus-widgets` before writing one |
 | A static chart, timeline or one-page summary | A picture or self-contained HTML page in `./outputs/` |
+
+For inline explanations, use several small OpenUI fences, each right after the
+sentence it illustrates. A picture with its own rules belongs in an inline
+widget; something to play or work in belongs in a windowed widget.
 
 Most replies need no visual. For a concept explanation's condensed cheat sheet
 proposal, follow `oculus-revision`; it owns what to offer and how to file it.

@@ -1,0 +1,8 @@
+@media (prefers-reduced-motion: no-preference) {
+  .openui-block[data-openui-streaming="true"] .openui-mark {
+    animation: openui-mark-enter 180ms ease-out;
+  }
+}
+@keyframes openui-mark-enter {
+  from { opacity: 0; }
+}
