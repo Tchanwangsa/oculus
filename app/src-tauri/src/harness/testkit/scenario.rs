@@ -31,6 +31,8 @@ pub(super) struct Scenario {
     pub repeat_envelope: bool,
     pub load_race: bool,
     pub restart: bool,
+    /// The run is a card's continuation, started by its `CardSettled`, not a send.
+    pub continuation: bool,
 }
 
 impl Scenario {
@@ -44,6 +46,7 @@ impl Scenario {
             repeat_envelope: false,
             load_race: false,
             restart: false,
+            continuation: false,
         }
     }
 

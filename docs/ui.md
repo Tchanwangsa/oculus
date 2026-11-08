@@ -79,6 +79,13 @@ at the left and the actions at the right. `cardState.ts` names the phase:
 | undone | muted header and icon, results still open where the item remains, "Undone" |
 | discarded, superseded | header only on the page background, a Discarded or "V1 · replaced" badge and the newer version's link |
 
+A card the agent gave a follow-up (`then`) names it on its deciding buttons
+("Sync and continue", "Discard and continue"), and once it no longer waits on
+the student a muted `note` line under the body, kept even when collapsed,
+says what the follow-up did: continues when the job finishes, continues
+after the current reply, continued below, or why it never will
+(`proposals/followUp.ts`, [harness.md](./harness.md#a-card-can-continue-the-agent)).
+
 Locked bodies are `inert`, so nothing in a card that is not ready or is busy
 takes a click. `useCardStreaming` reads OpenUI's `useIsStreaming`; outside a
 `Renderer` it is false. The frame holds

@@ -847,7 +847,9 @@ resumes, and a `harness_command_receipts` row keyed by `SendOptions.receipt`
 (a fresh id when the caller sends none). Any failure writes nothing and the
 send stops there: an error row and a failed `TurnFinished`, no provider
 write. A receipt already used starts nothing; `harness_send` returns early on
-one, and `begin_run` refuses one.
+one, and `begin_run` refuses one. A card's continuation is a run with origin
+`continuation` and a `continuation` row in place of the question
+([below](#a-card-can-continue-the-agent)).
 
 The question's `UserMessage` carries the run (never serialized), so the
 consumer stores no second row and `app/src-tauri/src/harness/app/run_scope.rs` opens that run for the
@@ -1493,6 +1495,45 @@ there reuses the onboarding sync line, ticks elapsed time, and shows only existi
 cancel actions (Sync and active Studio downloads). Terminal cards show the saved
 result or error once. Sync links use `/sync?run=<id>`: history includes that run
 even outside its recent window, selects its page and expands its row.
+
+### A card can continue the agent
+
+Every proposal and job component takes an optional last argument, `then`:
+what the agent will do once the student decides or the job finishes. It is
+stored in the card's state (`validate_shape` allows it on every kind, at most
+2000 characters) and is never drawn as the student's words. With one, the
+deciding buttons say so (`proposals/followUp.ts`: "Sync and continue",
+"Create 3 tasks and continue", "Discard and continue"): that click is the
+student's consent for exactly one billed turn. Nothing else starts one, and
+without `then` the outcome reaches the agent with the next message, as above.
+
+Apply and discard (`proposals/mod.rs`) and a job's `finish` call
+`app::card_settled`, which puts a `CardSettled` event on the consumer's bus.
+There `harness/app/continuation.rs` claims the card with one conditional
+update of its state: `continuation` becomes `{phase: "queued"}` only if the
+card has a `then`, has settled (discarded, applied, or its job complete or
+failed, not interrupted), has no claim yet, and its timeline row still exists.
+A second settle, a second view, or a rewind or thread delete past the card
+claims nothing. The claim then goes through `Queue` like a message: out at
+once on an idle thread, or behind the running turn, never listed in the
+composer's queue.
+
+At dispatch `store::begin_run` turns the claim into the run in the same
+transaction (`phase: "started"`, `run_id`), or refuses with `NOT_CLAIMED` and
+writes nothing; the consumer's `BusMsg::Release` then passes the thread to
+whatever waits next. The run's origin is `continuation`, and its head row is a
+`continuation` row holding the timeline's line ("Sync finished — continuing",
+meta `{proposal}`), announced as `Continued`, not `UserMessage`. The webview
+draws it as a small centred line, folds the run under it like a question's,
+and offers no Retry or edit on it. The prompt says it is from Oculus, names
+the card and its outcome, and quotes the agent's `then`; "Cards in this
+thread" follows as for any send. The thread's model comes from its row and
+the reasoning level from the live session, as the student last chose them.
+
+Stop drops a queued continuation and its card says so (`STOPPED`). The queue
+is only in memory, so startup marks a queued claim `skipped`, and a job the
+app closed during (`job.interrupted`) is `skipped` too: neither ever runs
+later, and the card shows the reason under its body (`CardFrame`'s `note`).
 
 
 ## Revision writes and submitted answers have separate paths

@@ -2,7 +2,7 @@ import { memo, useMemo } from "react";
 import { parseErrorMeta, parseToolMeta, thoughtMs, type HarnessItem, type Provider } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { CLI_ICON, ErrorRow, RowShell, ThinkingRow, ToolRow, TOOL_ICON } from "./WorkRow";
-import { Compacted, DeliveryNotice, FoldedReply, Reply, Stopped, Unprompted, User } from "./Messages";
+import { Compacted, Continued, DeliveryNotice, FoldedReply, Reply, Stopped, Unprompted, User } from "./Messages";
 import { PermissionCard } from "./PermissionCard";
 import { bundleLabel, type ReplyRole } from "./rows";
 import type { QuestionActions } from "./types";
@@ -60,6 +60,8 @@ export const Item = memo(function Item({
       return <Stopped />;
     case "unprompted":
       return <Unprompted item={item} />;
+    case "continuation":
+      return <Continued item={item} />;
     case "delivery_notice":
       return <DeliveryNotice item={item} />;
     case "compaction":

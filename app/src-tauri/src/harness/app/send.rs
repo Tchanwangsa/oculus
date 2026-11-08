@@ -15,7 +15,9 @@ use crate::runtime::blocking::run as blocking;
 use super::{sink_for, Bus, BusMsg};
 
 /// A send the queue has let go. A failure still closes the turn (an error
-/// row, then `TurnFinished`), so nothing queued behind it is stranded.
+/// row, then `TurnFinished`), so nothing queued behind it is stranded. A
+/// card's continuation whose claim is gone (a rewind took the card, Stop
+/// cancelled it) sends nothing and shows nothing; the thread passes on.
 pub(super) async fn dispatch(
     harness: Arc<Harness>,
     bus: Bus,
@@ -25,6 +27,7 @@ pub(super) async fn dispatch(
     text: String,
 ) -> Result<(), String> {
     let sink = sink_for(&bus, thread_id, provider);
+    let continuation = opts.continuation.is_some();
     match start_turn(
         &harness,
         &bus,
@@ -37,6 +40,10 @@ pub(super) async fn dispatch(
     .await
     {
         Ok(()) => Ok(()),
+        Err(e) if continuation && e == store::NOT_CLAIMED => {
+            let _ = bus.send(BusMsg::Release(thread_id, provider));
+            Ok(())
+        }
         Err(e) => {
             sink(HarnessEvent::error(e.clone()));
             sink(HarnessEvent::TurnFinished {
@@ -112,8 +119,18 @@ async fn start_turn(
         Provider::Antigravity => Some(antigravity_rules::stored(&pool).await?),
         _ => None,
     };
+    // A continuation has no composer behind it: it keeps the live session's
+    // reasoning level, and the row's model, as the student last chose them.
+    let reasoning_effort = match &opts.continuation {
+        Some(_) => opts
+            .reasoning_effort
+            .clone()
+            .or_else(|| harness.live_effort(thread_id)),
+        None => opts.reasoning_effort.clone(),
+    };
     let opts = SendOptions {
         model: opts.model.or(row.model),
+        reasoning_effort,
         scope: row.subject_code,
         lecture,
         studio_brief,
@@ -122,7 +139,9 @@ async fn start_turn(
     };
     let resume = row.provider_session_id;
     // The row is what the student typed; what they had open (a lecture's moment,
-    // a notebook) rides only the prompt, or the timeline would show it.
+    // a notebook) rides only the prompt, or the timeline would show it. A
+    // continuation's row is its line ("Sync finished — continuing"); the
+    // prompt is the card's outcome and the agent's own follow-up.
     let intent = store::SendIntent {
         thread_id,
         provider,
@@ -131,23 +150,42 @@ async fn start_turn(
         receipt: opts.receipt.clone().unwrap_or_else(store::fresh_receipt),
         text: text.to_string(),
         at: opts.at,
+        continuation: opts.continuation.clone(),
     };
-    let run = begin_run(bus, intent).await?;
-    let text = match &opts.context {
-        Some(c) => {
-            format!("{text}\n\n---\n\n## What the student had open when this was sent\n\n{c}")
-        }
-        None => text.to_string(),
-    };
-
-    let cards = super::proposal_context::read(&pool, thread_id).await?;
-    let text = format!("{text}{}", cards.section);
+    let (run, text, cards) = begin_turn(&pool, bus, intent, opts.context.as_deref()).await?;
     let (h, sink) = (harness.clone(), sink.clone());
     blocking(move || h.send(thread_id, provider, resume.as_deref(), &opts, &text, sink)).await?;
     if let Err(e) = store::mark_sent(&pool, &run).await {
         elog!("[oculus] harness run {}: {e}", run.run_id);
     }
     super::proposal_context::accepted(&pool, cards).await
+}
+
+/// Write the send's run, then build what the provider is sent: the
+/// student's text and what they had open, or a continuation's prompt, then
+/// "Cards in this thread", read now (after any click made while it queued).
+pub(in crate::harness) async fn begin_turn(
+    pool: &SqlitePool,
+    bus: &Bus,
+    intent: store::SendIntent,
+    context: Option<&str>,
+) -> Result<(store::RunStart, String, super::proposal_context::Cards), String> {
+    let (thread_id, card, typed) = (
+        intent.thread_id,
+        intent.continuation.clone(),
+        intent.text.clone(),
+    );
+    let run = begin_run(bus, intent).await?;
+    let text = match (card, context) {
+        (Some(card), _) => super::continuation::prompt(pool, &card).await?,
+        (None, Some(c)) => {
+            format!("{typed}\n\n---\n\n## What the student had open when this was sent\n\n{c}")
+        }
+        (None, None) => typed,
+    };
+    let cards = super::proposal_context::read(pool, thread_id).await?;
+    let text = format!("{text}{}", cards.section);
+    Ok((run, text, cards))
 }
 
 /// Persist the send's run and question on the consumer, before any provider

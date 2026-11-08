@@ -27,7 +27,7 @@ pub struct Owner {
     pub entity: String,
 }
 
-/// One student send, as [`begin`] records it.
+/// One send, a student's or a card's continuation, as [`begin`] records it.
 pub struct SendIntent {
     pub thread_id: i64,
     pub provider: Provider,
@@ -37,7 +37,15 @@ pub struct SendIntent {
     pub receipt: String,
     pub text: String,
     pub at: Option<i64>,
+    /// The card whose follow-up this run is (`app/continuation.rs`): its row is
+    /// a `continuation` row holding `text`, never a question, and the run's
+    /// origin is `continuation`. `None` for a student send.
+    pub continuation: Option<String>,
 }
+
+/// [`begin`]'s refusal of a continuation its card no longer holds a claim
+/// for (a rewind took the card, or it was stopped): nothing was written.
+pub const NOT_CLAIMED: &str = "the card's continuation is no longer queued";
 
 /// A receipt for a send whose caller named none; unique per process and time.
 pub fn fresh_receipt() -> String {
@@ -59,8 +67,9 @@ pub async fn receipt_run(pool: &SqlitePool, receipt: &str) -> Result<Option<i64>
 }
 
 /// Write the question's row, its run, first attempt, binding and receipt in
-/// one transaction. Any failure — a reused receipt included — writes nothing,
-/// and the caller must not send.
+/// one transaction. Any failure — a reused receipt, or a continuation whose
+/// card lost its claim ([`NOT_CLAIMED`]) — writes nothing, and the caller
+/// must not send.
 pub async fn begin(pool: &SqlitePool, send: &SendIntent) -> Result<RunStart, String> {
     let err = |e: sqlx::Error| e.to_string();
     let mut tx = pool.begin().await.map_err(err)?;
@@ -72,6 +81,11 @@ pub async fn begin(pool: &SqlitePool, send: &SendIntent) -> Result<RunStart, Str
             .map_err(err)?;
     if let Some(run) = taken {
         return Err(format!("send {} already started run {run}", send.receipt));
+    }
+    if let Some(card) = &send.continuation {
+        if !super::super::app::continuation::start(&mut tx, send.thread_id, card).await? {
+            return Err(NOT_CLAIMED.into());
+        }
     }
     let bound: Option<i64> = sqlx::query_scalar(
         "SELECT id FROM harness_bindings
@@ -105,13 +119,27 @@ pub async fn begin(pool: &SqlitePool, send: &SendIntent) -> Result<RunStart, Str
     .await
     .map_err(err)?;
     // `content` is only what the student typed; the playhead second is meta.
-    let meta = send
-        .at
-        .map(|at| serde_json::json!({ "at": at }).to_string());
+    // A continuation's row is Oculus's line about its card instead.
+    let (kind, origin, command, meta) = match &send.continuation {
+        Some(card) => (
+            "continuation",
+            "continuation",
+            "continuation",
+            Some(serde_json::json!({ "proposal": card }).to_string()),
+        ),
+        None => (
+            "user",
+            "student",
+            "send",
+            send.at
+                .map(|at| serde_json::json!({ "at": at }).to_string()),
+        ),
+    };
     let item_id = sqlx::query(
-        "INSERT INTO harness_items (thread_id, kind, content, meta) VALUES (?1, 'user', ?2, ?3)",
+        "INSERT INTO harness_items (thread_id, kind, content, meta) VALUES (?1, ?2, ?3, ?4)",
     )
     .bind(send.thread_id)
+    .bind(kind)
     .bind(&send.text)
     .bind(meta)
     .execute(&mut *tx)
@@ -122,16 +150,20 @@ pub async fn begin(pool: &SqlitePool, send: &SendIntent) -> Result<RunStart, Str
         "INSERT INTO harness_runs
            (thread_id, ordinal, origin, initiating_item_id, binding_id, model, execution_status)
          VALUES (?1, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM harness_runs WHERE thread_id = ?1),
-                 'student', ?2, ?3, ?4, 'preparing')",
+                 ?5, ?2, ?3, ?4, 'preparing')",
     )
     .bind(send.thread_id)
     .bind(item_id)
     .bind(binding_id)
     .bind(&send.model)
+    .bind(origin)
     .execute(&mut *tx)
     .await
     .map_err(err)?
     .last_insert_rowid();
+    if let Some(card) = &send.continuation {
+        super::super::app::continuation::started(&mut tx, card, run_id).await?;
+    }
     let attempt_id = sqlx::query(
         "INSERT INTO harness_attempts (run_id, ordinal, reason, status) VALUES (?1, 1, 'initial', 'preparing')",
     )
@@ -153,11 +185,12 @@ pub async fn begin(pool: &SqlitePool, send: &SendIntent) -> Result<RunStart, Str
         .await
         .map_err(err)?;
     sqlx::query(
-        "INSERT INTO harness_command_receipts (id, thread_id, command, run_id) VALUES (?1, ?2, 'send', ?3)",
+        "INSERT INTO harness_command_receipts (id, thread_id, command, run_id) VALUES (?1, ?2, ?4, ?3)",
     )
     .bind(&send.receipt)
     .bind(send.thread_id)
     .bind(run_id)
+    .bind(command)
     .execute(&mut *tx)
     .await
     .map_err(err)?;

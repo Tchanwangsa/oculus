@@ -243,8 +243,23 @@ pub fn kind_keys(kind: &str) -> Result<&'static [&'static str], String> {
     })
 }
 
+/// Keys every card may carry beside its kind's: the agent's follow-up
+/// (`then`) and Rust's record of it (`continuation`, `harness/app/continuation.rs`).
+const FOLLOW_UP_KEYS: [&str; 2] = ["then", "continuation"];
+
 pub fn validate_shape(kind: &str, state: &Value) -> Result<(), String> {
-    object(state, kind_keys(kind)?)?;
+    let keys: Vec<&str> = kind_keys(kind)?
+        .iter()
+        .copied()
+        .chain(FOLLOW_UP_KEYS)
+        .collect();
+    object(state, &keys)?;
+    match state.get("then") {
+        None | Some(Value::Null) => {}
+        Some(Value::String(s)) if s.chars().count() <= 2_000 => {}
+        Some(Value::String(_)) => return Err("then is longer than 2000 characters".into()),
+        Some(_) => return Err("then must be text".into()),
+    }
     if serde_json::to_vec(state).map_err(|e| e.to_string())?.len() > 2_000_000 {
         return Err("proposal is too large".into());
     }

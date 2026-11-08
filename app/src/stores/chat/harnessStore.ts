@@ -369,6 +369,14 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           live = { ...prev, running: true };
           touchThread({ status: "running" });
           break;
+        case "continued":
+          push(rowFrom(env, "continuation", event.text, { proposal: event.proposal }));
+          if (env.runId != null) {
+            setRun({ id: env.runId, status: "running", delivery: "unknown", answer_item_id: null, started_ms: Date.now(), ended_ms: null });
+          }
+          live = { ...prev, running: true };
+          touchThread({ status: "running" });
+          break;
         case "run_settled": {
           if (!held) break;
           if (env.runId != null) {

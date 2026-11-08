@@ -114,6 +114,7 @@ fn intent(thread_id: i64, receipt: &str, session: Option<&str>) -> store::SendIn
         receipt: receipt.into(),
         text: "question".into(),
         at: None,
+        continuation: None,
     }
 }
 

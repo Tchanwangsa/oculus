@@ -665,3 +665,30 @@ async fn cheat_cards_create_named_topics_and_undo_removes_them() {
         .unwrap();
     assert_eq!(left, 0);
 }
+
+#[test]
+fn every_card_takes_an_optional_text_follow_up() {
+    use super::state::validate_shape;
+    let then = "Check the new Ed threads for extension posts";
+    for (kind, state) in [
+        (
+            "Sync",
+            json!({"subjects": ["COMP30026"], "lectures": null, "then": then}),
+        ),
+        ("Download", json!({"item": "aligner", "then": null})),
+        (
+            "NewTasks",
+            json!({"project": null, "items": [], "amends": null, "then": then}),
+        ),
+        (
+            "Sync",
+            json!({"subjects": [], "then": then, "continuation": {"phase": "queued"}}),
+        ),
+    ] {
+        assert!(validate_shape(kind, &state).is_ok(), "{kind} {state}");
+    }
+    assert!(validate_shape("Sync", &json!({"subjects": [], "then": 5})).is_err());
+    let long = "x".repeat(2_001);
+    assert!(validate_shape("Sync", &json!({"subjects": [], "then": long})).is_err());
+    assert!(validate_shape("Sync", &json!({"subjects": [], "next": then})).is_err());
+}

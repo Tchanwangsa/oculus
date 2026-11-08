@@ -19,6 +19,7 @@ import { CardFrame, useCardStreaming } from "./CardFrame";
 import { cardState } from "./cardState";
 import { conflicts, effectiveChanges, excludeStale, included, object, rowId, liveKey, rowKey, rows, validateProposal, type Row } from "./model";
 import type { Proposal } from "@/lib/harness/proposals";
+import { continueLabel, followUp, followUpNote } from "./followUp";
 
 type Action = "apply" | "discard" | "undo";
 
@@ -139,18 +140,20 @@ function ProposalCardContent({ kind, input }: { kind: string; input: Row }) {
     } catch (error) { setValidation(String(error)); }
   };
   const anchor = card.id ? `proposal-${card.id}` : undefined;
+  const follow = followUp(state);
+  const note = followUpNote(follow, frame);
   const error = card.error ?? validation ?? data.error;
   const verb = kind.startsWith("New") ? "Create" : kind.startsWith("Delete") ? "Delete" : "Apply";
   // Busy on a decided card can only be Undo, whichever view clicked it.
   const working = proposal?.status === "created" ? "Undoing…" : acting === "discard" ? "Discarding…" : `${{ Create: "Creating", Delete: "Deleting", Apply: "Applying" }[verb]}…`;
   const decide = (label: string) => frame.failure === "load"
     ? <Button variant="outline" size="sm" onClick={card.retry}><ArrowClockwise />Try again</Button>
-    : <><Button variant="ghost" size="sm" disabled={disabled} onClick={() => act("discard")}>Discard</Button><Button variant={kind.startsWith("Delete") ? "destructive" : "default"} size="sm" disabled={disabled || (count === 0 && kind !== "NewProject")} onClick={apply}>{frame.phase === "applying" && acting === "apply" && <SpinnerGap className="animate-spin" />}{label}</Button></>;
+    : <><Button variant="ghost" size="sm" disabled={disabled} onClick={() => act("discard")}>{continueLabel("Discard", follow)}</Button><Button variant={kind.startsWith("Delete") ? "destructive" : "default"} size="sm" disabled={disabled || (count === 0 && kind !== "NewProject")} onClick={apply}>{frame.phase === "applying" && acting === "apply" && <SpinnerGap className="animate-spin" />}{continueLabel(label, follow)}</Button></>;
 
   if (frame.collapsed) {
     const index = version.versions.findIndex((item) => item.id === card.id) + 1;
     const newer = proposal?.superseded_by;
-    return <CardFrame id={anchor} state={frame} icon={Icon} title={title.replace(/\?$/, "")} meta={frame.phase === "discarded" ? <Badge variant="secondary">Discarded</Badge> : <>
+    return <CardFrame id={anchor} state={frame} icon={Icon} note={note} title={title.replace(/\?$/, "")} meta={frame.phase === "discarded" ? <Badge variant="secondary">Discarded</Badge> : <>
       <Badge variant="secondary">{index > 0 ? `V${index} · replaced` : "Replaced"}</Badge>
       {newer && <a className="inline-flex items-center gap-1 text-xs text-brand hover:underline" href={`#proposal-${newer}`} onClick={(event) => { event.preventDefault(); document.getElementById(`proposal-${newer}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>View newer version<ArrowDown size={12} /></a>}
     </>} />;
@@ -159,12 +162,12 @@ function ProposalCardContent({ kind, input }: { kind: string; input: Row }) {
   const small = kind !== "EditItems" && listing.length === 1 && !listing[0].parent && !["NewProject", "NewNote", "NewCheatNotes", "TagChanges"].includes(kind) && (!listing[0].row.from || Object.keys(object(listing[0].row.to)).length === 1) && !Object.keys(object(listing[0].row.to)).some((field) => ["body", "brief", "notes"].includes(field));
   if (small && !expanded && editor) {
     const heading = <span className="inline-flex max-w-full min-w-0 items-center gap-1.5"><button type="button" disabled={disabled} onClick={() => setExpanded(true)} aria-label="Edit proposal" className="min-w-0 cursor-pointer text-left break-words enabled:hover:text-brand disabled:cursor-default">{title}</button><ChangedSince fields={data.loaded ? conflicts(listing[0].row, data.live[liveKey(listing[0].row)]) : []} live={data.live[String(rowId(listing[0].row))]} /></span>;
-    return <CardFrame compact id={anchor} state={frame} icon={Icon} title={heading} error={error} status={frame.phase === "applying" ? working : undefined}
+    return <CardFrame compact id={anchor} state={frame} icon={Icon} title={heading} error={error} note={note} status={frame.phase === "applying" ? working : undefined}
       meta={editor && <VersionControl inline version={version} disabled={disabled} />}
       actions={decide(verb)} />;
   }
 
-  return <CardFrame id={anchor} state={frame} icon={Icon} error={error}
+  return <CardFrame id={anchor} state={frame} icon={Icon} error={error} note={note}
     title={editor ? title : resultTitle(proposal!, data.project)}
     subtitle={<>{data.project?.subject != null && <p className="mt-0.5 text-xs text-muted-foreground">{String(data.project.subject)}</p>}{editor && <VersionControl version={version} disabled={disabled} />}</>}
     meta={editor && total > 1 && kind !== "NewProject" && <span className="rounded-full bg-surface px-2 py-0.5 text-xs tabular-nums text-muted-foreground">{count} of {total}</span>}

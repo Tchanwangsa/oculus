@@ -18,6 +18,16 @@ fn next_queue_id() -> String {
     format!("q{}", N.fetch_add(1, Ordering::SeqCst))
 }
 
+impl QueuedMessage {
+    /// A message under a fresh queue id, for one that goes out without waiting.
+    pub fn new(text: &str) -> Self {
+        QueuedMessage {
+            id: next_queue_id(),
+            text: text.to_string(),
+        }
+    }
+}
+
 /// Which threads have a turn open, and what is waiting behind each.
 ///
 /// The CLIs mishandle a message sent mid-turn (`claude` silently chains a
@@ -30,6 +40,14 @@ fn next_queue_id() -> String {
 #[derive(Default)]
 pub struct Queue {
     threads: HashMap<i64, ThreadQueue>,
+}
+
+/// What [`Queue::clear`] dropped.
+#[derive(Default, Debug)]
+pub struct Cleared {
+    pub messages: Vec<QueuedMessage>,
+    /// Card ids whose continuation was waiting.
+    pub continuations: Vec<String>,
 }
 
 #[derive(Default)]
@@ -60,10 +78,7 @@ impl Queue {
 
     /// Fall in behind the turn that has the thread.
     pub fn push(&mut self, thread_id: i64, text: &str, opts: &SendOptions) -> QueuedMessage {
-        let msg = QueuedMessage {
-            id: next_queue_id(),
-            text: text.to_string(),
-        };
+        let msg = QueuedMessage::new(text);
         self.threads
             .entry(thread_id)
             .or_default()
@@ -86,13 +101,20 @@ impl Queue {
         Some(next)
     }
 
-    /// Everything still waiting, dropped — what stop does. Handed back so
-    /// the composer can return them to the student.
-    pub fn clear(&mut self, thread_id: i64) -> Vec<QueuedMessage> {
-        match self.threads.get_mut(&thread_id) {
-            Some(q) => q.pending.drain(..).map(|(m, _)| m).collect(),
-            None => Vec::new(),
+    /// Everything still waiting, dropped — what stop does. The student's
+    /// messages are handed back so the composer can return them; a card's
+    /// continuation, never typed, comes back as its card's id.
+    pub fn clear(&mut self, thread_id: i64) -> Cleared {
+        let mut cleared = Cleared::default();
+        if let Some(q) = self.threads.get_mut(&thread_id) {
+            for (m, opts) in q.pending.drain(..) {
+                match opts.continuation {
+                    Some(card) => cleared.continuations.push(card),
+                    None => cleared.messages.push(m),
+                }
+            }
         }
+        cleared
     }
 
     /// Drop one pending message.
@@ -113,9 +135,16 @@ impl Queue {
         Some(m.clone())
     }
 
+    /// The student's waiting messages; a queued continuation is the card's,
+    /// so the composer never shows it.
     pub fn list(&self, thread_id: i64) -> Vec<QueuedMessage> {
         match self.threads.get(&thread_id) {
-            Some(q) => q.pending.iter().map(|(m, _)| m.clone()).collect(),
+            Some(q) => q
+                .pending
+                .iter()
+                .filter(|(_, opts)| opts.continuation.is_none())
+                .map(|(m, _)| m.clone())
+                .collect(),
             None => Vec::new(),
         }
     }
@@ -176,7 +205,11 @@ mod tests {
             "a pending message can be dropped on its own"
         );
         assert_eq!(
-            q.clear(7).into_iter().map(|m| m.text).collect::<Vec<_>>(),
+            q.clear(7)
+                .messages
+                .into_iter()
+                .map(|m| m.text)
+                .collect::<Vec<_>>(),
             vec!["one".to_string(), "three".to_string()]
         );
         assert!(q.list(7).is_empty());
@@ -222,12 +255,40 @@ mod tests {
     }
 
     #[test]
+    fn a_continuation_waits_in_order_but_is_never_the_students() {
+        let mut q = Queue::default();
+        let opts = SendOptions::default();
+        assert!(q.try_claim(6));
+        let card = SendOptions {
+            continuation: Some("12.0".into()),
+            ..SendOptions::default()
+        };
+        q.push(6, "Sync finished — continuing", &card);
+        q.push(6, "typed", &opts);
+        assert_eq!(
+            q.list(6).into_iter().map(|m| m.text).collect::<Vec<_>>(),
+            vec!["typed".to_string()],
+            "the composer shows only what the student typed"
+        );
+        let (next, sent) = q.next(6).unwrap();
+        assert_eq!(
+            next.text, "Sync finished — continuing",
+            "first come, first served"
+        );
+        assert_eq!(sent.continuation.as_deref(), Some("12.0"));
+        q.push(6, "again", &card);
+        let cleared = q.clear(6);
+        assert_eq!(cleared.continuations, vec!["12.0".to_string()]);
+        assert_eq!(cleared.messages.len(), 1, "stop hands back only typed text");
+    }
+
+    #[test]
     fn clearing_the_queue_does_not_release_a_hold() {
         let mut q = Queue::default();
         let opts = SendOptions::default();
         q.hold(5);
         q.push(5, "one", &opts);
-        assert_eq!(q.clear(5).len(), 1);
+        assert_eq!(q.clear(5).messages.len(), 1);
         assert!(q.is_busy(5));
         assert!(!q.try_claim(5));
         assert!(q.next(5).is_none());

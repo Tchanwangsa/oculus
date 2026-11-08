@@ -21,6 +21,10 @@ type HarnessEvent =
    *  background task); `after` names those tasks. Holds the thread until its
    *  `turn_finished`, like a sent message. */
   | { type: "unprompted_turn"; after: string[] }
+  /** A run Oculus started after a card settled, in place of a question
+   *  (docs/harness.md, "A card can continue the agent"). `text` is its
+   *  timeline line; `proposal` the card's id. Holds the thread like a send. */
+  | { type: "continued"; text: string; proposal: string }
   | { type: "turn_started" }
   | { type: "assistant_delta"; text: string }
   | { type: "thinking_delta"; text: string }
@@ -126,6 +130,9 @@ type ItemKind =
   | "permission"
   /** Marks a turn the agent started itself; `meta` is `{ after: string[] }`. */
   | "unprompted"
+  /** Heads a card's continuation run; `content` is its line ("Sync finished —
+   *  continuing"), `meta` is `{ proposal: string }`. Never the student's words. */
+  | "continuation"
   /** A run whose answer, or part of it, never arrived; `content` says which. */
   | "delivery_notice"
   | "compaction";

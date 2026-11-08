@@ -34,7 +34,9 @@ async fn finish(
     outcome: Result<String, String>,
 ) -> Result<(), String> {
     save_finish(pool, id, outcome).await?;
-    publish_proposal(app, crate::db::proposals::get(pool, id).await?).await
+    let proposal = crate::db::proposals::get(pool, id).await?;
+    publish_proposal(app, proposal.clone()).await?;
+    crate::harness::app::card_settled(app, &proposal).await
 }
 
 async fn save_finish(

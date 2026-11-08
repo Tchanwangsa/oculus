@@ -283,6 +283,20 @@ pub enum HarnessEvent {
     Proposal {
         proposal: crate::db::proposals::Proposal,
     },
+    /// A card was applied or discarded, or its job finished. The consumer
+    /// starts the card's follow-up run, if it has one (`app/continuation.rs`).
+    CardSettled {
+        proposal: String,
+    },
+    /// A run Oculus started after a card settled, in place of a question:
+    /// its row says why ("Sync finished — continuing"), never as the student.
+    Continued {
+        text: String,
+        proposal: String,
+        /// The run whose row is already written; never serialized.
+        #[serde(skip)]
+        run: Option<super::store::RunStart>,
+    },
     /// Rows from `from_item_id` on are gone: an edited question rewound the thread.
     Rewound {
         from_item_id: i64,

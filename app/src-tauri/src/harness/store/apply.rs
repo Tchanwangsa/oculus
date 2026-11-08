@@ -93,6 +93,12 @@ async fn apply_rows(
                 ..Stored::default()
             })
             .ok_or_else(|| "a question with no run".to_string()),
+        HarnessEvent::Continued { run, .. } => run
+            .map(|run| Stored {
+                item_id: Some(run.item_id),
+                ..Stored::default()
+            })
+            .ok_or_else(|| "a continuation with no run".to_string()),
         // `begin_run` or `UnpromptedTurn` already set the thread running.
         HarnessEvent::TurnStarted => Ok(Stored::default()),
         // A row, so a reload still shows why the agent went on unasked.
@@ -104,11 +110,12 @@ async fn apply_rows(
                 .map(Stored::row)
         }
         HarnessEvent::TurnAnchor { anchor } => {
-            // The newest question is this turn's: one turn per thread runs at a time.
+            // The newest question (or continuation) is this turn's: one turn
+            // per thread runs at a time.
             sqlx::query(
                 "UPDATE harness_items SET anchor = ?2 WHERE id =
                    (SELECT id FROM harness_items
-                     WHERE thread_id = ?1 AND kind = 'user' ORDER BY id DESC LIMIT 1)",
+                     WHERE thread_id = ?1 AND kind IN ('user', 'continuation') ORDER BY id DESC LIMIT 1)",
             )
             .bind(thread_id)
             .bind(anchor)
@@ -344,6 +351,7 @@ async fn apply_rows(
         | HarnessEvent::Queued { .. }
         | HarnessEvent::Unqueued { .. }
         | HarnessEvent::Proposal { .. }
+        | HarnessEvent::CardSettled { .. }
         | HarnessEvent::Rewound { .. }
         // The consumer writes and emits these itself, at settlement.
         | HarnessEvent::RunSettled { .. }

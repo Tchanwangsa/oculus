@@ -71,7 +71,7 @@ function stepRows(items: HarnessItem[], running: boolean, out: ViewRow[]): void 
     else {
       close(true);
       if (item.kind === "user") question = item;
-      else if (item.kind === "unprompted") question = undefined;
+      else if (item.kind === "unprompted" || item.kind === "continuation") question = undefined;
       const asked = item.kind === "assistant" ? question : undefined;
       out.push({ kind: "item", item, dim: false, ...(asked && { asked }) });
     }
@@ -99,7 +99,8 @@ function runRows(
   const state: RunState | null = runEnded(run) ? (run!.status as RunState) : live ? "running" : null;
   // An unsettled run nobody is running (a load that missed its runs) is not guessed at.
   if (!state) return stepRows(segment, false, out);
-  const head = segment[0].kind === "user" ? segment[0] : null;
+  // A continuation heads its run like a question, but nothing re-asks it.
+  const head = segment[0].kind === "user" || segment[0].kind === "continuation" ? segment[0] : null;
   const rest = head ? segment.slice(1) : segment;
   let answer: HarnessItem | undefined;
   if (state === "running") {
@@ -127,7 +128,7 @@ function runRows(
   }
   const role: ReplyRole = state === "running" ? "provisional" : state === "completed" ? "answer" : "partial";
   for (const item of rest) {
-    if (item === answer) out.push({ kind: "item", item, dim: false, role, ...(head && { asked: head }) });
+    if (item === answer) out.push({ kind: "item", item, dim: false, role, ...(head?.kind === "user" && { asked: head }) });
     else if (!folded.has(item)) out.push({ kind: "item", item, dim: false });
   }
 }

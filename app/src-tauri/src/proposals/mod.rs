@@ -45,15 +45,24 @@ pub async fn proposal_edit(app: AppHandle, id: String, state: Value) -> Result<P
     let pool = crate::db::store::open_pool().await?;
     publish(&app, proposals::edit(&pool, &id, &state).await?).await
 }
+/// Apply and discard settle the card: its follow-up, if the agent gave one,
+/// starts after the snapshot is out (`harness/app/continuation.rs`).
+async fn settle(app: &AppHandle, row: Proposal) -> Result<Proposal, String> {
+    let row = publish(app, row).await?;
+    if let Err(e) = crate::harness::app::card_settled(app, &row).await {
+        elog!("[oculus] card continuation {}: {e}", row.id);
+    }
+    Ok(row)
+}
 #[tauri::command]
 pub async fn proposal_apply(app: AppHandle, id: String, state: Value) -> Result<Proposal, String> {
     let pool = crate::db::store::open_pool().await?;
-    publish(&app, proposals::apply(&pool, &id, &state).await?).await
+    settle(&app, proposals::apply(&pool, &id, &state).await?).await
 }
 #[tauri::command]
 pub async fn proposal_discard(app: AppHandle, id: String) -> Result<Proposal, String> {
     let pool = crate::db::store::open_pool().await?;
-    publish(&app, proposals::discard(&pool, &id).await?).await
+    settle(&app, proposals::discard(&pool, &id).await?).await
 }
 #[tauri::command]
 pub async fn proposal_undo(app: AppHandle, id: String) -> Result<Proposal, String> {

@@ -1,7 +1,8 @@
 //! Which run each thread's events belong to, and its settlement. The bridges
 //! keep the sink they were spawned with, so ownership is assigned here, on
-//! the one ordered consumer: a persisted question opens its run, and that run
-//! owns every later event on the thread until its `TurnFinished` settles it.
+//! the one ordered consumer: a persisted question (or a card's continuation)
+//! opens its run, and that run owns every later event on the thread until its
+//! `TurnFinished` settles it.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -52,7 +53,8 @@ impl RunScope {
     /// Opens the thread's run, or its unowned turn, before `ev` is stored.
     pub fn enter(&mut self, thread_id: i64, ev: &HarnessEvent) -> Tags {
         match ev {
-            HarnessEvent::UserMessage { run: Some(run), .. } => {
+            HarnessEvent::UserMessage { run: Some(run), .. }
+            | HarnessEvent::Continued { run: Some(run), .. } => {
                 self.failed_writes.remove(&thread_id);
                 self.open.insert(
                     thread_id,
@@ -79,10 +81,13 @@ impl RunScope {
             .unwrap_or_default()
     }
 
-    /// The owner a row made from `ev` would get. The question's own row was
-    /// written with its run, so it takes none here.
+    /// The owner a row made from `ev` would get. The question's own row (or
+    /// a continuation's) was written with its run, so it takes none here.
     pub fn owner(&self, thread_id: i64, ev: &HarnessEvent) -> Option<store::Owner> {
-        if matches!(ev, HarnessEvent::UserMessage { .. }) {
+        if matches!(
+            ev,
+            HarnessEvent::UserMessage { .. } | HarnessEvent::Continued { .. }
+        ) {
             return None;
         }
         self.open.get(&thread_id).map(|o| store::Owner {

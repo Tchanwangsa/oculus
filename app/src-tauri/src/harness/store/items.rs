@@ -79,7 +79,7 @@ pub async fn user_item(
 /// has seen, which Claude needs before it will rewind past later turns.
 pub async fn newest_anchor(pool: &SqlitePool, thread_id: i64) -> Result<Option<String>, String> {
     sqlx::query_scalar(
-        "SELECT anchor FROM harness_items WHERE thread_id = ?1 AND kind = 'user' ORDER BY id DESC LIMIT 1",
+        "SELECT anchor FROM harness_items WHERE thread_id = ?1 AND kind IN ('user', 'continuation') ORDER BY id DESC LIMIT 1",
     )
     .bind(thread_id)
     .fetch_optional(pool)

@@ -76,11 +76,14 @@ impl ConsumerIo for AppIo {
         opts: crate::harness::SendOptions,
     ) {
         let (h, b) = (self.namer.clone(), self.bus.clone());
-        let _ = b.send(BusMsg::Event(
-            thread_id,
-            provider,
-            HarnessEvent::Unqueued { id: msg.id },
-        ));
+        // A continuation was never shown as queued.
+        if opts.continuation.is_none() {
+            let _ = b.send(BusMsg::Event(
+                thread_id,
+                provider,
+                HarnessEvent::Unqueued { id: msg.id },
+            ));
+        }
         tauri::async_runtime::spawn(async move {
             if let Err(e) = dispatch(h, b, thread_id, provider, opts, msg.text).await {
                 elog!("[oculus] harness queued send: {e}");
@@ -112,6 +115,9 @@ pub fn reconcile(app: &AppHandle) {
         if let Ok(pool) = crate::db::store::open_pool().await {
             if let Err(error) = super::proposal_jobs::reconcile(&pool).await {
                 elog!("[oculus] proposal jobs: {error}");
+            }
+            if let Err(error) = super::continuation::reconcile(&pool).await {
+                elog!("[oculus] card continuations: {error}");
             }
             if let Ok(r) = store::reconcile(&pool).await {
                 if r.threads > 0 || r.tools > 0 {

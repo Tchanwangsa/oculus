@@ -38,6 +38,8 @@ pub(super) struct Replay {
     /// The app restarted after the stream (startup reconciliation ran).
     pub restarted: bool,
     pub load_race: bool,
+    /// Continuations the consumer dispatched (`Scenario::continuation`).
+    pub continuations: Vec<SendOptions>,
 }
 
 struct Io {
@@ -49,6 +51,8 @@ struct Io {
     snapshots: Vec<Vec<Value>>,
     runtime: Option<Runtime>,
     epoch: std::time::Instant,
+    /// A continuation's dispatch, which the replay starts itself.
+    continued: std::sync::mpsc::Sender<(QueuedMessage, SendOptions)>,
 }
 
 /// The bus until the replay has fed everything: the bridges keep sinks alive,
@@ -86,7 +90,11 @@ impl ConsumerIo for Io {
     fn name(&mut self, _: i64, _: Provider, _: Vec<jobs::JobSelection>, _: store::NamingSeed) {
         self.outbound.exchange(json!({"operation":"thread naming"}));
     }
-    fn dispatch(&mut self, _: i64, _: Provider, msg: QueuedMessage, _: SendOptions) {
+    fn dispatch(&mut self, _: i64, _: Provider, msg: QueuedMessage, opts: SendOptions) {
+        if opts.continuation.is_some() {
+            let _ = self.continued.send((msg, opts));
+            return;
+        }
         self.outbound
             .exchange(json!({"operation":"queued dispatch", "text":msg.text}));
     }
@@ -140,7 +148,18 @@ pub(super) fn run(scenario: Scenario) -> Replay {
         .unwrap();
     let harness = Harness::replay(assert_scratch(&scratch, &scratch));
     assert_scratch(&crate::harness::thread_cwd(&scratch), &scratch);
-    let outbound = Outbound::new(scenario.fixture.expected_outbound, &scratch);
+    // A continuation sends its card's prompt where the recording sent the request.
+    let card = scenario
+        .continuation
+        .then(|| runtime.block_on(super::continuation::seed_card(&pool, thread)));
+    let mut expected = scenario.fixture.expected_outbound.clone();
+    if let Some(card) = &card {
+        let prompt = runtime.block_on(super::continuation::prompt_for(&pool, thread, card));
+        for e in &mut expected {
+            e.frame = super::continuation::resend_as(e.frame.take(), &prompt);
+        }
+    }
+    let outbound = Outbound::new(expected, &scratch);
     // The consumer runs beside the replay, as in the app: a send's run is
     // written on it before the provider write.
     let (bus, rx) = std::sync::mpsc::channel::<BusMsg>();
@@ -150,6 +169,7 @@ pub(super) fn run(scenario: Scenario) -> Replay {
     });
     let queue = Arc::new(Mutex::new(Queue::default()));
     let fed = Arc::new(AtomicBool::new(false));
+    let (continued, dispatched) = std::sync::mpsc::channel();
     let consumer = {
         let (queue, fed) = (queue.clone(), fed.clone());
         let mut io = Io {
@@ -161,6 +181,7 @@ pub(super) fn run(scenario: Scenario) -> Replay {
             snapshots: Vec::new(),
             runtime: None,
             epoch: std::time::Instant::now(),
+            continued,
         };
         std::thread::spawn(move || {
             io.runtime = Some(Runtime::new().unwrap());
@@ -187,41 +208,111 @@ pub(super) fn run(scenario: Scenario) -> Replay {
         }
     };
     harness.replay_handle(thread, bridge.handle.clone());
-    assert!(queue.lock().unwrap().try_claim(thread));
+    let mut continuations = Vec::new();
+    if let Some(card) = &card {
+        // The card's click settled it: the consumer claims the idle thread
+        // and dispatches, and the replay runs the production start steps.
+        bus.send(BusMsg::Event(
+            thread,
+            provider,
+            crate::harness::HarnessEvent::CardSettled {
+                proposal: card.clone(),
+            },
+        ))
+        .unwrap();
+        let (msg, opts) = dispatched
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the settled card dispatched its continuation");
+        let started = runtime.block_on(crate::harness::app::send::begin_turn(
+            &pool,
+            &bus,
+            store::SendIntent {
+                thread_id: thread,
+                provider,
+                model: None,
+                native_session: None,
+                receipt: "replay-continuation".into(),
+                text: msg.text,
+                at: None,
+                continuation: opts.continuation.clone(),
+            },
+            None,
+        ));
+        let (run, prompt, cards) = started.unwrap();
+        continuations.push(opts);
+        harness
+            .send(
+                thread,
+                provider,
+                None,
+                &SendOptions::default(),
+                &prompt,
+                sink.clone(),
+            )
+            .unwrap();
+        runtime.block_on(store::mark_sent(&pool, &run)).unwrap();
+        runtime
+            .block_on(crate::harness::app::proposal_context::accepted(
+                &pool, cards,
+            ))
+            .unwrap();
+    }
+    let student = card.is_none();
+    assert!(!student || queue.lock().unwrap().try_claim(thread));
     if scenario.fail_intent {
         runtime.block_on(sqlx::raw_sql("CREATE TRIGGER replay_intent_failure BEFORE INSERT ON harness_items WHEN NEW.kind = 'user' BEGIN SELECT RAISE(FAIL, 'replay intent failure'); END;").execute(&pool)).unwrap();
     }
     if scenario.fail_write {
         runtime.block_on(sqlx::raw_sql("CREATE TRIGGER replay_write_failure BEFORE INSERT ON harness_items WHEN NEW.kind = 'assistant' BEGIN SELECT RAISE(FAIL, 'replay storage failure'); END;").execute(&pool)).unwrap();
     }
-    let begun = runtime.block_on(begin_run(
-        &bus,
-        store::SendIntent {
-            thread_id: thread,
-            provider,
-            model: None,
-            native_session: None,
-            receipt: "replay-send".into(),
-            text: "Replay request".into(),
-            at: None,
-        },
-    ));
-    let sent = begun.and_then(|run| {
-        harness.send(
-            thread,
-            provider,
-            None,
-            &SendOptions::default(),
-            "Replay request",
-            sink.clone(),
-        )?;
-        runtime.block_on(store::mark_sent(&pool, &run))
-    });
+    let begun = if !student {
+        Err("a continuation, not a send".to_string())
+    } else {
+        runtime.block_on(begin_run(
+            &bus,
+            store::SendIntent {
+                thread_id: thread,
+                provider,
+                model: None,
+                native_session: None,
+                receipt: "replay-send".into(),
+                text: "Replay request".into(),
+                at: None,
+                continuation: None,
+            },
+        ))
+    };
+    let sent = if !student {
+        Ok(())
+    } else {
+        begun.and_then(|run| {
+            harness.send(
+                thread,
+                provider,
+                None,
+                &SendOptions::default(),
+                "Replay request",
+                sink.clone(),
+            )?;
+            runtime.block_on(store::mark_sent(&pool, &run))
+        })
+    };
     if let Err(error) = &sent {
         crate::harness::child::fail_turn(&sink, provider, error.clone());
     }
     for frame in &scenario.frames {
         (bridge.inbound)(frame);
+    }
+    // The same card settling again (a second view's event) starts nothing.
+    if let Some(card) = &card {
+        bus.send(BusMsg::Event(
+            thread,
+            provider,
+            crate::harness::HarnessEvent::CardSettled {
+                proposal: card.clone(),
+            },
+        ))
+        .unwrap();
     }
     // A recording ends where its transport closed; a restart never sees it.
     if !scenario.restart {
@@ -262,6 +353,10 @@ pub(super) fn run(scenario: Scenario) -> Replay {
         repeat_envelope: scenario.repeat_envelope,
         restarted: scenario.restart,
         load_race: scenario.load_race,
+        continuations: {
+            continuations.extend(dispatched.try_iter().map(|(_, opts)| opts));
+            continuations
+        },
     }
 }
 

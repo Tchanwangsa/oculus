@@ -18,4 +18,4 @@ mod tests;
 pub use apply::{apply, apply_in, undo, undo_in};
 pub use inspect::inspect;
 pub use lifecycle::{discard, edit, get, list, open};
-pub use state::{Made, Proposal};
+pub use state::{key, Made, Proposal};

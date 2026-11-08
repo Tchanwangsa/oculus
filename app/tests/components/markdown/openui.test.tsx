@@ -162,7 +162,7 @@ describe("proposal signatures", () => {
   test("generated grammar keeps null-skip optional markers and recursive Task type", () => {
     const prompt = generateOculusUiPrompt();
     expect(prompt).toContain("Task(title: string | number, due?: string, estimate?: number, column?: string, subtasks?: Task[]");
-    expect(prompt).toContain("NewTasks(project: number | null, items: (Task | Under)[], amends?: string)");
+    expect(prompt).toContain("NewTasks(project: number | null, items: (Task | Under)[], amends?: string, then?: string)");
     expect(prompt).toContain("NewProject(name: string, subject: string | null,");
     expect(prompt).toContain("Value(label: string, value: number | null,");
     expect(prompt).toContain("y: number | null");

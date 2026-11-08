@@ -42,10 +42,13 @@ pub(in crate::harness) fn consume(
         if pool.is_none() {
             pool = io.open_pool(&rt);
         }
+        // A card whose continuation state changed here; its snapshot follows the event.
+        let mut card = None;
         let (thread_id, provider, mut ev) = match msg {
             BusMsg::Event(thread_id, provider, ev) => (thread_id, provider, ev),
             // The question becomes an ordinary `UserMessage` once its run is
-            // written; a failure writes nothing and the caller does not send.
+            // written (a continuation's, `Continued`); a failure writes
+            // nothing and the caller does not send.
             BusMsg::Begin { intent, reply } => {
                 let begun = match &pool {
                     Some(p) => rt.block_on(store::begin_run(p, &intent)),
@@ -53,12 +56,29 @@ pub(in crate::harness) fn consume(
                 };
                 let _ = reply.send(begun.clone());
                 let Ok(run) = begun else { continue };
-                let ev = HarnessEvent::UserMessage {
-                    text: intent.text,
-                    at: intent.at,
-                    run: Some(run),
+                let ev = match intent.continuation {
+                    Some(proposal) => {
+                        card = Some(proposal.clone());
+                        HarnessEvent::Continued {
+                            text: intent.text,
+                            proposal,
+                            run: Some(run),
+                        }
+                    }
+                    None => HarnessEvent::UserMessage {
+                        text: intent.text,
+                        at: intent.at,
+                        run: Some(run),
+                    },
                 };
                 (intent.thread_id, intent.provider, ev)
+            }
+            BusMsg::Release(thread_id, provider) => {
+                let next = queue.lock().unwrap().next(thread_id);
+                if let Some((msg, opts)) = next {
+                    io.dispatch(thread_id, provider, msg, opts);
+                }
+                continue;
             }
         };
         match io.clock_time() {
@@ -158,6 +178,29 @@ pub(in crate::harness) fn consume(
             }
         }
 
+        // A settled card with a follow-up claims its one continuation: it
+        // goes out now on an idle thread, or waits its turn like a message.
+        if let (HarnessEvent::CardSettled { proposal }, Some(p)) = (&ev, &pool) {
+            match rt.block_on(super::continuation::claim(p, thread_id, proposal)) {
+                Ok(Some(line)) => {
+                    card = Some(proposal.clone());
+                    let opts = SendOptions {
+                        continuation: Some(proposal.clone()),
+                        ..SendOptions::default()
+                    };
+                    let mut q = queue.lock().unwrap();
+                    if q.try_claim(thread_id) {
+                        drop(q);
+                        io.dispatch(thread_id, provider, QueuedMessage::new(&line), opts);
+                    } else {
+                        q.push(thread_id, &line, &opts);
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => elog!("[oculus] card continuation {proposal}: {e}"),
+            }
+        }
+
         io.emit(Envelope {
             thread_id,
             provider,
@@ -168,6 +211,21 @@ pub(in crate::harness) fn consume(
             sequence: next_sequence(&mut sequence),
             event: ev,
         });
+        if let (Some(id), Some(p)) = (card, &pool) {
+            match rt.block_on(crate::db::proposals::get(p, &id)) {
+                Ok(proposal) => io.emit(Envelope {
+                    thread_id,
+                    provider,
+                    item_id: None,
+                    run_id: None,
+                    attempt_id: None,
+                    entity_id: None,
+                    sequence: next_sequence(&mut sequence),
+                    event: HarnessEvent::Proposal { proposal },
+                }),
+                Err(e) => elog!("[oculus] card continuation {id}: {e}"),
+            }
+        }
     }
 }
 

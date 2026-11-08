@@ -123,6 +123,12 @@ export const Unprompted = memo(function Unprompted({ item }: { item: HarnessItem
   );
 });
 
+/** Heads a card's continuation run: Oculus's line about the card that
+ *  settled, never drawn as the student's message. */
+export const Continued = memo(function Continued({ item }: { item: HarnessItem }) {
+  return <div className="py-1 text-center text-[11px] text-muted-foreground">{item.content}</div>;
+});
+
 /** A rewind that took rows off the screen but not out of the agent's context
  *  (no anchor, or a dropped CLI session) — shown so the mismatch is visible. */
 export const ContextDrift = memo(function ContextDrift({ threadId }: { threadId: number }) {

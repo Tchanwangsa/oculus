@@ -39,6 +39,10 @@ pub struct SendOptions {
     /// The caller's id for this send. A repeat of one already accepted starts
     /// nothing; none gets a fresh one (`store::fresh_receipt`).
     pub receipt: Option<String>,
+    /// Set by the app, never the webview: this send is the follow-up of
+    /// that card (`app/continuation.rs`), not something the student typed.
+    #[serde(skip)]
+    pub continuation: Option<String>,
 }
 
 /// The video a thread is created for, as `StudioSend` in

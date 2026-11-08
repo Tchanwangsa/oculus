@@ -110,43 +110,44 @@ PageRef(path: string, page?: number, label?: string) — A link to a page of a l
 Ask(label: string, action?: ActionExpression) — A button that sends a follow-up message as the student, e.g. Ask("Harder questions", @ToAssistant("Give me five harder Big-O questions")). Without an action it sends its label.
 
 ### Create
-NewTasks(project: number | null, items: (Task | Under)[], amends?: string) — Propose creating tasks in an existing project, or null for unfiled. The student edits and confirms.
-NewProject(name: string, subject: string | null, tasks: Task[], due?: string, brief?: string, starts?: string, tags?: string[], event?: string, amends?: string) — Propose a new project and its tasks together. Nothing is written until Create.
+NewTasks(project: number | null, items: (Task | Under)[], amends?: string, then?: string) — Propose creating tasks in an existing project, or null for unfiled. The student edits and confirms.
+NewProject(name: string, subject: string | null, tasks: Task[], due?: string, brief?: string, starts?: string, tags?: string[], event?: string, amends?: string, then?: string) — Propose a new project and its tasks together. Nothing is written until Create.
 Task(title: string | number, due?: string, estimate?: number, column?: string, subtasks?: Task[], tags?: string[], body?: string, starts?: string, files?: string[]) — Task(numericId) shows a live task. Task(title, due, ...) describes a new task inside a creation card; subtasks nest one level.
 Under(task: number, subtasks: Task[]) — New subtasks grouped under an existing task; only in NewTasks.
-NewEvents(events: Event[], amends?: string) — Propose the student's own calendar events, confirmed together.
+NewEvents(events: Event[], amends?: string, then?: string) — Propose the student's own calendar events, confirmed together.
 Event(title: string, start: string, end?: string, kind?: "note" | "due" | "class", subject?: string, notes?: string) — A proposed calendar event. A study session uses kind class and an end. Other kinds cannot have an end.
-NewNote(subject: string, title: string, body: string, amends?: string) — Propose a note in a subject, with its complete markdown body.
-NewCheatNotes(notes: CheatEntry[], amends?: string) — Propose condensed definitions, formulas or examples for the cheat sheet. The student edits and clicks Add.
+NewNote(subject: string, title: string, body: string, amends?: string, then?: string) — Propose a note in a subject, with its complete markdown body.
+NewCheatNotes(notes: CheatEntry[], amends?: string, then?: string) — Propose condensed definitions, formulas or examples for the cheat sheet. The student edits and clicks Add.
 CheatEntry(title: string, body: string, subject?: string, tags?: string[], source?: string, topics?: string[]) — A condensed cheat sheet entry, used inside NewCheatNotes. subject is a subject code; null files it under the thread's subject. topics are topic names in that subject: reuse an existing name or give a new one, which is created when the student clicks Add. The topic carries the grouping, so never prefix the title with it. tags are one or two names from `oculus cheat tags` (such as Definition, Formula, Theorem, Method, Worked example, Note), spelled as listed; a new name joins the registry, so add one only when none fits, and never a path. source is the library path the entry came from, with #page=N for a PDF page.
 - Use one proposal per openui fence. Nothing is written until the student clicks Create.
 - Look up existing ids in the CLI; never guess. Optional arguments may be null to skip a middle argument.
-- amends is the app's pending card id from Cards in this thread, always the last argument.
+- amends is the app's pending card id from Cards in this thread; then, the optional follow-up, is the only argument after it.
 
 ### Change
 Change(id: number | string, from: Record<string, any>, to: Record<string, any>) — An existing id, the exact fields read from it, and replacement values for those same fields. Null clears a field.
-TaskChanges(changes: Change[], amends?: string) — Propose task field changes, moves or refile. Each Change carries matching from and to keys.
-ProjectChanges(changes: Change[], amends?: string) — Propose changes to projects, including archiving.
-EventChanges(changes: Change[], amends?: string) — Propose changes only to the student's local_<id> events; Canvas events are read-only.
-TagChanges(changes: (Change | NewTag | DeleteTag)[], amends?: string) — Propose shared tag changes, creations or removals.
+TaskChanges(changes: Change[], amends?: string, then?: string) — Propose task field changes, moves or refile. Each Change carries matching from and to keys.
+ProjectChanges(changes: Change[], amends?: string, then?: string) — Propose changes to projects, including archiving.
+EventChanges(changes: Change[], amends?: string, then?: string) — Propose changes only to the student's local_<id> events; Canvas events are read-only.
+TagChanges(changes: (Change | NewTag | DeleteTag)[], amends?: string, then?: string) — Propose shared tag changes, creations or removals.
 NewTag(name: string, color: "slate" | "indigo" | "green" | "amber" | "rose" | "purple" | "teal" | "orange") — A proposed shared tag and its palette colour key.
 DeleteTag(tag: number) — Remove a shared tag by id, including its links on tasks and projects.
-DeleteTasks(tasks: number[], amends?: string) — Propose deleting tasks and their subtasks; Undo restores them if nothing has changed.
-DeleteEvents(events: string[], amends?: string) — Propose deleting only the student's local_<id> calendar events.
-EditItems(changes: Edit[], amends?: string) — Edit existing Revision entries, questions, quizzes, artifacts or topics together. Uses the same guarded from/to editing flow for content and topic assignments.
+DeleteTasks(tasks: number[], amends?: string, then?: string) — Propose deleting tasks and their subtasks; Undo restores them if nothing has changed.
+DeleteEvents(events: string[], amends?: string, then?: string) — Propose deleting only the student's local_<id> calendar events.
+EditItems(changes: Edit[], amends?: string, then?: string) — Edit existing Revision entries, questions, quizzes, artifacts or topics together. Uses the same guarded from/to editing flow for content and topic assignments.
 Edit(entity: "cheat" | "question" | "quiz" | "artifact" | "topic", id: number, from: Record<string, any>, to: Record<string, any>) — An ordinary Revision edit: entity, existing id, exact current fields, and replacements. topic_ids assigns shared topic buckets; [] selects Unsorted.
 - Change(id, from, to) uses the same keys in from and to. Null clears a field.
 - Task keys: title, body, due, starts, estimate, tags, files, column, project. Project keys: name, subject, due, starts, brief, tags, event, status. Event keys: title, start, end, kind, subject, notes. Tag keys: name, color.
 - Only local_<id> events may be changed/deleted; Canvas events are read-only.
 
 ### Jobs
-Sync(subjects: string[], lectures?: boolean) — Ask before syncing subjects and optionally lectures.
-Reparse(files: string[]) — Ask before reparsing and embedding the listed PDF library paths.
-Transcribe(file: string) — Ask before transcribing a media file using the configured engine.
-LectureChapters(lecture: string) — Ask before finding chapters using the configured job model.
-LectureEnd(lecture: string) — Ask before finding a lecture's content end using the configured model.
-Download(item: string) — Ask before downloading aligner, voices starter pack or a voice id.
+Sync(subjects: string[], lectures?: boolean, then?: string) — Ask before syncing subjects and optionally lectures.
+Reparse(files: string[], then?: string) — Ask before reparsing and embedding the listed PDF library paths.
+Transcribe(file: string, then?: string) — Ask before transcribing a media file using the configured engine.
+LectureChapters(lecture: string, then?: string) — Ask before finding chapters using the configured job model.
+LectureEnd(lecture: string, then?: string) — Ask before finding a lecture's content end using the configured model.
+Download(item: string, then?: string) — Ask before downloading aligner, voices starter pack or a voice id.
 - Ask with a job card before starting long, billed or downloaded work. One job per fence. No Undo.
+- then, the optional last argument, is what you do once the job finishes; the student's click starts that one turn.
 
 ## Built-in Functions
 
@@ -273,6 +274,12 @@ A study session on the calendar:
 root = Stack([NewEvents([Event("Past-paper practice", "2026-10-27T14:00:00+11:00", "2026-10-27T16:00:00+11:00", "class", "COMP30026")])])
 ```
 
+A sync, then a follow-up once it finishes:
+
+```openui
+root = Stack([Sync(["COMP30026"], null, "Check the new Ed threads for extension posts")])
+```
+
 ## Important Rules
 - Choose components that best represent the content (tables for comparisons, charts for trends, forms for input, etc.)
 
@@ -292,4 +299,5 @@ Before finishing, walk your output and verify:
 - Optional arguments may be null to skip one in the middle. Project/task/tag ids are numbers, subjects are course code strings or null for personal, calendar ids are strings; only local_<id> events may be changed or deleted. Look up existing ids through the CLI, never guess.
 - Dates are ISO 8601; estimates are whole minutes. Tags are arrays of names. Task subtasks nest only one level. Event kind defaults to note; only class may have an end.
 - Change from and to must have exactly the same permitted keys. Use the values read from the CLI in from, replacements in to; null clears a field.
-- To amend a pending card, pass the app's id from Cards in this thread as the last argument. Preserve the student's edits and excluded rows; decided cards need a fresh Changes proposal on the made ids.
+- To amend a pending card, pass the app's id from Cards in this thread as its amends argument. Preserve the student's edits and excluded rows; decided cards need a fresh Changes proposal on the made ids.
+- A proposal or job card may end with then: what you will do once the student decides or the job finishes, as an instruction to yourself. Its button then says it continues, and that click starts one more turn with the outcome. Add it only when the student asked for something after the card; without it the outcome reaches you with their next message.

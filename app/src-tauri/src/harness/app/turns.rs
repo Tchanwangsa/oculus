@@ -255,24 +255,31 @@ pub async fn harness_edit_queued(
 }
 
 /// Stop the running turn and drop whatever was waiting behind it,
-/// handing the dropped texts back to the composer.
+/// handing the dropped texts back to the composer. A card's continuation
+/// waiting there is cancelled too, and its card says so.
 #[tauri::command]
 pub async fn harness_interrupt(
     state: State<'_, HarnessState>,
     thread_id: i64,
 ) -> Result<Vec<String>, String> {
     let cleared = state.queue.lock().unwrap().clear(thread_id);
-    if !cleared.is_empty() {
+    if !cleared.messages.is_empty() || !cleared.continuations.is_empty() {
         let pool = crate::db::store::open_pool().await?;
         let row = store::thread(&pool, thread_id).await?;
         let sink = state.sink(thread_id, row.provider);
-        for m in &cleared {
+        for m in &cleared.messages {
             sink(HarnessEvent::Unqueued { id: m.id.clone() });
+        }
+        for card in &cleared.continuations {
+            if super::continuation::cancel(&pool, card, super::continuation::STOPPED).await? {
+                let proposal = crate::db::proposals::get(&pool, card).await?;
+                sink(HarnessEvent::Proposal { proposal });
+            }
         }
     }
     let h = state.harness.clone();
     blocking(move || h.interrupt(thread_id)).await?;
-    Ok(cleared.into_iter().map(|m| m.text).collect())
+    Ok(cleared.messages.into_iter().map(|m| m.text).collect())
 }
 
 #[tauri::command]

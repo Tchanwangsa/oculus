@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useIsStreaming } from "@openuidev/react-lang";
-import { ArrowCounterClockwise, Check, Clock, SpinnerGap, WarningCircle, type Icon } from "@phosphor-icons/react";
+import { ArrowBendDownRight, ArrowCounterClockwise, Check, Clock, SpinnerGap, WarningCircle, type Icon } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import type { CardState } from "./cardState";
 
@@ -28,11 +28,12 @@ export function CardStatus({ state, text }: { state: CardState; text?: ReactNode
  * subtitle, meta), a body that locks while the card is not ready or busy, an
  * error strip, and a footer with the phase's status and the card's actions.
  * Discarded and superseded keep only the header; `compact` puts the actions
- * in the header row and drops the footer.
+ * in the header row and drops the footer. `note` is a muted line under the
+ * body that every phase keeps: what the agent's follow-up did (`followUp.ts`).
  */
-export function CardFrame({ state, icon: Glyph, title, subtitle, meta, actions, status, error, compact, label = "Proposal", id, children }: {
+export function CardFrame({ state, icon: Glyph, title, subtitle, meta, actions, status, error, note, compact, label = "Proposal", id, children }: {
   state: CardState; icon: Icon; title: ReactNode; subtitle?: ReactNode; meta?: ReactNode; actions?: ReactNode; status?: ReactNode;
-  error?: string; compact?: boolean; label?: string; id?: string; children?: ReactNode;
+  error?: string; note?: ReactNode; compact?: boolean; label?: string; id?: string; children?: ReactNode;
 }) {
   const { phase, collapsed, locked } = state;
   const quiet = collapsed || phase === "undone";
@@ -53,6 +54,7 @@ export function CardFrame({ state, icon: Glyph, title, subtitle, meta, actions, 
     </header>
     {!collapsed && children != null && <div inert={locked || undefined} className={cn("transition-opacity", locked && "opacity-60")}>{children}</div>}
     {error && state.failure !== "load" && <p role="alert" className="flex items-start gap-1.5 border-t border-border-subtle px-4 py-2 text-xs leading-relaxed text-destructive"><WarningCircle size={14} className="mt-px shrink-0" /><span className="min-w-0 break-words">{error}</span></p>}
+    {note && <p className="flex items-start gap-1.5 border-t border-border-subtle px-4 py-2 text-xs leading-relaxed text-muted-foreground"><ArrowBendDownRight size={14} className="mt-px shrink-0" /><span className="min-w-0 break-words">{note}</span></p>}
     {!collapsed && !compact && <footer className="flex min-h-13 flex-wrap items-center justify-end gap-2 border-t border-border-subtle bg-surface/40 px-4 py-2.5">
       <CardStatus state={state} text={state.failure === "load" ? error ? `Couldn’t load this card: ${error}` : undefined : status} />
       {actions}

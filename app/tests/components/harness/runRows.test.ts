@@ -329,3 +329,27 @@ describe("the stream never rebuilds history", () => {
     expect(after.live[THREAD].streaming).toBe("x");
   });
 });
+
+describe("a card's continuation run", () => {
+  test("heads its run with Oculus's line, folds its work and offers no Retry", () => {
+    const env = (itemId: number | null, event: HarnessEnvelope["event"]): HarnessEnvelope =>
+      ({ threadId: THREAD, provider: "codex", itemId, runId: 9, event });
+    const apply = useHarnessStore.getState().apply;
+    apply(env(40, { type: "continued", text: "Sync finished — continuing", proposal: "12.0" }));
+    expect(useHarnessStore.getState().live[THREAD]?.running).toBe(true);
+    apply(env(41, { type: "assistant_message", text: "Looking at the new threads." }));
+    apply(env(42, { type: "tool_started", id: "t1", kind: "oculus_cli", name: "Bash", title: "oculus ed list", input: {} }));
+    apply(env(43, { type: "assistant_message", text: "Two threads ask for extensions." }));
+    apply(env(null, { type: "run_settled", answer_item_id: 43, work_item_ids: [41], delivery: "complete", status: "completed" }));
+    useHarnessStore.getState().flushLive();
+    const s = useHarnessStore.getState();
+    const rows = buildRows(s.items[THREAD], false, { runs: s.runs[THREAD] });
+    expect(rows.map((r) => r.kind)).toEqual(["item", "work", "item"]);
+    const [head, , answer] = rows as Extract<ViewRow, { kind: "item" }>[];
+    expect(head.item).toMatchObject({ kind: "continuation", content: "Sync finished — continuing", run_id: 9 });
+    expect(JSON.parse(head.item.meta!)).toEqual({ proposal: "12.0" });
+    expect(answer.item.id).toBe(43);
+    expect(answer.role).toBe("answer");
+    expect(answer.asked).toBeUndefined();
+  });
+});

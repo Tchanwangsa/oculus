@@ -22,7 +22,8 @@ const RULES = [
   "Optional arguments may be null to skip one in the middle. Project/task/tag ids are numbers, subjects are course code strings or null for personal, calendar ids are strings; only local_<id> events may be changed or deleted. Look up existing ids through the CLI, never guess.",
   "Dates are ISO 8601; estimates are whole minutes. Tags are arrays of names. Task subtasks nest only one level. Event kind defaults to note; only class may have an end.",
   "Change from and to must have exactly the same permitted keys. Use the values read from the CLI in from, replacements in to; null clears a field.",
-  "To amend a pending card, pass the app's id from Cards in this thread as the last argument. Preserve the student's edits and excluded rows; decided cards need a fresh Changes proposal on the made ids.",
+  "To amend a pending card, pass the app's id from Cards in this thread as its amends argument. Preserve the student's edits and excluded rows; decided cards need a fresh Changes proposal on the made ids.",
+  "A proposal or job card may end with then: what you will do once the student decides or the job finishes, as an instruction to yourself. Its button then says it continues, and that click starts one more turn with the outcome. Add it only when the student asked for something after the card; without it the outcome reaches you with their next message.",
 ];
 
 const FLASHCARDS = `root = Stack([deck, Ask("Quiz me on these")])
@@ -76,6 +77,7 @@ ${REVEAL}
 
 const NEW_TASKS = `root = Stack([NewTasks(12, [Task("Read the specification", "2026-10-27", 30), Task("Implement the parser", "2026-10-28", 120, null, [Task("Handle malformed input")])])])`;
 const CHANGES = `root = Stack([TaskChanges([Change(42, {due: "2026-10-27"}, {due: "2026-10-30"})])])`;
+const SYNC_THEN = `root = Stack([Sync(["COMP30026"], null, "Check the new Ed threads for extension posts")])`;
 const NEW_EVENTS = `root = Stack([NewEvents([Event("Past-paper practice", "2026-10-27T14:00:00+11:00", "2026-10-27T16:00:00+11:00", "class", "COMP30026")])])`;
 
 export const PROMPT_OPTIONS: PromptOptions = {
@@ -89,11 +91,12 @@ export const PROMPT_OPTIONS: PromptOptions = {
     `Tasks to review and create:\n\n\`\`\`openui\n${NEW_TASKS}\n\`\`\``,
     `A guarded date change:\n\n\`\`\`openui\n${CHANGES}\n\`\`\``,
     `A study session on the calendar:\n\n\`\`\`openui\n${NEW_EVENTS}\n\`\`\``,
+    `A sync, then a follow-up once it finishes:\n\n\`\`\`openui\n${SYNC_THEN}\n\`\`\``,
   ],
 };
 
 /** The example programs, for tests: each must parse. */
-export const PROMPT_EXAMPLES = { FLASHCARDS, QUIZ, STEPS, EXPLORER, POPULATION, CLT, REVEAL, NEW_TASKS, CHANGES, NEW_EVENTS };
+export const PROMPT_EXAMPLES = { FLASHCARDS, QUIZ, STEPS, EXPLORER, POPULATION, CLT, REVEAL, NEW_TASKS, CHANGES, NEW_EVENTS, SYNC_THEN };
 
 /** The 1.0.1 printer loses a lazy recursive ref and treats nullable required
  * slots as omittable. Runtime validation enforces these exact signatures. */

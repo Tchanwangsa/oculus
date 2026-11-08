@@ -36,6 +36,15 @@ impl Harness {
         live.get(&thread_id).ok_or("no session")?.handle.send(text)
     }
 
+    /// The reasoning level the thread's live session runs under, if one is
+    /// up. A card's continuation keeps it, so the session is not respawned.
+    pub fn live_effort(&self, thread_id: i64) -> Option<String> {
+        let live = self.live.lock().unwrap();
+        live.get(&thread_id)
+            .filter(|l| l.is_alive())
+            .and_then(|l| l.effort.clone())
+    }
+
     /// Take a question and everything after it out of the provider's own
     /// session, so the agent's context matches the timeline. A thread whose
     /// process has gone is resumed for this without starting a turn.
