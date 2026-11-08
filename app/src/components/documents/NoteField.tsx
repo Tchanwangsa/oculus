@@ -86,6 +86,7 @@ export function NoteField({
   scrollClassName,
   compact = false,
   inline = false,
+  controlled = false,
 }: {
   /** The stored text; read at mount, then followed while at rest. */
   text: string;
@@ -114,6 +115,8 @@ export function NoteField({
    *  padding or height bound of its own, and the toolbar always up, so the
    *  text sits where its rendering did and only the toolbar moves it. */
   inline?: boolean;
+  /** A draft owner supplies every edit and can replace the text even while focused. */
+  controlled?: boolean;
 }) {
   const [view, setView] = useState<EditorView | null>(null);
   const [formats, setFormats] = useState<ActiveFormats>(NO_FORMATS);
@@ -132,6 +135,8 @@ export function NoteField({
   /** The text the doc last matched: the stored text or the last commit. */
   const baseRef = useRef(text);
   const editingRef = useRef(false);
+  const focusWithin = useRef(false);
+  const pointerHeld = useRef(false);
   const leaveTimer = useRef<number | null>(null);
 
   const textRef = useRef(text);
@@ -167,11 +172,11 @@ export function NoteField({
 
   /** Take the stored text unless the user has edits it would overwrite. Not
    *  an undo step: the user didn't type it. */
-  const follow = useCallback(() => {
+  const follow = useCallback((force = false) => {
     const v = viewRef.current;
     const next = textRef.current;
     const doc = v?.state.doc.toString();
-    if (!v || doc !== baseRef.current) return;
+    if (!v || (!force && doc !== baseRef.current)) return;
     baseRef.current = next;
     if (doc === next) return;
     v.dispatch({
@@ -297,8 +302,8 @@ export function NoteField({
 
   // An outside write lands now if the field is at rest, else on leaving it.
   useEffect(() => {
-    if (!editingRef.current) follow();
-  }, [text, follow]);
+    if (controlled || !editingRef.current) follow(controlled);
+  }, [text, controlled, follow]);
 
   useEffect(
     () => () => {
@@ -335,21 +340,46 @@ export function NoteField({
   const onFocus = () => {
     if (leaveTimer.current != null) window.clearTimeout(leaveTimer.current);
     leaveTimer.current = null;
+    focusWithin.current = true;
     editingRef.current = true;
     setEditing(true);
   };
-  const onBlur = () => {
+  const leave = useCallback(() => {
     if (leaveTimer.current != null) window.clearTimeout(leaveTimer.current);
     leaveTimer.current = window.setTimeout(() => {
       leaveTimer.current = null;
-      if (!document.hasFocus() || cardRef.current?.contains(document.activeElement)) return;
+      if (pointerHeld.current || focusWithin.current || !document.hasFocus() || cardRef.current?.contains(document.activeElement)) return;
       editingRef.current = false;
       setEditing(false);
       // A commit's own write comes back as `text`; only an unedited doc
       // takes a write that arrived while editing.
       if (!commit()) follow();
     }, 0);
+  }, [commit, follow]);
+  const onBlur = () => {
+    focusWithin.current = false;
+    leave();
   };
+
+  // Hiding the toolbar between pointerdown and click moves the button being
+  // pressed below the field. Keep its layout until that press has finished.
+  useEffect(() => {
+    if (!editing) return;
+    const down = () => { pointerHeld.current = true; };
+    const up = () => {
+      pointerHeld.current = false;
+      if (!focusWithin.current) leave();
+    };
+    window.addEventListener("pointerdown", down, true);
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", up, true);
+    return () => {
+      pointerHeld.current = false;
+      window.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", up, true);
+    };
+  }, [editing, leave]);
 
   const dropping = useFileDrop(rootRef, attachPaths);
   // An inline field never scrolls, so a formula's overhang mustn't fade it.

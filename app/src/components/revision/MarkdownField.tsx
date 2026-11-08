@@ -18,6 +18,8 @@ export function MarkdownField({
   onChange,
   compact,
   inline,
+  controlled,
+  placeholder = "Write a definition, formula or example…",
 }: {
   text: string;
   subjectId?: number | null;
@@ -26,6 +28,8 @@ export function MarkdownField({
   onChange?: (text: string) => void;
   compact?: boolean;
   inline?: boolean;
+  controlled?: boolean;
+  placeholder?: string;
 }) {
   const dataDir = useDataDir();
   const [error, setError] = useState<string>();
@@ -47,6 +51,7 @@ export function MarkdownField({
         subjectId={subjectId}
         compact={compact}
         inline={inline}
+        controlled={controlled}
         imageSrc={(src) => {
           const path = attachmentPath(src);
           return path
@@ -56,7 +61,7 @@ export function MarkdownField({
         writePicture={writePicture}
         pickerTitle="Add picture"
         notAPicture="Choose an image."
-        placeholder="Write a definition, formula or example…"
+        placeholder={placeholder}
         label={label}
         onChange={onChange}
         onCommit={(value) => {

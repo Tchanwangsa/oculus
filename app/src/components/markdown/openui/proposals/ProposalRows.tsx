@@ -9,14 +9,14 @@ import { cn } from "@/lib/utils";
 import { TagDot } from "@/components/projects/tags/TagDot";
 import { tagColorLabel } from "@/components/projects/tags/tagColors";
 import { isTagColor, type TagColor } from "@/lib/planning/projects/tags";
-import { Fields, fieldLabel, TextDiff } from "./Fields";
+import { Fields, fieldLabel, TextDiff, MARKDOWN_FIELDS } from "./Fields";
+import { MarkdownInput } from "./MarkdownInput";
 import { CARD_ROW } from "./CardFrame";
 import { CHIP, SubjectLabel } from "./SubjectLabel";
 import { SubjectPicker } from "./SubjectPicker";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { PILL } from "@/components/projects/fields/pill";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { ChangedSince, dateShift, displayValue, Include, RowActions } from "./ProposalParts";
 import { conflicts, effectiveChanges, included, includeChange, object, rowId, rows, type Row } from "./model";
 
@@ -116,7 +116,7 @@ export function ChangeRow({ kind, row, previous, live, loaded, disabled, columns
             return <div key={key} className="contents">
               <dt className="flex min-h-5 items-center gap-1.5 text-xs leading-5 text-muted-foreground">{fieldLabel(key)}{previous && JSON.stringify(object(previous.to)[key]) !== JSON.stringify(value) && <Updated label={`Updated ${key}`} />}</dt>
               <dd className="flex min-h-5 min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[13px] leading-5">
-                {long ? <TextDiff before={before} after={value} /> : <>
+                {long ? <TextDiff before={before} after={value} markdown={MARKDOWN_FIELDS.has(key)} /> : <>
                   {!tagCreate && <><span className="min-w-0 break-words text-muted-foreground line-through decoration-muted-foreground/50">{show(before)}</span><ArrowRight size={12} className="shrink-0 text-muted-foreground" /></>}
                   {date ? <DateTimeField allowAllDay className="-mx-1.5 h-5 rounded-full border-0 bg-transparent px-1.5 py-0 text-[13px] font-medium hover:bg-surface" value={typeof value === "string" ? value : null} label={`New ${fieldLabel(key)}`} onCommit={(next) => onChange({ ...row, to: { ...object(row.to), [key]: next } })} /> : <span className={cn("min-w-0 break-words", on && "font-medium text-foreground")}>{show(value)}</span>}
                   {delta && <span className={CHIP}><span className="tabular-nums">{delta}</span></span>}
@@ -141,6 +141,6 @@ export function NoteProposal({ state, disabled, onChange }: { state: Row; disabl
       <SubjectPicker value={subject} triggerClassName={PILL} icon={subject ? <SubjectIcon code={subject} size={13} /> : <BookOpen size={13} />} onChange={(code) => onChange({ ...state, subject: code })} />
     </div>
     <label className="flex min-w-0 flex-col gap-1 text-xs"><span className="text-muted-foreground">Title</span><Input aria-label="Title" value={String(state.title ?? "")} onChange={(e) => onChange({ ...state, title: e.target.value })} className="h-8 text-[13px]" /></label>
-    <label className="flex min-w-0 flex-col gap-1 text-xs"><span className="text-muted-foreground">Body</span><Textarea aria-label="Body" value={String(state.body ?? "")} onChange={(e) => onChange({ ...state, body: e.target.value })} className="min-h-28 text-[13px]" /></label>
+    <div className="flex min-w-0 flex-col gap-1 text-xs"><span className="text-muted-foreground">Body</span><MarkdownInput value={state.body} label="Body" subject={state.subject} onChange={(body) => onChange({ ...state, body })} /></div>
   </fieldset>;
 }

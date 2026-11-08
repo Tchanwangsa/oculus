@@ -10,10 +10,13 @@ import { getSubjects, type Subject } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { displayValue } from "./ProposalParts";
 import { object, type Row } from "./model";
+import { MarkdownInput } from "./MarkdownInput";
+import { CompactMd } from "@/components/markdown/MdComponents";
 
 import { TopicsField, TopicNamesField, JsonField } from "./RevisionFields";
 import type { RevisionTopic } from "@/lib/revision/types";
-const LONG = new Set(["body", "brief", "notes", "prompt", "answer", "description", "program"]);
+export const MARKDOWN_FIELDS = new Set(["body", "brief", "notes", "prompt", "answer", "description"]);
+const LONG = new Set([...MARKDOWN_FIELDS, "program"]);
 const EventLink = lazy(() => import("@/components/projects/page/EventLink").then((module) => ({ default: module.EventLink })));
 const DATES = new Set(["due", "starts", "start", "end"]);
 const LISTS = new Set(["tags", "files", "topic"]);
@@ -85,20 +88,33 @@ export function Field({ name, value, onChange, columns, subject, topics = [], su
     const options = name === "kind" ? ["note", "due", "class"] : name === "status" ? ["active", "archived"] : ["slate", "indigo", "green", "amber", "rose", "purple", "teal", "orange"];
     control = <Options value={value} options={options.map((id) => ({ id, label: id }))} label={label} onChange={(next) => onChange(next || null)} />;
   } else if (LISTS.has(name)) control = <ListField name={name} value={value} onChange={onChange} />;
+  else if (MARKDOWN_FIELDS.has(name)) control = <MarkdownInput value={value} label={label} subject={subject} subjectId={subjectId} onChange={onChange} />;
   else if (LONG.has(name)) control = <Textarea aria-label={label} className="min-h-20 text-[13px]" value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} />;
   else control = <Input aria-label={label} className="h-8 text-[13px]" type={name === "estimate" ? "number" : "text"} min={name === "estimate" ? 0 : undefined} step={name === "estimate" ? 1 : undefined} value={Array.isArray(value) ? value.join(", ") : String(value ?? "")} onChange={(e) => onChange(LISTS.has(name) ? e.target.value.split(",").map((v) => v.trim()).filter(Boolean) : name === "estimate" ? (e.target.value === "" ? null : Number(e.target.value)) : e.target.value)} />;
-  return <label className={`flex min-w-0 flex-col gap-1 text-xs ${LONG.has(name) || name === "files" ? "col-span-full" : ""}`}><span className="text-muted-foreground">{label}</span>{control}</label>;
+  return <div className={`flex min-w-0 flex-col gap-1 text-xs ${LONG.has(name) || name === "files" ? "col-span-full" : ""}`}><span className="text-muted-foreground">{label}</span>{control}</div>;
 }
 
 export function Fields({ row, names, onChange, columns, topics, subjectId, entity }: { row: Row; names: string[]; onChange: (row: Row) => void; columns?: Row[]; topics?: RevisionTopic[]; subjectId?: number | null; entity?: string }) {
   return <div className="grid min-w-0 grid-cols-1 gap-3 py-2 @sm/proposal:grid-cols-2">{names.map((name) => <Field key={name} name={name} value={row[name]} subject={row.subject} columns={columns} topics={topics} subjectId={subjectId} entity={entity} onChange={(value) => onChange({ ...row, [name]: value })} />)}</div>;
 }
 
-/** A long field's change as a diff, as GitHub draws one: removed lines on
- * red, added on green, each with its sign in a gutter. */
-export function TextDiff({ before, after }: { before: unknown; after: unknown }) {
+/** Keep complete markdown blocks intact: splitting on lines breaks tables,
+ * fenced code and display maths. Source fields use the line diff below. */
+export function TextDiff({ before, after, markdown = false }: { before: unknown; after: unknown; markdown?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const oldText = String(before ?? ""), newText = String(after ?? "");
+  if (markdown) {
+    const long = Math.max(oldText.length, newText.length) > 400 || Math.max(oldText.split("\n").length, newText.split("\n").length) > 6;
+    return <div className="w-full min-w-0">
+      <div className={`space-y-2 ${long && !expanded ? "max-h-64 overflow-y-auto" : ""}`}>
+        {[{ text: oldText, added: false }, { text: newText, added: true }].filter(({ text }) => text).map(({ text, added }) => <div key={String(added)} className={`min-w-0 rounded-md border border-border-subtle px-3 py-2 ${added ? "bg-success/8" : "bg-destructive/6"}`}>
+          <div className={`mb-1 text-[11px] font-medium ${added ? "text-success" : "text-destructive"}`}>{added ? "Added" : "Removed"}</div>
+          <CompactMd text={text} />
+        </div>)}
+      </div>
+      {long && <Button variant="link" size="xs" className="px-0" onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "Show full change"}</Button>}
+    </div>;
+  }
   const lines = [...oldText.split("\n").filter((line) => line && !newText.split("\n").includes(line)).map((line) => ({ line, added: false })), ...newText.split("\n").filter((line) => line && !oldText.split("\n").includes(line)).map((line) => ({ line, added: true }))];
   return <div className="w-full min-w-0">
     <div className="overflow-hidden rounded-md border border-border-subtle text-[12.5px] leading-5">

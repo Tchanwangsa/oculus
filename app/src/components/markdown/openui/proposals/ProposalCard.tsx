@@ -20,6 +20,7 @@ import { cardState } from "./cardState";
 import { conflicts, effectiveChanges, excludeStale, included, object, rowId, liveKey, rowKey, rows, validateProposal, type Row } from "./model";
 import type { Proposal } from "@/lib/harness/proposals";
 import { continueLabel, followUp, followUpNote } from "./followUp";
+import { fieldLabel, MARKDOWN_FIELDS } from "./Fields";
 
 type Action = "apply" | "discard" | "undo";
 
@@ -71,7 +72,10 @@ function headline(kind: string, state: Row, total: number, project: Row | null, 
   }
   if (changes.length === 1) {
     const change = changes[0], fields = Object.keys(object(change.to)), liveRow = live[String(rowId(change))];
-    if (fields.length === 1 && liveRow) return `Change “${liveRow.title ?? liveRow.name}” ${fields[0]} to ${displayValue(object(change.to)[fields[0]], fields[0])}?`;
+    if (fields.length === 1 && liveRow) {
+      if (MARKDOWN_FIELDS.has(fields[0]) || fields[0] === "program") return `Change “${liveRow.title ?? liveRow.name}” ${fieldLabel(fields[0]).toLowerCase()}?`;
+      return `Change “${liveRow.title ?? liveRow.name}” ${fields[0]} to ${displayValue(object(change.to)[fields[0]], fields[0])}?`;
+    }
   }
   if (kind === "ProjectChanges" && changes.every((item) => object(item.to).status === "archived")) return `Archive ${plural(total, "project")}?`;
   return `Apply ${plural(total, kind === "TagChanges" ? "tag change" : "change")}?`;

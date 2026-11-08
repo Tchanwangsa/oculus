@@ -295,7 +295,9 @@ reads as prose; focus anywhere in its React tree — including the
 through React — shows the brand border and the toolbar above the text. A
 press that gives a field at rest its focus holds the toolbar back until the
 pointer is released, since mounting it pushes the text down and would move the
-line being clicked or dragged over. A blur is judged a tick later, and a window
+line being clicked or dragged over. Leaving also keeps the toolbar in place
+until a pointer press ends, so a button below it receives its click before
+the layout changes. A blur is judged a tick later, and a window
 losing focus (the picture picker) is not leaving. The field's text scroller
 clips and masks its contents, so `NoteField` passes `noteExtensions` a
 `tooltipParent`: the completion list and maths popover are mounted in
@@ -310,6 +312,10 @@ hears the doc on every change, for a caller whose buttons read the text and
 cannot wait on the blur (the chat's pasted text editor,
 [harness.md](./harness.md#pasted-text-is-a-card-sent-inline));
 `scrollClassName` replaces the text scroller's 420px bound.
+`controlled` is for an owner that stores each change immediately, such as a
+proposal draft: incoming text also replaces a focused field, so Reset and
+version changes take effect without waiting for blur. The owner handles
+persistence through `onChange` rather than a second commit on leaving.
 
 `compact` sets the field in `CompactMd`'s type: 13px at 1.6, maths at its
 1.05em, and blank lines between top-level blocks shrunk to its 0.6rem

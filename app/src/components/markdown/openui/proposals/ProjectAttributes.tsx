@@ -32,6 +32,6 @@ export function ProjectAttributes({ state, disabled, onChange }: { state: Row; d
       <NameTags size="pill" registry={tags} value={Array.isArray(state.tags) ? state.tags.filter((tag): tag is string => typeof tag === "string") : []} disabled={disabled} onChange={(names) => set("tags", names)} />
     </div>
     <Field name="event" value={state.event} subject={state.subject} onChange={(value) => set("event", value)} />
-    <Field name="brief" value={state.brief} onChange={(value) => set("brief", value)} />
+    <Field name="brief" value={state.brief} subject={state.subject} onChange={(value) => set("brief", value)} />
   </fieldset>;
 }

@@ -100,8 +100,8 @@ Sync page words it. A job names what it acts on as chips: subjects as
 project page show them, never the Canvas code), files and lectures by name.
 
 A card the agent gave a follow-up (`then`) names it on its deciding buttons
-("Sync and continue", "Discard and continue"), and once it no longer waits on
-the student a muted `note` with a bent arrow, in the footer or under a
+("Sync and continue", "Discard and continue"), and after the student decides
+a muted `note` with a bent arrow, in the footer or under a
 collapsed card's title, says what the follow-up did: continues when the job
 finishes, continues after the current reply, continued below, or why it never
 will (`proposals/followUp.ts`,
@@ -113,8 +113,13 @@ takes a click. `useCardStreaming` reads OpenUI's `useIsStreaming`; outside a
 title, then one line of `h-5` chips (date, estimate, subject), with a row's
 Edit and Remove shown on hover or focus (`ROW_TOOLS`). A change reads as a
 label column and `old → new`: the old value muted and struck, the new one in
-the foreground, a date shift as a chip; a long field is a GitHub-style diff
-with removed and added lines on red and green. A deletion strikes its title
+the foreground, a date shift as a chip. Markdown changes keep complete before
+and after documents in red and green panels so tables, code and maths render
+correctly; source fields show a line diff. Markdown bodies, briefs, notes,
+descriptions, prompts and answers edit in the shared Live-mode `NoteField`
+with its formatting toolbar, maths tools, pictures and library mentions.
+Drafts update on each keystroke so Apply reads the current text and cancelling
+an editor cannot write its old text back on unmount. A deletion strikes its title
 and says what goes with it. Five rows fit a page; paging retains edits and
 inclusion ticks. Subtasks group beneath their existing parent's live title,
 status and due date. A single small proposal starts as one line; its title
