@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { ArrowSquareOut, CaretDown, CaretUp } from "@phosphor-icons/react";
+import { ArrowSquareOut, CalendarBlank, CaretDown, CaretUp, FileText, Note } from "@phosphor-icons/react";
+import { TagDot } from "@/components/projects/tags/TagDot";
+import { isTagColor } from "@/lib/planning/projects/tags";
 import { Button } from "@/components/ui/button";
 import { proposalInspect, type Proposal } from "@/lib/harness/proposals";
 import { navigateActive } from "@/lib/shell/tabRouters";
@@ -59,7 +61,7 @@ export function Results({ proposal }: { proposal: Proposal }) {
     if (item.entity === "note") openLibraryPath(item.id, newTab);
     else { const to = href(item); if (to) navigateActive(to); }
   };
-  return <div className="border-t border-border-subtle px-4 py-2">
+  return <div className="px-4 py-2">
     {(all ? proposal.made : proposal.made.slice(0, SHOWN)).map((item, i) => {
       const key = `${item.entity}:${item.id}`;
       // A made row read back as missing was deleted since (or by Undo); it keeps its title, struck through.
@@ -67,17 +69,27 @@ export function Results({ proposal }: { proposal: Proposal }) {
       const current = object(live[key]);
       const title = String(current.title ?? current.name ?? item.title ?? item.id);
       const present = !gone && current.id != null;
-      return <div key={`${key}:${i}`} className="flex min-w-0 items-center gap-2 py-1 text-[13px]">
-      {/* A task leads with its live status, editable as in the tasks table; a project with its icon. */}
-      {item.entity === "task" && <span className="flex size-5 shrink-0 items-center justify-center">{present && proposal.status === "created" && typeof current.column === "string" && <StatusPill glyphOnly project={{ columns: current.columns as ProjectColumn[] }} columnId={current.column} onPick={(column) => moveTask(Number(item.id), column, null, null).catch((e) => setError(String(e)))} />}</span>}
-      {item.entity === "project" && <span className="flex size-5 shrink-0 items-center justify-center"><ProjectIcon project={{ id: Number(item.id) }} size={15} /></span>}
-      <span className={cn("min-w-0 flex-1 break-words", gone && "text-muted-foreground line-through")}>{title}</span>
-      {gone && proposal.status === "created" && <span className="shrink-0 text-xs text-muted-foreground">Deleted</span>}
-      {/* An undone change leaves its item in place, so it still opens. */}
-      {(proposal.status === "created" || present) && item.op !== "delete" && !gone && !proposal.kind.startsWith("Delete") && !(proposal.kind === "TagChanges" && Array.isArray(proposal.state.changes) && proposal.state.changes.some((change) => String(object(change).tag) === item.id)) && <button type="button" data-tab-href={href(item) ?? undefined} onClick={(e) => open(item, e.metaKey || e.ctrlKey)} onAuxClick={(e) => { if (e.button === 1) open(item, true); }} className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-full px-2 py-1 text-xs text-brand hover:bg-brand-muted" aria-label={`Open ${title}`}>Open <ArrowSquareOut size={12} /></button>}
-    </div>;
+      const deleted = item.op === "delete" || proposal.kind.startsWith("Delete");
+      // A deletion is struck while it stands; Undo brings the item back.
+      const struck = gone || (deleted && proposal.status === "created");
+      const opens = (proposal.status === "created" || present) && !deleted && !gone && !(proposal.kind === "TagChanges" && Array.isArray(proposal.state.changes) && proposal.state.changes.some((change) => String(object(change).tag) === item.id));
+      return <div key={`${key}:${i}`} className="-mx-2 flex min-h-8 min-w-0 items-center gap-2.5 rounded-md px-2 py-1 text-[13px] leading-5">
+        {/* Each row leads with its kind: a task's live status (editable as in the tasks table), a project's icon, a tag's colour. */}
+        <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
+          {item.entity === "task" && present && proposal.status === "created" && typeof current.column === "string" && <StatusPill glyphOnly project={{ columns: current.columns as ProjectColumn[] }} columnId={current.column} onPick={(column) => moveTask(Number(item.id), column, null, null).catch((e) => setError(String(e)))} />}
+          {item.entity === "project" && <ProjectIcon project={{ id: Number(item.id) }} size={15} />}
+          {item.entity === "event" && <CalendarBlank size={15} />}
+          {item.entity === "note" && <FileText size={15} />}
+          {item.entity === "cheat" && <Note size={15} />}
+          {item.entity === "tag" && isTagColor(current.color) && <TagDot color={current.color} />}
+        </span>
+        <span className={cn("min-w-0 flex-1 break-words", struck && "text-muted-foreground line-through decoration-muted-foreground/50")}>{title}</span>
+        {struck && proposal.status === "created" && <span className="shrink-0 text-xs text-muted-foreground">Deleted</span>}
+        {/* An undone change leaves its item in place, so it still opens. */}
+        {opens && <button type="button" data-tab-href={href(item) ?? undefined} onClick={(e) => open(item, e.metaKey || e.ctrlKey)} onAuxClick={(e) => { if (e.button === 1) open(item, true); }} className="-mr-1 inline-flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-brand-muted hover:text-brand" aria-label={`Open ${title}`}>Open<ArrowSquareOut size={12} /></button>}
+      </div>;
     })}
     {proposal.made.length > SHOWN && <Button variant="ghost" size="xs" className="-ml-2 text-muted-foreground" onClick={() => setAll(!all)}>{all ? <><CaretUp />Show less</> : <><CaretDown />Show {proposal.made.length - SHOWN} more</>}</Button>}
-    {error && <p className="text-xs text-destructive">Could not load current links: {error}</p>}
+    {error && <div className="text-xs text-destructive">Couldn’t load current links: {error}</div>}
   </div>;
 }

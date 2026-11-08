@@ -89,3 +89,27 @@
 @media (prefers-reduced-motion: reduce) {
   .openui-block[data-openui-streaming="true"] section { animation: none; }
 }
+
+/* Work in flight with no known end: a brand segment crosses its track. Only
+   the background moves, like `text-shimmer`, so no layer is promoted. The
+   proposal card's top edge and a job's progress bar use it (docs/ui.md). */
+@utility progress-sweep {
+  background-image: linear-gradient(90deg, transparent, var(--color-brand) 30%, var(--color-brand) 70%, transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: progress-sweep 1.4s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    background-image: none;
+    background-color: color-mix(in oklab, var(--color-brand) 45%, transparent);
+  }
+}
+
+@keyframes progress-sweep {
+  from {
+    background-position: -67% 0;
+  }
+  to {
+    background-position: 167% 0;
+  }
+}

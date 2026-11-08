@@ -9,6 +9,7 @@ import type { RevisionTopic } from "@/lib/revision/types";
 import { cn } from "@/lib/utils";
 import { scrollParent } from "@/lib/ui/scrollAnchor";
 import { Include, RowActions } from "./ProposalParts";
+import { CARD_ROW } from "./CardFrame";
 import { TopicNamesField } from "./RevisionFields";
 import { SubjectPicker } from "./SubjectPicker";
 import { included, type Row } from "./model";
@@ -84,7 +85,7 @@ export function CheatRow({ row, allowed, previous, topics = [], disabled, onChan
   useEffect(() => { if (!disabled) void loadField(); }, [disabled]);
 
   const rendered = <CompactMd text={body} className={BODY} />;
-  return <div ref={root} style={editing ? { minHeight: readingHeight } : undefined} className="border-t border-border-subtle px-4 py-3">
+  return <div ref={root} style={editing ? { minHeight: readingHeight } : undefined} className={cn(CARD_ROW, "py-3")}>
     <div className="flex min-w-0 items-start gap-3">
       <Include title={title} checked={on} disabled={disabled || !allowed} onChange={(checked) => onChange({ ...row, included: checked })} />
       <div className="min-w-0 flex-1">

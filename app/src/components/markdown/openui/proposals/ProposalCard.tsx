@@ -1,9 +1,7 @@
 import { useContext, useEffect, useMemo, useState } from "react";
-import { OpenUISkeleton, StreamingPending } from "../Streaming";
-import { ArrowClockwise, ArrowDown, ArrowCounterClockwise, CalendarBlank, CheckSquare, FileText, FolderSimple, SpinnerGap, Tag } from "@phosphor-icons/react";
-import { Badge } from "@/components/ui/badge";
+import { StreamingPending } from "../Streaming";
+import { ArrowDown, ArrowCounterClockwise, SpinnerGap } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { ViewTabs } from "@/components/ui/table/ViewTabs";
 import { DEFAULT_COLUMNS } from "@/lib/planning/projects/columns";
 import { useWidgetProgress } from "../progress";
@@ -15,7 +13,9 @@ import { CheatRow } from "./CheatRow";
 import { useProposal, useProposalLive } from "./useProposal";
 import { useProposalVersions } from "./useProposalVersions";
 import { VersionControl } from "./VersionControl";
-import { CardFrame, useCardStreaming } from "./CardFrame";
+import { CardFrame, CardSkeleton, useCardStreaming } from "./CardFrame";
+import { kindIcon, kindNoun } from "./kinds";
+import { SubjectLabel } from "./SubjectLabel";
 import { cardState } from "./cardState";
 import { conflicts, effectiveChanges, excludeStale, included, object, rowId, liveKey, rowKey, rows, validateProposal, type Row } from "./model";
 import type { Proposal } from "@/lib/harness/proposals";
@@ -88,7 +88,7 @@ function columns(row: Row | null | undefined): Row[] {
 export function ProposalCard({ kind, input }: { kind: string; input: Row }) {
   const streaming = useCardStreaming();
   const pending = useContext(StreamingPending);
-  if (streaming && pending) return <OpenUISkeleton title={`Drawing ${kind}…`} />;
+  if (streaming && pending) return <CardSkeleton icon={kindIcon(kind)} title={`Drawing ${kindNoun(kind)}…`} />;
   return <ProposalCardContent kind={kind} input={input} />;
 }
 
@@ -115,7 +115,7 @@ function ProposalCardContent({ kind, input }: { kind: string; input: Row }) {
   const active = listing.filter((item) => item.allowed && included(item.row) && (!item.row.from || Object.keys(effectiveChanges(item.row)).length) && (item.row.included !== undefined || !data.loaded || !conflicts(item.row, data.live[liveKey(item.row)]).length));
   const count = kind === "NewNote" ? 1 : active.length;
   const total = listing.length;
-  const Icon = kind.includes("Project") ? FolderSimple : kind.includes("Event") ? CalendarBlank : kind.includes("Note") ? FileText : kind.includes("Tag") ? Tag : CheckSquare;
+  const Icon = kindIcon(kind);
   const title = headline(kind, state, total, data.project, data.live);
   const onlyUnder = kind === "NewTasks" && rows(state.items).length > 0 && rows(state.items).every((item) => item.task != null);
   const applyLabel = kind === "NewCheatNotes" ? `Add ${plural(count, "entry")}` : kind === "NewProject" ? `Create project${count ? ` and ${plural(count, "task")}` : ""}` : kind === "NewNote" ? "Create note" : kind === "NewTasks" ? onlyUnder ? `Add ${plural(count, "subtask")}` : `Create ${plural(count, "task")}` : kind === "NewEvents" ? `Create ${plural(count, "event")}` : kind.startsWith("Delete") ? `Delete ${plural(count, kind === "DeleteTasks" ? "task" : "event")}` : `Apply ${count} of ${total}`;
@@ -146,41 +146,44 @@ function ProposalCardContent({ kind, input }: { kind: string; input: Row }) {
   const verb = kind.startsWith("New") ? "Create" : kind.startsWith("Delete") ? "Delete" : "Apply";
   // Busy on a decided card can only be Undo, whichever view clicked it.
   const working = proposal?.status === "created" ? "Undoing…" : acting === "discard" ? "Discarding…" : `${{ Create: "Creating", Delete: "Deleting", Apply: "Applying" }[verb]}…`;
-  const decide = (label: string) => frame.failure === "load"
-    ? <Button variant="outline" size="sm" onClick={card.retry}><ArrowClockwise />Try again</Button>
-    : <><Button variant="ghost" size="sm" disabled={disabled} onClick={() => act("discard")}>{continueLabel("Discard", follow)}</Button><Button variant={kind.startsWith("Delete") ? "destructive" : "default"} size="sm" disabled={disabled || (count === 0 && kind !== "NewProject")} onClick={apply}>{frame.phase === "applying" && acting === "apply" && <SpinnerGap className="animate-spin" />}{continueLabel(label, follow)}</Button></>;
+  // A card that never loaded keeps its buttons, disabled, so Try again doesn't move them.
+  const decide = (label: string) => <><Button variant="ghost" size="sm" disabled={disabled} onClick={() => act("discard")}>{continueLabel("Discard", follow)}</Button><Button variant={kind.startsWith("Delete") ? "destructive" : "default"} size="sm" disabled={disabled || (count === 0 && kind !== "NewProject")} onClick={apply}>{frame.phase === "applying" && acting === "apply" && <SpinnerGap className="animate-spin" />}{continueLabel(label, follow)}</Button></>;
 
   if (frame.collapsed) {
     const index = version.versions.findIndex((item) => item.id === card.id) + 1;
     const newer = proposal?.superseded_by;
-    return <CardFrame id={anchor} state={frame} icon={Icon} note={note} title={title.replace(/\?$/, "")} meta={frame.phase === "discarded" ? <Badge variant="secondary">Discarded</Badge> : <>
-      <Badge variant="secondary">{index > 0 ? `V${index} · replaced` : "Replaced"}</Badge>
-      {newer && <a className="inline-flex items-center gap-1 text-xs text-brand hover:underline" href={`#proposal-${newer}`} onClick={(event) => { event.preventDefault(); document.getElementById(`proposal-${newer}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>View newer version<ArrowDown size={12} /></a>}
-    </>} />;
+    return <CardFrame id={anchor} state={frame} icon={Icon} note={note} title={title.replace(/\?$/, "")}
+      status={frame.phase === "superseded" ? index > 0 ? `V${index} · replaced` : "Replaced" : undefined}
+      tools={newer && <a className="inline-flex h-5 items-center gap-1 text-xs text-brand hover:underline" href={`#proposal-${newer}`} onClick={(event) => { event.preventDefault(); document.getElementById(`proposal-${newer}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>View newer version<ArrowDown size={12} /></a>} />;
   }
 
   const small = kind !== "EditItems" && listing.length === 1 && !listing[0].parent && !["NewProject", "NewNote", "NewCheatNotes", "TagChanges"].includes(kind) && (!listing[0].row.from || Object.keys(object(listing[0].row.to)).length === 1) && !Object.keys(object(listing[0].row.to)).some((field) => ["body", "brief", "notes"].includes(field));
   if (small && !expanded && editor) {
     const heading = <span className="inline-flex max-w-full min-w-0 items-center gap-1.5"><button type="button" disabled={disabled} onClick={() => setExpanded(true)} aria-label="Edit proposal" className="min-w-0 cursor-pointer text-left break-words enabled:hover:text-brand disabled:cursor-default">{title}</button><ChangedSince fields={data.loaded ? conflicts(listing[0].row, data.live[liveKey(listing[0].row)]) : []} live={data.live[String(rowId(listing[0].row))]} /></span>;
-    return <CardFrame compact id={anchor} state={frame} icon={Icon} title={heading} error={error} note={note} status={frame.phase === "applying" ? working : undefined}
-      meta={editor && <VersionControl inline version={version} disabled={disabled} />}
+    return <CardFrame compact id={anchor} state={frame} icon={Icon} title={heading} error={error} onRetry={card.retry} note={note} status={frame.phase === "applying" ? working : undefined}
+      meta={<VersionControl version={version} disabled={disabled} />}
       actions={decide(verb)} />;
   }
 
-  return <CardFrame id={anchor} state={frame} icon={Icon} error={error} note={note}
+  const subject = typeof data.project?.subject === "string" && data.project.subject ? data.project.subject : null;
+  const undoing = frame.phase === "applying" && proposal?.status === "created";
+  return <CardFrame id={anchor} state={frame} icon={Icon} error={error} onRetry={card.retry} note={note}
     title={editor ? title : resultTitle(proposal!, data.project)}
-    subtitle={<>{data.project?.subject != null && <p className="mt-0.5 text-xs text-muted-foreground">{String(data.project.subject)}</p>}{editor && <VersionControl version={version} disabled={disabled} />}</>}
-    meta={editor && total > 1 && kind !== "NewProject" && <span className="rounded-full bg-surface px-2 py-0.5 text-xs tabular-nums text-muted-foreground">{count} of {total}</span>}
+    subtitle={subject && <div className="mt-1 flex"><SubjectLabel code={subject} /></div>}
     status={frame.phase === "applying" ? working : undefined}
-    actions={editor ? decide(applyLabel) : proposal?.status === "created" && <Button variant="outline" size="sm" disabled={frame.phase !== "created"} onClick={() => act("undo")}>{frame.phase === "applying" ? <SpinnerGap className="animate-spin" /> : <ArrowCounterClockwise />}Undo</Button>}>
+    aside={editor && <>
+      {total > 1 && count !== total && kind !== "NewProject" && <span role="status" className="text-xs text-muted-foreground tabular-nums">{count} of {total} selected</span>}
+      <VersionControl version={version} disabled={disabled} />
+    </>}
+    tools={proposal?.status === "created" && <Button variant="ghost" size="xs" className="-my-0.5 text-muted-foreground" disabled={frame.phase !== "created"} onClick={() => act("undo")}>{undoing ? <SpinnerGap className="animate-spin" /> : <ArrowCounterClockwise />}Undo</Button>}
+    actions={editor && decide(applyLabel)}>
     {editor ? <>
-      {kind === "NewProject" && <div className="border-t border-border-subtle px-4">
+      {kind === "NewProject" && <div className="px-4">
         <ViewTabs value={tab} onChange={setTab} tabs={[{ value: "attributes", label: "Attributes" }, { value: "tasks", label: "Tasks", badge: <span className="rounded-full bg-surface px-1.5 text-[11px] tabular-nums text-muted-foreground">{count === total ? total : `${count} of ${total}`}</span> }]} />
       </div>}
       {kind === "NewProject" && tab === "attributes" && <ProjectAttributes key={`project:${version.generation}`} state={state} disabled={disabled} onChange={change} />}
       {kind === "NewNote" && <NoteProposal key={`note:${version.generation}`} state={state} disabled={disabled} onChange={change} />}
-      {/* Under the tab strip's own rule, the first row drops its top border. */}
-      {(kind !== "NewProject" || tab === "tasks") && <div className={cn("contents", kind === "NewProject" && "block [&>*:first-child]:border-t-0")}>{listing.slice(page * 5, page * 5 + 5).map((item, visibleIndex, visible) => {
+      {(kind !== "NewProject" || tab === "tasks") && <div className="contents">{listing.slice(page * 5, page * 5 + 5).map((item, visibleIndex, visible) => {
         const live = data.live[item.row.entity ? liveKey(item.row) : String(rowId(item.row) ?? item.parent?.task)];
         const previousRows = key && card.amended ? viewRows(kind, card.amended, key) : [];
         const previous = previousRows.find((old) => (rowId(item.row) != null && liveKey(old.row) === liveKey(item.row)) || (item.row.title != null && old.row.title === item.row.title))?.row ?? previousRows.find((old) => JSON.stringify(old.path) === JSON.stringify(item.path))?.row;

@@ -4,26 +4,28 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { fmtClock, sqliteUtcToMs } from "@/lib/format/format";
 import { type Row } from "./model";
+import { RULE, ROW_TOOLS } from "./CardFrame";
+import { cn } from "@/lib/utils";
 import { displayLocale } from "@/lib/format/locale";
 
 export function Pager({ page, count, onChange }: { page: number; count: number; onChange: (page: number) => void }) {
   if (count <= 5) return null;
-  return <div className="flex items-center justify-end gap-1 border-t border-border-subtle px-3 py-1.5 text-xs text-muted-foreground">
-    <span className="mr-2 tabular-nums">{page * 5 + 1}–{Math.min(page * 5 + 5, count)} of {count}</span>
+  return <div className={cn(RULE, "flex items-center justify-end gap-1 px-3 py-1.5 text-xs text-muted-foreground")}>
+    <span className="mr-1 tabular-nums">{page * 5 + 1}–{Math.min(page * 5 + 5, count)} of {count}</span>
     <Button variant="ghost" size="icon-sm" aria-label="Previous page" disabled={page === 0} onClick={() => onChange(page - 1)}><CaretLeft size={14} /></Button>
     <Button variant="ghost" size="icon-sm" aria-label="Next page" disabled={(page + 1) * 5 >= count} onClick={() => onChange(page + 1)}><CaretRight size={14} /></Button>
   </div>;
 }
 
 export function Include({ title, checked, disabled, onChange }: { title: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
-  return <Checkbox className="mt-1" checked={checked} disabled={disabled} aria-label={`Include ${title}`} onCheckedChange={(value) => onChange(value === true)} />;
+  return <Checkbox className="mt-0.5" checked={checked} disabled={disabled} aria-label={`Include ${title}`} onCheckedChange={(value) => onChange(value === true)} />;
 }
 
 export function RowActions({ title, editing, disabled, canRemove, onEdit, onSave, onCancel, onRemove }: {
   title: string; editing: boolean; disabled: boolean; canRemove: boolean; onEdit: () => void; onSave: () => void; onCancel: () => void; onRemove: () => void;
 }) {
   const action = (label: string, icon: React.ReactNode, onClick: () => void, off = disabled) => <Button variant="ghost" size="icon-xs" disabled={off} aria-label={`${label} ${title}`} onClick={onClick}>{icon}</Button>;
-  return <div className="flex shrink-0 items-center">
+  return <div data-editing={editing} className={cn("-my-0.5 flex shrink-0 items-center", ROW_TOOLS)}>
     {editing ? <>{action("Cancel editing", <X size={14} />, onCancel)}{action("Save", <Check size={14} />, onSave)}</> : <>{action("Edit", <PencilSimple size={14} />, onEdit)}{action("Remove", <Trash size={14} />, onRemove, disabled || !canRemove)}</>}
   </div>;
 }
@@ -39,7 +41,8 @@ export function displayValue(value: unknown, key?: string): string {
   if (value == null || value === "") return "none";
   if (["due", "starts", "start", "end"].includes(key ?? "")) {
     const parts = /^(\d{4})-(\d\d)-(\d\d)$/.exec(String(value));
-    if (parts) return new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3])).toLocaleDateString(displayLocale, { day: "numeric", month: "short", year: "numeric" });
+    // The year shows only when it isn't this one, as DateTimeField shows it.
+    if (parts) return new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3])).toLocaleDateString(displayLocale, { day: "numeric", month: "short", year: Number(parts[1]) === new Date().getFullYear() ? undefined : "numeric" });
     const ms = sqliteUtcToMs(String(value));
     if (ms != null) return fmtClock(ms, true);
   }

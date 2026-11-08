@@ -94,13 +94,20 @@ export function Fields({ row, names, onChange, columns, topics, subjectId, entit
   return <div className="grid min-w-0 grid-cols-1 gap-3 py-2 @sm/proposal:grid-cols-2">{names.map((name) => <Field key={name} name={name} value={row[name]} subject={row.subject} columns={columns} topics={topics} subjectId={subjectId} entity={entity} onChange={(value) => onChange({ ...row, [name]: value })} />)}</div>;
 }
 
+/** A long field's change as a diff, as GitHub draws one: removed lines on
+ * red, added on green, each with its sign in a gutter. */
 export function TextDiff({ before, after }: { before: unknown; after: unknown }) {
   const [expanded, setExpanded] = useState(false);
   const oldText = String(before ?? ""), newText = String(after ?? "");
   const lines = [...oldText.split("\n").filter((line) => line && !newText.split("\n").includes(line)).map((line) => ({ line, added: false })), ...newText.split("\n").filter((line) => line && !oldText.split("\n").includes(line)).map((line) => ({ line, added: true }))];
-  return <div className="min-w-0 text-[13px]">
-    {(expanded ? lines : lines.slice(0, 3)).map(({ line, added }, i) => <p key={i} className={`break-words ${added ? "text-success" : "text-muted-foreground line-through"}`}>{added ? "+ " : "− "}{line}</p>)}
-    {lines.length > 3 && <Button variant="link" size="xs" onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "Show full change"}</Button>}
+  return <div className="w-full min-w-0">
+    <div className="overflow-hidden rounded-md border border-border-subtle text-[12.5px] leading-5">
+      {(expanded ? lines : lines.slice(0, 3)).map(({ line, added }, i) => <div key={i} className={`flex min-w-0 gap-2 px-2 py-0.5 ${added ? "bg-success/8" : "bg-destructive/6 text-muted-foreground"}`}>
+        <span aria-label={added ? "Added" : "Removed"} className={`w-2 shrink-0 select-none ${added ? "text-success" : "text-destructive"}`}>{added ? "+" : "−"}</span>
+        <span className="min-w-0 break-words">{line}</span>
+      </div>)}
+    </div>
+    {lines.length > 3 && <Button variant="link" size="xs" className="px-0" onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : `Show all ${lines.length} lines`}</Button>}
   </div>;
 }
 

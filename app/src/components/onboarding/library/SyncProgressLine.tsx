@@ -6,7 +6,7 @@ import { type SyncProgress, useSyncStore } from "@/stores/sync/syncStore";
 import { useFirstSync } from "./firstSync";
 
 /** Canvas's phase names as the Sync page words them. */
-const PHASE: Record<string, string> = {
+export const SYNC_PHASE: Record<string, string> = {
   home: "overview",
   announcements: "announcements",
   modules: "modules",
@@ -65,7 +65,7 @@ export function SyncProgressLine({ className }: { className?: string }) {
 
 /** The shared live line accepts an explicitly owned run's progress. */
 export function SyncProgressDetails({ progress, className }: { progress: SyncProgress | null; className?: string }) {
-  const phase = progress?.phase ? (PHASE[progress.phase] ?? progress.phase) : null;
+  const phase = progress?.phase ? (SYNC_PHASE[progress.phase] ?? progress.phase) : null;
   return <div className={cn("flex min-w-0 items-center gap-2 text-xs text-muted-foreground", className)} role="status">
     <ArrowsClockwise size={13} className="shrink-0 animate-spin" />
     <span className="min-w-0 truncate">{progress?.course ? `Syncing ${displayCode(progress.course)}${phase ? ` — ${phase}` : ""}` : "Syncing your subjects…"}</span>

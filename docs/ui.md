@@ -63,65 +63,95 @@ the agent must still double TeX backslashes in strings.
 
 Each proposal or job has its own OpenUI fence. `CardFrame`
 (`app/src/components/markdown/openui/proposals/CardFrame.tsx`) draws every
-proposal, job and result list: header (icon, title, subtitle, a right-hand
-count or badge), body, an error strip, and a footer with the phase's status
-at the left and the actions at the right. `cardState.ts` names the phase:
+proposal, job and result list the same way. The header is the kind's glyph
+(muted, `kinds.ts`), a Manrope title and its subtitle chips, and at the right
+the phase's chip (`CardChip.tsx`) beside any `meta` and `tools`. One inset
+hairline separates the header from the body, and inset hairlines divide the
+body's rows; there is no footer band. A footer appears only when there is a
+decision (`actions`) or something to say beside it: the selection count, the
+version choice, the follow-up note. Errors sit in a tinted callout inside the
+card, never as a toast. Indigo means "act" or "in flight": the primary
+button, a brand chip while work runs, and the card's top edge.
+`cardState.ts` names the phase:
 
-| Phase | Shown as |
-| --- | --- |
-| streaming | title shimmers, body locked and dimmed, "Still writing…" |
-| uncommitted | body locked and dimmed, clock, "Available when the reply finishes" |
-| loading | body locked and dimmed, spinner, "Loading…" |
-| pending | editable; a small single change is the compact one-row form |
-| applying | spinner, "Creating…", "Applying…" or "Undoing…" with the body locked and dimmed; a running job's "Running…" keeps its body live for progress |
-| created | results, green check "Done" (a job's "Complete"), Undo |
-| failed | red border; a refused Apply stays editable with the error in the strip, a row that never loaded says so in the footer with Try again |
-| undone | muted header and icon, results still open where the item remains, "Undone" |
-| discarded, superseded | header only on the page background, a Discarded or "V1 · replaced" badge and the newer version's link |
+| Phase | Chip | Body and edge |
+| --- | --- | --- |
+| streaming | "Writing", shimmering, with the title | locked and dimmed; buttons in place, disabled |
+| uncommitted | clock, "Waiting for the reply" | locked and dimmed |
+| loading | spinner, "Loading" | locked and dimmed; the top edge sweeps |
+| pending | none: the question and its buttons are the state | editable; a small single change is the compact one-row form |
+| applying | brand spinner, "Creating…", "Applying…", "Undoing…", a job's "Starting…" | locked and dimmed, the top edge sweeps; a running job keeps its body live for its progress block instead |
+| created | green "Done" (a job's "Complete"), Undo beside it | the results |
+| failed | red "Not loaded", "Not saved" or "Failed" | solid red top edge; the callout says why: a row that never loaded offers Try again in it, a refused Apply stays editable, a job's error leads its body |
+| undone | "Undone", title muted | results, still opening where the item remains |
+| discarded, superseded | "Discarded" or "V1 · replaced" with the newer version's link | header only, dashed border on the page background |
+
+The sweep is `progress-sweep` (`app/src/styles/utilities.css`): only the
+background moves, as with `text-shimmer`, and reduced motion shows a still
+tint. Before a fence's props resolve, the card is `CardSkeleton`: the kind's
+glyph, "Drawing new tasks…" and two placeholder lines.
+
+A started job's body (`JobProgress.tsx`) says what it is doing with its counts
+and percent (tabular), a full-width bar (filled, or sweeping while the job
+gives no percent), then its elapsed time, the Sync history link and Cancel;
+once it ends, its result and how long it took. A sync's line is worded as the
+Sync page words it. A job names what it acts on as chips: subjects as
+`SubjectLabel` (the subject's icon and short code, as task cards and the
+project page show them, never the Canvas code), files and lectures by name.
 
 A card the agent gave a follow-up (`then`) names it on its deciding buttons
 ("Sync and continue", "Discard and continue"), and once it no longer waits on
-the student a muted `note` line under the body, kept even when collapsed,
-says what the follow-up did: continues when the job finishes, continues
-after the current reply, continued below, or why it never will
-(`proposals/followUp.ts`, [harness.md](./harness.md#a-card-can-continue-the-agent)).
+the student a muted `note` with a bent arrow, in the footer or under a
+collapsed card's title, says what the follow-up did: continues when the job
+finishes, continues after the current reply, continued below, or why it never
+will (`proposals/followUp.ts`,
+[harness.md](./harness.md#a-card-can-continue-the-agent)).
 
 Locked bodies are `inert`, so nothing in a card that is not ready or is busy
 takes a click. `useCardStreaming` reads OpenUI's `useIsStreaming`; outside a
-`Renderer` it is false. The frame holds
-editable creation rows, before → after changes, deletions and confirmed
-results. Five rows fit a page; paging retains edits and inclusion ticks.
-Subtasks group beneath their existing parent's live title, status and due
-date. A single small proposal starts as one line; its title opens the editor.
-Project creation splits into Attributes and Tasks tabs: Attributes holds the
-name field and the project page's property pills (subject, due, start, tags,
-with tags named against the task tag registry and created only on Create),
-then the calendar event and brief. A result list longer than six rows ends in
-Show more. A proposed task leads with the tasks table's status glyph, set to
-the column Create would use (its own, its parent's, else the board's first)
-and editable there; a created task leads with its live status, which moves
-the task as the table's glyph does, and a created project with its icon.
+`Renderer` it is false. Rows take the cheat sheet's grammar: a checkbox, the
+title, then one line of `h-5` chips (date, estimate, subject), with a row's
+Edit and Remove shown on hover or focus (`ROW_TOOLS`). A change reads as a
+label column and `old → new`: the old value muted and struck, the new one in
+the foreground, a date shift as a chip; a long field is a GitHub-style diff
+with removed and added lines on red and green. A deletion strikes its title
+and says what goes with it. Five rows fit a page; paging retains edits and
+inclusion ticks. Subtasks group beneath their existing parent's live title,
+status and due date. A single small proposal starts as one line; its title
+opens the editor. Project creation splits into Attributes and Tasks tabs:
+Attributes holds the name field and the project page's property pills
+(subject, due, start, tags, with tags named against the task tag registry and
+created only on Create), then the calendar event and brief; a note proposal
+uses the same subject pill. A result list longer than six rows ends in Show
+more; each result leads with its kind (a task's live status glyph, which moves
+the task as the table's does, a project's icon, a tag's colour). A proposed
+task leads with the tasks table's status glyph, set to the column Create
+would use (its own, its parent's, else the board's first) and editable there.
 Proposal headings use `role="heading"` so the surrounding reply's markdown
-heading styles cannot add spacing or override the card's title type.
+heading styles cannot add spacing or override the card's title type, and the
+card's text blocks are `div`s so the reply's paragraph margins don't reach
+them.
 
 `DateTimeField` preserves date-only values as local calendar days, without
-inventing a clock time. Proposal date pickers offer All day; turning it off
-chooses an explicit time. Status names and column choices come from the real
-board, including custom done columns. A stale change starts excluded and has
-a warning tooltip with its live values; explicitly ticking it uses those
-values as the new guarded baseline. Reverting every field removes that row
-from the changes to apply. A tag colour shows as its swatch and name, and a
-tag deletion says how many tasks lose the tag.
+inventing a clock time, and both sides of a change show the year only when it
+isn't this one. Proposal date pickers offer All day; turning it off chooses
+an explicit time. Status names and column choices come from the real board,
+including custom done columns. A stale change starts excluded and has a
+warning tooltip with its live values; explicitly ticking it uses those values
+as the new guarded baseline. Reverting every field removes that row from the
+changes to apply. A tag colour shows as its swatch and name, and a tag
+deletion says how many tasks lose the tag.
 
 Create, Apply, Discard and Undo show errors in the card. Confirmed results
-link to the actual items and deletion results have no Open action. A valid
-amendment collapses its predecessor to its version number and a newer-version
-link, and dots changed fields against the student's saved card. Pending cards
-offer a V1/V2 selector once a second version exists (beside the actions in a
-compact card, under the title otherwise), a Modified indicator and Reset; their snapshot and draft
-contract is in [harness.md](./harness.md#proposal-context-is-read-at-dispatch-and-confirmation-lives-in-rust).
-Decided cards keep their state
-through reloads and multiple views; their database and send contracts are in
+link to the actual items and deletion results are struck through, with no
+Open action. A valid amendment collapses its predecessor to its version
+number and a newer-version link, and dots changed fields against the
+student's saved card. Pending cards offer a V1/V2 selector once a second
+version exists (before the buttons in a compact card, at the footer's left
+otherwise), a Modified indicator and Reset; their snapshot and draft contract
+is in [harness.md](./harness.md#proposal-context-is-read-at-dispatch-and-confirmation-lives-in-rust).
+Decided cards keep their state through reloads and multiple views; their
+database and send contracts are in
 [harness.md](./harness.md#proposal-context-is-read-at-dispatch-and-confirmation-lives-in-rust).
 
 Revision uses these same cards and Live-mode fields for cheat entries, a focused question surface for reviews, and a widget grid for artifacts. Nothing is added to every reply or to a text selection; the agent offers entries as a card. See [revision.md](./revision.md).

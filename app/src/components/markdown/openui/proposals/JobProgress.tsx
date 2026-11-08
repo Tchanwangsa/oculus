@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
-import { SyncProgressDetails } from "@/components/onboarding/library/SyncProgressLine";
 import { useSyncStore } from "@/stores/sync/syncStore";
 import { useParseStore } from "@/stores/sync/parseStore";
 import { navigateActive } from "@/lib/shell/tabRouters";
+import { cn } from "@/lib/utils";
+import { CardCallout } from "./CardFrame";
 import { jobProgress, jobProgressEvents, matchesJobProgressEvent, type JobProgressSources } from "./jobProgress.ts";
 import { object, type Row } from "./model";
 
@@ -17,10 +17,12 @@ function elapsed(start: unknown, finish: unknown, now: number): string | null {
   if (typeof start !== "string") return null;
   const duration = Math.max(0, Math.floor(((typeof finish === "string" ? Date.parse(finish) : now) - Date.parse(start)) / 1000));
   if (!Number.isFinite(duration)) return null;
-  return duration >= 3600 ? `${Math.floor(duration / 3600)}h ${Math.floor(duration % 3600 / 60)}m` : `${Math.floor(duration / 60)}m ${duration % 60}s`;
+  return duration >= 3600 ? `${Math.floor(duration / 3600)}h ${Math.floor(duration % 3600 / 60)}m` : duration >= 60 ? `${Math.floor(duration / 60)}m ${duration % 60}s` : `${duration}s`;
 }
 
-export function JobProgress({ kind, state, error }: { kind: string; state: Row; error?: string }) {
+/** A job's live progress from its own sources (the sync and parse stores,
+ * its tagged events), its elapsed time ticking while it runs, and Cancel. */
+export function useJobProgress(kind: string, state: Row) {
   const job = object(state.job);
   const running = job.phase === "running";
   const [now, setNow] = useState(Date.now);
@@ -45,9 +47,6 @@ export function JobProgress({ kind, state, error }: { kind: string; state: Row; 
     return () => { active = false; for (const subscription of pending) void subscription.then((off) => off()).catch(() => {}); };
   }, [kind, running]);
   const progress = jobProgress(kind, state, { sync, parses, event });
-  const duration = job.interrupted ? null : elapsed(job.started_at, job.finished_at, now);
-  const message = error ?? (job.phase === "error" ? String(job.error ?? "The job could not finish.") : running ? progress.error ?? cancelError : undefined);
-  const href = typeof job.run_id === "number" ? `/sync?run=${job.run_id}` : null;
   const cancel = async () => {
     if (!progress.cancel) return;
     setCancelling(true);
@@ -55,18 +54,47 @@ export function JobProgress({ kind, state, error }: { kind: string; state: Row; 
     try { await invoke(progress.cancel.command, progress.cancel.args); }
     catch (cause) { setCancelError(String(cause)); setCancelling(false); }
   };
-  return <div className="space-y-2 border-t border-border-subtle px-4 py-3 text-xs text-muted-foreground">
-    {running && (progress.sync ? <SyncProgressDetails progress={progress.sync} /> : <div role="status" className="flex min-w-0 flex-wrap items-center gap-2">
-      <span className="min-w-0 break-words">{progress.label}</span>
-      {progress.percent != null && <><Progress value={progress.percent} className="ml-auto h-1 w-20 shrink-0" /><span className="tabular-nums">{Math.floor(progress.percent)}%</span></>}
-      {progress.total != null && progress.total > 0 && <span className="tabular-nums">{progress.done ?? 0}/{progress.total}{kind === "Reparse" ? " files" : ""}</span>}
-    </div>)}
-    {job.phase === "complete" && <p>{typeof job.result === "string" ? job.result : "Job completed."}</p>}
-    {message && <p role="alert" data-selectable className="break-words text-destructive">{message}</p>}
-    {(duration || href || running && progress.cancel) && <div className="flex flex-wrap items-center gap-3">
-      {duration && <span className="tabular-nums">{duration}{running ? " elapsed" : " total"}</span>}
-      {href && <button type="button" data-tab-href={href} className="cursor-pointer text-brand hover:underline" onClick={() => navigateActive(href)}>View in Sync history</button>}
-      {running && progress.cancel && <Button size="xs" variant="ghost" className="ml-auto" disabled={cancelling} onClick={() => void cancel()}>{cancelling ? "Cancelling…" : "Cancel"}</Button>}
+  return {
+    job, running, progress, cancel, cancelling,
+    duration: job.interrupted ? null : elapsed(job.started_at, job.finished_at, now),
+    /** A live failure the job has not ended on yet: a parse refused, or Cancel. */
+    error: running ? progress.error ?? cancelError : undefined,
+    href: typeof job.run_id === "number" ? `/sync?run=${job.run_id}` : null,
+  };
+}
+
+/** A full-width bar: filled to the percent, or a sweep while the job gives none. */
+function Bar({ percent }: { percent?: number }) {
+  return <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent != null ? Math.floor(percent) : undefined} className="h-1 w-full overflow-hidden rounded-full bg-surface-raised">
+    {percent != null ? <div className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out" style={{ width: `${Math.max(2, percent)}%` }} /> : <div className="progress-sweep h-full w-full" />}
+  </div>;
+}
+
+/**
+ * The body of a started job: while it runs, what it is doing with its counts
+ * and a bar, then its elapsed time, the Sync history link and Cancel; once it
+ * ends, the result and how long it took. A failure leads, in the card's callout.
+ */
+export function JobProgress({ run, error }: { run: ReturnType<typeof useJobProgress>; error?: string }) {
+  const { job, running, progress, duration, href, cancel, cancelling } = run;
+  const figures = [progress.total != null && progress.total > 0 ? `${progress.done ?? 0} of ${progress.total}` : null, progress.percent != null ? `${Math.floor(progress.percent)}%` : null].filter(Boolean).join(" · ");
+  const result = job.phase === "complete" ? typeof job.result === "string" && job.result ? job.result : "Finished." : null;
+  const meta = duration || href || (running && progress.cancel);
+  if (!running && !result && !meta && !error) return null;
+  return <div className="space-y-2 px-4 py-3">
+    {error && <CardCallout className="mx-0 my-0">{error}</CardCallout>}
+    {running && <>
+      <div role="status" className="flex min-w-0 items-baseline gap-3 text-[13px] leading-5">
+        <span className="min-w-0 flex-1 truncate">{progress.label}</span>
+        {figures && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{figures}</span>}
+      </div>
+      <Bar percent={progress.percent} />
+    </>}
+    {result && <div className="text-[13px] leading-5 break-words">{result}</div>}
+    {meta && <div className={cn("flex min-h-6 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground", running && "-mb-1")}>
+      {duration && <span className="tabular-nums">{running ? `${duration} elapsed` : `Took ${duration}`}</span>}
+      {href && <button type="button" data-tab-href={href} className="cursor-pointer hover:text-brand hover:underline" onClick={() => navigateActive(href)}>View in Sync history</button>}
+      {running && progress.cancel && <Button size="xs" variant="ghost" className="-mr-2 ml-auto text-muted-foreground" disabled={cancelling} onClick={() => void cancel()}>{cancelling ? "Cancelling…" : "Cancel"}</Button>}
     </div>}
   </div>;
 }

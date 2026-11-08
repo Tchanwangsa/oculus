@@ -1,6 +1,8 @@
 import type { SyncProgress } from "@/stores/sync/syncStore";
 import type { ParseJob, ParseFailure } from "@/stores/sync/parseStore";
 import { CHAPTER_PHASE_LABEL, type ChapterPhase } from "@/lib/lectures/chapters";
+import { displayCode } from "@/lib/format/format";
+import { SYNC_PHASE } from "@/components/onboarding/library/SyncProgressLine";
 import { object, type Row } from "./model";
 
 export interface JobProgressValue {
@@ -27,8 +29,12 @@ export function jobProgress(kind: string, state: Row, sources: JobProgressSource
     const ownsRun = typeof job.run_id === "number" && sources.sync.runId === job.run_id && sources.sync.scraping;
     const tagged = event?.name === "scrape-progress" && event.payload.runId === job.run_id && typeof job.run_id === "number";
     const progress = tagged ? event.payload as unknown as SyncProgress : ownsRun ? sources.sync.progress : null;
-    return { label: state.lectures ? "Refreshing lecture lists…" : "Starting sync…", sync: progress ?? undefined,
-      cancel: ownsRun && !state.lectures ? { command: "cancel_scrape" } : undefined };
+    const cancel = ownsRun && !state.lectures ? { command: "cancel_scrape" } : undefined;
+    if (!progress) return { label: state.lectures ? "Refreshing lecture lists…" : "Starting sync…", cancel };
+    const phase = progress.phase ? SYNC_PHASE[progress.phase] ?? progress.phase : null;
+    // Worded as the Sync page words it.
+    const label = progress.course ? `Syncing ${displayCode(progress.course)}${phase ? ` — ${phase}` : ""}` : "Syncing your subjects…";
+    return { label, sync: progress, done: progress.done, total: progress.total, percent: percent(progress.done, progress.total), cancel };
   }
   if (kind === "Reparse") {
     const files = Array.isArray(state.files) ? state.files.filter((v): v is string => typeof v === "string") : [];
