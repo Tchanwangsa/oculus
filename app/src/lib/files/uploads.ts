@@ -37,8 +37,7 @@ export async function pickUploads(): Promise<string[]> {
   return Array.isArray(picked) ? picked : [picked];
 }
 
-/** The row must exist before the parse is kicked: `useBackendEvents` resolves a
- *  finished parse to its file by `(subject_id, relative_path)` to embed it. */
+/** Copies picked files into the subject's uploads, then records them. */
 export async function addUploads(
   subject: { id: number; code: string },
   paths: string[],
@@ -47,7 +46,18 @@ export async function addUploads(
     subjectCode: subject.code,
     paths,
   });
+  await recordUploads(subject, outcomes);
+  return outcomes;
+}
 
+/** Writes the `files` row for each file that landed and kicks its parse:
+ *  picked files and browser downloads saved in Oculus alike. The row must
+ *  exist before the parse is kicked: `useBackendEvents` resolves a finished
+ *  parse to its file by `(subject_id, relative_path)` to embed it. */
+export async function recordUploads(
+  subject: { id: number; code: string },
+  outcomes: readonly ImportOutcome[],
+): Promise<void> {
   for (const outcome of outcomes) {
     const file = outcome.file;
     if (!file) continue;
@@ -68,7 +78,6 @@ export async function addUploads(
   }
 
   announce();
-  return outcomes;
 }
 
 /** Remove an upload: the file, its derived PDF and parse artifacts on disk,

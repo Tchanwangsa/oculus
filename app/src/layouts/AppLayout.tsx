@@ -15,6 +15,8 @@ import {
 import { useActivityPing } from "@/hooks/backend/useActivityPing";
 import { useJobAudit } from "@/hooks/agents/useJobAudit";
 import { useBrowserTabs } from "@/hooks/shell/useBrowserTabs";
+import { useBrowserDownloads } from "@/hooks/shell/useBrowserDownloads";
+import { BrowserDownloadDialog } from "@/pages/tools/browser/downloads/BrowserDownloadDialog";
 import { useMusicState } from "@/hooks/music/useMusicState";
 import { useTauriEvent, useWindowEvent } from "@/hooks/backend/useEvents";
 import { routeEdit, routeSelectAll } from "@/lib/menu/editRouting";
@@ -56,6 +58,7 @@ export default function AppLayout() {
   const toggle = useCallback(() => setCollapsed((c) => !c), []);
 
   useBrowserTabs();
+  useBrowserDownloads();
 
   useMusicState();
 
@@ -187,6 +190,7 @@ export default function AppLayout() {
         {/* Shell-level dialogs: each is raised from several places. */}
         <LeaveLectureDialog />
         <EventDialog />
+        <BrowserDownloadDialog />
         {/* ⌘K; listens for its menu event itself. */}
         <CommandPalette />
       </div>

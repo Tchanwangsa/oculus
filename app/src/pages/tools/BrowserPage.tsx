@@ -15,6 +15,7 @@ import { useActivePaneId } from "@/stores/shell/tabStore";
 import { useTabActive, useTabId } from "@/components/tabs/TabContext";
 import { FindBar } from "@/components/ui/search/FindBar";
 import { AddressSuggestions } from "./browser/AddressSuggestions";
+import { DownloadsButton } from "./browser/downloads/DownloadsButton";
 import { useBrowserAddressBar } from "./browser/useBrowserAddressBar";
 import { useBrowserFind } from "./browser/useBrowserFind";
 import { useBrowserViewport } from "./browser/useBrowserViewport";
@@ -150,6 +151,7 @@ export default function BrowserPage() {
           >
             <ArrowSquareOut size={15} />
           </button>
+          <DownloadsButton className={barButton} />
         </div>
 
         {/* A toolbar row, not a floating strip: inside `#root`, a strip over
