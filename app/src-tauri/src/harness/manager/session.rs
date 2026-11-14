@@ -11,17 +11,19 @@ use crate::harness::claude::{ClaudeSession, ClaudeSpawn};
 use crate::harness::codex::{self, CodexThreadOpts};
 use crate::harness::discover;
 use crate::harness::opencode::{self, OpencodeSessionOpts};
-use crate::harness::{Provider, Sink};
+use crate::harness::Provider;
 
 use super::handle::{Handle, Live, RewindTo};
 use super::instructions::{instructions, thread_cwd, thread_sections};
 use super::options::SendOptions;
 use super::raw_log::RawLog;
+use super::sinks::Sinks;
 use super::Harness;
 
 impl Harness {
     /// Bring a thread's session up if it is not, then send. `resume` is the
-    /// provider's session id from a previous process, if any.
+    /// provider's session id from a previous process, if any. A session this
+    /// spawns reports to `sinks`.
     pub fn send(
         &self,
         thread_id: i64,
@@ -29,10 +31,10 @@ impl Harness {
         resume: Option<&str>,
         opts: &SendOptions,
         text: &str,
-        sink: Sink,
+        sinks: &Arc<dyn Sinks>,
     ) -> Result<(), String> {
         let mut live = self.live.lock().unwrap();
-        self.ensure(&mut live, thread_id, provider, resume, opts, sink)?;
+        self.ensure(&mut live, thread_id, provider, resume, opts, sinks)?;
         live.get(&thread_id).ok_or("no session")?.handle.send(text)
     }
 
@@ -55,7 +57,7 @@ impl Harness {
         resume: Option<&str>,
         opts: &SendOptions,
         to: RewindTo,
-        sink: Sink,
+        sinks: &Arc<dyn Sinks>,
     ) -> Result<(), String> {
         // Rewound outside the lock: it waits on the CLI, and holding the map
         // would stall every other thread's next message.
@@ -64,7 +66,7 @@ impl Harness {
             // Any live session will do — the reasoning level is irrelevant to
             // a control-channel instruction, so no `ensure` respawn.
             if !live.get(&thread_id).is_some_and(|l| l.is_alive()) {
-                self.ensure(&mut live, thread_id, provider, resume, opts, sink)?;
+                self.ensure(&mut live, thread_id, provider, resume, opts, sinks)?;
             }
             live.get(&thread_id).ok_or("no session")?.handle.clone()
         };
@@ -73,7 +75,8 @@ impl Harness {
 
     /// Make sure this thread has a session that can be talked to, spawning or
     /// resuming one when it has none. A live session is reused only if it
-    /// runs under the reasoning level asked for.
+    /// runs under the reasoning level asked for. A new one is a new
+    /// [`Generation`](super::Generation), and its sink carries that number.
     fn ensure(
         &self,
         live: &mut HashMap<i64, Live>,
@@ -81,7 +84,7 @@ impl Harness {
         provider: Provider,
         resume: Option<&str>,
         opts: &SendOptions,
-        sink: Sink,
+        sinks: &Arc<dyn Sinks>,
     ) -> Result<(), String> {
         if live
             .get(&thread_id)
@@ -89,9 +92,25 @@ impl Harness {
         {
             return Ok(());
         }
-        #[cfg(test)]
-        assert!(!self.replay_only, "unrecorded provider spawn in replay");
         live.remove(&thread_id);
+        let sink = sinks.events(self.mint());
+        #[cfg(test)]
+        if self.replay_only {
+            let spawn = self
+                .replay_spawns
+                .lock()
+                .unwrap()
+                .remove(&thread_id)
+                .expect("unrecorded provider spawn in replay");
+            live.insert(
+                thread_id,
+                Live {
+                    handle: spawn(sink),
+                    effort: opts.reasoning_effort.clone(),
+                },
+            );
+            return Ok(());
+        }
 
         let cwd = thread_cwd(&self.data_dir);
         // The cwd and every folder a thread may write, before any CLI grants

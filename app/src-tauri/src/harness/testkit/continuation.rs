@@ -381,7 +381,7 @@ impl ConsumerIo for Recorder {
 }
 
 fn settled(thread: i64, card: &str) -> BusMsg {
-    BusMsg::Event(
+    BusMsg::app(
         thread,
         Provider::Codex,
         HarnessEvent::CardSettled {
@@ -422,7 +422,7 @@ fn a_continuation_waits_behind_a_busy_thread_and_goes_out_once() {
         "queued"
     );
 
-    let finished = BusMsg::Event(
+    let finished = BusMsg::app(
         thread,
         Provider::Codex,
         HarnessEvent::TurnFinished {

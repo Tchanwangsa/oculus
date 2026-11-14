@@ -1,8 +1,8 @@
-//! Which run each thread's events belong to, and its settlement. The bridges
-//! keep the sink they were spawned with, so ownership is assigned here, on
-//! the one ordered consumer: a persisted question (or a card's continuation)
-//! opens its run, and that run owns every later event on the thread until its
-//! `TurnFinished` settles it.
+//! Which run each thread's events belong to, and its settlement. Ownership
+//! is assigned here, on the one ordered consumer: a persisted question (or a
+//! card's continuation) opens its run, and that run owns every later event on
+//! the thread until its `TurnFinished` settles it. A session is known by its
+//! generation, and one that has been replaced is heard no more.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -10,7 +10,16 @@ use std::sync::Mutex;
 use sqlx::SqlitePool;
 use tokio::runtime::Runtime;
 
-use crate::harness::{store, HarnessEvent, Queue};
+use crate::harness::{store, Generation, HarnessEvent, Queue};
+
+/// Who sent an event.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) enum From {
+    /// The app itself: a queued message, a send that failed before its turn.
+    App,
+    /// A bridge's session.
+    Session(Generation),
+}
 
 struct Open {
     run_id: i64,
@@ -26,6 +35,8 @@ pub(super) struct RunScope {
     unprompted: HashSet<i64>,
     /// Threads whose open turn already reported a failed row write.
     failed_writes: HashSet<i64>,
+    /// Each thread's newest session.
+    sessions: HashMap<i64, Generation>,
 }
 
 /// One event's place in a run, for its envelope.
@@ -36,6 +47,17 @@ pub(super) struct Tags {
 }
 
 impl RunScope {
+    /// Whether `generation` is still the thread's session. A newer one
+    /// replaces it for good: generations only count up.
+    pub fn admit(&mut self, thread_id: i64, generation: Generation) -> bool {
+        let current = self.sessions.entry(thread_id).or_default();
+        if generation < *current {
+            return false;
+        }
+        *current = generation;
+        true
+    }
+
     /// A `TurnFinished` with no turn open and no claim on the thread: a
     /// repeat of one already applied.
     pub fn is_stray_terminal(

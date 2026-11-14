@@ -152,7 +152,7 @@ async fn rewind_provider(
     };
     let last_seen = store::newest_anchor(pool, thread_id).await.ok().flatten();
     let (h, provider) = (state.harness.clone(), row.provider);
-    let sink = state.sink(thread_id, provider);
+    let sinks = state.sinks(thread_id, provider);
     // A rewind may respawn the session, which binds the brief.
     let opts = SendOptions {
         model: opts.model.clone().or_else(|| row.model.clone()),
@@ -171,7 +171,7 @@ async fn rewind_provider(
                 anchor: &anchor,
                 last_seen: last_seen.as_deref(),
             },
-            sink,
+            &sinks,
         )
     })
     .await

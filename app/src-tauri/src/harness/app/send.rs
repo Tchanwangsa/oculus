@@ -7,12 +7,10 @@ use sqlx::SqlitePool;
 
 use crate::harness::antigravity_rules;
 use crate::harness::store;
-use crate::harness::{
-    Harness, HarnessEvent, LectureBrief, Provider, SendOptions, Sink, StudioBrief,
-};
+use crate::harness::{Harness, HarnessEvent, LectureBrief, Provider, SendOptions, StudioBrief};
 use crate::runtime::blocking::run as blocking;
 
-use super::{sink_for, Bus, BusMsg};
+use super::{sink_for, sinks_for, Bus, BusMsg};
 
 /// A send the queue has let go. A failure still closes the turn (an error
 /// row, then `TurnFinished`), so nothing queued behind it is stranded. A
@@ -28,17 +26,7 @@ pub(super) async fn dispatch(
 ) -> Result<(), String> {
     let sink = sink_for(&bus, thread_id, provider);
     let continuation = opts.continuation.is_some();
-    match start_turn(
-        &harness,
-        &bus,
-        thread_id,
-        provider,
-        opts,
-        &text,
-        sink.clone(),
-    )
-    .await
-    {
+    match start_turn(&harness, &bus, thread_id, provider, opts, &text).await {
         Ok(()) => Ok(()),
         Err(e) if continuation && e == store::NOT_CLAIMED => {
             let _ = bus.send(BusMsg::Release(thread_id, provider));
@@ -93,7 +81,6 @@ async fn start_turn(
     provider: Provider,
     opts: SendOptions,
     text: &str,
-    sink: Sink,
 ) -> Result<(), String> {
     let pool = crate::db::store::open_pool().await?;
     let row = store::thread(&pool, thread_id).await?;
@@ -153,8 +140,8 @@ async fn start_turn(
         continuation: opts.continuation.clone(),
     };
     let (run, text, cards) = begin_turn(&pool, bus, intent, opts.context.as_deref()).await?;
-    let (h, sink) = (harness.clone(), sink.clone());
-    blocking(move || h.send(thread_id, provider, resume.as_deref(), &opts, &text, sink)).await?;
+    let (h, sinks) = (harness.clone(), sinks_for(bus, thread_id, provider));
+    blocking(move || h.send(thread_id, provider, resume.as_deref(), &opts, &text, &sinks)).await?;
     if let Err(e) = store::mark_sent(&pool, &run).await {
         elog!("[oculus] harness run {}: {e}", run.run_id);
     }

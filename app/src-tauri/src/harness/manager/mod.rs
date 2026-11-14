@@ -11,6 +11,7 @@ mod options;
 mod queue;
 mod raw_log;
 mod session;
+mod sinks;
 mod stoppable;
 mod studio;
 
@@ -23,10 +24,12 @@ pub(in crate::harness) use options::validate_effort;
 pub use options::{LectureBrief, SendOptions, StudioSend};
 pub use queue::{Queue, QueuedMessage};
 pub use raw_log::RawLog;
+pub use sinks::{Generation, OneSink, Sinks};
 pub use studio::StudioBrief;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::harness::codex::CodexServer;
@@ -41,7 +44,12 @@ pub struct Harness {
     data_dir: PathBuf,
     #[cfg(test)]
     replay_only: bool,
+    /// Recorded sessions a replay's next spawn takes, by thread.
+    #[cfg(test)]
+    replay_spawns: Mutex<HashMap<i64, ReplaySpawn>>,
     live: Mutex<HashMap<i64, Live>>,
+    /// The last [`Generation`] minted.
+    generations: AtomicU64,
     codex: Mutex<Option<Arc<CodexServer>>>,
     opencode: Mutex<Option<Arc<OpencodeServer>>>,
     /// Codex events with no thread — the account's rate-limit windows.
@@ -64,7 +72,10 @@ impl Harness {
             data_dir,
             #[cfg(test)]
             replay_only: false,
+            #[cfg(test)]
+            replay_spawns: Mutex::new(HashMap::new()),
             live: Mutex::new(HashMap::new()),
+            generations: AtomicU64::new(0),
             codex: Mutex::new(None),
             opencode: Mutex::new(None),
             codex_account_sink: Mutex::new(None),
@@ -84,7 +95,16 @@ impl Harness {
     pub fn set_opencode_default_sink(&self, sink: Sink) {
         *self.opencode_default_sink.lock().unwrap() = Some(sink);
     }
+
+    /// A number no session of this app has had.
+    fn mint(&self) -> Generation {
+        self.generations.fetch_add(1, Ordering::SeqCst) + 1
+    }
 }
+
+/// Opens a recorded session on the sink of the generation minted for it.
+#[cfg(test)]
+type ReplaySpawn = Box<dyn FnOnce(Sink) -> Handle + Send>;
 
 #[cfg(test)]
 impl Harness {
@@ -94,13 +114,15 @@ impl Harness {
         harness
     }
 
-    pub(in crate::harness) fn replay_handle(&self, thread: i64, handle: Handle) {
-        self.live.lock().unwrap().insert(
-            thread,
-            Live {
-                handle,
-                effort: None,
-            },
-        );
+    /// The session the thread's next spawn opens, in place of a process.
+    pub(in crate::harness) fn replay_spawn(
+        &self,
+        thread: i64,
+        spawn: impl FnOnce(Sink) -> Handle + Send + 'static,
+    ) {
+        self.replay_spawns
+            .lock()
+            .unwrap()
+            .insert(thread, Box::new(spawn));
     }
 }

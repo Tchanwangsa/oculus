@@ -30,8 +30,8 @@ mod transport;
 pub use cli::{discover, install, signin, update};
 pub use event::{HarnessEvent, Provider, ToolKind};
 pub use manager::{
-    instructions, run_once, thread_cwd, thread_sections, Harness, LectureBrief, Queue,
-    QueuedMessage, RawLog, RewindTo, SendOptions, StudioBrief, StudioSend,
+    instructions, run_once, thread_cwd, thread_sections, Generation, Harness, LectureBrief,
+    OneSink, Queue, QueuedMessage, RawLog, RewindTo, SendOptions, Sinks, StudioBrief, StudioSend,
 };
 pub use providers::antigravity::rules as antigravity_rules;
 pub use providers::{antigravity, claude, codex, opencode};

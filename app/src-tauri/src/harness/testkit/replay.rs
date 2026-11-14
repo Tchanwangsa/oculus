@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use crate::harness::manager::Handle;
-use crate::harness::{Harness, Provider, SendOptions};
+use crate::harness::{Harness, OneSink, Provider, SendOptions, Sinks};
 
 use super::{guard::assert_scratch, rig::Rig, scenario::Scenario};
 
@@ -47,12 +47,13 @@ pub(super) fn run(scenario: Scenario) -> Replay {
 fn replay_manager_never_spawns_an_unrecorded_handle() {
     let scratch = super::guard::scratch("turn-no-spawn");
     let harness = Harness::replay(assert_scratch(&scratch, &scratch));
+    let sinks: Arc<dyn Sinks> = Arc::new(OneSink(Arc::new(|_| {})));
     let _ = harness.send(
         1,
         Provider::Claude,
         None,
         &SendOptions::default(),
         "unexpected",
-        Arc::new(|_| {}),
+        &sinks,
     );
 }

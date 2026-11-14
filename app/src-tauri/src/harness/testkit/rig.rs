@@ -19,7 +19,7 @@ use crate::harness::app::consumer::consume;
 use crate::harness::app::send::begin_run;
 use crate::harness::app::BusMsg;
 use crate::harness::{
-    jobs, store, Harness, HarnessEvent, Provider, Queue, QueuedMessage, SendOptions, Sink,
+    jobs, store, Harness, HarnessEvent, Provider, Queue, QueuedMessage, SendOptions, Sink, Sinks,
 };
 
 use super::io::{Feed, Io};
@@ -36,7 +36,10 @@ pub(super) struct Rig {
     pub provider: Provider,
     pub harness: Harness,
     pub bus: Sender<BusMsg>,
+    /// Where the app's own events go: a send that failed before its turn.
     pub sink: Sink,
+    /// Where the thread's sessions report, as in the app.
+    pub sinks: Arc<dyn Sinks>,
     pub queue: Arc<Mutex<Queue>>,
     outbound: Outbound,
     bridge: Bridge,
@@ -108,10 +111,8 @@ impl Rig {
         // The consumer runs beside the replay, as in the app: a send's run is
         // written on it before the provider write.
         let (bus, rx) = std::sync::mpsc::channel::<BusMsg>();
-        let events = bus.clone();
-        let sink: Sink = Arc::new(move |ev| {
-            let _ = events.send(BusMsg::Event(thread, provider, ev));
-        });
+        let sink = crate::harness::app::sink_for(&bus, thread, provider);
+        let sinks = crate::harness::app::sinks_for(&bus, thread, provider);
         let queue = Arc::new(Mutex::new(Queue::default()));
         let fed = Arc::new(AtomicBool::new(false));
         let (continued, dispatched) = std::sync::mpsc::channel();
@@ -140,27 +141,14 @@ impl Rig {
                 io
             })
         };
-        let bridge = match provider {
-            Provider::Claude => {
-                crate::harness::claude::replay::bridge(outbound.wire(), sink.clone())
-            }
-            Provider::Codex => crate::harness::codex::replay::bridge(
-                outbound.clone(),
-                sink.clone(),
-                &scenario.fixture.native_session,
-                &scratch,
-            ),
-            Provider::Opencode => crate::harness::opencode::replay::bridge(
-                outbound.clone(),
-                sink.clone(),
-                &scenario.fixture.native_session,
-                &scratch,
-            ),
-            Provider::Antigravity => {
-                crate::harness::antigravity::replay::bridge(outbound.wire(), sink.clone())
-            }
-        };
-        harness.replay_handle(thread, bridge.handle.clone());
+        let bridge = session(
+            &harness,
+            thread,
+            provider,
+            &outbound,
+            &scenario.fixture.native_session,
+            &scratch,
+        );
         Rig {
             scenario,
             scratch,
@@ -172,6 +160,7 @@ impl Rig {
             harness,
             bus,
             sink,
+            sinks,
             queue,
             outbound,
             bridge,
@@ -208,7 +197,7 @@ impl Rig {
     /// dispatches, and the rig runs the production start steps.
     fn continue_card(&mut self, card: &str) {
         self.bus
-            .send(BusMsg::Event(
+            .send(BusMsg::app(
                 self.thread,
                 self.provider,
                 HarnessEvent::CardSettled {
@@ -244,7 +233,7 @@ impl Rig {
                 None,
                 &SendOptions::default(),
                 &prompt,
-                self.sink.clone(),
+                &self.sinks,
             )
             .unwrap();
         self.runtime
@@ -261,6 +250,15 @@ impl Rig {
     /// written on the consumer, then the provider hears of it. A refusal
     /// closes the turn the way `send::dispatch` does.
     pub fn send(&mut self, receipt: &str) -> Result<store::RunStart, String> {
+        self.send_with(receipt, &SendOptions::default())
+    }
+
+    /// [`Self::send`] under the composer's `opts` (a reasoning level).
+    pub fn send_with(
+        &mut self,
+        receipt: &str,
+        opts: &SendOptions,
+    ) -> Result<store::RunStart, String> {
         let begun = self.runtime.block_on(begin_run(
             &self.bus,
             store::SendIntent {
@@ -279,9 +277,9 @@ impl Rig {
                 self.thread,
                 self.provider,
                 None,
-                &SendOptions::default(),
+                opts,
                 "Replay request",
-                self.sink.clone(),
+                &self.sinks,
             )?;
             self.runtime.block_on(store::mark_sent(&self.pool, &run))?;
             Ok(run)
@@ -290,6 +288,21 @@ impl Rig {
             crate::harness::child::fail_turn(&self.sink, self.provider, error.clone());
         }
         sent
+    }
+
+    /// A second recorded session for the thread, which the manager's next
+    /// spawn opens. Returns the one it replaces, whose reader the test may
+    /// still drive: a process the app no longer listens to.
+    pub fn next_session(&mut self) -> Bridge {
+        let next = session(
+            &self.harness,
+            self.thread,
+            self.provider,
+            &self.outbound,
+            &self.scenario.fixture.native_session,
+            &self.scratch,
+        );
+        std::mem::replace(&mut self.bridge, next)
     }
 
     /// Feed one inbound frame through the bridge's production reader.
@@ -345,7 +358,7 @@ impl Rig {
         // The same card settling again (a second view's event) starts nothing.
         if let Some(card) = &self.card {
             self.bus
-                .send(BusMsg::Event(
+                .send(BusMsg::app(
                     self.thread,
                     self.provider,
                     HarnessEvent::CardSettled {
@@ -407,4 +420,47 @@ impl Rig {
             continuations: self.continuations,
         }
     }
+}
+
+/// A recorded session of `provider`, registered as the thread's next spawn.
+/// Its bridge is built now, so the test can feed it, on a sink that goes
+/// nowhere until the manager opens the session and mints its generation: a
+/// session never opened (its send was refused) has no reader to hear it.
+fn session(
+    harness: &Harness,
+    thread: i64,
+    provider: Provider,
+    outbound: &Outbound,
+    native_session: &str,
+    scratch: &std::path::Path,
+) -> Bridge {
+    let opened: Arc<Mutex<Option<Sink>>> = Arc::default();
+    let sink: Sink = {
+        let opened = opened.clone();
+        Arc::new(move |ev| {
+            let sink = opened.lock().unwrap().clone();
+            if let Some(sink) = sink {
+                sink(ev);
+            }
+        })
+    };
+    let bridge = match provider {
+        Provider::Claude => crate::harness::claude::replay::bridge(outbound.wire(), sink),
+        Provider::Codex => {
+            crate::harness::codex::replay::bridge(outbound.clone(), sink, native_session, scratch)
+        }
+        Provider::Opencode => crate::harness::opencode::replay::bridge(
+            outbound.clone(),
+            sink,
+            native_session,
+            scratch,
+        ),
+        Provider::Antigravity => crate::harness::antigravity::replay::bridge(outbound.wire(), sink),
+    };
+    let handle = bridge.handle.clone();
+    harness.replay_spawn(thread, move |sink| {
+        *opened.lock().unwrap() = Some(sink);
+        handle
+    });
+    bridge
 }

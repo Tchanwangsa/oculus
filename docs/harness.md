@@ -1086,6 +1086,25 @@ removed; tool and reasoning text is not searched, since those rows stay
 closed) opens until the query stops matching. Select All leaves folds as they
 are. An answer's Copy copies that reply alone.
 
+## Events say whose they are
+
+A bridge keeps the sink it was spawned with for its whole life, so an event
+has to say which session it came from: the consumer cannot go by which run
+happens to be open when it arrives.
+
+**A session has a generation.** `Harness::ensure` mints a number
+(`manager/sinks.rs`, `Generation`) for every spawn or attach, never reused,
+and asks the thread's `Sinks` for that generation's sink
+(`app::sinks_for`). Each event the session reports reaches the bus as
+`BusMsg::Event { generation: Some(n), .. }`; an event the app makes itself
+(`Queued`, `Rewound`, a send that failed before its turn) carries `None`.
+The consumer keeps each thread's newest generation (`RunScope::admit`) and
+drops, with a log line, an event from an older one. That is what keeps a
+process the manager replaced from speaking into the run its successor is
+answering: left alone, a turn it started for a finished background task
+would take the thread from that run. A headless run (`run_once`) has no
+consumer and passes `OneSink`, the same sink for every session.
+
 ## Going back rewinds the agent too
 
 Edit, Retry and Rewind truncate at a row (`harness::store::truncate_from`, announced as

@@ -283,7 +283,7 @@ fn a_stray_row_on_the_bus_is_written_before_the_next_question() {
         .unwrap();
     let (reply, answer) = tokio::sync::oneshot::channel();
     let bus = vec![
-        BusMsg::Event(
+        BusMsg::app(
             thread,
             Provider::Claude,
             HarnessEvent::error("late from the previous turn"),

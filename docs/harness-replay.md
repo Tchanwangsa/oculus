@@ -22,8 +22,8 @@ and release gate for the agent turn model rebuild.
 frames. `mutate(Mutation)` explicitly changes a recording for robustness
 checks; mutations are never described as captured provider behavior.
 `run(scenario)` drives a `Rig` (below) through the whole recording. The rig
-creates a migrated scratch SQLite file, installs production
-provider handles in the manager and starts the production consumer on its own
+creates a migrated scratch SQLite file, registers production
+provider handles as the manager's next spawn and starts the production consumer on its own
 thread, fed by a bus as in the app. It persists the send's run through the
 production `begin_run` on that bus (receipt `replay-send`) and then calls
 `Harness::send`; a refused intent skips the send, as the app does. The normal provider
@@ -77,6 +77,13 @@ has applied everything sent so far (`Rig::drain`: the feed answers when it
 finds the bus empty, with no sleep to tune). The test then does what a
 student or the app would do mid-turn, such as a second `rig.send` or a call
 on `rig.harness`, and `resume`s. Races are tested this way, never by timing.
+
+The manager never spawns in a replay. A recorded session is registered as the
+thread's next spawn (`Harness::replay_spawn`) and opened by the send that
+would have started a process, on the sink of the generation minted for it.
+`rig.next_session()` registers another and hands back the one it replaces,
+whose reader the test can go on feeding: a process the app no longer listens
+to.
 
 ```rust
 let scenario = Scenario::recorded("codex-ls")

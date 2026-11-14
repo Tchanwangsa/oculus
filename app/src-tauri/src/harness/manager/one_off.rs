@@ -18,6 +18,7 @@ use super::handle::Handle;
 use super::instructions::thread_cwd;
 use super::naming::{clean_title, naming_prompt, NAMING_INSTRUCTIONS, NAMING_TIMEOUT_SECS};
 use super::options::SendOptions;
+use super::sinks::{OneSink, Sinks};
 use super::Harness;
 
 impl Harness {
@@ -231,7 +232,8 @@ pub fn run_once(
         let _ = tx.send(ev);
     });
     // Thread id 0 in the log dir: a headless run is not a thread.
-    harness.send(0, provider, None, opts, prompt, sink)?;
+    let sinks: Arc<dyn Sinks> = Arc::new(OneSink(sink));
+    harness.send(0, provider, None, opts, prompt, &sinks)?;
     let failed = drain_turn(&rx, None, "finishing", &on_event);
     harness.shutdown();
     match failed {

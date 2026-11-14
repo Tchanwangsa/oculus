@@ -57,7 +57,7 @@ impl ConsumerIo for AppIo {
                 namer.name_thread(sel, &seed.first_message, &seed.reply)
             }) {
                 Ok(title) => {
-                    let _ = bus.send(BusMsg::Event(
+                    let _ = bus.send(BusMsg::app(
                         thread_id,
                         provider,
                         HarnessEvent::ThreadTitled { title },
@@ -78,7 +78,7 @@ impl ConsumerIo for AppIo {
         let (h, b) = (self.namer.clone(), self.bus.clone());
         // A continuation was never shown as queued.
         if opts.continuation.is_none() {
-            let _ = b.send(BusMsg::Event(
+            let _ = b.send(BusMsg::app(
                 thread_id,
                 provider,
                 HarnessEvent::Unqueued { id: msg.id },

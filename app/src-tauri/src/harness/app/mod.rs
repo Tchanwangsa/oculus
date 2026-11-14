@@ -26,7 +26,7 @@ use std::sync::{mpsc, Arc, Mutex};
 
 use serde::Serialize;
 
-use crate::harness::{Harness, HarnessEvent, Provider, Queue, Sink};
+use crate::harness::{Generation, Harness, HarnessEvent, Provider, Queue, Sink, Sinks};
 
 /// What the webview gets on `harness-event`, plus the row id when the
 /// event became a row. Account-scoped events arrive with `threadId` 0,
@@ -53,8 +53,14 @@ pub(in crate::harness) struct Envelope {
 /// stay unboxed as they were before `Begin` joined them.
 #[allow(clippy::large_enum_variant)]
 pub(in crate::harness) enum BusMsg {
-    /// A bridge's event, tagged with its thread.
-    Event(i64, Provider, HarnessEvent),
+    /// An event, tagged with its thread and with the session that reported
+    /// it; `None` for one the app made itself.
+    Event {
+        thread_id: i64,
+        provider: Provider,
+        generation: Option<Generation>,
+        event: HarnessEvent,
+    },
     /// A send to persist before its provider write. On the consumer, so every
     /// row already queued for the thread is written before the question's.
     Begin {
@@ -66,6 +72,18 @@ pub(in crate::harness) enum BusMsg {
     Release(i64, Provider),
 }
 
+impl BusMsg {
+    /// An event the app made itself, from no session.
+    pub(in crate::harness) fn app(thread_id: i64, provider: Provider, event: HarnessEvent) -> Self {
+        BusMsg::Event {
+            thread_id,
+            provider,
+            generation: None,
+            event,
+        }
+    }
+}
+
 type Bus = mpsc::Sender<BusMsg>;
 
 pub struct HarnessState {
@@ -75,16 +93,56 @@ pub struct HarnessState {
     queue: Arc<Mutex<Queue>>,
 }
 
-fn sink_for(bus: &Bus, thread_id: i64, provider: Provider) -> Sink {
+/// Where the app's own events for a thread go: from no session.
+pub(in crate::harness) fn sink_for(bus: &Bus, thread_id: i64, provider: Provider) -> Sink {
     let bus = bus.clone();
     Arc::new(move |ev| {
-        let _ = bus.send(BusMsg::Event(thread_id, provider, ev));
+        let _ = bus.send(BusMsg::app(thread_id, provider, ev));
+    })
+}
+
+/// A thread's sessions on the consumer's bus: each stamps what it reports
+/// with its generation, so the consumer can tell a replaced session's events
+/// from the live one's.
+struct ThreadSinks {
+    bus: Bus,
+    thread_id: i64,
+    provider: Provider,
+}
+
+impl Sinks for ThreadSinks {
+    fn events(&self, generation: Generation) -> Sink {
+        let (bus, thread_id, provider) = (self.bus.clone(), self.thread_id, self.provider);
+        Arc::new(move |event| {
+            let _ = bus.send(BusMsg::Event {
+                thread_id,
+                provider,
+                generation: Some(generation),
+                event,
+            });
+        })
+    }
+}
+
+pub(in crate::harness) fn sinks_for(
+    bus: &Bus,
+    thread_id: i64,
+    provider: Provider,
+) -> Arc<dyn Sinks> {
+    Arc::new(ThreadSinks {
+        bus: bus.clone(),
+        thread_id,
+        provider,
     })
 }
 
 impl HarnessState {
     fn sink(&self, thread_id: i64, provider: Provider) -> Sink {
         sink_for(&self.bus, thread_id, provider)
+    }
+
+    fn sinks(&self, thread_id: i64, provider: Provider) -> Arc<dyn Sinks> {
+        sinks_for(&self.bus, thread_id, provider)
     }
 }
 
