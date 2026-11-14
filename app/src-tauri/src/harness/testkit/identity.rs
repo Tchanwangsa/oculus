@@ -1,6 +1,7 @@
 //! Events say whose they are: a run is settled only by its own turn's end,
-//! and a session that has been replaced is heard no more. Each test replays
-//! a hole that was open before turns and sessions had ids.
+//! and a session that has ended or been replaced is heard no more. Each
+//! test replays what goes wrong when an event is taken for the open run's
+//! only because it arrived while that run was open.
 
 use std::sync::{Arc, Mutex};
 

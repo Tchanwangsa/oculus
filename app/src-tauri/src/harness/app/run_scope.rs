@@ -191,8 +191,7 @@ impl RunScope {
             open => open,
         };
         // No turn is named by the app, closing a send that failed, or by a
-        // bridge that could not tell: whatever is open ends, as it would
-        // have before turns had ids.
+        // bridge that could not tell: whatever is open ends.
         let (Some(generation), Some(turn)) = (from.generation(), turn) else {
             return match (open, own) {
                 // A session cut short in a turn of its own it never named.

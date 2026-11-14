@@ -22,6 +22,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Process pipes, JSON lines and terminal turn failures shared by the bridges | `app/src-tauri/src/harness/child.rs` |
 | Thread and timeline rows | `app/src-tauri/src/harness/store/` |
 | Runs, attempts, provider bindings and send receipts; which run owns each event | `app/src-tauri/src/harness/store/runs.rs`, `app/src-tauri/src/harness/store/runs.sql`, `app/src-tauri/src/harness/app/run_scope.rs` |
+| Session generations and `release`, turn ids, the ordered consumer with its stream drafts and settle retries, the startup gate | `app/src-tauri/src/harness/manager/sinks.rs`, `app/src-tauri/src/harness/manager/release.rs`, `app/src-tauri/src/harness/event/turn.rs`, `app/src-tauri/src/harness/app/consumer.rs`, `app/src-tauri/src/harness/app/drafts.rs`, `app/src-tauri/src/harness/app/wake.rs`, `app/src-tauri/src/harness/app/startup.rs` |
 | The brief appended to each prompt; `AGENTS.md`; skills | `app/src-tauri/templates/HARNESS.template.md`, `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/skills/`, `app/src-tauri/src/agents/mod.rs` |
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
 | Provider table (`PROVIDERS`), platform capabilities, types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/availability.ts`, `app/src/lib/harness/` |
