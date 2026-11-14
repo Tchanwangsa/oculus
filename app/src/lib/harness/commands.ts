@@ -5,6 +5,7 @@ import type { RunRow } from "./runs";
 import type { BridgeHealth, HarnessItem, QueuedMessage } from "./types";
 import type { StudioSend } from "@/lib/studio/videos";
 import { openNotebookContext } from "@/lib/canvas/openNotebooks";
+import { takePickedSkills } from "./skills";
 import { useProposalStore } from "@/stores/chat/proposalStore";
 
 export interface SendOptions {
@@ -23,6 +24,9 @@ export interface SendOptions {
   at?: number | null;
   /** Only read on creation: links the new thread to a Studio video. */
   studio?: StudioSend;
+  /** The skills the student picked as chips in this message, by name. Rust
+   *  names each to the agent in the prompt, never in the stored row. */
+  skills?: string[];
 }
 
 /** How a message should reach a chat that is mid-turn (`Mode` in
@@ -65,7 +69,9 @@ export function harnessSend(
 ): Promise<number> {
   const notebooks = openNotebookContext();
   const context = [options.context, notebooks].filter(Boolean).join("\n\n") || null;
-  return messaging.send(threadId, provider, text, notebooks ? { ...options, context } : options);
+  const skills = takePickedSkills(text);
+  const withSkills = skills.length ? { ...options, skills } : options;
+  return messaging.send(threadId, provider, text, notebooks ? { ...withSkills, context } : withSkills);
 }
 
 /** Rewind to a question and send new text in its place. See docs/harness.md

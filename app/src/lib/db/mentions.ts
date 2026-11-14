@@ -26,11 +26,12 @@ export interface MentionFile {
 function mentionMatch(
   query: string,
   from: number,
+  column = "f.filename",
 ): { where: string; params: string[]; prefix: string } {
   const words = terms(query);
   return {
     where: words.length
-      ? words.map((_, i) => `f.filename LIKE $${from + i} ESCAPE '\\'`).join(" AND ")
+      ? words.map((_, i) => `${column} LIKE $${from + i} ESCAPE '\\'`).join(" AND ")
       : "1",
     params: words.map((w) => `%${w}%`),
     prefix: `${words[0] ?? ""}%`,
@@ -64,6 +65,74 @@ export async function searchMentionFiles(
      LIMIT $${params.length + 3}`,
     [subjectId, ...params, prefix, limit],
   );
+}
+
+/** A folder the chat composer's `@` can point the agent at; the agent lists it
+ *  itself. */
+export interface MentionFolder {
+  /** Library-root path ending in `/`: `courses/<subject>/pages/`, or a whole
+   *  subject's `courses/<subject>/` in a General thread. */
+  path: string;
+  /** Its own name: the folder's, or the subject's folder's. */
+  name: string;
+  subject_id: number;
+  subject_code: string;
+}
+
+/**
+ * The folders an `@` offers, first in its menu: a subject's own top-level
+ * folders (`pages/`, `files/`, `uploads/`…), or in a General thread each
+ * subject's folder. Read off the files table, so a folder holding no file is
+ * not offered. Most recently opened first; the query's words are ANDed
+ * against the folder's name.
+ */
+export async function searchMentionFolders(
+  subjectId: number | null,
+  query: string,
+  limit = 6,
+): Promise<MentionFolder[]> {
+  const db = await getDb();
+  const { sql, params } = mentionFoldersQuery(subjectId, query, limit);
+  return db.select<MentionFolder[]>(sql, params);
+}
+
+/** `searchMentionFolders`' statement and its parameters. */
+export function mentionFoldersQuery(
+  subjectId: number | null,
+  query: string,
+  limit: number,
+): { sql: string; params: (string | number | null)[] } {
+  const { where, params } = mentionMatch(query, 2, "name");
+  return {
+    sql: `WITH d AS (
+       SELECT f.subject_id, s.code AS subject_code, f.last_accessed_at AS seen,
+              substr(f.relative_path, 9) AS rest
+       FROM files f
+       JOIN subjects s ON s.id = f.subject_id
+       WHERE f.relative_path LIKE 'courses/%/%'
+         AND ($1 IS NULL OR f.subject_id = $1)
+     ), t AS (
+       SELECT subject_id, subject_code, seen,
+              substr(rest, 1, instr(rest, '/')) AS top,
+              substr(rest, instr(rest, '/') + 1) AS inner
+       FROM d
+     ), n AS (
+       SELECT subject_id, subject_code, seen,
+              CASE WHEN $1 IS NULL THEN 'courses/' || top
+                   ELSE 'courses/' || top || substr(inner, 1, instr(inner, '/')) END AS path,
+              CASE WHEN $1 IS NULL THEN substr(top, 1, length(top) - 1)
+                   ELSE substr(inner, 1, instr(inner, '/') - 1) END AS name
+       FROM t
+       WHERE $1 IS NULL OR instr(inner, '/') > 0
+     )
+     SELECT path, name, subject_id, subject_code
+     FROM n
+     WHERE (${where})
+     GROUP BY path
+     ORDER BY MAX(seen) DESC, path ASC
+     LIMIT $${params.length + 2}`,
+    params: [subjectId, ...params, limit],
+  };
 }
 
 /** A file a note's `@` offers, with its subject's code for the menu. */

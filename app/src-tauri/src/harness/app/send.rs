@@ -133,6 +133,7 @@ async fn send(rt: &Runtime, start: Start) -> Result<bool, String> {
         opts.context.as_deref(),
     )
     .await?;
+    let text = super::skills::name_picked_skills(provider, &opts.skills, text);
     // The last check before the provider hears of it: a run stopped while
     // this step prepared, or one a rewind or a delete took, is not sent.
     if !store::claim_start(&pool, &run).await? {

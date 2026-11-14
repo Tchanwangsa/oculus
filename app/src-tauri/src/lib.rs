@@ -339,6 +339,7 @@ pub fn run() {
             providers::groq::groq_delete_api_key,
             harness::app::setup::harness_health,
             harness::app::setup::harness_capabilities,
+            harness::app::skills::harness_skills,
             harness::app::setup::harness_install_offer,
             harness::app::setup::harness_install_run,
             harness::app::setup::harness_updates,

@@ -4,11 +4,11 @@ import { imageFiles } from "@/lib/harness/attachments";
 import { hasControlChars } from "@/lib/harness/controlChars";
 import {
   caretChunk,
-  chipText,
   chunkText,
   chunksText,
   domOffset,
   linkChunks,
+  maskedText,
   normalize,
   sameChunks,
   ZWSP_RE,
@@ -17,6 +17,7 @@ import {
 } from "./chunks";
 import { isChip, readEditor, repaintCaret, revealCaret, toChunks, type Point } from "./dom";
 import { ComposerLink } from "./ComposerLink";
+import { SkillChip } from "./SkillChip";
 import type { Landing, MentionInputHandle } from "./types";
 
 export type { MentionInputHandle } from "./types";
@@ -32,18 +33,20 @@ const drawnText = (text: string, last: boolean) => (last && text.endsWith(" ") ?
 const isBlank = (text: string) => text.replace(/[\r\n]/g, "") === "";
 
 /**
- * A contenteditable whose `@` mentions are inline `contenteditable="false"`
- * references and whose web links are text drawn as links (`ComposerLink`).
- * Drawn and sent text differ: `readEditor` turns each mention back into its
- * backticked library path, so the agent never sees a display name, and each
- * link back into the text as written. A link is drawn when pasted, or when the
- * space after it is typed, and stops being one when an edit leaves no link.
- * Only Shift+Enter and mention-eating Backspace/Delete are intercepted.
+ * A contenteditable whose `@` mentions and picked skills are inline
+ * `contenteditable="false"` references and whose web links are text drawn as
+ * links (`ComposerLink`). Drawn and sent text differ: `readEditor` turns each
+ * mention back into its backticked library path, so the agent never sees a
+ * display name, each skill into `/name`, and each link into the text as
+ * written. A link is drawn when pasted, or when the space after it is typed,
+ * and stops being one when an edit leaves no link. Only Shift+Enter and
+ * chip-eating Backspace/Delete are intercepted.
  */
 export function MentionInput({
   ref,
   placeholder,
   initialText,
+  skills,
   autoFocus,
   onEdit,
   onFiles,
@@ -55,8 +58,14 @@ export function MentionInput({
   placeholder: string;
   /** Read once at mount; after that the DOM is the truth. */
   initialText?: string;
+  /** The installed skills' names: a `/name` in loaded text becomes a chip only
+   *  if it is here. Null while the catalogue loads; once it lands, a box not
+   *  yet edited draws its chips. */
+  skills?: ReadonlySet<string> | null;
   autoFocus?: boolean;
-  onEdit: (text: string, caret: number) => void;
+  /** `masked` is `text` with each picked skill's characters masked, for
+   *  finding a `/` trigger without matching a chip. */
+  onEdit: (text: string, caret: number, masked: string) => void;
   /** Pasted pictures; they never enter the editor's nodes. */
   onFiles?: (files: File[]) => void;
   /** Offered a plain-text paste first; true means it was taken (as a card). */
@@ -66,13 +75,16 @@ export function MentionInput({
   onBlur?: () => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
-  const [chunks, setChunks] = useState<Chunk[]>(() => normalize(toChunks(initialText ?? "")));
+  const [chunks, setChunks] = useState<Chunk[]>(() => normalize(toChunks(initialText ?? "", skills ?? undefined)));
   /** The editor's `key`: a structural change remounts instead of diffing a tree
    *  the typist edited underneath React. */
   const [version, setVersion] = useState(0);
   /** Placeholder flag — `:empty` can't do it, WebKit's trailing `<br>` isn't empty. */
   const [blank, setBlank] = useState(isBlank(initialText ?? ""));
   const landing = useRef<Landing | null>(null);
+  /** Whether anything has changed the text since mount; a late catalogue only
+   *  redraws a box that still holds what it loaded. */
+  const touched = useRef(false);
   /** The pending `repaintCaret`; one is enough for a burst of line breaks. */
   const repaint = useRef(0);
   useEffect(() => () => cancelAnimationFrame(repaint.current), []);
@@ -102,7 +114,8 @@ export function MentionInput({
     if (!el) return;
     const r = readEditor(el, point(el));
     setBlank(isBlank(r.text));
-    onEdit(r.text, r.caret ?? r.text.length);
+    if (r.text !== chunksText(chunks)) touched.current = true;
+    onEdit(r.text, r.caret ?? r.text.length, maskedText(r.chunks));
   }
 
   /** Redraws the links when an edit made or unmade one. The message text does
@@ -128,6 +141,7 @@ export function MentionInput({
   function commit(next: Chunk[], caret: number, focus?: boolean) {
     const el = box.current;
     const norm = normalize(next);
+    if (chunksText(norm) !== (initialText ?? "")) touched.current = true;
     landing.current = {
       ...caretChunk(norm, caret),
       focus: focus === true || (el != null && el.contains(document.activeElement)),
@@ -136,7 +150,45 @@ export function MentionInput({
     setVersion((v) => v + 1);
     const text = chunksText(norm);
     setBlank(isBlank(text));
-    onEdit(text, caret);
+    onEdit(text, caret, maskedText(norm));
+  }
+
+  // The catalogue landed after mount: chip the loaded text's skills, unless
+  // the student has already typed.
+  useEffect(() => {
+    if (!skills?.size || touched.current || !initialText?.includes("/")) return;
+    const next = normalize(toChunks(initialText, skills));
+    if (!sameChunks(next, chunks)) commit(next, chunksText(next).length);
+    // Only a catalogue change re-runs this; the rest is read at that moment.
+  }, [skills]);
+
+  /** Swaps the token from message offset `start` to the caret for `insert`,
+   *  then a space; the caret lands after the space. A token never holds a
+   *  backtick, newline or chip, so it is in one text run. */
+  function splice(start: number, insert: Chunk[]) {
+    const el = box.current;
+    if (!el) return;
+    const r = readEditor(el, point(el));
+    const caret = r.caret ?? r.text.length;
+    let at = 0;
+    for (let i = 0; i < r.chunks.length; i++) {
+      const c = r.chunks[i];
+      const len = chunkText(c).length;
+      if (c.kind === "text" && start >= at && caret <= at + len) {
+        const head = c.text.slice(0, domOffset(c.text, start - at));
+        let tail = c.text.slice(domOffset(c.text, caret - at));
+        // Removing a token leaves one space where two would meet.
+        if (!insert.length && /\s$/.test(head) && /^\s/.test(tail)) tail = tail.slice(1);
+        const added = insert.length ? [...insert, { kind: "text" as const, text: " " }] : [];
+        commit(
+          [...r.chunks.slice(0, i), { kind: "text", text: head }, ...added, { kind: "text", text: tail }, ...r.chunks.slice(i + 1)],
+          start + chunksText(added).length,
+          true,
+        );
+        return;
+      }
+      at += len;
+    }
   }
 
   // Place the caret once the remounted nodes exist, before paint.
@@ -168,36 +220,25 @@ export function MentionInput({
 
   useImperativeHandle(ref, () => ({
     insertMention(start, path) {
+      splice(start, [{ kind: "chip", path }]);
+    },
+    insertSkill(start, name) {
+      splice(start, [{ kind: "skill", name }]);
+    },
+    removeToken(start) {
+      splice(start, []);
+    },
+    pickedSkills() {
       const el = box.current;
-      if (!el) return;
-      const r = readEditor(el, point(el));
-      const caret = r.caret ?? r.text.length;
-      // A query never holds a backtick or newline, so the token is in one text run.
-      let at = 0;
-      for (let i = 0; i < r.chunks.length; i++) {
-        const c = r.chunks[i];
-        const len = chunkText(c).length;
-        if (c.kind === "text" && start >= at && caret <= at + len) {
-          const head = c.text.slice(0, domOffset(c.text, start - at));
-          const tail = c.text.slice(domOffset(c.text, caret - at));
-          commit(
-            [
-              ...r.chunks.slice(0, i),
-              { kind: "text", text: head },
-              { kind: "chip", path },
-              { kind: "text", text: ` ${tail}` },
-              ...r.chunks.slice(i + 1),
-            ],
-            start + chipText(path).length + 1,
-            true,
-          );
-          return;
-        }
-        at += len;
-      }
+      if (!el) return [];
+      return readEditor(el, null).chunks.flatMap((c) => (c.kind === "skill" ? [c.name] : []));
     },
     clear() {
       commit([], 0);
+    },
+    replace(text) {
+      const next = normalize(toChunks(text, skills ?? undefined));
+      commit(next, chunksText(next).length, true);
     },
     prepend(text) {
       const el = box.current;
@@ -336,7 +377,15 @@ export function MentionInput({
         }}
       >
         {chunks.map((c, i) =>
-          c.kind === "text" ? drawnText(c.text, i === chunks.length - 1) : c.kind === "link" ? <ComposerLink key={i} raw={c.raw} /> : <FileChip key={i} path={c.path} />,
+          c.kind === "text" ? (
+            drawnText(c.text, i === chunks.length - 1)
+          ) : c.kind === "link" ? (
+            <ComposerLink key={i} raw={c.raw} />
+          ) : c.kind === "skill" ? (
+            <SkillChip key={i} name={c.name} />
+          ) : (
+            <FileChip key={i} path={c.path} />
+          ),
         )}
       </div>
       {blank && (

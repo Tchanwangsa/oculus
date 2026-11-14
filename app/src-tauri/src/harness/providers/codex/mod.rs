@@ -12,6 +12,7 @@
 
 mod inbound;
 mod server;
+mod skill;
 #[cfg(test)]
 mod tests;
 mod translate;
@@ -26,6 +27,7 @@ use crate::harness::event::ToolKind;
 use crate::harness::{RawLog, Sink};
 
 pub use server::CodexServer;
+pub use skill::invoke_skill;
 
 pub struct CodexSpawn {
     pub bin: PathBuf,

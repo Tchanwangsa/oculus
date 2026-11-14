@@ -1,12 +1,15 @@
 import { parseLink, splitLinks } from "@/lib/harness/links";
+import { skillText } from "@/lib/harness/skills";
 
-/** Runs of text with atomic mentions (a mention is only its path) and links
- *  (their text as written, which the caret edits like any other). The DOM, not
- *  this model, is the truth while typing: React renders it once per structural
- *  change, because a contenteditable re-rendered per keystroke drops the caret. */
+/** Runs of text with atomic mentions (a mention is only its path), atomic
+ *  skills (only their name) and links (their text as written, which the caret
+ *  edits like any other). The DOM, not this model, is the truth while typing:
+ *  React renders it once per structural change, because a contenteditable
+ *  re-rendered per keystroke drops the caret. */
 export type Chunk =
   | { kind: "text"; text: string }
   | { kind: "chip"; path: string }
+  | { kind: "skill"; name: string }
   | { kind: "link"; raw: string };
 
 /** A mention as the message spells it: the backticked path `oculus read` takes. */
@@ -21,6 +24,7 @@ export const ZWSP_RE = /​/g;
 
 export function chunkText(c: Chunk): string {
   if (c.kind === "chip") return chipText(c.path);
+  if (c.kind === "skill") return skillText(c.name);
   return c.kind === "link" ? c.raw : c.text.replace(ZWSP_RE, "");
 }
 
@@ -28,8 +32,17 @@ export function chunksText(chunks: Chunk[]): string {
   return chunks.map(chunkText).join("");
 }
 
+/** Stands in for each character of a picked skill in `maskedText`. */
+const MASK = "\ufffc";
+
+/** `chunksText` with every picked skill's characters masked, same length: a
+ *  chip reads as `/name`, which must not open the `/` menu again. */
+export function maskedText(chunks: Chunk[]): string {
+  return chunks.map((c) => (c.kind === "skill" ? MASK.repeat(chunkText(c).length) : chunkText(c))).join("");
+}
+
 /** No empty or adjacent text runs (the caret maths addresses one DOM node per
- *  chunk by index), plus a ZWSP guard before a leading mention. */
+ *  chunk by index), plus a ZWSP guard before a leading mention or skill. */
 export function normalize(chunks: Chunk[]): Chunk[] {
   const out: Chunk[] = [];
   for (const c of chunks) {
@@ -43,7 +56,7 @@ export function normalize(chunks: Chunk[]): Chunk[] {
     if (last?.kind === "text") out[out.length - 1] = { kind: "text", text: last.text + text };
     else out.push({ kind: "text", text });
   }
-  if (out[0]?.kind === "chip") out.unshift({ kind: "text", text: ZWSP });
+  if (out[0]?.kind === "chip" || out[0]?.kind === "skill") out.unshift({ kind: "text", text: ZWSP });
   return out;
 }
 
@@ -99,5 +112,13 @@ export function linkChunks(chunks: Chunk[], scan: LinkScan = "all"): Chunk[] {
 
 /** Whether two chunk lists draw the same nodes. */
 export function sameChunks(a: Chunk[], b: Chunk[]): boolean {
-  return a.length === b.length && a.every((c, i) => c.kind === b[i].kind && (c.kind !== "link" || c.raw === (b[i] as typeof c).raw));
+  return (
+    a.length === b.length &&
+    a.every(
+      (c, i) =>
+        c.kind === b[i].kind &&
+        (c.kind !== "link" || c.raw === (b[i] as typeof c).raw) &&
+        (c.kind !== "skill" || c.name === (b[i] as typeof c).name),
+    )
+  );
 }

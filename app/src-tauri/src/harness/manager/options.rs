@@ -47,6 +47,10 @@ pub struct SendOptions {
     /// that card (`app/continuation.rs`), not something the student typed.
     #[serde(skip)]
     pub continuation: Option<String>,
+    /// The skills the student picked as chips, by name. Named to the agent
+    /// before the prompt (`app/skills.rs`), never in the stored row.
+    #[serde(default)]
+    pub skills: Vec<String>,
 }
 
 /// A new Chat thread's scope as the composer sends it: `"general"` or a

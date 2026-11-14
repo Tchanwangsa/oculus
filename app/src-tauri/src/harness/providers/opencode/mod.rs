@@ -22,6 +22,7 @@ mod models;
 mod redact;
 mod server;
 mod session;
+mod skill;
 mod strays;
 mod stream;
 #[cfg(test)]
@@ -32,6 +33,7 @@ pub use auth::visible_answers;
 pub use config::{write_config, OneOffPrompts};
 pub use models::split_model;
 pub use server::OpencodeServer;
+pub use skill::invoke_skill;
 pub use strays::sweep;
 pub use types::{
     AuthMethod, AuthOption, AuthPrompt, AuthWhen, Authorization, ModelCost, ModelFacts, ModelInfo,

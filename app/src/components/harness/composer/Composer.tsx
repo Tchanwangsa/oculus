@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { SendControls } from "@/components/harness/composer/SendControls";
 import { MentionInput, type MentionInputHandle } from "@/components/harness/mentions/MentionInput";
-import { MentionMenu } from "@/components/harness/mentions/MentionMenu";
-import { useMentionMenu } from "@/components/harness/mentions/useMentionMenu";
+import { ComposerMenu } from "@/components/harness/mentions/ComposerMenu";
+import { useComposerTools } from "@/components/harness/composer/useComposerTools";
+import { notePickedSkills } from "@/lib/harness/skills";
 import { ModelPicker } from "@/components/harness/composer/ModelPicker";
 import { UsageMeter } from "@/components/harness/composer/UsageMeter";
 import { SubjectPicker } from "@/components/harness/composer/SubjectPicker";
@@ -113,7 +114,8 @@ export function Composer({
   const setDraft = useDraftStore((s) => s.setDraft);
   const ref = useRef<MentionInputHandle>(null);
   const dictation = useDictation(draftKey, (transcript) => ref.current?.append(transcript));
-  const mentions = useMentionMenu({ subjectId, input: ref });
+  const tools = useComposerTools({ subjectId, input: ref });
+  const mentions = tools.menu;
   /** The drop target for attachments: the whole box, not just the editor. */
   const wrapRef = useRef<HTMLDivElement>(null);
   /** Pasted/dropped pictures, in memory until send writes them to the library;
@@ -161,6 +163,7 @@ export function Composer({
     const message = await att.prepare(text);
     if (message == null) return;
 
+    notePickedSkills(message, ref.current?.pickedSkills() ?? []);
     ref.current?.clear();
     mentions.close();
     // Rust decides send-now vs queue.
@@ -184,7 +187,7 @@ export function Composer({
       )}
 
       {/* Portals out and positions itself at the caret. */}
-      <MentionMenu {...mentions.menu} />
+      <ComposerMenu {...mentions.menu} />
 
       <DictationFeedback dictation={dictation} />
 
@@ -242,10 +245,11 @@ export function Composer({
             key={draftKey}
             ref={ref}
             initialText={text}
+            skills={tools.skillNames}
             autoFocus={autoFocus}
-            onEdit={(next, caret) => {
+            onEdit={(next, caret, masked) => {
               setDraft(draftKey, next);
-              mentions.track(next, caret);
+              mentions.track(next, caret, masked);
             }}
             onFiles={att.attach}
             onPasteText={att.attachText}
@@ -278,6 +282,8 @@ export function Composer({
             onProvider={onProvider}
             onModel={onModel}
             onReasoning={onReasoning}
+            open={tools.modelOpen}
+            onOpenChange={tools.setModelOpen}
           />
           <div className="flex-1" />
           <UsageMeter usage={usage} rateLimits={rateLimits} />

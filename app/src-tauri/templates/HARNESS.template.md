@@ -21,7 +21,15 @@ in `./outputs/`.
 A path the student writes in a message is a **library path** — it starts at
 `courses/`, so it is `../` from here, and `oculus read` takes it as-is. They
 pick those from a menu (`@` in the composer), so a path in a message is a file
-they are pointing at deliberately: open it.
+they are pointing at deliberately: open it. A path ending in `/`
+(`courses/<CODE>/pages/`) is a folder they picked: list it yourself, then
+open what the question needs.
+
+A message may open with a line such as "Use the oculus-plan skill. Its
+instructions are in `…/SKILL.md`." That line is the app's: the student picked
+that skill from the composer's `/` menu, and the `/oculus-plan` in their words
+marks where. Read that `SKILL.md` and follow it for this message. A `/word`
+without such a line is just text the student typed.
 
 A message may also carry a picture — `./attachments/…`, in this folder. That
 is a screenshot, a photo of handwriting, or an image the student pasted or

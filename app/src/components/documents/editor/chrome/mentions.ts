@@ -22,7 +22,7 @@ import { ancestorAt } from "../syntax/syntax";
  * `@a` is a shorthand.
  */
 
-/** The chat's caps (`useMentionMenu.ts`), so a stray `@` in prose stops
+/** The chat's caps (`mentions/trigger.ts`), so a stray `@` in prose stops
  *  matching as the sentence runs on. */
 const MAX_MENTION = 60;
 const MAX_MENTION_WORDS = 4;

@@ -284,6 +284,14 @@ themes are opt-in and keep the same structure.
   `ResizeObserver`, never against `window` or a viewport breakpoint, which page
   zoom and a split pane make wrong; when it does not, the picker drops to a
   line of its own.
+- **The composer's `@` and `/` menu hangs off its trigger character**
+  (`ComposerMenu`): a `fixed` popover portalled to the body, measured over the
+  range from the `@` or `/` to the caret (a collapsed range can measure zero
+  in WebKit) and clamped to the root element's box, never `window` sizes. Rows
+  are a glyph, a name, a muted description and, for a skill, an Oculus or
+  Personal pill badge; a search or empty state is one muted line inside it. A
+  picked skill is an inline chip in the sentence (`SkillChip`, brand-tinted,
+  `display: inline` so the line keeps its height).
 - **A long list's rows can skip layout off screen with `skip-offscreen`**
   (`content-visibility: auto`, remembering each row's drawn height), so a
   resize lays out only what is visible. The row clips its paint to its box:

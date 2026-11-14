@@ -114,3 +114,23 @@ export function splitSkillTokens(
   if (at < text.length) out.push({ kind: "text", text: text.slice(at) });
   return out;
 }
+
+/** The skills picked as chips in the message a composer is sending, until
+ *  `harnessSend` takes them for that same text. One slot: a composer notes
+ *  its chips just before handing the text on, as an open notebook rides
+ *  `harnessSend` without every caller passing it. */
+let picked: { text: string; names: string[] } | null = null;
+
+/** Called by a composer as it sends `text` holding these skill chips. */
+export function notePickedSkills(text: string, names: readonly string[]): void {
+  picked = names.length ? { text, names: [...new Set(names)] } : null;
+}
+
+/** The skills picked for `text`, once; none for text a composer did not note,
+ *  so a typed `/word` is only ever text. */
+export function takePickedSkills(text: string): string[] {
+  if (!picked || picked.text !== text) return [];
+  const { names } = picked;
+  picked = null;
+  return names;
+}

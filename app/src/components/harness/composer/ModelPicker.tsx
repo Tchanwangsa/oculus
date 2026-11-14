@@ -34,6 +34,7 @@ export const ModelPicker = memo(function ModelPicker({
   onModel,
   onReasoning,
   align = "start",
+  open: openProp,
   onOpenChange,
   emptyLabel = "Choose a model",
   emptyIcon,
@@ -51,6 +52,9 @@ export const ModelPicker = memo(function ModelPicker({
   onReasoning: (level: string | null) => void;
   /** Which trigger edge the menu lines up with; `end` for a trigger at a page's right edge. */
   align?: "start" | "end";
+  /** Given, the caller owns whether the menu is open (the composer's `/model`
+   *  opens it); `onOpenChange` then hears every change. */
+  open?: boolean;
   /** Told whenever the menu opens or closes. */
   onOpenChange?: (open: boolean) => void;
   /** The trigger's text while no model is set. */
@@ -63,7 +67,8 @@ export const ModelPicker = memo(function ModelPicker({
   keepEmptyTrigger?: boolean;
   className?: string;
 }) {
-  const [open, setOpenState] = useState(false);
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
   const setOpen = (next: boolean) => {
     setOpenState(next);
     onOpenChange?.(next);

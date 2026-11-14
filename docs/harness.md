@@ -43,7 +43,8 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Subagents (Studio's research and scene helpers) | `app/src-tauri/src/harness/studio_agents.rs`, `app/src-tauri/templates/STUDIO_*.template.md`, `oculus studio agents` (`app/src-tauri/src/bin/oculus/commands/studio/agents.rs`) |
 | One-off turns (`Harness::one_off`, `Harness::one_turn`): thread names, the editor's inline suggestions (`document_suggest`), where a lecture ends, a widget's `ask` (stoppable by id) | `app/src-tauri/src/harness/manager/one_off.rs`, `app/src-tauri/src/harness/manager/stoppable.rs`, `app/src-tauri/src/harness/app/suggest.rs`, `app/src-tauri/src/harness/suggest/`, `app/src-tauri/src/lectures/lecture_end/`, `app/src-tauri/src/widgets/ask/` |
 | The JSON in a model's reply (whole reply, fences, balanced brackets), for the jobs that want JSON back | `app/src-tauri/src/harness/reply_json.rs` |
-| `@` menu and mention input | `app/src/components/harness/mentions/useMentionMenu.ts`, `app/src/components/harness/mentions/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
+| `@` and `/` menu, mention input, skill chips | `app/src/components/harness/mentions/useComposerMenu.ts`, `app/src/components/harness/mentions/ComposerMenu.tsx`, `app/src/components/harness/mentions/trigger.ts`, `app/src/components/harness/mentions/MentionInput.tsx`, `app/src/components/harness/mentions/SkillChip.tsx`, `app/src/components/markdown/FileChip.tsx`, `app/src/components/harness/composer/useComposerTools.ts` |
+| Commands and skills: the catalogue, its search, the ranking, how a picked skill reaches each bridge | `app/src/lib/harness/skills.ts`, `app/src/lib/harness/composerCommands.ts`, `app/src/stores/chat/skillStore.ts`, `app/src/lib/search/ranking.ts`, `app/src-tauri/src/harness/app/skills.rs`, `app/src-tauri/src/harness/providers/*/skill.rs` |
 | Studio's thread column and New video box, which use `Composer`'s `leading` (chips after the subject's) and `placeholder` | `app/src/components/studio/thread/ThreadColumn.tsx`, `app/src/components/studio/new/NewVideo.tsx` ([studio-page.md](./studio-page.md)) |
 | Voice dictation, microphone capture and cleanup job | `app/src/components/harness/dictation/`, `app/src/lib/dictation/recording.ts`, `app/src-tauri/src/harness/app/dictation.rs` |
 | Send, queue and stop controls shared by both composers | `app/src/components/harness/composer/SendControls.tsx` |
@@ -1766,7 +1767,14 @@ so it names its scope too ([studio-page.md](./studio-page.md)).
 **`@` inserts a library path**, not content — the path is what `oculus read`
 takes. Words are ANDed against filenames (`safe_filename` turns spaces into
 `_`); the token is bounded (no space after `@`, four words, 60 characters, a
-backtick ends it) and the menu opens only on a match.
+backtick ends it). Folders come first (`searchMentionFolders`): the subject's
+own top-level folders (`pages/`, `files/`, `uploads/`…), or in a General
+thread each subject's folder, read off the files table and most recently
+opened first. A folder's chip holds its path with a trailing `/`, which the
+agent lists itself. Then up to eight readable files, which for a bare `@` are
+the most recently opened. A lookup slower than 150 ms says "Searching the
+library…"; a one-word query with nothing says "No matching files or
+folders.", while a longer one closes quietly, being more likely prose.
 
 **A mention is a glyph and a name on screen and a path on the wire**
 (`FileChip`, built from the path alone, drawn as a note draws a reference:
@@ -1775,8 +1783,8 @@ the caret), which is why `MentionInput.tsx` is a contenteditable:
 the DOM is the source of truth while typing, React re-renders only on
 structural changes (bumping `key`), and `revealCaret` scrolls the box because
 a contenteditable follows its caret only for edits it made. The menu anchors
-on a range over the `@` token, since a collapsed range's rect can be zeros in
-WebKit.
+on a range over the trigger character and its query, since a collapsed
+range's rect can be zeros in WebKit, and clamps to the root element's box.
 The box refuses control characters (`lib/harness/controlChars.ts`): WebKit can
 turn an arrow key into text (U+001D for Right Arrow), which draws as tofu, so a
 native `beforeinput` cancels it and a stored draft is stripped on load.
@@ -1798,6 +1806,62 @@ and menu, scoped to the lecture's subject.
 A note's or task body's `@` (the note editor's own completion) writes the
 same backticked path and draws the same reference
 ([editor.md](./editor.md#pictures-mentions-and-citations-resolve-to-library-files)).
+
+## `/` finds commands and skills
+
+A `/` at the start of a word opens one menu with two groups, "Commands" then
+"Skills" (`detectTrigger` in `mentions/trigger.ts`, after T3's
+`detectComposerTrigger`). The slash must start a word and the word must not
+be a path: `1/2`, `a/b` and `and/or` never open it, nor does `/usr/bin` or
+`/etc/hosts` (a second slash anywhere in the word, past the caret too). There
+is no `$` trigger, since students type `$` for maths, and no `#`. Both
+composers share it through `useComposerTools`, and so do Studio's New video
+and thread column, which use `Composer`.
+
+- **Ranking** is T3's (`lib/search/ranking.ts`): exact, prefix, a match at a
+  word boundary, anywhere, then a fuzzy subsequence; a name before a
+  description, a description before the badge. Each group ranks on its own.
+- **Commands** are what Oculus implements (`composerCommands`):
+  `/model` opens the model picker. A pick removes its `/word` and sends
+  nothing. Each entry names the bridge capability it needs, so `/compact`
+  can join gated on its bridge's flag.
+- **Skills** come from `harness_skills`, read when a composer mounts and on
+  each `/` (`skillStore`); "Searching skills…" shows until the first read,
+  "No matching command." when nothing matches. Each row is the name, its
+  description and an Oculus or Personal badge. A pick puts a skill chip in
+  the sentence (`SkillChip`, `contenteditable="false"`), which the draft
+  stores as `/name`; a stored `/name` becomes a chip again on load only if
+  the catalogue holds that name (`splitSkillTokens`). Picked chips are
+  masked when the menu looks for a trigger, so a chip never reopens it.
+- **A typed `/word` is text.** Enter with the menu showing no rows sends it
+  as typed. Only chips are skills: the composer notes its chips' names for
+  the text it sends (`notePickedSkills`), and `harnessSend` passes them as
+  `SendOptions.skills`.
+
+**`harness_skills` scans four folders** (`app/src-tauri/src/harness/app/skills.rs`):
+`agents/.claude/skills` and `agents/.agents/skills` (Oculus), then
+`~/.claude/skills` and `~/.agents/skills` (Personal). A skill is a folder with
+a `SKILL.md`; its frontmatter gives `name` (else the folder's),
+`description` and `user-invocable` (`false` hides it from the menu). Entries
+are deduplicated by resolved path, so the two library links to
+`agents/skills/` give one entry each, then by name, Oculus first. A missing
+folder is no error, and a `SKILL.md` without a closed frontmatter block, with
+a line that is not `key: value`, or whose name cannot stand as a `/name` word
+is skipped alone. No network, no model.
+
+**Every bridge hears a picked skill as a sentence.** `send.rs` makes one call
+where the prompt is final (`name_picked_skills`): for each picked name still
+standing as a `/name` word in the prompt and still installed, the bridge's
+`invoke_skill(name, path)` (`providers/<bridge>/skill.rs`) gives a line, and
+the lines go before the prompt. The stored row keeps what the student typed.
+Every bridge returns the fallback sentence, "Use the {name} skill. Its
+instructions are in `<SKILL.md>`.", which carries the path so a bridge that
+does not index a Personal skill can still read it; a bridge's own form
+replaces its `invoke_skill` body once a recorded turn shows that bridge acting
+on it. Nothing picked leaves the prompt untouched, so a typed `/word` reaches
+every bridge as text (Claude one-offs and every `agy` launch also run with
+`--disable-slash-commands`). The brief (`HARNESS.template.md`) tells the agent
+what the line means.
 
 ## Attachments are files in `agents/attachments/`
 

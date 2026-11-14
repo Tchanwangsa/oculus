@@ -15,6 +15,7 @@ mod json;
 mod models;
 pub mod rules;
 mod session;
+mod skill;
 #[cfg(test)]
 mod tests;
 mod translate;
@@ -23,6 +24,7 @@ use crate::harness::child::ThreadSpawn;
 
 pub use models::{list_models, run_models, ModelInfo, ModelsRun};
 pub use session::AntigravitySession;
+pub use skill::invoke_skill;
 
 pub struct AntigravitySpawn {
     /// `base.cwd` is also where `agy` reads `AGENTS.md` from; `base.effort`

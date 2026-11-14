@@ -18,6 +18,7 @@ pub(in crate::harness) mod rewind;
 mod run_scope;
 pub(in crate::harness) mod send;
 pub mod setup;
+pub mod skills;
 pub(in crate::harness) mod startup;
 pub mod suggest;
 mod thought_clock;

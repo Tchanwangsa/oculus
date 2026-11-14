@@ -5,8 +5,9 @@ import { useDictation } from "@/components/harness/dictation/useDictation";
 import { DictationBar, DictationMic, DictationFeedback } from "@/components/harness/dictation/DictationControls";
 import { SendControls } from "@/components/harness/composer/SendControls";
 import { MentionInput, type MentionInputHandle } from "@/components/harness/mentions/MentionInput";
-import { MentionMenu } from "@/components/harness/mentions/MentionMenu";
-import { useMentionMenu } from "@/components/harness/mentions/useMentionMenu";
+import { ComposerMenu } from "@/components/harness/mentions/ComposerMenu";
+import { useComposerTools } from "@/components/harness/composer/useComposerTools";
+import { notePickedSkills } from "@/lib/harness/skills";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ModelPicker, type PickerProvider } from "@/components/harness/composer/ModelPicker";
 import { UsageMeter } from "@/components/harness/composer/UsageMeter";
@@ -73,9 +74,9 @@ function MomentChip({
  * The dock's composer — a sibling of `components/harness/composer/Composer.tsx`, not a
  * variant: the lecture fixes the subject and the agent already has the
  * recording folder (`docs/harness.md`), so there is no scope picker, and it adds
- * the moment instead. `@` is the page composer's, fixed to the lecture's
- * subject (`MentionInput`, `useMentionMenu`). Attachments are shared outright
- * (`useAttachments`, `AttachmentStrip`).
+ * the moment instead. The `@` and `/` menu is the page composer's, `@` fixed
+ * to the lecture's subject (`MentionInput`, `useComposerTools`). Attachments
+ * are shared outright (`useAttachments`, `AttachmentStrip`).
  *
  * Enter sends, Shift+Enter breaks a line. While a turn runs a send is queued by
  * Rust, so stop and send sit side by side. Unsent text lives in `draftStore`,
@@ -141,7 +142,8 @@ export function LectureChatComposer({
   const text = useDraftStore((s) => s.drafts[draftKey] ?? "");
   const setDraft = useDraftStore((s) => s.setDraft);
   const ref = useRef<MentionInputHandle>(null);
-  const mentions = useMentionMenu({ subjectId, input: ref });
+  const tools = useComposerTools({ subjectId, input: ref });
+  const mentions = tools.menu;
   /** The drop target: the box and its attachment strip. */
   const wrapRef = useRef<HTMLDivElement>(null);
   /** Pictures pasted or dropped in, written on send. */
@@ -175,6 +177,7 @@ export function LectureChatComposer({
     const message = await att.prepare(text);
     if (message == null) return;
 
+    notePickedSkills(message, ref.current?.pickedSkills() ?? []);
     ref.current?.clear();
     mentions.close();
     // Rust decides whether this sends now or queues.
@@ -184,7 +187,7 @@ export function LectureChatComposer({
   return (
     <div ref={wrapRef} className="flex flex-col gap-1.5">
       {/* Portals out and positions itself at the caret. */}
-      <MentionMenu {...mentions.menu} />
+      <ComposerMenu {...mentions.menu} />
       <DictationFeedback dictation={dictation} />
       {att.error && <div className="px-0.5 text-[11px] text-destructive">{att.error}</div>}
       <ThreadBanners threadId={threadId} rateLimits={rateLimits} />
@@ -211,9 +214,10 @@ export function LectureChatComposer({
           key={draftKey}
           ref={ref}
           initialText={text}
-          onEdit={(next, caret) => {
+          skills={tools.skillNames}
+          onEdit={(next, caret, masked) => {
             setDraft(draftKey, next);
-            mentions.track(next, caret);
+            mentions.track(next, caret, masked);
           }}
           onFiles={att.attach}
           onPasteText={att.attachText}
@@ -240,6 +244,8 @@ export function LectureChatComposer({
             onProvider={onProvider}
             onModel={onModel}
             onReasoning={onReasoning}
+            open={tools.modelOpen}
+            onOpenChange={tools.setModelOpen}
           />
           <div className="ml-auto flex shrink-0 items-center gap-1">
             <UsageMeter usage={usage} rateLimits={rateLimits} />

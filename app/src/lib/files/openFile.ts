@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useTabStore } from "@/stores/shell/tabStore";
 import { openBeside, openLink } from "@/lib/shell/tabRouters";
-import { humanizeSlug } from "@/lib/format/format";
+import { displayCode, humanizeSlug } from "@/lib/format/format";
 import { isLessonAsset, isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath, parsedMdSource } from "@/lib/files/fileTypes";
 import { getFileByRelativePath, getLecture, markFileAccessed, type DbFile } from "@/lib/db";
 import { attachmentPath } from "@/lib/harness/attachments";
@@ -24,6 +24,14 @@ export function fileTitle(file: Pick<DbFile, "category" | "filename">): string {
   return REAL_FILENAME.has(file.category ?? "") || isLessonAsset(file)
     ? file.filename
     : humanizeSlug(file.filename);
+}
+
+/** A folder path's (`courses/<CODE>/pages/`) display name: a subject's own
+ *  folder by its code, any other humanised. */
+export function folderTitle(path: string): string {
+  const parts = path.replace(/\/+$/, "").split("/");
+  const name = parts[parts.length - 1] ?? "";
+  return parts.length === 2 && parts[0] === "courses" ? displayCode(name) : humanizeSlug(name);
 }
 
 /** Fired after a file's last_accessed_at is stamped, so open lists refresh. */

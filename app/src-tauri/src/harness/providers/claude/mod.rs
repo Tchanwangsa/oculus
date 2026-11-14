@@ -13,6 +13,7 @@
 mod models;
 mod session;
 mod settings;
+mod skill;
 mod transcript;
 mod translate;
 
@@ -22,6 +23,7 @@ use crate::harness::child::ThreadSpawn;
 
 pub use models::{concrete_model, list_models, ModelInfo};
 pub use session::ClaudeSession;
+pub use skill::invoke_skill;
 
 pub struct ClaudeSpawn {
     pub base: ThreadSpawn,

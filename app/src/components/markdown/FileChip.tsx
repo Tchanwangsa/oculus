@@ -1,6 +1,6 @@
 import { useCallback, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { fileReferenceAppearance } from "@/lib/files/referenceAppearance";
-import { fileTitle, pathFile } from "@/lib/files/openFile";
+import { fileTitle, folderTitle, pathFile } from "@/lib/files/openFile";
 import { citationText, parsedSourceOf, type Citation } from "@/lib/citations";
 import { useCitedPage } from "@/hooks/agents/useCitation";
 import { cn } from "@/lib/utils";
@@ -47,11 +47,12 @@ export function FileChip({
   const { Icon, tone, kind } = fileReferenceAppearance(file, path);
   const page = useCitedPage(cite);
   const full = cite ? citationText(cite) : path;
-  const label = children ?? fileTitle(file);
+  const title = path.endsWith("/") ? folderTitle(path) : fileTitle(file);
+  const label = children ?? title;
   const load = useCallback(() => fileReferenceDetails(path), [path]);
   const icon = <Icon size="1.15em" aria-hidden className={cn("mr-[0.35em] inline align-[-0.18em]", tone)} />;
   return (
-    <ReferencePreview icon={icon} title={fileTitle(file)} kind={kind} detail={full} load={load}>
+    <ReferencePreview icon={icon} title={title} kind={kind} detail={full} load={load}>
       <span
         // In the composer: atomic to the caret, and `data-path` is read back
         // into the message. Elsewhere it is what a copy writes.
