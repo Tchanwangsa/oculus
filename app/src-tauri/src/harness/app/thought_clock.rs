@@ -100,6 +100,7 @@ mod tests {
         clock.observe_at(1, &mut d, t0);
         let mut fin = HarnessEvent::TurnFinished {
             status: "interrupted".into(),
+            turn: None,
         };
         clock.observe_at(1, &mut fin, t0);
         let mut ev = thought(None);

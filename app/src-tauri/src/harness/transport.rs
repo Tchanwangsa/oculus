@@ -68,16 +68,22 @@ impl ChildProc {
         }
     }
 
-    pub fn finish(&self, sink: &Sink, provider: Provider, mid_turn: impl FnOnce() -> bool) {
+    pub fn finish(
+        &self,
+        sink: &Sink,
+        provider: Provider,
+        mid_turn: impl FnOnce() -> Option<super::event::TurnId>,
+    ) {
         match &self.process {
             Some(process) => process.finish(sink, provider, mid_turn),
             // A replayed transport closing: the same outcome, with no exit code.
             None => {
-                if mid_turn() {
+                if let Some(turn) = mid_turn() {
                     super::child::fail_turn(
                         sink,
                         provider,
                         "the replayed process exited mid-turn".into(),
+                        Some(turn),
                     );
                 }
                 sink(super::HarnessEvent::Exited { code: None });

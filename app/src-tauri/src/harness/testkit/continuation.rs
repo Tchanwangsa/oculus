@@ -427,6 +427,7 @@ fn a_continuation_waits_behind_a_busy_thread_and_goes_out_once() {
         Provider::Codex,
         HarnessEvent::TurnFinished {
             status: "completed".into(),
+            turn: None,
         },
     );
     consume(vec![finished], queue.clone(), &mut io);

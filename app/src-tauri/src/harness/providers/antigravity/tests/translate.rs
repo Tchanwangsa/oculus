@@ -115,13 +115,13 @@ fn folds_a_recorded_session() {
     assert_eq!(
         events
             .iter()
-            .filter(|e| matches!(e, HarnessEvent::TurnStarted))
+            .filter(|e| matches!(e, HarnessEvent::TurnStarted { .. }))
             .count(),
         1
     );
     assert!(matches!(
         events.last(),
-        Some(HarnessEvent::TurnFinished { status }) if status == "completed"
+        Some(HarnessEvent::TurnFinished { status, .. }) if status == "completed"
     ));
     assert!(!events
         .iter()
@@ -145,7 +145,7 @@ fn a_result_status_maps_to_one_of_three() {
         });
         let out = t.translate(&v);
         assert!(
-            matches!(out.last(), Some(HarnessEvent::TurnFinished { status: s }) if s == want),
+            matches!(out.last(), Some(HarnessEvent::TurnFinished { status: s, .. }) if s == want),
             "{status} → {want}"
         );
         assert_eq!(
@@ -165,7 +165,7 @@ fn an_asked_for_stop_is_not_a_failure() {
         "result": { "status": "ERROR", "error": "killed" },
     }));
     assert!(
-        matches!(out.last(), Some(HarnessEvent::TurnFinished { status }) if status == "interrupted")
+        matches!(out.last(), Some(HarnessEvent::TurnFinished { status, .. }) if status == "interrupted")
     );
     assert!(!out.iter().any(|e| matches!(e, HarnessEvent::Error { .. })));
 }
@@ -227,7 +227,7 @@ fn a_refusal_closes_the_row_and_names_the_rule() {
         )]
     );
     assert!(
-        matches!(out.last(), Some(HarnessEvent::TurnFinished { status }) if status == "completed")
+        matches!(out.last(), Some(HarnessEvent::TurnFinished { status, .. }) if status == "completed")
     );
     assert!(!out.iter().any(|e| matches!(e, HarnessEvent::Error { .. })));
 }

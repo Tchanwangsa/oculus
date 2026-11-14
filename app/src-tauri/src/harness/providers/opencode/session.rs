@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use serde_json::json;
 
-use crate::harness::event::HarnessEvent;
+use crate::harness::event::{Bound, HarnessEvent, TurnId, Turns};
 use crate::harness::Sink;
 
 use super::models::split_model;
@@ -29,6 +29,10 @@ pub(super) struct SessionRoute {
 pub(super) struct SessionState {
     /// Only [`super::events::close_turn`] clears this, so `TurnFinished` fires once per turn.
     pub(super) turn_open: bool,
+    /// The session's turn ordinals: the stream names no turn.
+    pub(super) turns: Turns,
+    /// The open turn's ordinal.
+    pub(super) turn: Option<TurnId>,
     /// Text by part id, from the deltas. Whatever is left at close is a part
     /// that never got its closing snapshot, and is committed rather than lost.
     pub(super) text: HashMap<String, String>,
@@ -162,8 +166,9 @@ impl OpencodeServer {
     /// `POST /session/{id}/prompt_async`, naming agent and model every time
     /// ([`SessionRoute::agent`]). Answers 204 with no body: the turn's anchor
     /// arrives on the stream ([`super::events::translate`]). The harness queue guarantees
-    /// one turn in flight.
-    pub fn prompt(&self, session: &str, text: &str) -> Result<(), String> {
+    /// one turn in flight. `bound` hears the turn's ordinal before the server
+    /// hears the prompt.
+    pub fn prompt(&self, session: &str, text: &str, bound: &Bound) -> Result<(), String> {
         let route = self
             .routes
             .lock()
@@ -171,7 +176,11 @@ impl OpencodeServer {
             .get(session)
             .cloned()
             .ok_or_else(|| format!("opencode session {session} is not attached"))?;
-        let brief = route.state.lock().unwrap().pending_brief.take();
+        let (brief, turn) = {
+            let mut st = route.state.lock().unwrap();
+            (st.pending_brief.take(), st.turns.reserve())
+        };
+        bound(turn);
         let text = match brief {
             Some(b) => format!("{}\n\n---\n\n{text}", b.trim()),
             None => text.to_string(),

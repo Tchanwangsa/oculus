@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 
-use super::event::{HarnessEvent, Provider};
+use super::event::{HarnessEvent, Provider, TurnId};
 pub use super::transport::ChildProc;
 use super::{RawLog, Sink};
 
@@ -163,12 +163,17 @@ impl Process {
     }
 
     /// A per-thread CLI's stdout has ended: reap it, fail the turn it died in
-    /// (`mid_turn` is asked after the reap), then report the exit.
-    pub fn finish(&self, sink: &Sink, provider: Provider, mid_turn: impl FnOnce() -> bool) {
+    /// (`mid_turn` names it, asked after the reap), then report the exit.
+    pub fn finish(
+        &self,
+        sink: &Sink,
+        provider: Provider,
+        mid_turn: impl FnOnce() -> Option<TurnId>,
+    ) {
         let code = self.reap();
-        if mid_turn() {
+        if let Some(turn) = mid_turn() {
             let msg = self.with_tail(format!("{} exited (code {code:?}) mid-turn", self.who));
-            fail_turn(sink, provider, msg);
+            fail_turn(sink, provider, msg, Some(turn));
         }
         sink(HarnessEvent::Exited { code });
     }
@@ -200,10 +205,13 @@ pub fn read_json_lines(
 }
 
 /// Close a turn that will never get its own end: the error, then `failed`.
-pub fn fail_turn(sink: &Sink, provider: Provider, msg: String) {
+/// `turn` is the bridge's id for it; `None` when the app closes a send that
+/// never reached a turn.
+pub fn fail_turn(sink: &Sink, provider: Provider, msg: String, turn: Option<TurnId>) {
     sink(HarnessEvent::error_for(provider, msg));
     sink(HarnessEvent::TurnFinished {
         status: "failed".into(),
+        turn,
     });
 }
 

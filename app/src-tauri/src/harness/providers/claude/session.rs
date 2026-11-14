@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use crate::harness::child::{self, ChildProc};
-use crate::harness::event::{HarnessEvent, Provider};
+use crate::harness::event::{Bound, HarnessEvent, Provider, Turns};
 use crate::harness::Sink;
 
 use super::settings::settings_json;
@@ -39,6 +39,9 @@ pub struct ClaudeSession {
     /// `TurnFinished` the manager's queue waits on. A turn that opens without
     /// it is the CLI's own ([`crate::harness::HarnessEvent::UnpromptedTurn`]).
     pub(super) expecting: Arc<AtomicBool>,
+    /// The process's turn ordinals, shared with its reader: the stream names
+    /// no turn.
+    pub(super) turns: Arc<Turns>,
 }
 
 impl ClaudeSession {
@@ -113,12 +116,14 @@ impl ClaudeSession {
 
         let interrupting = Arc::new(AtomicBool::new(false));
         let expecting = Arc::new(AtomicBool::new(false));
+        let turns = Arc::new(Turns::default());
         let session = Arc::new(ClaudeSession {
             proc,
             request_ids: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),
             interrupting: interrupting.clone(),
             expecting: expecting.clone(),
+            turns: turns.clone(),
         });
 
         let reader_session = session.clone();
@@ -127,6 +132,7 @@ impl ClaudeSession {
             let mut state = Translator {
                 interrupting,
                 expecting: expecting.clone(),
+                turns,
                 ..Default::default()
             };
             child::read_json_lines(stdout, raw_log.as_ref(), |v| {
@@ -150,15 +156,21 @@ impl ClaudeSession {
             sink(ev);
         }
         self.proc.finish(sink, Provider::Claude, || {
-            let sent = self.expecting.swap(false, Ordering::SeqCst);
+            let sent = self
+                .expecting
+                .swap(false, Ordering::SeqCst)
+                .then(|| self.turns.take_sent())
+                .flatten();
+            let open = state.turn.take();
             // A send that raced a turn the CLI started itself: both
-            // claims need their `TurnFinished`.
-            if sent && state.turn_open {
+            // turns need their `TurnFinished`.
+            if let (Some(sent), Some(_)) = (&sent, &open) {
                 sink(HarnessEvent::TurnFinished {
                     status: "failed".into(),
+                    turn: Some(sent.clone()),
                 });
             }
-            sent || state.turn_open
+            open.or(sent)
         });
     }
 
@@ -167,8 +179,10 @@ impl ClaudeSession {
     }
 
     /// One user turn. A line sent mid-turn is queued by the CLI itself, which
-    /// is why the manager holds messages back until `TurnFinished`.
-    pub fn send(&self, text: &str) -> Result<(), String> {
+    /// is why the manager holds messages back until `TurnFinished`. `bound`
+    /// hears the turn's ordinal before the CLI hears the message.
+    pub fn send(&self, text: &str, bound: &Bound) -> Result<(), String> {
+        bound(self.turns.reserve());
         self.expecting.store(true, Ordering::SeqCst);
         self.proc.write_line(&serde_json::json!({
             "type": "user",

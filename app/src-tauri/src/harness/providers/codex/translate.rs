@@ -95,15 +95,30 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
             st.streamed_messages.clear();
             st.partial_message.clear();
             st.partial_item = None;
-            out.push(HarnessEvent::TurnStarted);
+            out.push(HarnessEvent::TurnStarted {
+                turn: st.active_turn.clone(),
+            });
         }
         "turn/completed" => {
-            st.active_turn = None;
+            let turn = p
+                .pointer("/turn/id")
+                .and_then(|s| s.as_str())
+                .map(String::from);
             let status = match p.pointer("/turn/status").and_then(|s| s.as_str()) {
                 Some("failed") => "failed",
                 Some("interrupted") => "interrupted",
                 _ => "completed",
             };
+            // Another turn's end (a repeat, or a turn the server ran itself)
+            // names that turn and leaves the open one's state alone.
+            if turn.is_some() && turn != st.active_turn {
+                out.push(HarnessEvent::TurnFinished {
+                    status: status.into(),
+                    turn,
+                });
+                return out;
+            }
+            let turn = st.active_turn.take();
             if let Some(msg) = p.pointer("/turn/error/message").and_then(|m| m.as_str()) {
                 out.push(HarnessEvent::error_for(Provider::Codex, msg));
             }
@@ -117,6 +132,7 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
             }
             out.push(HarnessEvent::TurnFinished {
                 status: status.into(),
+                turn,
             });
         }
         "item/started" => {

@@ -5,6 +5,7 @@ mod assertions;
 mod continuation;
 mod fixture;
 mod guard;
+mod identity;
 mod io;
 mod matrix;
 pub(in crate::harness) mod outbound;

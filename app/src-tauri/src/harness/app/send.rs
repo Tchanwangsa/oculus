@@ -36,6 +36,7 @@ pub(super) async fn dispatch(
             sink(HarnessEvent::error(e.clone()));
             sink(HarnessEvent::TurnFinished {
                 status: "failed".into(),
+                turn: None,
             });
             Err(e)
         }

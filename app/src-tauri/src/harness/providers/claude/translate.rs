@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use crate::harness::child::str_of;
 use crate::harness::event::{
-    cap_output, classify, GapCause, HarnessEvent, Provider, RateWindow, Source,
+    cap_output, classify, GapCause, HarnessEvent, Provider, RateWindow, Source, TurnId, Turns,
 };
 
 use super::transcript::{anchor_for, tool_result_text, transcript_path};
@@ -114,6 +114,12 @@ pub(super) struct Translator {
     pub(super) started_tools: HashSet<String>,
     /// Between the first stream event of a turn and its `result`.
     pub(super) turn_open: bool,
+    /// The session's turn ordinals, shared with [`super::session::ClaudeSession::send`].
+    pub(super) turns: Arc<Turns>,
+    /// The open turn's ordinal.
+    pub(super) turn: Option<TurnId>,
+    /// The turn the last `result` closed, which a repeated `result` names again.
+    pub(super) last_turn: Option<TurnId>,
     pub(super) saw_result: bool,
     /// What the last request occupied; `result.usage` sums the turn (spend).
     pub(super) last_context_tokens: Option<u64>,
@@ -146,13 +152,17 @@ impl Translator {
         if self.expecting.swap(false, Ordering::SeqCst) {
             // What finished before the student's turn is that turn's to take up.
             self.finished.clear();
+            self.turn = Some(self.turns.open());
         } else {
             self.turn_unprompted = true;
+            self.turn = Some(self.turns.own());
             out.push(HarnessEvent::UnpromptedTurn {
                 after: std::mem::take(&mut self.finished),
             });
         }
-        out.push(HarnessEvent::TurnStarted);
+        out.push(HarnessEvent::TurnStarted {
+            turn: self.turn.clone(),
+        });
     }
 
     /// The process is gone: background rows still running never will finish.
@@ -475,14 +485,19 @@ impl Translator {
                         }
                     }
                 }
-                // A result with no stream events before it (an error) still answers our message.
-                if !self.turn_open {
-                    self.expecting.store(false, Ordering::SeqCst);
-                }
+                let turn = match self.turn.take() {
+                    Some(turn) => Some(turn),
+                    // A result with no stream events before it (an error) still answers our message.
+                    None if self.expecting.swap(false, Ordering::SeqCst) => self.turns.take_sent(),
+                    // A repeated `result` names the turn it already closed.
+                    None => self.last_turn.clone(),
+                };
+                self.last_turn = turn.clone();
                 self.turn_open = false;
                 self.turn_unprompted = false;
                 out.push(HarnessEvent::TurnFinished {
                     status: status.into(),
+                    turn,
                 });
             }
             "rate_limit_event" => {
@@ -593,7 +608,7 @@ mod tests {
     fn summarized_narration_is_assistant_text_before_its_tool() {
         let frames = lines(NARRATION);
         let (_, events) = replay(frames.clone());
-        assert!(matches!(events[0], HarnessEvent::TurnStarted));
+        assert!(matches!(events[0], HarnessEvent::TurnStarted { .. }));
         assert!(matches!(
             &events[1], HarnessEvent::Thinking { text, .. }
                 if text == frames[0]["message"]["content"][0]["thinking"].as_str().unwrap()
@@ -658,7 +673,7 @@ mod tests {
             assert!(matches!(
                 events.as_slice(),
                 [
-                    HarnessEvent::TurnStarted,
+                    HarnessEvent::TurnStarted { .. },
                     // This recording's lines carry no uuid, so no block id.
                     HarnessEvent::DeliveryGap {
                         source: None,
@@ -785,7 +800,7 @@ mod tests {
         );
 
         assert!(
-            matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "completed")
+            matches!(events.last(), Some(HarnessEvent::TurnFinished { status, .. }) if status == "completed")
         );
         assert!(events.iter().any(|e| matches!(
             e,
@@ -830,7 +845,7 @@ mod tests {
         });
         assert_eq!(message.as_deref(), Some(deltas.trim()));
         assert!(
-            matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "interrupted")
+            matches!(events.last(), Some(HarnessEvent::TurnFinished { status, .. }) if status == "interrupted")
         );
     }
 
@@ -856,13 +871,32 @@ mod tests {
         let thinking = positions(&events, |e| matches!(e, HarnessEvent::Thinking { .. }));
         assert_eq!(thinking.len(), 3, "only the parent's three thinking blocks");
 
-        let started = positions(&events, |e| matches!(e, HarnessEvent::TurnStarted));
+        let started = positions(&events, |e| matches!(e, HarnessEvent::TurnStarted { .. }));
         let finished = positions(
             &events,
-            |e| matches!(e, HarnessEvent::TurnFinished { status } if status == "completed"),
+            |e| matches!(e, HarnessEvent::TurnFinished { status, .. } if status == "completed"),
         );
         assert_eq!(started.len(), 2);
         assert_eq!(finished.len(), 2);
+        // The stream names no turn: each gets the next ordinal as it opens,
+        // the CLI's own included, and ends under the one it opened as.
+        let turns: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                HarnessEvent::TurnStarted { turn } => Some(("started", turn.as_deref())),
+                HarnessEvent::TurnFinished { turn, .. } => Some(("finished", turn.as_deref())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            turns,
+            vec![
+                ("started", Some("1")),
+                ("finished", Some("1")),
+                ("started", Some("2")),
+                ("finished", Some("2")),
+            ]
+        );
         assert_eq!(
             positions(&events, |e| matches!(e, HarnessEvent::TurnFinished { .. })).len(),
             2
@@ -903,7 +937,7 @@ mod tests {
         let (_, events) = replay(with_thinking(lines(BACKGROUND_FAST)));
         let agent = positions(&events, |e| matches!(e, HarnessEvent::ToolFinished { .. }));
         let finished = positions(&events, |e| matches!(e, HarnessEvent::TurnFinished { .. }));
-        let started = positions(&events, |e| matches!(e, HarnessEvent::TurnStarted));
+        let started = positions(&events, |e| matches!(e, HarnessEvent::TurnStarted { .. }));
         let unprompted = positions(
             &events,
             |e| matches!(e, HarnessEvent::UnpromptedTurn { after } if after == &["Say pong"]),

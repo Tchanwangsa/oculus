@@ -39,7 +39,7 @@ pub(super) fn finishes(events: &[HarnessEvent]) -> Vec<&str> {
     events
         .iter()
         .filter_map(|e| match e {
-            HarnessEvent::TurnFinished { status } => Some(status.as_str()),
+            HarnessEvent::TurnFinished { status, .. } => Some(status.as_str()),
             _ => None,
         })
         .collect()

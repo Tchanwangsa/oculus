@@ -189,7 +189,10 @@ fn folds_a_recorded_thread() {
         }
         events.extend(translate(method, &v["params"], &mut st));
     }
-    assert!(matches!(events.first(), Some(HarnessEvent::TurnStarted)));
+    assert!(matches!(
+        events.first(),
+        Some(HarnessEvent::TurnStarted { .. })
+    ));
     let tools: Vec<_> = events
         .iter()
         .filter_map(|e| match e {
@@ -215,7 +218,7 @@ fn folds_a_recorded_thread() {
         .iter()
         .any(|e| matches!(e, HarnessEvent::RateLimits { windows } if windows.len() == 2)));
     assert!(
-        matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "completed")
+        matches!(events.last(), Some(HarnessEvent::TurnFinished { status, .. }) if status == "completed")
     );
 }
 
@@ -252,6 +255,43 @@ fn a_stopped_turn_keeps_what_was_said() {
         "the partial is committed as a row"
     );
     assert!(
-        matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "interrupted")
+        matches!(events.last(), Some(HarnessEvent::TurnFinished { status, .. }) if status == "interrupted")
     );
+}
+
+/// A `turn/completed` for another turn (a repeat of the last one, or a turn
+/// the server ran itself) names that turn and leaves the open one alone.
+#[test]
+fn another_turns_end_leaves_the_open_turn_as_it_is() {
+    let mut st = ThreadState::default();
+    let turn =
+        |id: &str| serde_json::json!({"threadId": "t", "turn": {"id": id, "status": "completed"}});
+    let started = translate("turn/started", &turn("now"), &mut st);
+    assert!(matches!(
+        started.as_slice(),
+        [HarnessEvent::TurnStarted { turn: Some(t) }] if t == "now"
+    ));
+    translate(
+        "item/agentMessage/delta",
+        &serde_json::json!({"threadId": "t", "itemId": "m1", "delta": "half an ans"}),
+        &mut st,
+    );
+
+    let stray = translate("turn/completed", &turn("before"), &mut st);
+    assert!(
+        matches!(
+            stray.as_slice(),
+            [HarnessEvent::TurnFinished { turn: Some(t), .. }] if t == "before"
+        ),
+        "only the end it names: {stray:?}"
+    );
+    assert_eq!(st.active_turn.as_deref(), Some("now"));
+    assert_eq!(st.partial_message, "half an ans", "the streamed text stays");
+
+    let own = translate("turn/completed", &turn("now"), &mut st);
+    assert!(matches!(
+        own.last(),
+        Some(HarnessEvent::TurnFinished { turn: Some(t), .. }) if t == "now"
+    ));
+    assert!(st.active_turn.is_none());
 }

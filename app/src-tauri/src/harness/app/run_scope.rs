@@ -1,8 +1,9 @@
-//! Which run each thread's events belong to, and its settlement. Ownership
-//! is assigned here, on the one ordered consumer: a persisted question (or a
-//! card's continuation) opens its run, and that run owns every later event on
-//! the thread until its `TurnFinished` settles it. A session is known by its
-//! generation, and one that has been replaced is heard no more.
+//! Which run each thread's events belong to, and which `TurnFinished` may
+//! settle it. A persisted question (or a card's continuation) opens its run,
+//! the send binds that run to one turn of one session, and only that turn's
+//! terminal settles it. A turn the provider starts itself owns no run. A
+//! session is known by its generation, and one that has been replaced is
+//! heard no more.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -10,6 +11,7 @@ use std::sync::Mutex;
 use sqlx::SqlitePool;
 use tokio::runtime::Runtime;
 
+use crate::harness::event::TurnId;
 use crate::harness::{store, Generation, HarnessEvent, Queue};
 
 /// Who sent an event.
@@ -21,59 +23,157 @@ pub(super) enum From {
     Session(Generation),
 }
 
+/// One turn of one session.
+type Turn = (Generation, TurnId);
+
 struct Open {
     run_id: i64,
     attempt_id: i64,
     /// The next row's attempt-local ordinal.
     next: u64,
+    /// The turn the send was accepted as; none until the bridge says.
+    turn: Option<Turn>,
+}
+
+/// A thread's newest session, and the turns of it that have ended.
+#[derive(Default)]
+struct Session {
+    generation: Generation,
+    finished: HashSet<TurnId>,
 }
 
 #[derive(Default)]
 pub(super) struct RunScope {
     open: HashMap<i64, Open>,
-    /// Threads in a turn the provider started itself (unowned for now).
-    unprompted: HashSet<i64>,
+    /// Threads in a turn the provider started itself, which owns no run:
+    /// announced by `UnpromptedTurn`, named by the `TurnStarted` after it.
+    own: HashMap<i64, Option<Turn>>,
     /// Threads whose open turn already reported a failed row write.
     failed_writes: HashSet<i64>,
-    /// Each thread's newest session.
-    sessions: HashMap<i64, Generation>,
+    sessions: HashMap<i64, Session>,
 }
 
 /// One event's place in a run, for its envelope.
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 pub(super) struct Tags {
     pub run_id: Option<i64>,
     pub attempt_id: Option<i64>,
 }
 
+/// What a `TurnFinished` ends.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) enum Terminal {
+    /// The thread's open run: it settles.
+    Run,
+    /// A turn the provider started itself.
+    Own,
+    /// No turn, only the thread's claim: a send that failed before its run
+    /// was written.
+    Claim,
+    /// Nothing this thread has open: another turn's end, or a repeat.
+    Stray,
+}
+
 impl RunScope {
-    /// Whether `generation` is still the thread's session. A newer one
-    /// replaces it for good: generations only count up.
-    pub fn admit(&mut self, thread_id: i64, generation: Generation) -> bool {
-        let current = self.sessions.entry(thread_id).or_default();
-        if generation < *current {
-            return false;
+    /// Whether `ev`, from the session `generation`, is still to be heard. A
+    /// newer session replaces an older one for good (generations only count
+    /// up), except that the older one's terminal may still settle the run
+    /// bound to it.
+    pub fn admit(&mut self, thread_id: i64, generation: Generation, ev: &HarnessEvent) -> bool {
+        let session = self.sessions.entry(thread_id).or_default();
+        if generation > session.generation {
+            *session = Session {
+                generation,
+                finished: HashSet::new(),
+            };
         }
-        *current = generation;
-        true
+        if generation == session.generation {
+            return true;
+        }
+        match (ev, self.open.get(&thread_id)) {
+            (
+                HarnessEvent::TurnFinished {
+                    turn: Some(turn), ..
+                },
+                Some(open),
+            ) => open
+                .turn
+                .as_ref()
+                .is_some_and(|(g, t)| *g == generation && t == turn),
+            _ => false,
+        }
     }
 
-    /// A `TurnFinished` with no turn open and no claim on the thread: a
-    /// repeat of one already applied.
-    pub fn is_stray_terminal(
+    /// A send on the thread's open run was accepted as `turn` of the session
+    /// `generation`.
+    pub fn bind(&mut self, thread_id: i64, generation: Generation, turn: TurnId) {
+        if let Some(open) = self.open.get_mut(&thread_id) {
+            open.turn.get_or_insert((generation, turn));
+        }
+    }
+
+    /// What a `TurnFinished` naming `turn` ends on this thread.
+    pub fn terminal(
         &self,
         thread_id: i64,
-        ev: &HarnessEvent,
+        from: From,
+        turn: Option<&TurnId>,
         queue: &Mutex<Queue>,
-    ) -> bool {
-        matches!(ev, HarnessEvent::TurnFinished { .. })
-            && !self.open.contains_key(&thread_id)
-            && !self.unprompted.contains(&thread_id)
-            && !queue.lock().unwrap().is_busy(thread_id)
+    ) -> Terminal {
+        let open = self.open.get(&thread_id);
+        let own = self.own.get(&thread_id);
+        // No turn is named by the app, closing a send that failed, or by a
+        // bridge that could not tell: whatever is open ends, as it would
+        // have before turns had ids.
+        let (From::Session(generation), Some(turn)) = (from, turn) else {
+            return match (open, own) {
+                (Some(_), _) => Terminal::Run,
+                (None, Some(_)) => Terminal::Own,
+                (None, None) if queue.lock().unwrap().is_busy(thread_id) => Terminal::Claim,
+                (None, None) => Terminal::Stray,
+            };
+        };
+        let is = |held: &Option<Turn>| {
+            held.as_ref()
+                .is_some_and(|(g, t)| *g == generation && t == turn)
+        };
+        if open.is_some_and(|o| is(&o.turn)) {
+            return Terminal::Run;
+        }
+        if own.is_some_and(is) {
+            return Terminal::Own;
+        }
+        // A send whose bridge never named its turn is ended by the first
+        // terminal of its session that is not a turn already over.
+        let over = self
+            .sessions
+            .get(&thread_id)
+            .is_some_and(|s| s.generation != generation || s.finished.contains(turn));
+        if open.is_some_and(|o| o.turn.is_none()) && own.is_none() && !over {
+            elog!("[oculus] harness thread {thread_id}: turn {turn} ended a run bound to no turn");
+            return Terminal::Run;
+        }
+        Terminal::Stray
     }
 
-    /// Opens the thread's run, or its unowned turn, before `ev` is stored.
-    pub fn enter(&mut self, thread_id: i64, ev: &HarnessEvent) -> Tags {
+    /// The terminal was applied: its turn is over, and a later one naming it
+    /// again is a repeat.
+    pub fn finished(&mut self, thread_id: i64, from: From, turn: Option<&TurnId>, was: Terminal) {
+        if was == Terminal::Own {
+            self.own.remove(&thread_id);
+        }
+        if let (From::Session(generation), Some(turn)) = (from, turn) {
+            if let Some(session) = self.sessions.get_mut(&thread_id) {
+                if session.generation == generation {
+                    session.finished.insert(turn.clone());
+                }
+            }
+        }
+    }
+
+    /// Opens the thread's run, or a turn of the provider's own, before `ev`
+    /// is stored.
+    pub fn enter(&mut self, thread_id: i64, from: From, ev: &HarnessEvent) {
         match ev {
             HarnessEvent::UserMessage { run: Some(run), .. }
             | HarnessEvent::Continued { run: Some(run), .. } => {
@@ -84,18 +184,38 @@ impl RunScope {
                         run_id: run.run_id,
                         attempt_id: run.attempt_id,
                         next: 0,
+                        turn: None,
                     },
                 );
             }
             HarnessEvent::UnpromptedTurn { .. } => {
                 self.failed_writes.remove(&thread_id);
-                self.open.remove(&thread_id);
-                self.unprompted.insert(thread_id);
+                self.own.insert(thread_id, None);
+            }
+            HarnessEvent::TurnStarted { turn: Some(turn) } => {
+                if let (From::Session(generation), Some(own @ None)) =
+                    (from, self.own.get_mut(&thread_id))
+                {
+                    *own = Some((generation, turn.clone()));
+                }
             }
             _ => {}
         }
-        self.open
-            .get(&thread_id)
+    }
+
+    /// The run `ev` belongs to: the thread's open one, unless the provider
+    /// is in a turn of its own. A run's own terminal is always its.
+    fn scope(&self, thread_id: i64, terminal: Option<Terminal>) -> Option<&Open> {
+        match terminal {
+            Some(Terminal::Run) => self.open.get(&thread_id),
+            Some(_) => None,
+            None if self.own.contains_key(&thread_id) => None,
+            None => self.open.get(&thread_id),
+        }
+    }
+
+    pub fn tags(&self, thread_id: i64, terminal: Option<Terminal>) -> Tags {
+        self.scope(thread_id, terminal)
             .map(|o| Tags {
                 run_id: Some(o.run_id),
                 attempt_id: Some(o.attempt_id),
@@ -105,14 +225,19 @@ impl RunScope {
 
     /// The owner a row made from `ev` would get. The question's own row (or
     /// a continuation's) was written with its run, so it takes none here.
-    pub fn owner(&self, thread_id: i64, ev: &HarnessEvent) -> Option<store::Owner> {
+    pub fn owner(
+        &self,
+        thread_id: i64,
+        ev: &HarnessEvent,
+        terminal: Option<Terminal>,
+    ) -> Option<store::Owner> {
         if matches!(
             ev,
             HarnessEvent::UserMessage { .. } | HarnessEvent::Continued { .. }
         ) {
             return None;
         }
-        self.open.get(&thread_id).map(|o| store::Owner {
+        self.scope(thread_id, terminal).map(|o| store::Owner {
             run_id: o.run_id,
             attempt_id: o.attempt_id,
             entity: format!("weak:{}", o.next),
@@ -132,19 +257,18 @@ impl RunScope {
     }
 
     /// Run-level effects of an already stored event: the binding learns its
-    /// session; `TurnFinished` settles the run and closes the scope. Returns
-    /// the settlement's events, each with its row, to emit before the terminal.
+    /// session; the run's own `TurnFinished` settles it and closes the scope.
+    /// Returns the settlement's events, each with its row, to emit before
+    /// the terminal.
     pub fn after(
         &mut self,
         rt: &Runtime,
         pool: &SqlitePool,
         thread_id: i64,
         ev: &HarnessEvent,
+        terminal: Option<Terminal>,
     ) -> Vec<(HarnessEvent, Option<i64>)> {
-        if matches!(ev, HarnessEvent::TurnFinished { .. }) {
-            self.unprompted.remove(&thread_id);
-        }
-        let Some(open) = self.open.get(&thread_id) else {
+        let Some(open) = self.scope(thread_id, terminal) else {
             return Vec::new();
         };
         let mut out = Vec::new();
@@ -160,7 +284,7 @@ impl RunScope {
             HarnessEvent::AssistantMessage { .. } => {
                 rt.block_on(store::clear_draft(pool, open.run_id))
             }
-            HarnessEvent::TurnFinished { status } => {
+            HarnessEvent::TurnFinished { status, .. } => {
                 let settled = rt.block_on(store::settle_run(
                     pool,
                     open.run_id,
@@ -193,5 +317,85 @@ impl RunScope {
             elog!("[oculus] harness run {thread_id}: {e}");
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn open_run(scope: &mut RunScope, thread: i64) {
+        let run = store::RunStart {
+            run_id: 7,
+            attempt_id: 8,
+            binding_id: 1,
+            item_id: 1,
+        };
+        scope.enter(
+            thread,
+            From::App,
+            &HarnessEvent::UserMessage {
+                text: "q".into(),
+                at: None,
+                run: Some(run),
+            },
+        );
+    }
+
+    fn ended(turn: &str) -> HarnessEvent {
+        HarnessEvent::TurnFinished {
+            status: "completed".into(),
+            turn: Some(turn.into()),
+        }
+    }
+
+    #[test]
+    fn a_bound_run_is_ended_only_by_its_own_turn_of_its_own_session() {
+        let queue = Mutex::new(Queue::default());
+        let mut scope = RunScope::default();
+        assert!(scope.admit(1, 4, &ended("a")));
+        open_run(&mut scope, 1);
+        scope.bind(1, 4, "b".into());
+        let ends = |scope: &RunScope, from, turn: &str| {
+            scope.terminal(1, from, Some(&turn.to_string()), &queue)
+        };
+        assert_eq!(ends(&scope, From::Session(4), "a"), Terminal::Stray);
+        assert_eq!(ends(&scope, From::Session(3), "b"), Terminal::Stray);
+        assert_eq!(ends(&scope, From::Session(4), "b"), Terminal::Run);
+        // The app's own terminal names no turn: the send failed.
+        assert_eq!(scope.terminal(1, From::App, None, &queue), Terminal::Run);
+    }
+
+    #[test]
+    fn a_run_bound_to_no_turn_is_not_ended_by_a_turn_already_over() {
+        let queue = Mutex::new(Queue::default());
+        let mut scope = RunScope::default();
+        assert!(scope.admit(1, 4, &ended("a")));
+        scope.finished(1, From::Session(4), Some(&"a".to_string()), Terminal::Stray);
+        open_run(&mut scope, 1);
+        let a = "a".to_string();
+        let b = "b".to_string();
+        assert_eq!(
+            scope.terminal(1, From::Session(4), Some(&a), &queue),
+            Terminal::Stray,
+            "a repeat of the last turn's end"
+        );
+        assert_eq!(
+            scope.terminal(1, From::Session(4), Some(&b), &queue),
+            Terminal::Run,
+            "the bridge never named the send's turn, so its session's next end is it"
+        );
+    }
+
+    #[test]
+    fn a_replaced_sessions_end_still_settles_the_run_bound_to_it() {
+        let mut scope = RunScope::default();
+        assert!(scope.admit(1, 4, &ended("a")));
+        open_run(&mut scope, 1);
+        scope.bind(1, 4, "b".into());
+        assert!(scope.admit(1, 5, &ended("x")), "a newer session");
+        assert!(!scope.admit(1, 4, &ended("a")));
+        assert!(!scope.admit(1, 4, &HarnessEvent::UnpromptedTurn { after: Vec::new() }));
+        assert!(scope.admit(1, 4, &ended("b")), "the bound run's own end");
     }
 }

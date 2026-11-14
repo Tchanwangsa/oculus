@@ -181,7 +181,6 @@ impl Rig {
             self.continue_card(&card);
         }
         let student = self.card.is_none();
-        assert!(!student || self.queue.lock().unwrap().try_claim(self.thread));
         if self.scenario.fail_intent {
             self.runtime.block_on(sqlx::raw_sql("CREATE TRIGGER replay_intent_failure BEFORE INSERT ON harness_items WHEN NEW.kind = 'user' BEGIN SELECT RAISE(FAIL, 'replay intent failure'); END;").execute(&self.pool)).unwrap();
         }
@@ -259,6 +258,10 @@ impl Rig {
         receipt: &str,
         opts: &SendOptions,
     ) -> Result<store::RunStart, String> {
+        assert!(
+            self.queue.lock().unwrap().try_claim(self.thread),
+            "a send on a busy thread waits in the queue"
+        );
         let begun = self.runtime.block_on(begin_run(
             &self.bus,
             store::SendIntent {
@@ -285,7 +288,7 @@ impl Rig {
             Ok(run)
         });
         if let Err(error) = &sent {
-            crate::harness::child::fail_turn(&self.sink, self.provider, error.clone());
+            crate::harness::child::fail_turn(&self.sink, self.provider, error.clone(), None);
         }
         sent
     }

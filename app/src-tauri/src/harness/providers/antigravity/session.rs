@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::harness::child::{self, ChildProc, ThreadSpawn};
-use crate::harness::event::Provider;
+use crate::harness::event::{Bound, Provider, Turns};
 use crate::harness::Sink;
 
 use super::install;
@@ -19,6 +19,9 @@ pub struct AntigravitySession {
     pub(super) interrupting: Arc<AtomicBool>,
     /// A turn is owed a `result`; a death meanwhile must still close it.
     pub(super) expecting: Arc<AtomicBool>,
+    /// The process's turn ordinals, shared with its reader: the stream names
+    /// no turn.
+    pub(super) turns: Arc<Turns>,
 }
 
 /// `agy`'s argv after the binary.
@@ -70,11 +73,13 @@ impl AntigravitySession {
 
         let interrupting = Arc::new(AtomicBool::new(false));
         let expecting = Arc::new(AtomicBool::new(false));
+        let turns = Arc::new(Turns::default());
         let session = Arc::new(AntigravitySession {
             proc,
             pending_brief: Mutex::new((!cfg.brief.trim().is_empty()).then(|| cfg.brief.clone())),
             interrupting: interrupting.clone(),
             expecting: expecting.clone(),
+            turns: turns.clone(),
         });
 
         let reader_session = session.clone();
@@ -83,6 +88,7 @@ impl AntigravitySession {
             let mut state = Translator {
                 interrupting,
                 expecting: expecting.clone(),
+                turns,
                 ..Default::default()
             };
             child::read_json_lines(stdout, raw_log.as_ref(), |v| {
@@ -102,7 +108,12 @@ impl AntigravitySession {
             sink(ev);
         }
         self.proc.finish(sink, Provider::Antigravity, || {
-            self.expecting.swap(false, Ordering::SeqCst) || state.turn_open
+            let sent = self
+                .expecting
+                .swap(false, Ordering::SeqCst)
+                .then(|| self.turns.take_sent())
+                .flatten();
+            state.turn.take().or(sent)
         });
     }
 
@@ -110,13 +121,15 @@ impl AntigravitySession {
         self.proc.is_alive()
     }
 
-    /// One user turn, with the brief ahead of the first message.
-    pub fn send(&self, text: &str) -> Result<(), String> {
+    /// One user turn, with the brief ahead of the first message. `bound`
+    /// hears the turn's ordinal before `agy` hears the message.
+    pub fn send(&self, text: &str, bound: &Bound) -> Result<(), String> {
         let brief = self.pending_brief.lock().unwrap().take();
         let text = match brief {
             Some(b) => format!("{}\n\n---\n\n{text}", b.trim()),
             None => text.to_string(),
         };
+        bound(self.turns.reserve());
         self.expecting.store(true, Ordering::SeqCst);
         self.proc.write_line(&serde_json::json!({
             "event": "user",

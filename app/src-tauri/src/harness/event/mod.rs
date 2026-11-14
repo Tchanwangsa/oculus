@@ -6,8 +6,10 @@
 
 pub mod answer;
 mod classify;
+mod turn;
 
 pub use classify::{cap_output, classify, MAX_TOOL_OUTPUT};
+pub use turn::{unbound, Bound, TurnId, Turns};
 
 use serde::{Deserialize, Serialize};
 
@@ -191,7 +193,11 @@ pub enum HarnessEvent {
     },
     /// The provider began working on the last user message, or, after
     /// [`Self::UnpromptedTurn`], on a turn of its own.
-    TurnStarted,
+    TurnStarted {
+        /// Which turn of its session; the bridge's, never serialized.
+        #[serde(skip)]
+        turn: Option<TurnId>,
+    },
     /// Live assistant text, superseded by the [`Self::AssistantMessage`] that follows.
     AssistantDelta {
         text: String,
@@ -347,6 +353,11 @@ pub enum HarnessEvent {
     TurnFinished {
         /// `completed`, `interrupted`, `failed`.
         status: String,
+        /// Which turn of its session ended: only the run that turn belongs
+        /// to is settled by it. `None` from the app, for a send that failed
+        /// before its turn. Never serialized.
+        #[serde(skip)]
+        turn: Option<TurnId>,
     },
     Error {
         message: String,

@@ -15,9 +15,12 @@ const V1_LS: &str = include_str!("../../../../../fixtures/harness/opencode-v1-ls
 #[test]
 fn folds_a_recorded_v1_turn() {
     let events = replay(V1_LS);
-    assert!(matches!(events.first(), Some(HarnessEvent::TurnStarted)));
+    assert!(matches!(
+        events.first(),
+        Some(HarnessEvent::TurnStarted { .. })
+    ));
     assert_eq!(
-        count(&events, |e| matches!(e, HarnessEvent::TurnStarted)),
+        count(&events, |e| matches!(e, HarnessEvent::TurnStarted { .. })),
         1,
         "user re-emits open nothing"
     );
@@ -142,7 +145,7 @@ fn folds_a_recorded_v1_text_turn() {
         "../../../../../fixtures/harness/opencode-v1-text.ndjson"
     ));
     assert_eq!(
-        count(&events, |e| matches!(e, HarnessEvent::TurnStarted)),
+        count(&events, |e| matches!(e, HarnessEvent::TurnStarted { .. })),
         1
     );
     assert_eq!(messages(&events), vec!["ok"]);
@@ -255,7 +258,7 @@ fn a_v1_model_not_found_fails_once_with_the_providers_words() {
         "../../../../../fixtures/harness/opencode-v1-error.ndjson"
     ));
     assert_eq!(
-        count(&events, |e| matches!(e, HarnessEvent::TurnStarted)),
+        count(&events, |e| matches!(e, HarnessEvent::TurnStarted { .. })),
         1
     );
     let errs = errors(&events);
@@ -304,7 +307,7 @@ fn a_v1_turn_finishes_exactly_once() {
     let events = replay(&again);
     assert_eq!(finishes(&events), vec!["completed"]);
     assert_eq!(
-        count(&events, |e| matches!(e, HarnessEvent::TurnStarted)),
+        count(&events, |e| matches!(e, HarnessEvent::TurnStarted { .. })),
         1
     );
     assert_eq!(
@@ -325,7 +328,7 @@ fn a_v1_bad_agent_closes_on_the_error_because_no_idle_follows() {
         json!({"info": {"id": "msg_u1", "role": "user", "sessionID": "ses_1"}}),
     );
     assert!(
-        matches!(opened.as_slice(), [HarnessEvent::TurnStarted, HarnessEvent::TurnAnchor { anchor }] if anchor == "msg_u1")
+        matches!(opened.as_slice(), [HarnessEvent::TurnStarted { .. }, HarnessEvent::TurnAnchor { anchor }] if anchor == "msg_u1")
     );
     let msg =
         "Agent not found: \"nope-agent\". Available agents: build, explore, general, oculus, plan";
@@ -423,7 +426,7 @@ fn a_v1_idle_with_the_assistant_still_open_fails_the_turn_once() {
         );
     let events = replay(&raw);
     assert_eq!(
-        count(&events, |e| matches!(e, HarnessEvent::TurnStarted)),
+        count(&events, |e| matches!(e, HarnessEvent::TurnStarted { .. })),
         1
     );
     assert_eq!(finishes(&events), vec!["failed"]);
@@ -455,7 +458,7 @@ fn a_v1_user_row_opens_on_its_id_not_on_the_absence_of_summary() {
         json!({"info": {"id": "msg_u1", "role": "user", "summary": {"diffs": []}}}),
     );
     assert!(
-        matches!(first.as_slice(), [HarnessEvent::TurnStarted, HarnessEvent::TurnAnchor { anchor }] if anchor == "msg_u1")
+        matches!(first.as_slice(), [HarnessEvent::TurnStarted { .. }, HarnessEvent::TurnAnchor { anchor }] if anchor == "msg_u1")
     );
     assert!(go(
         &mut st,

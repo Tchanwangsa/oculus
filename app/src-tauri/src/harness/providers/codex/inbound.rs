@@ -13,7 +13,8 @@ impl CodexServer {
         match (has_id, method) {
             (true, None) => {
                 let id = v.get("id").and_then(|i| i.as_i64()).unwrap_or(-1);
-                if let Some(tx) = self.pending.lock().unwrap().remove(&id) {
+                let pending = self.pending.lock().unwrap().remove(&id);
+                if let Some(pending) = pending {
                     let r = match v.get("error") {
                         Some(e) => Err(e
                             .get("message")
@@ -22,7 +23,10 @@ impl CodexServer {
                             .unwrap_or_else(|| e.to_string())),
                         None => Ok(v.get("result").cloned().unwrap_or(Value::Null)),
                     };
-                    let _ = tx.send(r);
+                    if let (Ok(result), Some(on_result)) = (&r, pending.on_result) {
+                        on_result(result);
+                    }
+                    let _ = pending.reply.send(r);
                 }
             }
             (true, Some(m)) => self.handle_server_request(&v["id"], m, &v["params"]),

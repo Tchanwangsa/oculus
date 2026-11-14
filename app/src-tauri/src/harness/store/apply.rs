@@ -100,7 +100,7 @@ async fn apply_rows(
             })
             .ok_or_else(|| "a continuation with no run".to_string()),
         // `begin_run` or `UnpromptedTurn` already set the thread running.
-        HarnessEvent::TurnStarted => Ok(Stored::default()),
+        HarnessEvent::TurnStarted { .. } => Ok(Stored::default()),
         // A row, so a reload still shows why the agent went on unasked.
         HarnessEvent::UnpromptedTurn { after } => {
             set_status(pool, thread_id, "running").await?;
@@ -319,7 +319,7 @@ async fn apply_rows(
                 .map_err(|e| e.to_string())?;
             Ok(Stored::default())
         }
-        HarnessEvent::TurnFinished { status } => {
+        HarnessEvent::TurnFinished { status, .. } => {
             // A run's settlement sets the thread's status with its own; only
             // a turn with no run (one the provider started) sets it here.
             if owner.is_none() {

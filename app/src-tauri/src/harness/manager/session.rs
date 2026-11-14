@@ -10,6 +10,7 @@ use crate::harness::child::ThreadSpawn;
 use crate::harness::claude::{ClaudeSession, ClaudeSpawn};
 use crate::harness::codex::{self, CodexThreadOpts};
 use crate::harness::discover;
+use crate::harness::event::Bound;
 use crate::harness::opencode::{self, OpencodeSessionOpts};
 use crate::harness::Provider;
 
@@ -35,7 +36,11 @@ impl Harness {
     ) -> Result<(), String> {
         let mut live = self.live.lock().unwrap();
         self.ensure(&mut live, thread_id, provider, resume, opts, sinks)?;
-        live.get(&thread_id).ok_or("no session")?.handle.send(text)
+        let session = live.get(&thread_id).ok_or("no session")?;
+        // The run this send belongs to is bound to the turn it is accepted as.
+        let (generation, sinks) = (session.generation, session.sinks.clone());
+        let bound: Bound = Arc::new(move |turn| sinks.bound(generation, turn));
+        session.handle.send_turn(text, &bound)
     }
 
     /// The reasoning level the thread's live session runs under, if one is
@@ -93,7 +98,8 @@ impl Harness {
             return Ok(());
         }
         live.remove(&thread_id);
-        let sink = sinks.events(self.mint());
+        let generation = self.mint();
+        let sink = sinks.events(generation);
         #[cfg(test)]
         if self.replay_only {
             let spawn = self
@@ -107,6 +113,8 @@ impl Harness {
                 Live {
                     handle: spawn(sink),
                     effort: opts.reasoning_effort.clone(),
+                    generation,
+                    sinks: sinks.clone(),
                 },
             );
             return Ok(());
@@ -221,6 +229,8 @@ impl Harness {
             Live {
                 handle,
                 effort: opts.reasoning_effort.clone(),
+                generation,
+                sinks: sinks.clone(),
             },
         );
         Ok(())

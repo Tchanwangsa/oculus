@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::harness::child::{self, ChildProc};
-use crate::harness::event::{HarnessEvent, Provider};
+use crate::harness::event::{Bound, HarnessEvent, Provider};
 use crate::harness::Sink;
 
 use super::translate::rate_windows;
@@ -17,10 +17,20 @@ use super::{CodexSpawn, CodexThreadOpts, ModelInfo, ThreadRoute, ThreadState};
 /// No answer in this long is a hung server, not a slow one.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Run on the reader thread when a request's reply is a result, before any
+/// later line is read.
+type OnResult = Box<dyn FnOnce(&Value) + Send>;
+
+/// A request waiting on its reply.
+pub(super) struct Pending {
+    pub(super) reply: mpsc::Sender<Result<Value, String>>,
+    pub(super) on_result: Option<OnResult>,
+}
+
 pub struct CodexServer {
     pub(super) proc: ChildProc,
     pub(super) next_id: AtomicI64,
-    pub(super) pending: Mutex<HashMap<i64, mpsc::Sender<Result<Value, String>>>>,
+    pub(super) pending: Mutex<HashMap<i64, Pending>>,
     pub(super) routes: Mutex<HashMap<String, Arc<ThreadRoute>>>,
     /// Where account-scoped events go; absent for headless runs.
     pub(super) account_sink: Option<Sink>,
@@ -43,16 +53,16 @@ impl CodexServer {
                 let mut st = r.state.lock().unwrap();
                 st.active_turn
                     .take()
-                    .map(|_| super::translate::cut_off(&mut st))
+                    .map(|turn| (turn, super::translate::cut_off(&mut st)))
             };
-            if let Some(events) = cut_off {
+            if let Some((turn, events)) = cut_off {
                 for ev in events {
                     (r.sink)(ev);
                 }
                 let msg = self
                     .proc
                     .with_tail(format!("codex app-server exited (code {code:?})"));
-                child::fail_turn(&r.sink, Provider::Codex, msg);
+                child::fail_turn(&r.sink, Provider::Codex, msg, Some(turn));
             }
             (r.sink)(HarnessEvent::Exited { code });
         }
@@ -89,12 +99,26 @@ impl CodexServer {
     }
 
     pub(super) fn request(&self, method: &str, params: Value) -> Result<Value, String> {
+        self.request_then(method, params, None)
+    }
+
+    /// [`Self::request`], with `on_result` run on the reader thread as the
+    /// reply arrives: what it does is done before any later notification.
+    fn request_then(
+        &self,
+        method: &str,
+        params: Value,
+        on_result: Option<OnResult>,
+    ) -> Result<Value, String> {
         if !self.is_alive() {
             return Err("codex app-server is not running".into());
         }
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let (tx, rx) = mpsc::channel();
-        self.pending.lock().unwrap().insert(id, tx);
+        let (reply, rx) = mpsc::channel();
+        self.pending
+            .lock()
+            .unwrap()
+            .insert(id, Pending { reply, on_result });
         if let Err(error) = self
             .proc
             .write_line(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))
@@ -324,18 +348,25 @@ impl CodexServer {
         p
     }
 
+    /// Start a turn. Its id is taken from the response: `turn/started` can
+    /// lag while the server warms MCP and hooks, leaving an interrupt or exit
+    /// no turn to name. Taken on the reader thread, so `bound` and the route
+    /// know the turn before any of its notifications is read.
     pub fn start_turn(
         &self,
         thread_id: &str,
         text: &str,
         opts: &CodexThreadOpts,
+        bound: &Bound,
     ) -> Result<(), String> {
         let p = Self::turn_params(thread_id, text, opts);
-        let r = self.request("turn/start", p)?;
-        // Taken from the response: `turn/started` can lag while the server
-        // warms MCP and hooks, leaving an interrupt or exit no turn to name.
-        if let Some(id) = r.pointer("/turn/id").and_then(|s| s.as_str()) {
-            let route = self.routes.lock().unwrap().get(thread_id).cloned();
+        let route = self.routes.lock().unwrap().get(thread_id).cloned();
+        let bound = bound.clone();
+        let started = move |r: &Value| {
+            let Some(id) = r.pointer("/turn/id").and_then(|s| s.as_str()) else {
+                return;
+            };
+            bound(id.to_string());
             if let Some(route) = route {
                 route
                     .state
@@ -348,7 +379,8 @@ impl CodexServer {
                     anchor: id.to_string(),
                 });
             }
-        }
+        };
+        self.request_then("turn/start", p, Some(Box::new(started)))?;
         Ok(())
     }
 

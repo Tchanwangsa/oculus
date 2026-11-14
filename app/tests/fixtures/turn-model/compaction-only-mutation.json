@@ -23,7 +23,7 @@
       "sequence": 1794054812354135,
       "event": {
         "type": "turn_anchor",
-        "anchor": "replay-turn"
+        "anchor": "01a08b4a-5f68-7c42-bc82-ab8e70d37d01"
       }
     },
     {
@@ -233,7 +233,7 @@
       "content": "Replay request",
       "meta": null,
       "created_at": "2026-11-07 12:33:32",
-      "anchor": "replay-turn",
+      "anchor": "01a08b4a-5f68-7c42-bc82-ab8e70d37d01",
       "run_id": 1,
       "attempt_id": null,
       "entity_ref": null,

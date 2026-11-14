@@ -3,7 +3,7 @@
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
-use crate::harness::event::{HarnessEvent, Provider};
+use crate::harness::event::{unbound, HarnessEvent, Provider};
 use crate::harness::Sink;
 
 use super::super::{
@@ -105,6 +105,7 @@ fn a_real_opencode_runs_a_v1_thread_end_to_end() {
         .prompt(
             &session,
             "Use the bash tool to run `ls`, then say one file name you saw.",
+            &unbound(),
         )
         .expect("prompt_async");
     let events = one_turn(&rx, Duration::from_secs(120));
@@ -114,7 +115,7 @@ fn a_real_opencode_runs_a_v1_thread_end_to_end() {
         started.elapsed().as_secs_f64()
     );
     assert_eq!(
-        count(&events, |e| matches!(e, HarnessEvent::TurnStarted)),
+        count(&events, |e| matches!(e, HarnessEvent::TurnStarted { .. })),
         1
     );
     let anchors: Vec<&str> = events
@@ -161,7 +162,7 @@ fn a_real_opencode_runs_a_v1_thread_end_to_end() {
     );
     let started = Instant::now();
     server
-        .prompt(&session, "Reply with the single word: ok")
+        .prompt(&session, "Reply with the single word: ok", &unbound())
         .expect("prompt_async");
     let events = one_turn(&rx, Duration::from_secs(60));
     eprintln!(
@@ -176,7 +177,7 @@ fn a_real_opencode_runs_a_v1_thread_end_to_end() {
     // 4. Stop a long answer mid-stream.
     let started = Instant::now();
     server
-        .prompt(&session, "Count from 1 to 300, one per line")
+        .prompt(&session, "Count from 1 to 300, one per line", &unbound())
         .expect("prompt_async");
     let mut before = Vec::new();
     loop {

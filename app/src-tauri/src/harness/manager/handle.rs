@@ -3,8 +3,11 @@ use std::sync::Arc;
 use crate::harness::antigravity::AntigravitySession;
 use crate::harness::claude::ClaudeSession;
 use crate::harness::codex::{CodexServer, CodexThreadOpts};
+use crate::harness::event::{unbound, Bound};
 use crate::harness::opencode::OpencodeServer;
 use crate::harness::Provider;
+
+use super::sinks::{Generation, Sinks};
 
 /// Where a rewind goes back to: `anchor` is the provider's handle for the
 /// question to take out, kept on its row; `last_seen` the newest question's,
@@ -45,12 +48,19 @@ impl Handle {
         }
     }
 
+    /// A send nothing tracks: a one-off turn.
     pub(in crate::harness) fn send(&self, text: &str) -> Result<(), String> {
+        self.send_turn(text, &unbound())
+    }
+
+    /// Send, telling `bound` which turn of the session the message was
+    /// accepted as, before any event of that turn.
+    pub(in crate::harness) fn send_turn(&self, text: &str, bound: &Bound) -> Result<(), String> {
         match self {
-            Handle::Claude(s) => s.send(text),
-            Handle::Codex(server, tid, opts) => server.start_turn(tid, text, opts),
-            Handle::Opencode(server, ses) => server.prompt(ses, text),
-            Handle::Antigravity(s) => s.send(text),
+            Handle::Claude(s) => s.send(text, bound),
+            Handle::Codex(server, tid, opts) => server.start_turn(tid, text, opts, bound),
+            Handle::Opencode(server, ses) => server.prompt(ses, text, bound),
+            Handle::Antigravity(s) => s.send(text, bound),
         }
     }
 
@@ -108,6 +118,10 @@ impl Handle {
 pub(super) struct Live {
     pub(super) handle: Handle,
     pub(super) effort: Option<String>,
+    /// Minted when this session was spawned or attached; its sink carries it.
+    pub(super) generation: Generation,
+    /// Where this session reports.
+    pub(super) sinks: Arc<dyn Sinks>,
 }
 
 impl Live {

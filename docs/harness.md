@@ -929,15 +929,16 @@ one, and `begin_run` refuses one. A card's continuation is a run with origin
 
 The question's `UserMessage` carries the run (never serialized), so the
 consumer stores no second row and `app/src-tauri/src/harness/app/run_scope.rs` opens that run for the
-thread. The bridges keep the sink they were spawned with, so ownership is
+thread. Ownership is
 assigned there, on the one ordered consumer: every later row on the thread
 gets the run, the attempt and a weak attempt-local `entity_ref` (`weak:0`,
 `weak:1`, …), which is no provider id. Envelopes add `runId`, `attemptId` and
 a row's `entityId`; the webview stamps `runId` on the rows it makes live, as
 `run_id` is stored, and folds by it (below). `SessionStarted`
 gives the binding its native session (a different one opens a new binding),
-and `TurnFinished` settles the run (below). A turn the provider starts
-itself (`UnpromptedTurn`) is unowned, as is every row from before migration
+and its own turn's `TurnFinished` settles the run
+([Events say whose they are](#events-say-whose-they-are)). A turn the provider starts
+itself (`UnpromptedTurn`) is unowned and leaves an open run as it is, as is every row from before migration
 54: their delivery stays `unknown`. `begin_run` sets the thread `running` and
 settlement sets it back; only an unowned turn's `UnpromptedTurn` and
 `TurnFinished` set it themselves. A rewind deletes runs asked from the
@@ -1104,6 +1105,39 @@ process the manager replaced from speaking into the run its successor is
 answering: left alone, a turn it started for a finished background task
 would take the thread from that run. A headless run (`run_once`) has no
 consumer and passes `OneSink`, the same sink for every session.
+
+**A turn has an id.** `TurnStarted` and `TurnFinished` carry `turn`
+(`event/turn.rs`, `TurnId`; never serialized, so the webview's events are
+unchanged): Codex's own turn id, and for the other three the bridge's count
+of the turns opened on that session (`Turns`), the CLI's own included, since
+their streams name none. A send reserves its ordinal before the provider
+write; a turn the CLI starts itself takes the next as it opens.
+
+**A send binds its run to one turn.** `Harness::send` hands the bridge a
+`Bound` callback, and the bridge calls it with the turn the message was
+accepted as, before any event of that turn can arrive: before the write on
+Claude, opencode and Antigravity, and for Codex on the reader thread as the
+`turn/start` reply comes in (`CodexServer::request_then`), which is also
+where the route learns its active turn and the `TurnAnchor` goes out. It
+reaches the consumer as `BusMsg::Bound` and `RunScope::bind` records
+`(generation, turn)` on the thread's open run.
+
+**Only that turn's end settles the run.** `RunScope::terminal` reads each
+`TurnFinished`:
+
+| It names | What happens |
+| --- | --- |
+| the open run's turn | the run settles (`Terminal::Run`) |
+| a turn the provider started itself (`UnpromptedTurn`, then its `TurnStarted`) | that turn ends; its rows were unowned and the run, if one is open, is untouched (`Own`) |
+| any other turn: a repeat, or one the server ran itself | logged and ignored; nothing settles and no queued message is let go (`Stray`) |
+| no turn, from the app (`send::dispatch` closing a send that failed) | the open run settles; with none open, the thread's claim is released (`Claim`) |
+
+A replaced session's terminal is still heard when it names the turn the open
+run is bound to. A run whose bridge never named its turn (a `turn/start`
+reply with no id) is settled by its session's next terminal that is not a
+turn already over. Codex's translator compares too: a `turn/completed` for
+another turn emits only the terminal and leaves the open turn's state and
+streamed text alone.
 
 ## Going back rewinds the agent too
 

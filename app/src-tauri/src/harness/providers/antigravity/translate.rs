@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::harness::event::{cap_output, classify, GapCause, HarnessEvent, Provider, Source};
+use crate::harness::event::{
+    cap_output, classify, GapCause, HarnessEvent, Provider, Source, TurnId, Turns,
+};
 
 /// Per-process translation state, keyed by `step_index`.
 #[derive(Default)]
@@ -23,13 +25,22 @@ pub(super) struct Translator {
     pub(super) refused: bool,
     pub(super) interrupting: Arc<AtomicBool>,
     pub(super) expecting: Arc<AtomicBool>,
+    /// The session's turn ordinals, shared with [`super::session::AntigravitySession::send`].
+    pub(super) turns: Arc<Turns>,
+    /// The open turn's ordinal.
+    pub(super) turn: Option<TurnId>,
+    /// The turn the last `result` closed, which a repeated `result` names again.
+    pub(super) last_turn: Option<TurnId>,
 }
 
 impl Translator {
     fn open_turn(&mut self, out: &mut Vec<HarnessEvent>) {
         if !self.turn_open {
             self.turn_open = true;
-            out.push(HarnessEvent::TurnStarted);
+            self.turn = Some(self.turns.open());
+            out.push(HarnessEvent::TurnStarted {
+                turn: self.turn.clone(),
+            });
         }
     }
 
@@ -130,11 +141,20 @@ impl Translator {
                         .unwrap_or_else(|| format!("Antigravity ended the turn with {status}"));
                     out.push(HarnessEvent::error_for(Provider::Antigravity, why));
                 }
+                // A result with no step before it still answers our message;
+                // a repeated one names the turn it already closed.
+                let turn = self
+                    .turn
+                    .take()
+                    .or_else(|| self.turns.take_sent())
+                    .or_else(|| self.last_turn.clone());
+                self.last_turn = turn.clone();
                 self.turn_open = false;
                 self.done_steps.clear();
                 self.expecting.store(false, Ordering::SeqCst);
                 out.push(HarnessEvent::TurnFinished {
                     status: mapped.into(),
+                    turn,
                 });
             }
             _ => {}

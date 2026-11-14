@@ -87,7 +87,7 @@ fn a_storage_failure_before_send_blocks_the_provider_write() {
 }
 
 /// The scratch directory lives as long as the returned guard.
-async fn scratch_pool(name: &str) -> (crate::test_support::Scratch, SqlitePool) {
+pub(super) async fn scratch_pool(name: &str) -> (crate::test_support::Scratch, SqlitePool) {
     let dir = scratch(name);
     let database = assert_scratch(&dir.join("oculus.db"), &dir);
     let pool = SqlitePoolOptions::new()
@@ -105,7 +105,7 @@ async fn scratch_pool(name: &str) -> (crate::test_support::Scratch, SqlitePool) 
     (dir, pool)
 }
 
-fn intent(thread_id: i64, receipt: &str, session: Option<&str>) -> store::SendIntent {
+pub(super) fn intent(thread_id: i64, receipt: &str, session: Option<&str>) -> store::SendIntent {
     store::SendIntent {
         thread_id,
         provider: Provider::Claude,

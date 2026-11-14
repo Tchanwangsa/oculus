@@ -124,7 +124,10 @@ private threads are not fixtures.
 The schema-upgrade replay pins SHA-256 for migrations 1–54, migrates legacy
 assistant rows from schema 24, checks source IDs/bodies, that they stay
 unowned after migration 54, and proposal source keys, then drives production
-rewind/delete pruning. `testkit/runs.rs` checks run identity: one run,
+rewind/delete pruning. `testkit/identity.rs` replays the holes turn and session ids close (a second
+Codex `turn/completed` under the next run, a replaced process speaking into
+its successor's run, a send racing a turn Claude starts itself).
+`testkit/runs.rs` checks run identity: one run,
 attempt, binding and receipt per send on all four bridges, with every later
 row owned by them; a repeated receipt starting nothing; a failed intent
 blocking the provider write; bindings following the native session; rewind,
@@ -244,5 +247,6 @@ folding needs superseded attempts. No mutation proves protocol support.
 - Every recording ends with its bridge's production EOF path (`Bridge::eof`), as a closed transport would; a `restart` scenario skips it and runs startup `reconcile` instead.
 - After a restart the checks read the reloaded rows (`Replay::restarted`), since a reload is the app's only view then.
 - The load-race projection strips `sequence`: its fresh store replays a stream whose sequence numbers the first pass already consumed.
-- A repeated root terminal is dropped only when no turn is open and no claim holds the thread; a duplicate arriving after the next send's claim but before its run is written would still release that claim.
+- A bridge's repeated terminal names a turn that is already over and is dropped whatever the thread holds. Only the app's own terminal, which names no turn, goes by the claim: with no run open it releases the thread's claim, and with neither it is dropped.
+- A Codex manifest answers `turn/start` with the recorded turn's own id, as the server does. The run is bound to that id, so a placeholder would leave the recording's `turn/completed` naming a turn nobody sent.
 - Run only the named offline release gate with `--ignored`, by its full path; the bridge suite also contains ignored live provider tests (a real opencode thread spends OpenRouter credit). Cargo ORs a filter before `--` with one after it, so `cargo test harness:: -- --ignored release_matrix` runs every ignored `harness::` test.

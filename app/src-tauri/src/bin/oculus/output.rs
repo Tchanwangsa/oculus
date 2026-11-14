@@ -140,7 +140,7 @@ impl AgentPrinter {
                 };
                 let _ = writeln!(out, "{}", paint(&format!("· continued {why}"), DIM));
             }
-            HarnessEvent::TurnFinished { status } => {
+            HarnessEvent::TurnFinished { status, .. } => {
                 end_line(&mut mid, &mut out);
                 let _ = writeln!(out, "{}", paint(&format!("· turn {status}"), DIM));
             }

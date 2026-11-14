@@ -6,7 +6,7 @@ use tokio::runtime::Runtime;
 use crate::harness::event::GapCause;
 use crate::harness::{jobs, store, HarnessEvent, Provider, Queue, QueuedMessage, SendOptions};
 
-use super::run_scope::{From, RunScope};
+use super::run_scope::{From, RunScope, Terminal};
 use super::thought_clock::ThoughtClock;
 use super::{BusMsg, Envelope};
 
@@ -107,6 +107,11 @@ impl Consumer {
                     io.dispatch(thread_id, provider, msg, opts);
                 }
             }
+            BusMsg::Bound {
+                thread_id,
+                generation,
+                turn,
+            } => self.runs.bind(thread_id, generation, turn),
         }
     }
 
@@ -124,7 +129,7 @@ impl Consumer {
         // A session that was replaced is heard no more: its late events
         // belong to no run the thread has now.
         if let (true, From::Session(generation)) = (thread_id > 0, from) {
-            if !self.runs.admit(thread_id, generation) {
+            if !self.runs.admit(thread_id, generation, &ev) {
                 elog!(
                     "[oculus] harness thread {thread_id}: dropped {} from replaced session {generation}",
                     kind(&ev)
@@ -136,17 +141,34 @@ impl Consumer {
             Some(now) => self.clock.observe_at(thread_id, &mut ev, now),
             None => self.clock.observe(thread_id, &mut ev),
         }
-        // A terminal for no open turn (a repeated `result`) settles nothing
-        // and must not release a queued message a second time.
-        if thread_id > 0 && self.runs.is_stray_terminal(thread_id, &ev, &self.queue) {
+        // Whose turn a terminal ends. One for a turn this thread does not
+        // have open (another turn's, or a repeated `result`) settles nothing
+        // and must not release a queued message.
+        let terminal =
+            match &ev {
+                HarnessEvent::TurnFinished { turn, .. } if thread_id > 0 => Some(
+                    self.runs
+                        .terminal(thread_id, from, turn.as_ref(), &self.queue),
+                ),
+                _ => None,
+            };
+        if terminal == Some(Terminal::Stray) {
+            if let (From::Session(generation), HarnessEvent::TurnFinished { turn, .. }) =
+                (from, &ev)
+            {
+                elog!(
+                    "[oculus] harness thread {thread_id}: ignored the end of turn {turn:?} (session {generation}), which is not open here"
+                );
+            }
             return;
         }
         let mut item_id = None;
         let mut entity_id = None;
-        let tags = self.runs.enter(thread_id, &ev);
+        self.runs.enter(thread_id, from, &ev);
+        let tags = self.runs.tags(thread_id, terminal);
         if let Some(p) = &self.pool {
             if thread_id > 0 {
-                let owner = self.runs.owner(thread_id, &ev);
+                let owner = self.runs.owner(thread_id, &ev, terminal);
                 match self
                     .rt
                     .block_on(store::apply_event(p, thread_id, &ev, owner.as_ref()))
@@ -170,7 +192,7 @@ impl Consumer {
                             source: None,
                             cause: GapCause::StorageFailure,
                         };
-                        let owner = self.runs.owner(thread_id, &ev);
+                        let owner = self.runs.owner(thread_id, &ev, terminal);
                         for event in [&gap, &ev] {
                             match self.rt.block_on(store::apply(
                                 p,
@@ -188,7 +210,7 @@ impl Consumer {
                     }
                     Err(e) => elog!("[oculus] harness store: {e}"),
                 }
-                for (event, id) in self.runs.after(&self.rt, p, thread_id, &ev) {
+                for (event, id) in self.runs.after(&self.rt, p, thread_id, &ev, terminal) {
                     io.emit(Envelope {
                         thread_id,
                         provider,
@@ -208,7 +230,7 @@ impl Consumer {
             // claim is atomic (asks at most once); the naming turn runs
             // off this loop, which every thread's events wait behind.
             if thread_id > 0
-                && matches!(&ev, HarnessEvent::TurnFinished { status } if status == "completed")
+                && matches!(&ev, HarnessEvent::TurnFinished { status, .. } if status == "completed")
             {
                 match self.rt.block_on(store::claim_naming(p, thread_id)) {
                     Ok(Some(seed)) => {
@@ -230,7 +252,8 @@ impl Consumer {
         }
         // A closed turn releases the next queued message; its send is
         // spawned, since a send may start a process.
-        if thread_id > 0 && matches!(&ev, HarnessEvent::TurnFinished { .. }) {
+        if let (Some(was), HarnessEvent::TurnFinished { turn, .. }) = (terminal, &ev) {
+            self.runs.finished(thread_id, from, turn.as_ref(), was);
             let next = self.queue.lock().unwrap().next(thread_id);
             if let Some((msg, opts)) = next {
                 io.dispatch(thread_id, provider, msg, opts);

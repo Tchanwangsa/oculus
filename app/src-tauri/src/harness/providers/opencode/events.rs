@@ -64,7 +64,10 @@ fn begin_turn(st: &mut SessionState) -> HarnessEvent {
     st.aborting = false;
     st.turn_open = true;
     st.awaiting_step = Some(Instant::now());
-    HarnessEvent::TurnStarted
+    st.turn = Some(st.turns.open());
+    HarnessEvent::TurnStarted {
+        turn: st.turn.clone(),
+    }
 }
 
 /// One `step-finish` folded into the running totals. `input` excludes cache
@@ -134,6 +137,7 @@ pub(super) fn close_turn(st: &mut SessionState, status: &str) -> Vec<HarnessEven
     }
     out.push(HarnessEvent::TurnFinished {
         status: status.into(),
+        turn: st.turn.take(),
     });
     out
 }

@@ -268,7 +268,7 @@ fn drain_turn(
         on_event(&ev);
         match ev {
             HarnessEvent::Error { message, .. } => failed = Some(message),
-            HarnessEvent::TurnFinished { status } => {
+            HarnessEvent::TurnFinished { status, .. } => {
                 if status == "failed" {
                     failed.get_or_insert(format!("the turn failed before {doing}"));
                 }

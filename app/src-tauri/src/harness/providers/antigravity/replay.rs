@@ -15,10 +15,12 @@ pub(in crate::harness) fn bridge(wire: Wire, sink: Sink) -> Bridge {
         pending_brief: Mutex::new(None),
         interrupting: Arc::default(),
         expecting: Arc::default(),
+        turns: Arc::default(),
     });
     let translator = Rc::new(RefCell::new(Translator {
         interrupting: session.interrupting.clone(),
         expecting: session.expecting.clone(),
+        turns: session.turns.clone(),
         ..Default::default()
     }));
     let (reader, closer, closing, eof_sink) = (
