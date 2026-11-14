@@ -187,3 +187,42 @@ async fn a_timed_thought_keeps_its_duration() {
         .get("meta");
     assert_eq!(raw, None);
 }
+
+#[tokio::test]
+async fn an_error_row_keeps_its_sign_in_and_limit_marks() {
+    let pool = migrated_pool().await;
+    let thread = create_thread(&pool, Provider::Claude, None, None, None, "hi")
+        .await
+        .unwrap();
+    let error = |auth: Option<Provider>, limit: bool| HarnessEvent::Error {
+        message: "x".into(),
+        auth,
+        limit,
+    };
+    let plain = apply(&pool, thread, &error(None, false), None)
+        .await
+        .unwrap()
+        .unwrap();
+    let signed_out = apply(&pool, thread, &error(Some(Provider::Claude), false), None)
+        .await
+        .unwrap()
+        .unwrap();
+    let limited = apply(&pool, thread, &error(None, true), None)
+        .await
+        .unwrap()
+        .unwrap();
+    let raw: Option<String> = sqlx::query_scalar("SELECT meta FROM harness_items WHERE id = ?1")
+        .bind(plain)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(raw, None);
+    assert_eq!(
+        meta(&pool, signed_out).await,
+        serde_json::json!({ "auth": "claude" })
+    );
+    assert_eq!(
+        meta(&pool, limited).await,
+        serde_json::json!({ "limit": true })
+    );
+}

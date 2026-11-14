@@ -213,6 +213,7 @@ export default function ChatPage() {
       autoFocus
       dropRef={columnRef}
       onDropping={setDropping}
+      threadId={activeId}
     />
   );
 

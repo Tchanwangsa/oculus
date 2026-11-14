@@ -10,6 +10,7 @@ import { useMentionMenu } from "@/components/harness/mentions/useMentionMenu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ModelPicker, type PickerProvider } from "@/components/harness/composer/ModelPicker";
 import { UsageMeter } from "@/components/harness/composer/UsageMeter";
+import { ThreadBanners } from "@/components/harness/composer/ThreadBanners";
 import { AttachmentStrip } from "@/components/harness/attachments/AttachmentStrip";
 import { useAttachments } from "@/hooks/agents/useAttachments";
 import type { Provider, RateWindow, ThreadUsage } from "@/lib/harness";
@@ -102,6 +103,7 @@ export function LectureChatComposer({
   onStop,
   dropRef,
   onDropping,
+  threadId = null,
 }: {
   /** Whose draft this box shows (`draftKey` in `stores/chat/draftStore.ts`). */
   draftKey: string;
@@ -133,6 +135,8 @@ export function LectureChatComposer({
    *  draws its own overlay from `onDropping`. */
   dropRef?: RefObject<HTMLElement | null>;
   onDropping?: (over: boolean) => void;
+  /** The open thread, whose notices (`ThreadBanners`) sit above the box. */
+  threadId?: number | null;
 }) {
   const text = useDraftStore((s) => s.drafts[draftKey] ?? "");
   const setDraft = useDraftStore((s) => s.setDraft);
@@ -183,6 +187,7 @@ export function LectureChatComposer({
       <MentionMenu {...mentions.menu} />
       <DictationFeedback dictation={dictation} />
       {att.error && <div className="px-0.5 text-[11px] text-destructive">{att.error}</div>}
+      <ThreadBanners threadId={threadId} rateLimits={rateLimits} />
 
       <div
         className={cn(

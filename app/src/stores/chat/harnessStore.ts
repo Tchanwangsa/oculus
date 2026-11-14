@@ -457,7 +457,14 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           break;
         }
         case "error":
-          push(rowFrom(env, "error", event.message, event.auth ? { auth: event.auth } : undefined));
+          push(
+            rowFrom(
+              env,
+              "error",
+              event.message,
+              event.auth || event.limit ? { ...(event.auth && { auth: event.auth }), ...(event.limit && { limit: true }) } : undefined,
+            ),
+          );
           break;
         case "permission_needed":
           push(

@@ -342,6 +342,17 @@ pasted code), `"callback"` (`codex login` finishes on its own listener) or
 `null` (opencode signs in [per provider](#opencode-providers-go-through-its-own-server)).
 No deadline is imposed on a sign-in.
 
+**Usage limits.** `signin::is_usage_limit` (beside `is_auth_failure`, also
+through `error_for`) sets `Error.limit`, stored as `"limit": true` in the
+error row's `meta`. Each bridge's phrase list holds only a CLI's recorded
+limit message, and none is recorded yet, so every list is empty and no error
+is marked; a phrase goes in with the recording it came from. A thread whose
+latest turn ended at a marked error shows "Usage limit reached" in
+`BannerLane` (`app/src/components/harness/composer/`): "Resets in 2 hr" from
+the fullest rate window when one is known, else "Reset time unavailable;
+retry manually". There is no resume or snooze, since nothing schedules a
+send. Closing it hides that run's notice for the session.
+
 `agy` has no login subcommand and refuses a pipe, so `signin/agy/` runs bare
 `agy` on a pseudo-terminal (`signin/pty.rs`: `openpty`, a 1000-column window
 so the URL never wraps, `login_tty` for a session of its own). Its TUI's
@@ -500,6 +511,10 @@ still update the picker.
   `\(…\)`/`\[…\]`, which CommonMark eats before remark-math.
   The brief also bans a bare `|` in maths inside a table (the table splits the
   cell first); agents use `\lvert`/`\rvert`.
+- **Thread notices sit in one lane above the composer** (`BannerLane`, fed by
+  `ThreadBanners` for the open thread in both Chat and the lecture dock): an
+  ordered stack of cards, each a toned glyph, a title, a muted description,
+  pill actions and an optional close. Never a toast, and nothing times out.
 - **Usage is a ring of context only** (`UsageMeter.tsx`); spend is hidden, as
   subscriptions aren't billed per token. Claude context is the last
   `assistant` usage, since `result.usage` sums the turn. Codex windows are read

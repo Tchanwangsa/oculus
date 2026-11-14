@@ -16,6 +16,7 @@ export * from "./reads";
 export * from "./runs";
 export * from "./threadStatus";
 export * from "./announce";
+export * from "./usageLimit";
 export * from "./commands";
 export * from "./signin";
 export * from "./antigravity";

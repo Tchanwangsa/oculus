@@ -73,7 +73,7 @@ type HarnessEvent =
   | { type: "turn_finished"; status: "completed" | "interrupted" | "failed" }
   /** `auth` names the provider when the CLI has no usable credentials; the
    *  timeline draws a sign-in card instead of an error. */
-  | { type: "error"; message: string; auth: Provider | null }
+  | { type: "error"; message: string; auth: Provider | null; limit?: boolean }
   | { type: "exited"; code: number | null };
 
 export interface HarnessEnvelope {
@@ -149,6 +149,8 @@ export interface QueuedMessage {
 
 export interface ErrorMeta {
   auth?: Provider;
+  /** The provider's usage limit is spent (`is_usage_limit` in Rust). */
+  limit?: boolean;
 }
 
 export interface ToolMeta {

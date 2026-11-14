@@ -1,7 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { fmtTime } from "@/lib/format/format";
-import type { RateWindow, ThreadUsage } from "@/lib/harness";
+import { fmtResets, type RateWindow, type ThreadUsage } from "@/lib/harness";
 import { cn } from "@/lib/utils";
 
 /** Past this, a bar stops being informational and starts being a warning. */
@@ -15,23 +14,6 @@ function fmtTokens(n: number) {
     return `${Number.isInteger(m) ? m : Number(m.toFixed(1))}M`;
   }
   return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
-}
-
-/** "Resets in 3 hr 48 min" under a day out, else "Resets Tue 9:00 pm". */
-function fmtResets(unixSeconds: number | null): string | null {
-  if (!unixSeconds) return null;
-  const ms = unixSeconds * 1000;
-  const left = ms - Date.now();
-  if (left <= 0) return null;
-  if (left < 86_400_000) {
-    const mins = Math.round(left / 60_000);
-    if (mins < 60) return `Resets in ${Math.max(1, mins)} min`;
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
-    return m ? `Resets in ${h} hr ${m} min` : `Resets in ${h} hr`;
-  }
-  const d = new Date(ms);
-  return `Resets ${d.toLocaleDateString([], { weekday: "short" })} ${fmtTime(ms)}`;
 }
 
 function tint(percent: number) {

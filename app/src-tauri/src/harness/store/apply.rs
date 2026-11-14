@@ -238,10 +238,26 @@ async fn apply_rows(
             .map_err(|e| e.to_string())?;
             Ok(Stored::default())
         }
-        // `meta` records which provider's credentials failed, so a reload can
-        // redraw the sign-in card.
-        HarnessEvent::Error { message, auth } => {
-            let meta = auth.map(|p| serde_json::json!({ "auth": p.as_str() }).to_string());
+        // `meta` records which provider's credentials failed, or that its usage
+        // limit is spent, so a reload can redraw the sign-in card or the notice.
+        HarnessEvent::Error {
+            message,
+            auth,
+            limit,
+        } => {
+            let meta = match (auth, limit) {
+                (None, false) => None,
+                (auth, limit) => {
+                    let mut meta = serde_json::Map::new();
+                    if let Some(p) = auth {
+                        meta.insert("auth".into(), p.as_str().into());
+                    }
+                    if *limit {
+                        meta.insert("limit".into(), true.into());
+                    }
+                    Some(serde_json::Value::Object(meta).to_string())
+                }
+            };
             insert_item(pool, thread_id, "error", None, Some(message), meta, owner)
                 .await
                 .map(Stored::row)

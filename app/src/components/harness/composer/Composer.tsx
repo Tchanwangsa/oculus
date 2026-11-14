@@ -6,6 +6,7 @@ import { useMentionMenu } from "@/components/harness/mentions/useMentionMenu";
 import { ModelPicker } from "@/components/harness/composer/ModelPicker";
 import { UsageMeter } from "@/components/harness/composer/UsageMeter";
 import { SubjectSelect } from "@/components/harness/composer/SubjectSelect";
+import { ThreadBanners } from "@/components/harness/composer/ThreadBanners";
 import { type Subject } from "@/lib/db";
 import {
   defaultSelection,
@@ -58,6 +59,7 @@ export function Composer({
   onDropping,
   leading,
   placeholder,
+  threadId = null,
 }: {
   /** Whose draft this box shows (`draftKey` in `stores/chat/draftStore.ts`). */
   draftKey: string;
@@ -92,6 +94,8 @@ export function Composer({
   leading?: ReactNode;
   /** The empty box's hint; a running turn's own wins. */
   placeholder?: string;
+  /** The open thread, whose notices (`ThreadBanners`) sit above the box. */
+  threadId?: number | null;
 }) {
   /** The serialized message (chips as paths); emptiness checks read this. */
   const text = useDraftStore((s) => s.drafts[draftKey] ?? "");
@@ -203,6 +207,8 @@ export function Composer({
           }}
         />
       )}
+
+      <ThreadBanners threadId={threadId} rateLimits={rateLimits} />
 
       <div
         className={cn(

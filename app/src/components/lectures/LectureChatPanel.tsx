@@ -291,6 +291,7 @@ export const LectureChatPanel = memo(function LectureChatPanel({
           onStop={onStop}
           dropRef={panelRef}
           onDropping={setDropping}
+          threadId={threadId}
         />
       </div>
 

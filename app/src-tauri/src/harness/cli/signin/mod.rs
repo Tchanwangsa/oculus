@@ -18,6 +18,7 @@
 mod agy;
 mod classify;
 mod flow;
+mod limit;
 mod output;
 #[cfg(not(unix))]
 #[path = "no_pty.rs"]
@@ -30,4 +31,5 @@ mod tests;
 
 pub use classify::is_auth_failure;
 pub use flow::{cancel, start, submit_code, SignInLine, SIGNIN_EVENT};
+pub use limit::is_usage_limit;
 pub use status::{status, SignInStatus};

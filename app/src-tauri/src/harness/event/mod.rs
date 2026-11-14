@@ -352,6 +352,10 @@ pub enum HarnessEvent {
         message: String,
         /// Set when the provider has no usable credentials; drawn as a sign-in card.
         auth: Option<Provider>,
+        /// The provider's usage limit is spent; drawn as the composer's
+        /// "Usage limit reached" notice.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        limit: bool,
     },
     /// The process is gone; the thread stays and the next message resumes it.
     Exited {
@@ -365,14 +369,21 @@ impl HarnessEvent {
         HarnessEvent::Error {
             message: message.into(),
             auth: None,
+            limit: false,
         }
     }
 
     /// A provider's error, with `auth` set when the (deliberately narrow)
-    /// [`signin::is_auth_failure`](super::signin::is_auth_failure) reads it as a credentials failure.
+    /// [`signin::is_auth_failure`](super::signin::is_auth_failure) reads it as a credentials failure,
+    /// and `limit` when [`signin::is_usage_limit`](super::signin::is_usage_limit) reads a spent usage limit.
     pub fn error_for(provider: Provider, message: impl Into<String>) -> Self {
         let message = message.into();
         let auth = super::signin::is_auth_failure(provider, &message).then_some(provider);
-        HarnessEvent::Error { message, auth }
+        let limit = super::signin::is_usage_limit(provider, &message);
+        HarnessEvent::Error {
+            message,
+            auth,
+            limit,
+        }
     }
 }

@@ -77,8 +77,8 @@ export function messageAt(item: HarnessItem): number | null {
 /** The agent a credentials-failure error row is about (`{"auth":"claude"}`);
  *  an unknown provider reads as an ordinary error. */
 export function parseErrorMeta(item: HarnessItem): ErrorMeta {
-  const { auth } = parseItemMeta(item);
-  return isProvider(auth) ? { auth } : {};
+  const { auth, limit } = parseItemMeta(item);
+  return { ...(isProvider(auth) && { auth }), ...(limit === true && { limit }) };
 }
 
 /** An `unprompted` row's finished background tasks; empty when unknown. */
