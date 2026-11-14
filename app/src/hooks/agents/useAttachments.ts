@@ -7,7 +7,7 @@ import {
   isLongPaste,
   pastedText,
   pendingFromFile,
-  pendingFromKept,
+  keptAttachments,
   pendingFromPath,
   releaseAttachment,
   splitAttachments,
@@ -46,6 +46,13 @@ export interface Attachments {
   takeBack: (message: string) => string;
   /** Prepare a trimmed message and its attachments; null keeps the editor intact. */
   prepare: (text: string) => Promise<string | null>;
+  /** Takes the pictures and pasted cards out for the stash: pictures are
+   *  written now, so the stash holds paths. Null (and nothing taken) when a
+   *  write fails, which `error` then says. */
+  setAside: () => Promise<{ pastes: string[]; pictures: string[] } | null>;
+  /** A stash entry's pastes as cards and its pictures as kept attachments,
+   *  after any already held. */
+  bringBack: (stashed: { pastes: string[]; pictures: string[] }) => void;
 }
 
 /** Pictures on their way into a message, for every composer: pasted or
@@ -118,7 +125,7 @@ export function useAttachments(
 
   function takeBack(message: string): string {
     const { text: unpictured, paths } = splitAttachments(message);
-    const kept = paths.flatMap((p) => pendingFromKept(p, dataDir) ?? []);
+    const kept = keptAttachments(paths, dataDir);
     if (kept.length) setItems((a) => [...kept, ...a]);
     const { text, pasted } = splitPastedText(unpictured);
     if (pasted.length) setPastes(draftKey, [...pasted.map(pastedText), ...currentTexts()]);
@@ -158,6 +165,35 @@ export function useAttachments(
     return withAttachments(words, paths);
   }
 
+  async function setAside(): Promise<{ pastes: string[]; pictures: string[] } | null> {
+    if (writing) return null;
+    const pictures = itemsRef.current;
+    let paths: string[] = [];
+    if (pictures.length) {
+      setWriting(true);
+      try {
+        paths = await Promise.all(pictures.map(writeAttachment));
+      } catch (e) {
+        setError(String(e));
+        return null;
+      } finally {
+        setWriting(false);
+      }
+      pictures.forEach(releaseAttachment);
+      setItems([]);
+    }
+    const pastes = currentTexts().map((p) => p.text);
+    if (pastes.length) setPastes(draftKey, []);
+    setError(null);
+    return { pastes, pictures: paths };
+  }
+
+  function bringBack(stashed: { pastes: string[]; pictures: string[] }) {
+    const kept = keptAttachments(stashed.pictures, dataDir);
+    if (kept.length) setItems((a) => [...a, ...kept]);
+    if (stashed.pastes.length) setPastes(draftKey, [...currentTexts(), ...stashed.pastes.map(pastedText)]);
+  }
+
   return {
     items,
     error,
@@ -171,5 +207,7 @@ export function useAttachments(
     detachText,
     takeBack,
     prepare,
+    setAside,
+    bringBack,
   };
 }

@@ -3,6 +3,8 @@ import { SendControls } from "@/components/harness/composer/SendControls";
 import { MentionInput, type MentionInputHandle } from "@/components/harness/mentions/MentionInput";
 import { ComposerMenu } from "@/components/harness/mentions/ComposerMenu";
 import { useComposerTools } from "@/components/harness/composer/useComposerTools";
+import { useComposerStash } from "@/components/harness/composer/useComposerStash";
+import { StashMenu } from "@/components/harness/composer/StashMenu";
 import { usePromptHistory } from "@/hooks/agents/usePromptHistory";
 import { notePickedSkills } from "@/lib/harness/skills";
 import { ModelPicker } from "@/components/harness/composer/ModelPicker";
@@ -127,6 +129,7 @@ export function Composer({
   const att = useAttachments(dropRef ?? wrapRef, draftKey);
   useEffect(() => onDropping?.(att.dropping), [att.dropping, onDropping]);
   const history = usePromptHistory({ threadId, input: ref, text });
+  const stash = useComposerStash({ input: ref, text, att });
 
   // Restored text goes before anything typed since, because it was typed first;
   // its pasted blocks go back to being cards.
@@ -177,7 +180,7 @@ export function Composer({
 
   return (
     <div ref={wrapRef} className="flex flex-col gap-1.5">
-      {((!subjectLocked && onSubject) || leading) && (
+      {((!subjectLocked && onSubject) || leading || stash.menu.entries.length > 0) && (
         <div className="flex items-center gap-1.5 px-0.5">
           {!subjectLocked && onSubject && (
             <SubjectPicker
@@ -188,6 +191,9 @@ export function Composer({
             />
           )}
           {leading}
+          <div className="ml-auto">
+            <StashMenu {...stash.menu} />
+          </div>
         </div>
       )}
 
@@ -263,6 +269,7 @@ export function Composer({
               // The menu's claimed keys come back prevented, so a pick never sends.
               mentions.keyDown(e);
               if (e.defaultPrevented) return;
+              stash.keyDown(e);
               history.keyDown(e);
               if (e.defaultPrevented) return;
               const action = enterAction(e, unscoped);

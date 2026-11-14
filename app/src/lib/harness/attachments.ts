@@ -74,6 +74,13 @@ export function pendingFromKept(path: string, dataDir: string): PendingAttachmen
   };
 }
 
+/** Pictures already in `agents/attachments/` (handed back, or restored from
+ *  the stash) as pending ones, sent again by the same path; a path that is
+ *  not an attachment's is dropped. */
+export function keptAttachments(paths: readonly string[], dataDir: string): PendingAttachment[] {
+  return paths.flatMap((p) => pendingFromKept(p, dataDir) ?? []);
+}
+
 export function releaseAttachment(a: PendingAttachment): void {
   if (a.source.kind === "bytes") URL.revokeObjectURL(a.preview);
 }

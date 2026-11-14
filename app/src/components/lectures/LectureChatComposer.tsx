@@ -7,6 +7,8 @@ import { SendControls } from "@/components/harness/composer/SendControls";
 import { MentionInput, type MentionInputHandle } from "@/components/harness/mentions/MentionInput";
 import { ComposerMenu } from "@/components/harness/mentions/ComposerMenu";
 import { useComposerTools } from "@/components/harness/composer/useComposerTools";
+import { useComposerStash } from "@/components/harness/composer/useComposerStash";
+import { StashMenu } from "@/components/harness/composer/StashMenu";
 import { usePromptHistory } from "@/hooks/agents/usePromptHistory";
 import { notePickedSkills } from "@/lib/harness/skills";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -156,6 +158,7 @@ export function LectureChatComposer({
   });
   useEffect(() => onDropping?.(att.dropping), [att.dropping, onDropping]);
   const history = usePromptHistory({ threadId, input: ref, text });
+  const stash = useComposerStash({ input: ref, text, att });
 
   /** Whether there is a message at all: words, pastes, pictures. */
   const ready = text.trim().length > 0 || att.items.length > 0 || att.texts.length > 0;
@@ -196,6 +199,11 @@ export function LectureChatComposer({
       <DictationFeedback dictation={dictation} />
       {att.error && <div className="px-0.5 text-[11px] text-destructive">{att.error}</div>}
       <ThreadBanners threadId={threadId} rateLimits={rateLimits} />
+      {stash.menu.entries.length > 0 && (
+        <div className="flex justify-end px-0.5">
+          <StashMenu {...stash.menu} />
+        </div>
+      )}
 
       <div
         className={cn(
@@ -231,6 +239,7 @@ export function LectureChatComposer({
             // The menu's claimed keys come back prevented, so a pick never sends.
             mentions.keyDown(e);
             if (e.defaultPrevented) return;
+            stash.keyDown(e);
             history.keyDown(e);
             if (e.defaultPrevented) return;
             if (e.key === "Enter" && !e.shiftKey) {

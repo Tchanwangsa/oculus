@@ -45,7 +45,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | The JSON in a model's reply (whole reply, fences, balanced brackets), for the jobs that want JSON back | `app/src-tauri/src/harness/reply_json.rs` |
 | `@` and `/` menu, mention input, skill chips | `app/src/components/harness/mentions/useComposerMenu.ts`, `app/src/components/harness/mentions/ComposerMenu.tsx`, `app/src/components/harness/mentions/trigger.ts`, `app/src/components/harness/mentions/MentionInput.tsx`, `app/src/components/harness/mentions/SkillChip.tsx`, `app/src/components/markdown/FileChip.tsx`, `app/src/components/harness/composer/useComposerTools.ts` |
 | Commands and skills: the catalogue, its search, the ranking, how a picked skill reaches each bridge | `app/src/lib/harness/skills.ts`, `app/src/lib/harness/composerCommands.ts`, `app/src/stores/chat/skillStore.ts`, `app/src/lib/search/ranking.ts`, `app/src-tauri/src/harness/app/skills.rs`, `app/src-tauri/src/harness/providers/*/skill.rs` |
-| Earlier messages on ArrowUp | `app/src/lib/harness/promptHistory.ts`, `app/src/hooks/agents/usePromptHistory.ts` |
+| Earlier messages on ArrowUp, and the ⌘S stash | `app/src/lib/harness/promptHistory.ts`, `app/src/hooks/agents/usePromptHistory.ts`, `app/src/stores/chat/stashStore.ts`, `app/src/components/harness/composer/useComposerStash.ts`, `app/src/components/harness/composer/StashMenu.tsx`, `app/src/components/harness/composer/StashBadge.tsx` |
 | Studio's thread column and New video box, which use `Composer`'s `leading` (chips after the subject's) and `placeholder` | `app/src/components/studio/thread/ThreadColumn.tsx`, `app/src/components/studio/new/NewVideo.tsx` ([studio-page.md](./studio-page.md)) |
 | Voice dictation, microphone capture and cleanup job | `app/src/components/harness/dictation/`, `app/src/lib/dictation/recording.ts`, `app/src-tauri/src/harness/app/dictation.rs` |
 | Send, queue and stop controls shared by both composers | `app/src/components/harness/composer/SendControls.tsx` |
@@ -1864,7 +1864,7 @@ every bridge as text (Claude one-offs and every `agy` launch also run with
 `--disable-slash-commands`). The brief (`HARNESS.template.md`) tells the agent
 what the line means.
 
-## The empty box and earlier messages
+## The empty box, earlier messages and the stash
 
 **The placeholder names both menus**: "Ask anything. @ files, / skills"
 (`COMPOSER_PLACEHOLDER`), "Ask about this lecture. @ files, / skills" in the
@@ -1879,6 +1879,22 @@ picture line (`splitAttachments`) dropped and its mentions and skills kept as
 chips. ArrowUp walks back, ArrowDown forward and past the newest to an empty
 box; an edit to the recalled text ends the walk and gives the arrows back to
 the caret. The `@`/`/` menu's keys come first.
+
+**⌘S stashes a draft** (`useComposerStash`, `stores/chat/stashStore.ts`):
+with anything in the box, its text, its pasted cards and its pictures are set
+aside and the box empties. Pictures are written to `agents/attachments/` then
+(`useAttachments.setAside`), so an entry is text and paths, kept in
+localStorage (`oculus.chatStash`) and shared by every composer. ⌘S on an empty
+box restores the only entry or opens the menu. The badge above the box
+("Stash" and the count) opens "Stashed prompts" (`StashMenu`): newest first,
+each row its words (or "(empty)", or what it holds), a picture count, its age
+and "Delete stashed prompt"; a click restores it ("Restore stashed prompt:
+…"), its words after anything typed, its pastes as cards and its pictures as
+kept attachments, sent again by the same path. The stash holds 20; a 21st
+removes the oldest and the menu says so until it next closes — never a toast.
+The composer takes ⌘S on its own keydown and stops it there, since a note
+open in another pane takes ⌘S on `document` (`useNoteShortcuts`). A new chat
+with no subject chosen still stashes and restores; it still will not send.
 
 ## Attachments are files in `agents/attachments/`
 

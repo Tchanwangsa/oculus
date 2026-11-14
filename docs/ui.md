@@ -291,7 +291,9 @@ themes are opt-in and keep the same structure.
   are a glyph, a name, a muted description and, for a skill, an Oculus or
   Personal pill badge; a search or empty state is one muted line inside it. A
   picked skill is an inline chip in the sentence (`SkillChip`, brand-tinted,
-  `display: inline` so the line keeps its height).
+  `display: inline` so the line keeps its height). The ⌘S stash is a "Stash"
+  pill above the box opening a popover; its eviction notice is a line inside
+  that popover, not a toast ([harness.md](./harness.md#the-empty-box-earlier-messages-and-the-stash)).
 - **A long list's rows can skip layout off screen with `skip-offscreen`**
   (`content-visibility: auto`, remembering each row's drawn height), so a
   resize lays out only what is visible. The row clips its paint to its box:
