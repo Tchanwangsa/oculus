@@ -14,7 +14,7 @@ function lastRunStatus(runs: Record<number, HarnessRun> | undefined): RunStatus 
  * "Working", "Done", "Failed", "Stopped" (and, once the bridges raise them,
  * "Needs approval" and "Needs your input") when the open thread's status
  * changes — never on mount or a thread switch, and never a message or a step.
- * Not `role="status"`, which some readers repeat on every re-render.
+ * A plain `aria-live="polite"` region, not `role="status"`.
  */
 export function ThreadAnnouncer({ threadId }: { threadId: number }) {
   const [text, setText] = useState("");
