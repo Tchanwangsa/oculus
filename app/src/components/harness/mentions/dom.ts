@@ -1,36 +1,29 @@
 import { splitLibraryPaths } from "@/lib/files/openFile";
-import { splitLinks } from "@/lib/harness/links";
-
-/** Runs of text with atomic mentions (a mention is only its path) and links
- *  (only their text as written). The DOM, not this model, is the truth while
- *  typing: React renders it once per structural change, because a
- *  contenteditable re-rendered per keystroke drops the caret. */
-export type Chunk =
-  | { kind: "text"; text: string }
-  | { kind: "chip"; path: string }
-  | { kind: "link"; raw: string };
-
-/** A mention as the message spells it: the backticked path `oculus read` takes. */
-export function chipText(path: string): string {
-  return `\`${path}\``;
-}
-
-/** Caret landing strip: WebKit cannot place a caret before a
- *  `contenteditable="false"` that starts a block. Stripped from every read. */
-const ZWSP = "​";
-export const ZWSP_RE = /​/g;
+import { parseLink } from "@/lib/harness/links";
+import { chipText, linkChunks, ZWSP_RE, type Chunk } from "./chunks";
 
 /** Block tags a paste or undo may split the box into; each means a line break. */
 const BLOCKS = new Set(["DIV", "P", "LI"]);
 
 export type Point = { node: Node; offset: number };
 
-export type Reading = { text: string; caret: number | null; chunks: Chunk[] };
+/** `stale`: a drawn link no longer reads as one, so the nodes need redrawing. */
+export type Reading = { text: string; caret: number | null; chunks: Chunk[]; stale: boolean };
 
+/** A mention, the one atomic reference: the caret steps over it whole. */
 export function isChip(node: Node): boolean {
-  if (node.nodeType !== Node.ELEMENT_NODE) return false;
-  const el = node as HTMLElement;
-  return el.hasAttribute("data-path") || el.hasAttribute("data-raw");
+  return node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).hasAttribute("data-path");
+}
+
+/** A link (`ComposerLink`): editable text drawn as a link. */
+function isLink(node: Node): boolean {
+  return node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).hasAttribute("data-link");
+}
+
+/** A markdown link's words back into `[words](href)`; a bare link is its text. */
+function linkRaw(text: string, href: string | null): string {
+  if (href == null) return text;
+  return text ? `[${text}](${href})` : "";
 }
 
 /** Walks the nodes into the sent text, its chunks and the caret's offset in one
@@ -40,6 +33,7 @@ export function readEditor(root: HTMLElement, point: Point | null): Reading {
   const chunks: Chunk[] = [];
   let text = "";
   let caret: number | null = null;
+  let stale = false;
 
   const push = (s: string) => {
     if (!s) return;
@@ -65,13 +59,11 @@ export function readEditor(root: HTMLElement, point: Point | null): Reading {
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return;
     const el = node as HTMLElement;
+    if (isLink(el)) {
+      visitLink(el);
+      return;
+    }
     if (isChip(el)) {
-      const raw = el.getAttribute("data-raw");
-      if (raw != null) {
-        chunks.push({ kind: "link", raw });
-        text += raw;
-        return;
-      }
       const path = el.getAttribute("data-path") ?? "";
       chunks.push({ kind: "chip", path });
       text += chipText(path);
@@ -85,6 +77,30 @@ export function readEditor(root: HTMLElement, point: Point | null): Reading {
     walk(el);
   };
 
+  // The text as it stands, so an edit inside the link is read; one that leaves
+  // no link reads as prose and marks the reading `stale`.
+  const visitLink = (el: HTMLElement) => {
+    let words = "";
+    let inside: number | null = null;
+    const nodes = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let t = nodes.nextNode() as Text | null; t; t = nodes.nextNode() as Text | null) {
+      if (point?.node === t) inside = words.length + clean(t.data.slice(0, point.offset)).length;
+      words += clean(t.data);
+    }
+    if (point?.node === el) inside = point.offset === 0 ? 0 : words.length;
+    const href = el.getAttribute("data-href");
+    const raw = linkRaw(words, href);
+    const at = text.length;
+    if (parseLink(raw)) {
+      chunks.push({ kind: "link", raw });
+      text += raw;
+    } else {
+      push(raw);
+      stale = true;
+    }
+    if (inside != null) caret = at + (href != null && raw ? inside + 1 : inside);
+  };
+
   const walk = (el: Node) => {
     const kids = el.childNodes;
     for (let i = 0; i < kids.length; i++) {
@@ -95,70 +111,9 @@ export function readEditor(root: HTMLElement, point: Point | null): Reading {
   };
 
   walk(root);
-  return { text, caret, chunks };
+  return { text, caret, chunks, stale };
 }
 
-export function chunkText(c: Chunk): string {
-  if (c.kind === "chip") return chipText(c.path);
-  return c.kind === "link" ? c.raw : c.text.replace(ZWSP_RE, "");
-}
-
-export function chunksText(chunks: Chunk[]): string {
-  return chunks.map(chunkText).join("");
-}
-
-/** No empty or adjacent text runs (the caret maths addresses one DOM node per
- *  chunk by index), plus a ZWSP guard before a leading chip. */
-export function normalize(chunks: Chunk[]): Chunk[] {
-  const out: Chunk[] = [];
-  for (const c of chunks) {
-    if (c.kind !== "text") {
-      out.push(c);
-      continue;
-    }
-    const text = c.text.replace(ZWSP_RE, "");
-    if (!text) continue;
-    const last = out[out.length - 1];
-    if (last?.kind === "text") out[out.length - 1] = { kind: "text", text: last.text + text };
-    else out.push({ kind: "text", text });
-  }
-  if (out[0] && out[0].kind !== "text") out.unshift({ kind: "text", text: ZWSP });
-  return out;
-}
-
-/** DOM offset of the nth message character in a chunk, skipping ZWSP guards. */
-export function domOffset(text: string, n: number): number {
-  let seen = 0;
-  for (let i = 0; i < text.length; i++) {
-    if (seen === n && text[i] !== ZWSP) return i;
-    if (text[i] !== ZWSP) seen++;
-  }
-  return text.length;
-}
-
-/** A message offset as (chunk, offset) — chunks, since the old nodes are gone by
- *  the time the caret lands and `childNodes[chunk]` is what that chunk became.
- *  An offset inside a chip resolves to just after it. */
-export function caretChunk(chunks: Chunk[], offset: number): { chunk: number; offset: number } {
-  let at = 0;
-  for (let i = 0; i < chunks.length; i++) {
-    const c = chunks[i];
-    const len = chunkText(c).length;
-    if (c.kind !== "text") {
-      if (offset <= at + len) return { chunk: i + 1, offset: 0 };
-    } else if (offset <= at + len) {
-      return { chunk: i, offset: domOffset(c.text, offset - at) };
-    }
-    at += len;
-  }
-  return { chunk: chunks.length, offset: 0 };
-}
-
-/** The links in text runs, as chunks; the message text does not change. `settled`:
- *  see `splitLinks`. */
-export function linkChunks(chunks: Chunk[], settled = false): Chunk[] {
-  return chunks.flatMap((c): Chunk[] => (c.kind === "text" ? splitLinks(c.text, settled) : [c]));
-}
 
 /** Text back into chunks via `splitLibraryPaths`, so a restored draft chips the
  *  same runs a sent message does, and its links draw as links. */
@@ -180,7 +135,7 @@ function atEnd(el: HTMLElement, caret: Range): boolean {
   tail.setStart(caret.startContainer, caret.startOffset);
   if (tail.toString().replace(ZWSP_RE, "").replace(/\n/g, "").trim()) return false;
   const rest = tail.cloneContents();
-  if (rest.querySelector("[data-path], [data-raw]")) return false;
+  if (rest.querySelector("[data-path], [data-link]")) return false;
   // One break is the placeholder; more are blank lines below the caret.
   return rest.querySelectorAll("br").length + (tail.toString().match(/\n/g)?.length ?? 0) <= 1;
 }

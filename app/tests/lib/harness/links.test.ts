@@ -28,6 +28,9 @@ describe("splitLinks", () => {
   test("settled waits for the space after the link", () => {
     expect(kinds("go https://example.com", true)).toEqual(["go https://example.com"]);
     expect(kinds("go https://example.com ", true)).toEqual(["go ", "<https://example.com>", " "]);
+    expect(kinds("go https://example.com,", true)).toEqual(["go https://example.com,"]);
+    expect(kinds("go https://example.com, ok", true)).toEqual(["go ", "<https://example.com>", ", ok"]);
+    expect(kinds("(see https://example.com) ", true)).toEqual(["(see ", "<https://example.com>", ") "]);
   });
 
   test("text is unchanged by splitting", () => {

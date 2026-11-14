@@ -18,10 +18,15 @@ export function parseLink(raw: string): { href: string; label: string | null } |
   return /^https?:\/\/\S+$/.test(raw) ? { href: raw, label: null } : null;
 }
 
+/** What may sit between a finished link and the space after it: the
+ *  punctuation a bare URL leaves out, as in `https://a.io, ok`. */
+const SETTLED_AFTER = /^[.,;:!?'")\]]*\s/;
+
 /**
  * Splits text into prose and links. `settled` keeps only links followed by
- * whitespace, so a URL still being typed is left alone until the space after
- * it; a paste or a restored draft passes false and takes them all.
+ * whitespace (after any closing punctuation), so a URL still being typed is
+ * left alone until the space after it; a paste or a restored draft passes
+ * false and takes them all.
  */
 export function splitLinks(text: string, settled = false): LinkPart[] {
   const parts: LinkPart[] = [];
@@ -29,7 +34,7 @@ export function splitLinks(text: string, settled = false): LinkPart[] {
   for (const m of text.matchAll(LINK)) {
     if (m[0].startsWith("`")) continue;
     const end = (m.index ?? 0) + m[0].length;
-    if (settled && !/\s/.test(text[end] ?? "")) continue;
+    if (settled && !SETTLED_AFTER.test(text.slice(end))) continue;
     const i = m.index ?? 0;
     if (i > at) parts.push({ kind: "text", text: text.slice(at, i) });
     parts.push({ kind: "link", raw: m[0] });

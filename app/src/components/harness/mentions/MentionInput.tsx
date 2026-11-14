@@ -1,6 +1,5 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
 import { FileChip } from "@/components/markdown/FileChip";
-import { LinkChip } from "@/components/markdown/LinkChip";
 import { imageFiles } from "@/lib/harness/attachments";
 import { hasControlChars } from "@/lib/harness/controlChars";
 import {
@@ -9,32 +8,37 @@ import {
   chunkText,
   chunksText,
   domOffset,
-  isChip,
   linkChunks,
   normalize,
-  readEditor,
-  repaintCaret,
-  revealCaret,
-  toChunks,
+  sameChunks,
   ZWSP_RE,
   type Chunk,
-  type Point,
-} from "./dom";
+  type LinkScan,
+} from "./chunks";
+import { isChip, readEditor, repaintCaret, revealCaret, toChunks, type Point } from "./dom";
+import { ComposerLink } from "./ComposerLink";
 import type { Landing, MentionInputHandle } from "./types";
 
 export type { MentionInputHandle } from "./types";
+
+/** A text run as WebKit would have typed it: a space ending the box is a
+ *  no-break space. Drawn as a plain space after a wrapped link, the next
+ *  keystroke lands inside the link and the space is lost. `readEditor` reads
+ *  it back as a space. */
+const drawnText = (text: string, last: boolean) => (last && text.endsWith(" ") ? `${text.slice(0, -1)}\u00a0` : text);
 
 /** Nothing typed: a space counts as text, so the placeholder gives way to it.
  *  Line breaks don't, as WebKit's trailing `<br>` reads as one. */
 const isBlank = (text: string) => text.replace(/[\r\n]/g, "") === "";
 
 /**
- * A contenteditable whose `@` mentions and web links are inline
- * `contenteditable="false"` references. Drawn and sent text differ:
- * `readEditor` turns each mention back into its backticked library path, so the
- * agent never sees a display name, and each link back into the text as written.
- * A link becomes a reference when pasted, or when the space after it is typed.
- * Only Shift+Enter and chip-eating Backspace/Delete are intercepted.
+ * A contenteditable whose `@` mentions are inline `contenteditable="false"`
+ * references and whose web links are text drawn as links (`ComposerLink`).
+ * Drawn and sent text differ: `readEditor` turns each mention back into its
+ * backticked library path, so the agent never sees a display name, and each
+ * link back into the text as written. A link is drawn when pasted, or when the
+ * space after it is typed, and stops being one when an edit leaves no link.
+ * Only Shift+Enter and mention-eating Backspace/Delete are intercepted.
  */
 export function MentionInput({
   ref,
@@ -101,14 +105,14 @@ export function MentionInput({
     onEdit(r.text, r.caret ?? r.text.length);
   }
 
-  /** Draws the links in the typed text as references. The message text does not
-   *  change, so the caret keeps its offset. `settled`: see `splitLinks`. */
-  function linkify(settled: boolean): boolean {
+  /** Redraws the links when an edit made or unmade one. The message text does
+   *  not change, so the caret keeps its offset. `scan`: see `LinkScan`. */
+  function linkify(scan: LinkScan): boolean {
     const el = box.current;
     if (!el) return false;
     const r = readEditor(el, point(el));
-    const next = linkChunks(r.chunks, settled);
-    if (next.length === r.chunks.length && next.every((c, i) => c.kind === r.chunks[i].kind)) return false;
+    const next = linkChunks(r.chunks, scan);
+    if (!r.stale && sameChunks(next, r.chunks)) return false;
     commit(next, r.caret ?? r.text.length);
     return true;
   }
@@ -117,7 +121,7 @@ export function MentionInput({
   function input(e: FormEvent<HTMLDivElement>) {
     const { inputType, data } = e.nativeEvent as InputEvent;
     const ends = inputType === "insertParagraph" || inputType === "insertLineBreak" || (inputType === "insertText" && data != null && /\s/.test(data));
-    if (ends && linkify(true)) return;
+    if (linkify(ends ? "settled" : "typed")) return;
     sync();
   }
 
@@ -146,8 +150,10 @@ export function MentionInput({
     if (!sel) return;
     const range = document.createRange();
     const node = el.childNodes[target.chunk];
-    if (node && node.nodeType === Node.TEXT_NODE) {
-      range.setStart(node, Math.min(target.offset, (node as Text).data.length));
+    // A link's caret lands in its text.
+    const text = node?.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).hasAttribute("data-link") ? node.firstChild : node;
+    if (text && text.nodeType === Node.TEXT_NODE) {
+      range.setStart(text, Math.min(target.offset, (text as Text).data.length));
     } else if (node) {
       range.setStartBefore(node);
     } else {
@@ -231,7 +237,7 @@ export function MentionInput({
     sel.addRange(range);
   }, [autoFocus]);
 
-  /** The chip a delete key would land on — only at the very edge of a text run. */
+  /** The mention a delete key would land on — only at the very edge of a text run. */
   function chipBeside(el: HTMLElement, dir: "back" | "forward"): HTMLElement | null {
     const sel = window.getSelection();
     if (!sel || !sel.isCollapsed) return null;
@@ -250,7 +256,7 @@ export function MentionInput({
     return side && isChip(side) ? (side as HTMLElement) : null;
   }
 
-  /** Delete a whole chip, through the browser so it joins the undo stack. */
+  /** Delete a whole mention, through the browser so it joins the undo stack. */
   function removeChip(chip: HTMLElement) {
     const sel = window.getSelection();
     const range = document.createRange();
@@ -326,11 +332,11 @@ export function MentionInput({
           if (plain && onPasteText?.(plain)) return;
           if (plain) document.execCommand("insertText", false, plain);
           if (box.current) revealCaret(box.current);
-          if (!linkify(false)) sync();
+          if (!linkify("all")) sync();
         }}
       >
         {chunks.map((c, i) =>
-          c.kind === "text" ? c.text : c.kind === "link" ? <LinkChip key={i} raw={c.raw} /> : <FileChip key={i} path={c.path} />,
+          c.kind === "text" ? drawnText(c.text, i === chunks.length - 1) : c.kind === "link" ? <ComposerLink key={i} raw={c.raw} /> : <FileChip key={i} path={c.path} />,
         )}
       </div>
       {blank && (

@@ -1187,11 +1187,18 @@ WebKit.
 The box refuses control characters (`lib/harness/controlChars.ts`): WebKit can
 turn an arrow key into text (U+001D for Right Arrow), which draws as tofu, so a
 native `beforeinput` cancels it and a stored draft is stripped on load.
-A web link (`https://…` or `[words](https://…)`, `lib/harness/links.ts`) draws
-the same way (`LinkChip`: the site's icon and its words or host) in the
-composer and in the sent bubble. It becomes one when pasted or when the space
-or line break after it is typed, and a restored draft draws its links too; the
-text on the wire is the link as written, so a conversion never moves the caret.
+A web link (`https://…` or `[words](https://…)`, `lib/harness/links.ts`) is
+drawn as a link, the site's icon before it. In the sent bubble it is a
+reference (`LinkChip`: its words or host). In the composer it stays text
+(`ComposerLink`: the URL as typed, or a markdown link's words): the caret walks
+through it and Backspace takes one character, the icon being a pseudo-element
+rather than a node in the caret's way. It is drawn when pasted or when the
+space or line break after it is typed (past any closing punctuation, as in
+`https://a.io, ok`), and a restored draft draws its links too. Every keystroke
+checks the links again (`linkChunks` in `mentions/chunks.ts`): a space or
+trailing punctuation typed into one splits it, and an edit that leaves no link
+turns it back into prose. The text on the wire
+is the link as written, so a conversion never moves the caret.
 The menu's rows draw the chip's own glyph and colour
 (`fileReferenceAppearance`), and the lecture dock's composer uses the same input
 and menu, scoped to the lecture's subject.
