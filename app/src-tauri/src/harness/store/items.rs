@@ -1,7 +1,7 @@
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, SqliteConnection, SqlitePool};
 
 pub(super) async fn insert_item(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     thread_id: i64,
     kind: &str,
     ref_id: Option<&str>,
@@ -21,14 +21,14 @@ pub(super) async fn insert_item(
     .bind(owner.map(|o| o.run_id))
     .bind(owner.map(|o| o.attempt_id))
     .bind(owner.map(|o| o.entity.as_str()))
-    .execute(pool)
+    .execute(&mut *conn)
     .await
     .map_err(|e| e.to_string())?;
     Ok(res.last_insert_rowid())
 }
 
 pub(super) async fn set_status(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     thread_id: i64,
     status: &str,
 ) -> Result<(), String> {
@@ -37,7 +37,7 @@ pub(super) async fn set_status(
     )
     .bind(thread_id)
     .bind(status)
-    .execute(pool)
+    .execute(&mut *conn)
     .await
     .map(|_| ())
     .map_err(|e| e.to_string())
@@ -91,8 +91,12 @@ pub async fn newest_anchor(pool: &SqlitePool, thread_id: i64) -> Result<Option<S
 /// Delete this row and everything after it — the local half of a rewind
 /// (`Harness::rewind` rewinds the provider's session). Runs asked from those
 /// rows go too; explicit deletes, since a connection may lack `foreign_keys`.
-pub async fn truncate_from(pool: &SqlitePool, thread_id: i64, item_id: i64) -> Result<u64, String> {
-    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+/// The caller's transaction makes it one change.
+pub async fn truncate(
+    conn: &mut SqliteConnection,
+    thread_id: i64,
+    item_id: i64,
+) -> Result<u64, String> {
     let runs = "SELECT id FROM harness_runs WHERE thread_id = ?1 AND initiating_item_id >= ?2";
     for sql in [
         format!("DELETE FROM harness_command_receipts WHERE run_id IN ({runs})"),
@@ -104,23 +108,30 @@ pub async fn truncate_from(pool: &SqlitePool, thread_id: i64, item_id: i64) -> R
         sqlx::query(&sql)
             .bind(thread_id)
             .bind(item_id)
-            .execute(&mut *tx)
+            .execute(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
     }
     sqlx::query("DELETE FROM chat_proposals WHERE thread_id = ?1 AND item_id >= ?2")
         .bind(thread_id)
         .bind(item_id)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|e| e.to_string())?;
     let removed = sqlx::query("DELETE FROM harness_items WHERE thread_id = ?1 AND id >= ?2")
         .bind(thread_id)
         .bind(item_id)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|e| e.to_string())?
         .rows_affected();
+    Ok(removed)
+}
+
+/// [`truncate`] as a transaction of its own.
+pub async fn truncate_from(pool: &SqlitePool, thread_id: i64, item_id: i64) -> Result<u64, String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let removed = truncate(&mut tx, thread_id, item_id).await?;
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(removed)
 }

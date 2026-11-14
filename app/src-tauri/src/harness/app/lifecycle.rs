@@ -2,11 +2,11 @@ use std::sync::{mpsc, Arc, Mutex};
 
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::harness::core::effect::{self, Effect, Pools, Runtime};
 use crate::harness::{jobs, opencode, store};
 use crate::harness::{Harness, HarnessEvent, Provider, Queue};
 
 use super::consumer::ConsumerIo;
-use super::send::dispatch;
 use super::wake::{Alarm, Wakeful};
 use super::{sink_for, BusMsg, Envelope, HarnessState};
 
@@ -83,27 +83,13 @@ impl ConsumerIo for AppIo {
         });
     }
 
-    fn dispatch(
-        &mut self,
-        thread_id: i64,
-        provider: Provider,
-        msg: crate::harness::QueuedMessage,
-        opts: crate::harness::SendOptions,
-    ) {
-        let (h, b) = (self.namer.clone(), self.bus.clone());
-        // A continuation was never shown as queued.
-        if opts.continuation.is_none() {
-            let _ = b.send(BusMsg::app(
-                thread_id,
-                provider,
-                HarnessEvent::Unqueued { id: msg.id },
-            ));
-        }
-        tauri::async_runtime::spawn(async move {
-            if let Err(e) = dispatch(h, b, thread_id, provider, opts, msg.text).await {
-                elog!("[oculus] harness queued send: {e}");
-            }
-        });
+    fn perform(&mut self, effect: Effect) {
+        let runtime = Runtime {
+            harness: self.namer.clone(),
+            bus: self.bus.clone(),
+            pools: Pools::App,
+        };
+        tauri::async_runtime::spawn(async move { effect::run(&runtime, effect).await });
     }
 
     fn emit(&mut self, envelope: Envelope) {

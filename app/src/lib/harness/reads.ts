@@ -1,7 +1,6 @@
 import { getDb, getSetting } from "@/lib/db";
 import type { Provider } from "./providers";
-import { runFromRow, type RunRow } from "./runs";
-import type { HarnessItem, HarnessRun, HarnessThread, RateWindow } from "./types";
+import type { HarnessThread, RateWindow } from "./types";
 
 /** A thread's `settled_at`: when its latest run ended. */
 const SETTLED_AT = "(SELECT MAX(r.ended_at) FROM harness_runs r WHERE r.thread_id = t.id) AS settled_at";
@@ -55,26 +54,6 @@ export async function getThreadPreviews(ids: number[]): Promise<Map<number, stri
     if (text) out.set(r.thread_id, text);
   }
   return out;
-}
-
-export async function getHarnessItems(threadId: number): Promise<HarnessItem[]> {
-  const db = await getDb();
-  return db.select<HarnessItem[]>(
-    `SELECT * FROM harness_items WHERE thread_id = $1 ORDER BY id ASC`,
-    [threadId],
-  );
-}
-
-/** A thread's runs, keyed by id; a run that never started reads from its request. */
-export async function getHarnessRuns(threadId: number): Promise<Record<number, HarnessRun>> {
-  const db = await getDb();
-  const rows = await db.select<RunRow[]>(
-    `SELECT id, execution_status, delivery_state, answer_item_id,
-            COALESCE(started_at, requested_at) AS started_at, ended_at
-       FROM harness_runs WHERE thread_id = $1`,
-    [threadId],
-  );
-  return Object.fromEntries(rows.map((r) => [r.id, runFromRow(r)]));
 }
 
 export async function getHarnessRateLimits(provider: Provider): Promise<RateWindow[]> {

@@ -10,9 +10,8 @@ use sqlx::SqlitePool;
 
 use crate::harness::app::consumer::{consume, ConsumerIo};
 use crate::harness::app::{BusMsg, Envelope};
-use crate::harness::{
-    jobs, store, HarnessEvent, Provider, Queue, QueuedMessage, Release, SendOptions,
-};
+use crate::harness::core::effect::Effect;
+use crate::harness::{jobs, store, HarnessEvent, Provider, Queue, Release, SendOptions};
 
 use super::rig::Rig;
 use super::scenario::Scenario;
@@ -266,9 +265,7 @@ impl ConsumerIo for Recorder {
         Some(self.pool.clone())
     }
     fn name(&mut self, _: i64, _: Provider, _: Vec<jobs::JobSelection>, _: store::NamingSeed) {}
-    fn dispatch(&mut self, _: i64, _: Provider, _: QueuedMessage, _: SendOptions) {
-        panic!("nothing is queued in this test");
-    }
+    fn perform(&mut self, _: Effect) {}
     fn emit(&mut self, envelope: Envelope) {
         self.events.push(serde_json::to_value(envelope).unwrap());
     }
@@ -314,15 +311,12 @@ fn a_send_racing_a_turn_the_cli_starts_is_settled_by_its_own_turn() {
             "q",
         ))
         .unwrap();
-    let (reply, begun) = tokio::sync::oneshot::channel();
+    let (send, begun) = super::runs::send(thread, Provider::Claude, "race");
     let started = |turn: &str| HarnessEvent::TurnStarted {
         turn: Some(turn.into()),
     };
     let bus = vec![
-        BusMsg::Begin {
-            intent: super::runs::intent(thread, "race", None),
-            reply,
-        },
+        send,
         BusMsg::Bound {
             thread_id: thread,
             generation: 1,
@@ -343,13 +337,12 @@ fn a_send_racing_a_turn_the_cli_starts_is_settled_by_its_own_turn() {
         from_session(thread, 1, ended("1")),
     ];
     let queue = Arc::new(Mutex::new(Queue::default()));
-    assert!(queue.lock().unwrap().try_claim(thread));
     let mut io = Recorder {
         pool: pool.clone(),
         events: Vec::new(),
     };
     consume(bus, queue.clone(), &mut io);
-    let run = runtime.block_on(begun).unwrap().unwrap();
+    let run = runtime.block_on(begun).unwrap().unwrap().run.unwrap();
 
     let ledger = runtime.block_on(super::snapshot::ledger(&pool, thread));
     assert_eq!(ledger["runs"][0]["execution_status"], "completed");
@@ -401,12 +394,9 @@ fn one_run(
             "q",
         ))
         .unwrap();
-    let (reply, _begun) = tokio::sync::oneshot::channel();
+    let (send, _begun) = super::runs::send(thread, Provider::Claude, name);
     let mut messages = vec![
-        BusMsg::Begin {
-            intent: super::runs::intent(thread, name, None),
-            reply,
-        },
+        send,
         BusMsg::Bound {
             thread_id: thread,
             generation: 1,
@@ -415,7 +405,6 @@ fn one_run(
     ];
     messages.extend(bus(thread));
     let queue = Arc::new(Mutex::new(Queue::default()));
-    assert!(queue.lock().unwrap().try_claim(thread));
     let mut io = Recorder {
         pool: pool.clone(),
         events: Vec::new(),

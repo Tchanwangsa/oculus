@@ -4,14 +4,14 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, SqliteConnection, SqlitePool};
 
 use crate::harness::event::answer::{select, Candidate};
 use crate::harness::event::Provider;
 
 /// What [`begin`] wrote: the run, its first attempt, the binding it runs on
 /// and the question's row.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RunStart {
     pub run_id: i64,
     pub attempt_id: i64,
@@ -70,9 +70,8 @@ pub async fn receipt_run(pool: &SqlitePool, receipt: &str) -> Result<Option<i64>
 /// one transaction. Any failure — a reused receipt, or a continuation whose
 /// card lost its claim ([`NOT_CLAIMED`]) — writes nothing, and the caller
 /// must not send.
-pub async fn begin(pool: &SqlitePool, send: &SendIntent) -> Result<RunStart, String> {
+pub async fn begin(tx: &mut SqliteConnection, send: &SendIntent) -> Result<RunStart, String> {
     let err = |e: sqlx::Error| e.to_string();
-    let mut tx = pool.begin().await.map_err(err)?;
     let taken: Option<i64> =
         sqlx::query_scalar("SELECT run_id FROM harness_command_receipts WHERE id = ?1")
             .bind(&send.receipt)
@@ -83,7 +82,7 @@ pub async fn begin(pool: &SqlitePool, send: &SendIntent) -> Result<RunStart, Str
         return Err(format!("send {} already started run {run}", send.receipt));
     }
     if let Some(card) = &send.continuation {
-        if !super::super::app::continuation::start(&mut tx, send.thread_id, card).await? {
+        if !super::super::app::continuation::start(&mut *tx, send.thread_id, card).await? {
             return Err(NOT_CLAIMED.into());
         }
     }
@@ -162,7 +161,7 @@ pub async fn begin(pool: &SqlitePool, send: &SendIntent) -> Result<RunStart, Str
     .map_err(err)?
     .last_insert_rowid();
     if let Some(card) = &send.continuation {
-        super::super::app::continuation::started(&mut tx, card, run_id).await?;
+        super::super::app::continuation::started(&mut *tx, card, run_id).await?;
     }
     let attempt_id = sqlx::query(
         "INSERT INTO harness_attempts (run_id, ordinal, reason, status) VALUES (?1, 1, 'initial', 'preparing')",
@@ -194,13 +193,21 @@ pub async fn begin(pool: &SqlitePool, send: &SendIntent) -> Result<RunStart, Str
     .execute(&mut *tx)
     .await
     .map_err(err)?;
-    tx.commit().await.map_err(err)?;
     Ok(RunStart {
         run_id,
         attempt_id,
         binding_id,
         item_id,
     })
+}
+
+/// [`begin`] as a transaction of its own.
+#[cfg(test)]
+pub async fn begin_run(pool: &SqlitePool, send: &SendIntent) -> Result<RunStart, String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let run = begin(&mut tx, send).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(run)
 }
 
 /// The provider accepted the send. Conditional, since the turn may already
@@ -229,6 +236,8 @@ pub async fn mark_sent(pool: &SqlitePool, run: &RunStart) -> Result<(), String> 
 
 /// What [`settle`] decided for a run, for the webview.
 pub struct Settlement {
+    /// The thread's revision with the settlement written.
+    pub revision: i64,
     pub answer_item_id: Option<i64>,
     /// Earlier replies of the attempt, now work.
     pub work_item_ids: Vec<i64>,
@@ -285,11 +294,15 @@ pub async fn settle(
     .execute(&mut *tx)
     .await
     .map_err(err)?;
+    let thread_id: i64 = sqlx::query_scalar("SELECT thread_id FROM harness_runs WHERE id = ?1")
+        .bind(run_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(err)?;
     sqlx::query(
-        "UPDATE harness_threads SET status = ?2, updated_at = datetime('now')
-          WHERE id = (SELECT thread_id FROM harness_runs WHERE id = ?1)",
+        "UPDATE harness_threads SET status = ?2, updated_at = datetime('now') WHERE id = ?1",
     )
-    .bind(run_id)
+    .bind(thread_id)
     .bind(if status == "failed" { "error" } else { "idle" })
     .execute(&mut *tx)
     .await
@@ -399,8 +412,10 @@ pub async fn settle(
     .fetch_one(&mut *tx)
     .await
     .map_err(err)?;
+    let revision = super::threads::raise_revision(&mut tx, thread_id).await?;
     tx.commit().await.map_err(err)?;
     Ok(Some(Settlement {
+        revision,
         answer_item_id: answer,
         work_item_ids: work,
         delivery,

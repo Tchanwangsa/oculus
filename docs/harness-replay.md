@@ -24,9 +24,11 @@ checks; mutations are never described as captured provider behavior.
 `run(scenario)` drives a `Rig` (below) through the whole recording. The rig
 creates a migrated scratch SQLite file, registers production
 provider handles as the manager's next spawn and starts the production consumer on its own
-thread, fed by a bus as in the app. It persists the send's run through the
-production `begin_run` on that bus (receipt `replay-send`) and then calls
-`Harness::send`; a refused intent skips the send, as the app does. The normal provider
+thread, fed by a bus as in the app. Its send is the `Send` command
+`harness_send` builds (command id `replay-send`), decided and committed on
+that consumer; the commit's `Start` effect then runs the production start
+step (`app/send.rs`) on the consumer's thread, so the turn is open when the
+command returns. A send whose commit fails sends nothing, as in the app. The normal provider
 encoders write into checked transports. Recorded inbound frames use the
 production translators (Codex and opencode also use their production route
 dispatchers). The emitted stream goes through the same ordered consumer as
@@ -50,8 +52,9 @@ the production widget store with in-memory storage and original row/fence keys.
 
 Process spawning is prohibited by the replay manager. Process-pipe writes and
 HTTP helpers consume an exact ordered outbound expectation list. A mismatch,
-extra operation, missing expected write, queued dispatch or naming attempt
-fails closed. The test database explicitly disables naming and other jobs.
+extra operation, missing expected write or naming attempt
+fails closed, and so does a start the recording did not make: its write to
+the provider is checked like any other. The test database explicitly disables naming and other jobs.
 No provider CLI is discovered or started. Claude replay clears the optional
 transcript lookup cwd between frames, so its anchor-file fallback cannot read
 user transcripts; the input frames themselves are unchanged.
@@ -156,6 +159,12 @@ its successor's run, a send racing a turn Claude starts itself, a
 reasoning-level change leaving two processes, a killed process's last words
 after the next question started, a process dying before or during its
 answer).
+`testkit/commands.rs` checks the command path on a scripted bus (`Bench`,
+whose effects the test answers): one result per command id, an id from
+another chat refused, a retried first message making one chat, a refusal
+recording nothing, a message sent while the provider rewinds, an edit's
+single commit, a delete heard twice, and the revision on every envelope
+against `load::read`.
 `testkit/runs.rs` checks run identity: one run,
 attempt, binding and receipt per send on all four bridges, with every later
 row owned by them; a repeated receipt starting nothing; a failed intent
@@ -268,7 +277,7 @@ folding needs superseded attempts. No mutation proves protocol support.
 ## Gotchas
 
 - Claude's optional transcript-file anchor lookup is disabled in replay; anchor-file integration needs an injected scratch transcript resolver.
-- The app's send preparation opens its default database; replay enters at `begin_run` and the manager, so it does not cover the Tauri command's thread lookup or prompt assembly.
+- Replay enters at the command (`Rig::command`), so the decider, the commit and the start step's prompt assembly run for real, on the scratch database (`Pools::Given`). The Tauri command's own argument checks (the provider's name, the reasoning level, a new chat's scope) are above it.
 - `durable_receipt` needs the thread's one receipt to name its run, not just the table.
 - `gap_survives_reload` reads `harness_delivery_gaps` for the run, not the notice row settlement writes from it.
 - `codex-ls` has two distinct messages, so its repeat-snapshot row checks `two_messages`: the repeat must add no third.

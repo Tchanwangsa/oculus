@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Provider } from "./providers";
 import type { ChatScope } from "./scope";
-import type { BridgeHealth, QueuedMessage } from "./types";
+import type { RunRow } from "./runs";
+import type { BridgeHealth, HarnessItem, QueuedMessage } from "./types";
 import type { StudioSend } from "@/lib/studio/videos";
 import { openNotebookContext } from "@/lib/canvas/openNotebooks";
 import { useProposalStore } from "@/stores/chat/proposalStore";
@@ -26,17 +27,24 @@ export interface SendOptions {
 
 type MessagingInvoke = <T>(command: string, args: Record<string, unknown>) => Promise<T>;
 
+/** An id for one thing the student did. Rust keeps the result under it
+ *  (`harness_receipts`), so the same id sent again changes nothing and
+ *  answers as the first call did. */
+export function commandId(): string {
+  return crypto.randomUUID();
+}
+
 /** Keep prompt dispatch behind card saves for every entry point. Explicit
  * dependencies let this ordering be checked without mocking global IPC. */
 export function createHarnessMessaging(invokeCommand: MessagingInvoke, flushThread: (thread: number) => Promise<void>) {
   return {
     send: async (threadId: number | null, provider: Provider, text: string, options: SendOptions): Promise<number> => {
       if (threadId != null) await flushThread(threadId);
-      return invokeCommand<number>("harness_send", { threadId, provider, text, options });
+      return invokeCommand<number>("harness_send", { commandId: commandId(), threadId, provider, text, options });
     },
     editResend: async (threadId: number, itemId: number, text: string, options: SendOptions): Promise<void> => {
       await flushThread(threadId);
-      return invokeCommand("harness_edit_resend", { threadId, itemId, text, options });
+      return invokeCommand("harness_edit_resend", { commandId: commandId(), threadId, itemId, text, options });
     },
   };
 }
@@ -60,11 +68,21 @@ export const harnessEditResend = messaging.editResend;
 
 /** `harnessEditResend` without the send: resolves to the question's text. */
 export function harnessRewind(threadId: number, itemId: number): Promise<string> {
-  return invoke<string>("harness_rewind", { threadId, itemId });
+  return invoke<string>("harness_rewind", { commandId: commandId(), threadId, itemId });
 }
 
-export function harnessQueued(threadId: number): Promise<QueuedMessage[]> {
-  return invoke<QueuedMessage[]>("harness_queued", { threadId });
+/** A thread as Rust read it in one transaction (`harness/core/load.rs`):
+ *  its rows and runs, the revision that covers them, and what waits behind
+ *  its turn. An envelope at or below `revision` tells of nothing new. */
+export interface HarnessSnapshot {
+  revision: number;
+  items: HarnessItem[];
+  runs: RunRow[];
+  queued: QueuedMessage[];
+}
+
+export function harnessLoad(threadId: number): Promise<HarnessSnapshot> {
+  return invoke<HarnessSnapshot>("harness_load", { threadId });
 }
 
 export function harnessUnqueue(threadId: number, queueId: string): Promise<void> {
@@ -81,7 +99,7 @@ export function harnessInterrupt(threadId: number): Promise<string[]> {
 }
 
 export function harnessDeleteThread(threadId: number): Promise<void> {
-  return invoke("harness_delete_thread", { threadId });
+  return invoke("harness_delete_thread", { commandId: commandId(), threadId });
 }
 
 /** The thread is on screen: stamps `viewed_at` (never `updated_at`) and

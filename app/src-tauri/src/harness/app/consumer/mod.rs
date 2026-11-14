@@ -1,3 +1,9 @@
+//! The one ordered consumer of the harness bus: provider events are stored
+//! and told to the webview here, and the student's commands are decided and
+//! committed here (`commands.rs`), so the two can never interleave.
+
+mod commands;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -5,9 +11,10 @@ use std::time::{Duration, Instant};
 use sqlx::SqlitePool;
 use tokio::runtime::Runtime;
 
+use crate::harness::core::effect::Effect;
 use crate::harness::event::{GapCause, Source};
 use crate::harness::{
-    jobs, store, Generation, HarnessEvent, Provider, Queue, QueuedMessage, Release, SendOptions,
+    jobs, store, Generation, HarnessEvent, Provider, Queue, Release, SendOptions,
 };
 
 use super::drafts::Drafts;
@@ -37,7 +44,9 @@ pub(in crate::harness) trait ConsumerIo {
         chain: Vec<jobs::JobSelection>,
         seed: store::NamingSeed,
     );
-    fn dispatch(&mut self, thread: i64, provider: Provider, msg: QueuedMessage, opts: SendOptions);
+    /// Carry out a provider call a commit left to be made
+    /// (`core::effect::run`), off this thread: a CLI can take a minute.
+    fn perform(&mut self, effect: Effect);
     fn emit(&mut self, envelope: Envelope);
 }
 
@@ -55,6 +64,8 @@ pub(in crate::harness) fn consume(
         drafts: Drafts::default(),
         parked: HashMap::new(),
         sequence: first_sequence(),
+        revisions: HashMap::new(),
+        asking: HashMap::new(),
     };
     for msg in rx {
         consumer.handle(msg, io);
@@ -76,6 +87,11 @@ struct Consumer {
     /// Terminals whose settle write has not landed yet, by thread.
     parked: HashMap<i64, Parked>,
     sequence: u64,
+    /// Each thread's revision as last written here, for its envelopes.
+    revisions: HashMap<i64, i64>,
+    /// Commands waiting on a provider's answer before they can commit, by
+    /// thread (`commands.rs`).
+    asking: HashMap<i64, commands::Asking>,
 }
 
 impl Consumer {
@@ -93,41 +109,12 @@ impl Consumer {
                 let from = generation.map_or(From::App, From::Session);
                 self.event(thread_id, provider, from, event, None, io);
             }
-            // The question becomes an ordinary `UserMessage` once its run is
-            // written (a continuation's, `Continued`); a failure writes
-            // nothing and the caller does not send.
-            BusMsg::Begin { intent, reply } => {
-                let begun = match &self.pool {
-                    Some(p) => self.rt.block_on(store::begin_run(p, &intent)),
-                    None => Err("the database is not open".into()),
-                };
-                let _ = reply.send(begun.clone());
-                let Ok(run) = begun else { return };
-                // A card whose continuation state changed here; its snapshot follows the event.
-                let mut card = None;
-                let ev = match intent.continuation {
-                    Some(proposal) => {
-                        card = Some(proposal.clone());
-                        HarnessEvent::Continued {
-                            text: intent.text,
-                            proposal,
-                            run: Some(run),
-                        }
-                    }
-                    None => HarnessEvent::UserMessage {
-                        text: intent.text,
-                        at: intent.at,
-                        run: Some(run),
-                    },
-                };
-                self.event(intent.thread_id, intent.provider, From::App, ev, card, io);
-            }
-            BusMsg::Unclaimed(thread_id, provider) => {
-                let next = self.queue.lock().unwrap().next(thread_id);
-                if let Some((msg, opts)) = next {
-                    io.dispatch(thread_id, provider, msg, opts);
-                }
-            }
+            BusMsg::Command { command, reply } => self.command(command, reply, io),
+            BusMsg::Answer {
+                thread_id,
+                command,
+                answer,
+            } => self.answer(thread_id, &command, answer, io),
             BusMsg::Bound {
                 thread_id,
                 generation,
@@ -329,6 +316,9 @@ impl Consumer {
                     .block_on(store::apply_event(p, thread_id, &ev, owner.as_ref()))
                 {
                     Ok(stored) => {
+                        if let Some(revision) = stored.revision {
+                            self.revisions.insert(thread_id, revision);
+                        }
                         item_id = stored.item_id;
                         if stored.inserted && owner.is_some() {
                             self.runs.written(thread_id);
@@ -438,6 +428,9 @@ impl Consumer {
         let settlement = self
             .rt
             .block_on(store::settle_run(pool, run_id, attempt_id, status))?;
+        if let Some(settlement) = &settlement {
+            self.revisions.insert(thread_id, settlement.revision);
+        }
         self.runs.close(thread_id);
         // Settlement removed the stored draft with the run.
         self.drafts.take(run_id);
@@ -496,8 +489,8 @@ impl Consumer {
     }
 
     /// Tell the webview about a stored event, and do what follows from it:
-    /// the settlement's events first, naming, the queue, a card's
-    /// continuation.
+    /// the settlement's events first, naming, then, once the event itself
+    /// is out, the next waiting message or a card's continuation.
     fn publish(
         &mut self,
         stored: Stored,
@@ -509,12 +502,13 @@ impl Consumer {
             provider,
             from,
             ev,
-            mut card,
+            card,
             tags,
             item_id,
             entity_id,
             terminal,
         } = stored;
+        let revision = self.revision(thread_id);
         for (event, id) in settled {
             io.emit(Envelope {
                 thread_id,
@@ -524,6 +518,7 @@ impl Consumer {
                 attempt_id: tags.attempt_id,
                 entity_id: None,
                 sequence: next_sequence(&mut self.sequence),
+                revision,
                 event,
             });
         }
@@ -555,42 +550,14 @@ impl Consumer {
         if thread_id > 0 && matches!(&ev, HarnessEvent::UnpromptedTurn { .. }) {
             self.queue.lock().unwrap().hold(thread_id);
         }
-        // A closed turn releases the next queued message; its send is
-        // spawned, since a send may start a process.
-        if let (Some(was), HarnessEvent::TurnFinished { turn, .. }) = (terminal, &ev) {
-            self.runs.finished(thread_id, from, turn.as_ref(), was);
-            let next = self.queue.lock().unwrap().next(thread_id);
-            if let Some((msg, opts)) = next {
-                io.dispatch(thread_id, provider, msg, opts);
-            }
-        }
-
-        // A settled card with a follow-up claims its one continuation: it
-        // goes out now on an idle thread, or waits its turn like a message.
-        if let (HarnessEvent::CardSettled { proposal }, Some(p)) = (&ev, &self.pool) {
-            match self
-                .rt
-                .block_on(super::continuation::claim(p, thread_id, proposal))
-            {
-                Ok(Some(line)) => {
-                    card = Some(proposal.clone());
-                    let opts = SendOptions {
-                        continuation: Some(proposal.clone()),
-                        ..SendOptions::default()
-                    };
-                    let mut q = self.queue.lock().unwrap();
-                    if q.try_claim(thread_id) {
-                        drop(q);
-                        io.dispatch(thread_id, provider, QueuedMessage::new(&line), opts);
-                    } else {
-                        q.push(thread_id, &line, &opts);
-                    }
-                }
-                Ok(None) => {}
-                Err(e) => elog!("[oculus] card continuation {proposal}: {e}"),
-            }
-        }
-
+        let closed = match (terminal, &ev) {
+            (Some(was), HarnessEvent::TurnFinished { turn, .. }) => Some((was, turn.clone())),
+            _ => None,
+        };
+        let settled_card = match &ev {
+            HarnessEvent::CardSettled { proposal } => Some(proposal.clone()),
+            _ => None,
+        };
         io.emit(Envelope {
             thread_id,
             provider,
@@ -599,22 +566,97 @@ impl Consumer {
             attempt_id: tags.attempt_id,
             entity_id,
             sequence: next_sequence(&mut self.sequence),
+            revision,
             event: ev,
         });
-        if let (Some(id), Some(p)) = (card, &self.pool) {
-            match self.rt.block_on(crate::db::proposals::get(p, &id)) {
-                Ok(proposal) => io.emit(Envelope {
-                    thread_id,
-                    provider,
-                    item_id: None,
-                    run_id: None,
-                    attempt_id: None,
-                    entity_id: None,
-                    sequence: next_sequence(&mut self.sequence),
-                    event: HarnessEvent::Proposal { proposal },
-                }),
-                Err(e) => elog!("[oculus] card continuation {id}: {e}"),
+        if let Some(card) = card {
+            self.snapshot(thread_id, provider, &card, io);
+        }
+        // What follows comes after the event's own envelope, so the next
+        // question is never told before the turn that ended ahead of it.
+        // A closed turn lets the next waiting message go.
+        if let Some((was, turn)) = closed {
+            self.runs.finished(thread_id, from, turn.as_ref(), was);
+            self.start_next(thread_id, provider, io);
+        }
+        // A settled card with a follow-up claims its one continuation: it
+        // goes out now on an idle thread, or waits its turn like a message.
+        if let Some(proposal) = settled_card {
+            self.continue_card(thread_id, provider, &proposal, io);
+        }
+    }
+
+    /// A card's committed state, for every view of its thread.
+    fn snapshot(
+        &mut self,
+        thread_id: i64,
+        provider: Provider,
+        card: &str,
+        io: &mut impl ConsumerIo,
+    ) {
+        let Some(p) = &self.pool else { return };
+        match self.rt.block_on(crate::db::proposals::get(p, card)) {
+            Ok(proposal) => io.emit(Envelope {
+                thread_id,
+                provider,
+                item_id: None,
+                run_id: None,
+                attempt_id: None,
+                entity_id: None,
+                sequence: next_sequence(&mut self.sequence),
+                revision: self.revisions.get(&thread_id).copied().unwrap_or_default(),
+                event: HarnessEvent::Proposal { proposal },
+            }),
+            Err(e) => elog!("[oculus] card continuation {card}: {e}"),
+        }
+    }
+
+    /// The thread's revision, for an envelope: what was last written here,
+    /// or the stored one the first time a thread is heard from.
+    fn revision(&mut self, thread_id: i64) -> i64 {
+        if thread_id <= 0 {
+            return 0;
+        }
+        if let Some(revision) = self.revisions.get(&thread_id) {
+            return *revision;
+        }
+        let stored = match &self.pool {
+            Some(p) => self.rt.block_on(store::revision(p, thread_id)),
+            None => Ok(0),
+        };
+        let revision = stored.unwrap_or_default();
+        self.revisions.insert(thread_id, revision);
+        revision
+    }
+
+    /// A settled card claims its continuation, when the agent gave it one.
+    fn continue_card(
+        &mut self,
+        thread_id: i64,
+        provider: Provider,
+        proposal: &str,
+        io: &mut impl ConsumerIo,
+    ) {
+        let Some(p) = self.pool.clone() else { return };
+        let claimed = self
+            .rt
+            .block_on(super::continuation::claim(&p, thread_id, proposal));
+        match claimed {
+            Ok(Some(line)) => {
+                let opts = SendOptions {
+                    continuation: Some(proposal.to_string()),
+                    ..SendOptions::default()
+                };
+                let busy = self.queue.lock().unwrap().is_busy(thread_id);
+                if busy {
+                    self.queue.lock().unwrap().push(thread_id, &line, &opts);
+                    self.snapshot(thread_id, provider, proposal, io);
+                } else if let Err(failed) = self.begin(thread_id, provider, line, opts, io) {
+                    elog!("[oculus] card continuation {proposal}: {}", failed.error);
+                }
             }
+            Ok(None) => {}
+            Err(e) => elog!("[oculus] card continuation {proposal}: {e}"),
         }
     }
 }

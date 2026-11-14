@@ -1,4 +1,4 @@
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, SqliteConnection, SqlitePool};
 
 use crate::harness::event::{HarnessEvent, Source};
 
@@ -22,6 +22,9 @@ pub struct Stored {
     /// A new row, which took the owner's next ordinal.
     pub inserted: bool,
     pub entity: Option<String>,
+    /// The thread's revision once the event was written; `None` for an
+    /// event that writes nothing.
+    pub revision: Option<i64>,
 }
 
 impl Stored {
@@ -29,7 +32,7 @@ impl Stored {
         Stored {
             item_id: Some(id),
             inserted: true,
-            entity: None,
+            ..Stored::default()
         }
     }
 }
@@ -48,22 +51,52 @@ pub async fn apply(
 }
 
 /// [`apply`], saying whether the row is new. A new row belongs to `owner`,
-/// the run the consumer has open on this thread.
+/// the run the consumer has open on this thread. One transaction: what the
+/// event writes and the thread's raised revision land together, so a reload
+/// that reads the rows reads the revision that covers them.
 pub async fn apply_event(
     pool: &SqlitePool,
     thread_id: i64,
     ev: &HarnessEvent,
     owner: Option<&Owner>,
 ) -> Result<Stored, String> {
-    let mut stored = apply_rows(pool, thread_id, ev, owner).await?;
+    if !writes(ev) {
+        return Ok(Stored::default());
+    }
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let mut stored = apply_rows(&mut tx, thread_id, ev, owner).await?;
     if stored.inserted {
         stored.entity = owner.map(|o| o.entity.clone());
     }
+    stored.revision = Some(super::threads::raise_revision(&mut tx, thread_id).await?);
+    tx.commit().await.map_err(|e| e.to_string())?;
     Ok(stored)
 }
 
+/// Whether an event changes a table. A streamed delta is only gathered
+/// into its run's draft (`app/drafts.rs`), and the rest are the consumer's
+/// own announcements of rows already written.
+fn writes(ev: &HarnessEvent) -> bool {
+    !matches!(
+        ev,
+        HarnessEvent::AssistantDelta { .. }
+            | HarnessEvent::ThinkingDelta { .. }
+            | HarnessEvent::ToolOutputDelta { .. }
+            | HarnessEvent::Queued { .. }
+            | HarnessEvent::Unqueued { .. }
+            | HarnessEvent::Proposal { .. }
+            | HarnessEvent::CardSettled { .. }
+            | HarnessEvent::Rewound { .. }
+            | HarnessEvent::RunSettled { .. }
+            | HarnessEvent::DeliveryNotice { .. }
+            | HarnessEvent::RateLimits { .. }
+            | HarnessEvent::TurnStarted { .. }
+            | HarnessEvent::Exited { .. }
+    )
+}
+
 async fn apply_rows(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     thread_id: i64,
     ev: &HarnessEvent,
     owner: Option<&Owner>,
@@ -80,7 +113,7 @@ async fn apply_rows(
             .bind(thread_id)
             .bind(provider_session_id)
             .bind(model)
-            .execute(pool)
+            .execute(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
             Ok(Stored::default())
@@ -103,9 +136,9 @@ async fn apply_rows(
         HarnessEvent::TurnStarted { .. } => Ok(Stored::default()),
         // A row, so a reload still shows why the agent went on unasked.
         HarnessEvent::UnpromptedTurn { after } => {
-            set_status(pool, thread_id, "running").await?;
+            set_status(conn, thread_id, "running").await?;
             let meta = serde_json::json!({ "after": after }).to_string();
-            insert_item(pool, thread_id, "unprompted", None, None, Some(meta), owner)
+            insert_item(conn, thread_id, "unprompted", None, None, Some(meta), owner)
                 .await
                 .map(Stored::row)
         }
@@ -119,14 +152,14 @@ async fn apply_rows(
             )
             .bind(thread_id)
             .bind(anchor)
-            .execute(pool)
+            .execute(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
             Ok(Stored::default())
         }
         HarnessEvent::AssistantMessage { text, source } => {
             text_row(
-                pool,
+                conn,
                 thread_id,
                 "assistant",
                 text,
@@ -139,7 +172,7 @@ async fn apply_rows(
         HarnessEvent::Thinking { text, ms, source } => {
             let meta = ms.map(|ms| serde_json::json!({ "ms": ms }).to_string());
             text_row(
-                pool,
+                conn,
                 thread_id,
                 "thinking",
                 text,
@@ -159,7 +192,7 @@ async fn apply_rows(
             .bind(owner.map(|o| o.attempt_id))
             .bind(source)
             .bind(cause.as_str())
-            .execute(pool)
+            .execute(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
             Ok(Stored::default())
@@ -184,7 +217,7 @@ async fn apply_rows(
                 output: None,
             };
             insert_item(
-                pool,
+                conn,
                 thread_id,
                 "tool",
                 Some(id),
@@ -207,7 +240,7 @@ async fn apply_rows(
             )
             .bind(thread_id)
             .bind(id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
             let Some(row) = row else {
@@ -233,7 +266,7 @@ async fn apply_rows(
                     .bind(item_id)
                     .bind(serde_json::to_string(&meta).ok()),
             }
-            .execute(pool)
+            .execute(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
             Ok(Stored::default())
@@ -258,7 +291,7 @@ async fn apply_rows(
                     Some(serde_json::Value::Object(meta).to_string())
                 }
             };
-            insert_item(pool, thread_id, "error", None, Some(message), meta, owner)
+            insert_item(conn, thread_id, "error", None, Some(message), meta, owner)
                 .await
                 .map(Stored::row)
         }
@@ -277,7 +310,7 @@ async fn apply_rows(
                 "rule": rule,
             });
             insert_item(
-                pool,
+                conn,
                 thread_id,
                 "permission",
                 None,
@@ -305,7 +338,7 @@ async fn apply_rows(
             sqlx::query("UPDATE harness_threads SET usage = ?2 WHERE id = ?1")
                 .bind(thread_id)
                 .bind(usage.to_string())
-                .execute(pool)
+                .execute(&mut *conn)
                 .await
                 .map_err(|e| e.to_string())?;
             Ok(Stored::default())
@@ -314,7 +347,7 @@ async fn apply_rows(
             sqlx::query("UPDATE harness_threads SET title = ?2 WHERE id = ?1")
                 .bind(thread_id)
                 .bind(title)
-                .execute(pool)
+                .execute(&mut *conn)
                 .await
                 .map_err(|e| e.to_string())?;
             Ok(Stored::default())
@@ -324,11 +357,11 @@ async fn apply_rows(
             // a turn with no run (one the provider started) sets it here.
             if owner.is_none() {
                 let s = if status == "failed" { "error" } else { "idle" };
-                set_status(pool, thread_id, s).await?;
+                set_status(conn, thread_id, s).await?;
             }
             // A stopped turn leaves a mark, so a cut-off answer reads as stopped.
             if status == "interrupted" {
-                return insert_item(pool, thread_id, "interrupted", None, None, None, owner)
+                return insert_item(conn, thread_id, "interrupted", None, None, None, owner)
                     .await
                     .map(Stored::row);
             }
@@ -346,7 +379,7 @@ async fn apply_rows(
                 )
                 .bind(thread_id)
                 .bind(source)
-                .fetch_optional(pool)
+                .fetch_optional(&mut *conn)
                 .await
                 .map_err(|e| e.to_string())?;
                 if let Some(id) = known {
@@ -356,7 +389,7 @@ async fn apply_rows(
                     });
                 }
             }
-            insert_item(pool, thread_id, "compaction", source.as_deref(), None, None, owner)
+            insert_item(conn, thread_id, "compaction", source.as_deref(), None, None, owner)
                 .await
                 .map(Stored::row)
         }
@@ -379,7 +412,7 @@ async fn apply_rows(
 /// A message or reasoning row. Within a run, the same provider source again
 /// (a re-sent or closing snapshot) replaces its row's text instead of adding one.
 async fn text_row(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     thread_id: i64,
     kind: &'static str,
     text: &str,
@@ -388,7 +421,7 @@ async fn text_row(
     owner: Option<&Owner>,
 ) -> Result<Stored, String> {
     let (Some(source), Some(owner)) = (source, owner) else {
-        return insert_item(pool, thread_id, kind, None, Some(text), meta, owner)
+        return insert_item(conn, thread_id, kind, None, Some(text), meta, owner)
             .await
             .map(Stored::row);
     };
@@ -404,7 +437,7 @@ async fn text_row(
     .bind(owner.attempt_id)
     .bind(kind)
     .bind(&source.id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await
     .map_err(|e| e.to_string())?;
     if let Some(row) = known {
@@ -418,13 +451,13 @@ async fn text_row(
         .bind(meta)
         .bind(phase)
         .bind(lifecycle)
-        .execute(pool)
+        .execute(&mut *conn)
         .await
         .map_err(|e| e.to_string())?;
         return Ok(Stored {
             item_id: Some(id),
-            inserted: false,
             entity: row.get("entity_ref"),
+            ..Stored::default()
         });
     }
     sqlx::query(
@@ -442,7 +475,7 @@ async fn text_row(
     .bind(&source.id)
     .bind(phase)
     .bind(lifecycle)
-    .execute(pool)
+    .execute(&mut *conn)
     .await
     .map(|r| Stored::row(r.last_insert_rowid()))
     .map_err(|e| e.to_string())

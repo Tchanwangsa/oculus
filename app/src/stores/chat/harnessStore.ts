@@ -4,10 +4,9 @@ import {
   defaultSelectionFor,
   providerAvailability,
   parseItemMeta,
-  getHarnessItems,
-  getHarnessRuns,
   getHarnessThreads,
-  harnessQueued,
+  harnessLoad,
+  runFromRow,
   type HarnessEnvelope,
   type HarnessItem,
   type HarnessRun,
@@ -84,8 +83,10 @@ interface HarnessState {
   setReasoning: (level: string | null) => void;
   loadSubjects: () => Promise<void>;
   apply: (env: HarnessEnvelope) => void;
-  /** `apply` without the repeat check; `load` re-folds what arrived during its read. */
-  fold: (env: HarnessEnvelope) => void;
+  /** `apply` without the repeat check. `rowsOnly` is `load` folding what
+   *  arrived during its read onto the snapshot: rows and runs, since the
+   *  rest of each envelope was folded as it arrived. */
+  fold: (env: HarnessEnvelope, rowsOnly?: boolean) => void;
   /** Fold the buffered deltas into `live` now. */
   flushLive: () => void;
   removed: (id: number) => void;
@@ -110,6 +111,9 @@ const pending = new Map<number, PendingDeltas>();
 let lastSequence = 0;
 /** Envelopes per thread that arrived while `load` was reading its rows. */
 const loading = new Map<number, HarnessEnvelope[]>();
+/** The revision each held thread's rows were read at (`harnessLoad`). An
+ *  envelope at or below it tells of rows the snapshot already holds. */
+const loaded = new Map<number, number>();
 /** Folded into `live` only; re-folding them after a read would repeat text. */
 const LIVE_ONLY = new Set(["assistant_delta", "thinking_delta", "tool_output_delta"]);
 let timer: ReturnType<typeof setTimeout> | null = null;
@@ -197,17 +201,21 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
     // What arrives during the read may be newer than it: re-fold it on top.
     const during: HarnessEnvelope[] = [];
     loading.set(id, during);
-    const [rows, runs] = await Promise.all([
-      getHarnessItems(id).catch(() => [] as HarnessItem[]),
-      getHarnessRuns(id).catch(() => NO_RUNS),
-    ]);
+    const snapshot = await harnessLoad(id).catch(() => null);
     loading.delete(id);
-    if (id in get().items) {
-      set((s) => ({ items: { ...s.items, [id]: rows }, runs: { ...s.runs, [id]: runs } }));
-      for (const env of during) get().fold(env);
-    }
-    const waiting = await harnessQueued(id).catch(() => [] as QueuedMessage[]);
-    if (id in get().items) set((s) => ({ queued: { ...s.queued, [id]: waiting } }));
+    if (!(id in get().items)) return;
+    if (snapshot) loaded.set(id, snapshot.revision);
+    else loaded.delete(id);
+    const rows = snapshot?.items ?? [];
+    const runs = snapshot ? Object.fromEntries(snapshot.runs.map((r) => [r.id, runFromRow(r)])) : NO_RUNS;
+    const waiting: QueuedMessage[] = snapshot?.queued ?? [];
+    set((s) => ({
+      items: { ...s.items, [id]: rows },
+      runs: { ...s.runs, [id]: runs },
+      queued: { ...s.queued, [id]: waiting },
+    }));
+    // Only what the snapshot does not hold yet: `fold` skips the rest by revision.
+    for (const env of during) get().fold(env, true);
   },
 
   // Agents share no model ids or levels, so a switch replaces both.
@@ -224,6 +232,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
       // Never one a Chat view holds, or the dock unmounting would empty a tab
       // showing the same thread mid-turn.
       if (s.holds[id] || !(id in s.items)) return s;
+      loaded.delete(id);
       const items = { ...s.items };
       delete items[id];
       const runs = { ...s.runs };
@@ -233,6 +242,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
 
   removed: (id) => {
     pending.delete(id);
+    loaded.delete(id);
     useWidgetStore.getState().prune(id);
     useProposalVersionStore.getState().prune(id);
     useProposalStore.getState().prune(id);
@@ -301,16 +311,21 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
     get().fold(env);
   },
 
-  fold: (env) => {
+  fold: (env, rowsOnly = false) => {
     const { threadId, event } = env;
-    if (event.type === "rewound") {
+    // Rows the snapshot already holds are not written again: a rewind told
+    // twice would take rows written after it.
+    const at = loaded.get(threadId);
+    const stale = at != null && env.revision != null && env.revision <= at;
+    if (rowsOnly && (stale || LIVE_ONLY.has(event.type))) return;
+    if (event.type === "rewound" && !stale && !rowsOnly) {
       forgetFolds(threadId);
       useWidgetStore.getState().prune(threadId, event.from_item_id);
       useProposalVersionStore.getState().prune(threadId, event.from_item_id);
       useProposalStore.getState().prune(threadId, event.from_item_id);
     }
     if (event.type === "proposal") {
-      useProposalStore.getState().receive(event.proposal);
+      if (!rowsOnly) useProposalStore.getState().receive(event.proposal);
       return;
     }
 
@@ -333,7 +348,8 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
     set((s) => {
       const prev = s.live[threadId] ?? IDLE;
       // Any held thread, not just the active one (the dock's is never active).
-      const held = threadId in s.items;
+      // Its rows and runs take the event unless the snapshot already has it.
+      const held = threadId in s.items && !stale;
       let live: LiveTurn | null = null;
       let rows = s.items[threadId] ?? EMPTY;
       let threads = s.threads;
@@ -476,6 +492,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           break;
         // `queued` is both "new" and "edited".
         case "queued": {
+          if (rowsOnly) return s;
           const list = s.queued[threadId] ?? [];
           const msg = { id: event.id, text: event.text };
           const next = list.some((q) => q.id === event.id)
@@ -484,11 +501,12 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           return { queued: { ...s.queued, [threadId]: next } };
         }
         case "unqueued":
+          if (rowsOnly) return s;
           return {
             queued: { ...s.queued, [threadId]: (s.queued[threadId] ?? []).filter((q) => q.id !== event.id) },
           };
         case "rewound": {
-          const drift = event.context
+          const drift = event.context || rowsOnly
             ? s.contextDrift
             : { ...s.contextDrift, [threadId]: true };
           const keep = (i: HarnessItem) => i.id > 0 && i.id < event.from_item_id;
@@ -514,7 +532,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         }
         // Account-scoped, not per thread.
         case "rate_limits":
-          return { rateLimits: { ...s.rateLimits, [env.provider]: event.windows } };
+          return rowsOnly ? s : { rateLimits: { ...s.rateLimits, [env.provider]: event.windows } };
         case "turn_finished": {
           // The bridge has committed the live tail. Stay running if a queued
           // message is about to go out, so the spinner does not blink.
@@ -544,8 +562,8 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
       return {
         items: held && rows !== s.items[threadId] ? { ...s.items, [threadId]: rows } : s.items,
         runs: held && runs !== (s.runs[threadId] ?? NO_RUNS) ? { ...s.runs, [threadId]: runs } : s.runs,
-        threads,
-        live: live ? { ...s.live, [threadId]: live } : s.live,
+        threads: rowsOnly ? s.threads : threads,
+        live: live && !rowsOnly ? { ...s.live, [threadId]: live } : s.live,
       };
     });
   },

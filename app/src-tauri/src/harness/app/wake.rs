@@ -54,10 +54,15 @@ mod tests {
         assert!(alarm.lock().unwrap().is_none(), "one wake per alarm");
 
         *alarm.lock().unwrap() = Some(Instant::now() + Duration::from_secs(60));
-        tx.send(BusMsg::Unclaimed(1, crate::harness::Provider::Claude))
-            .unwrap();
+        let turn = "1".to_string();
+        tx.send(BusMsg::Bound {
+            thread_id: 1,
+            generation: 1,
+            turn,
+        })
+        .unwrap();
         assert!(
-            matches!(bus.next(), Some(BusMsg::Unclaimed(..))),
+            matches!(bus.next(), Some(BusMsg::Bound { .. })),
             "a message does not wait for the alarm"
         );
         drop(tx);

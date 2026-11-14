@@ -21,8 +21,9 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Hidden native processes, Windows job ownership and npm shim resolution | `app/src-tauri/src/runtime/platform/` |
 | Process pipes, JSON lines and terminal turn failures shared by the bridges | `app/src-tauri/src/harness/child.rs` |
 | Thread and timeline rows | `app/src-tauri/src/harness/store/` |
+| The command path: commands and their deciders, the one commit, receipts, effects, the snapshot a reload reads | `app/src-tauri/src/harness/core/` (`command.rs`, `decide/`, `commit.rs`, `receipts.rs`, `effect.rs`, `state.rs`, `load.rs`), `app/src-tauri/src/harness/app/consumer/commands.rs`, `app/src-tauri/src/harness/store/commands.sql` |
 | Runs, attempts, provider bindings and send receipts; which run owns each event | `app/src-tauri/src/harness/store/runs.rs`, `app/src-tauri/src/harness/store/runs.sql`, `app/src-tauri/src/harness/app/run_scope.rs` |
-| Session generations and `release`, turn ids, the ordered consumer with its stream drafts and settle retries, the startup gate | `app/src-tauri/src/harness/manager/sinks.rs`, `app/src-tauri/src/harness/manager/release.rs`, `app/src-tauri/src/harness/event/turn.rs`, `app/src-tauri/src/harness/app/consumer.rs`, `app/src-tauri/src/harness/app/drafts.rs`, `app/src-tauri/src/harness/app/wake.rs`, `app/src-tauri/src/harness/app/startup.rs` |
+| Session generations and `release`, turn ids, the ordered consumer with its stream drafts and settle retries, the startup gate | `app/src-tauri/src/harness/manager/sinks.rs`, `app/src-tauri/src/harness/manager/release.rs`, `app/src-tauri/src/harness/event/turn.rs`, `app/src-tauri/src/harness/app/consumer/`, `app/src-tauri/src/harness/app/drafts.rs`, `app/src-tauri/src/harness/app/wake.rs`, `app/src-tauri/src/harness/app/startup.rs` |
 | The brief appended to each prompt; `AGENTS.md`; skills | `app/src-tauri/templates/HARNESS.template.md`, `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/skills/`, `app/src-tauri/src/agents/mod.rs` |
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
 | Provider table (`PROVIDERS`), platform capabilities, types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/availability.ts`, `app/src/lib/harness/` |
@@ -109,8 +110,8 @@ display policy: no thinking flags or summary setting, with
 - **The repair comes before the first command.** It is one gate,
   `app/startup.rs` (`Startup::ready`): proposal jobs left running, queued
   card continuations, then `store::reconcile`. `lifecycle::reconcile` starts
-  it at launch, and `harness_send`, `harness_edit_resend`, `harness_rewind`,
-  `harness_delete_thread` and `proposal_job_start` await the same gate
+  it at launch, and every command (`HarnessState::command`) and
+  `proposal_job_start` await the same gate
   first, so a send made the moment the app opens cannot be cut by the repair
   meant for the process before it. A repair that fails is logged and is the
   error of the command that waited on it ("Oculus could not finish checking
@@ -909,8 +910,8 @@ marker as well as rows and queue, so removed turns cannot leave the sidebar busy
 A message sent mid-turn waits in `Queue` until the turn closes. Left to the
 CLIs, Claude leaves an idle gap between turns, Codex folds it into the running
 turn (the first answer can vanish), and opencode's v1 API has no queue. A
-queued message has no row, so it can be edited or removed; `harness_queued`
-restores it after a reload.
+queued message has no row, so it can be edited or removed; `harness_load`
+returns it with the thread's rows after a reload.
 
 The queue drains only if every accepted message, and every turn the provider
 starts itself, gets exactly one `TurnFinished`: Claude's `expecting` flag
@@ -937,19 +938,86 @@ bridge commits the streamed text itself; Claude's closing `result` claims an
 error, so `terminal_reason: "aborted_streaming"` decides and its zeroed usage
 is skipped.
 
+## One command path
+
+Everything the student does to a chat is a `Command` (`core/command.rs`):
+`Send`, `Rewind`, `EditResend`, `DeleteThread`. A Tauri command in
+`app/turns.rs` only builds one, with the id the webview minted for it
+(`commandId` in `lib/harness/commands.ts`), puts it on the consumer's bus
+(`BusMsg::Command`) and awaits the result. The consumer takes it through
+four steps before it reads anything else, so it is the chat's lock: no other
+command and no provider event can come between a decision and its commit.
+
+1. **Receipt.** `harness_receipts` (migration 56) holds one row per accepted
+   command: its id, thread, name and result. An id found there returns the
+   stored result and nothing else happens; the same id naming another thread
+   is refused. This comes before everything, creating the thread included,
+   so a retried first message makes one chat.
+2. **Decide.** `core/decide/` has one file per command. A decider is a
+   function of the saved state (`core/state.rs`: the thread row, the
+   question a rewind names, and what only the running app knows) and
+   returns the changes to save. It writes nothing and waits on no provider.
+   A refusal the student can lift ("stop the current turn before
+   rewinding") records nothing, so the same id works once it is lifted.
+3. **Commit.** `core/commit.rs` is the only place a command writes: one
+   transaction reserves the receipt, applies every change (a new thread,
+   the run's rows through `store::begin`, a truncate, a delete), raises
+   `harness_threads.revision`, stores the result on the receipt and
+   commits. All of it lands or none of it does.
+4. **Tell and call.** Only then does the consumer announce what changed
+   (`UserMessage`, `Rewound`) and hand each provider call to an effect
+   (`core/effect.rs`, `ConsumerIo::perform`): `Start` sends a written run
+   (`app/send.rs`), `Rewind` asks a provider to forget a question,
+   `Release` ends a session. An effect runs off the consumer's thread, is
+   made from what was just saved and lives only in memory: after a restart
+   nothing replays one, and startup's repair owns what was open.
+
+`harness_send` therefore returns once the message is saved, not once the
+CLI has accepted it, which can take a minute. A send that fails in its
+effect (no binary, signed out, a spawn that dies) closes its run the way a
+provider failure does: an error row, then a failed `TurnFinished` from the
+app, which settles the run. A send whose commit fails wrote nothing; the
+chat gets the error row and the same failed turn's end.
+
+**A command that needs the provider's answer first is decided twice.**
+Rewind and edit-and-resend ask the provider to forget the question before
+the rows go, and the rows' fate depends on the answer. The decider returns
+`Decision::Ask`; the consumer holds the chat (a message sent meanwhile
+waits its turn, so it cannot be among the rows the rewind takes), performs
+the `Rewind` effect and parks the command with its reply. The answer comes
+back on the bus (`BusMsg::Answer`), the command is decided again with it,
+committed, and the hold passes to whatever waited. Its receipt is written by
+that commit; the same id arriving while it waits is refused as still
+running.
+
+What the app does itself goes through the same commit with no receipt of
+this kind: a waiting message going out, and a card's continuation.
+
+**Every envelope carries the thread's revision.** `store::apply_event`,
+`store::settle_run` and the commit each raise `harness_threads.revision` in
+the transaction that writes, and an envelope is stamped with the thread's
+revision as the consumer last wrote it, so everything an envelope tells of
+is saved at or below its number. `harness_load` (`core/load.rs`) reads a
+thread's rows, runs and revision in one read transaction. The webview's
+`load` keeps that revision per thread and `fold` skips the row and run
+changes of any envelope at or below it: an envelope that arrived while the
+read was out is folded onto the snapshot only if it is newer, and a rewind
+told twice cannot take rows written after it. The rest of an envelope (the
+running flag, the thread's status) is folded once, as it arrives.
+
 ## Each send is a run
 
-A student send is written before the provider hears of it. `send::begin_run`
-puts a `BusMsg::Begin` on the consumer's bus and waits for its answer, so
+A student send is written before the provider hears of it. The `Send`
+command's commit runs `store::begin` on the consumer, so
 every row already queued for the thread is written first and the question's
-id comes after them. There `store::begin_run` inserts, in one transaction, the question's row, a
+id comes after them. It inserts, in the commit's transaction, the question's row, a
 `harness_runs` row (origin `student`, the next per-thread ordinal), its first
 `harness_attempts` row, the `harness_bindings` row for the provider session it
-resumes, and a `harness_command_receipts` row keyed by `SendOptions.receipt`
-(a fresh id when the caller sends none). Any failure writes nothing and the
+resumes, and a `harness_command_receipts` row keyed by the command's id (a
+fresh id for a run the app starts itself): the record of a started run,
+beside the command's own `harness_receipts` row. Any failure writes nothing and the
 send stops there: an error row and a failed `TurnFinished`, no provider
-write. A receipt already used starts nothing; `harness_send` returns early on
-one, and `begin_run` refuses one. A card's continuation is a run with origin
+write. A card's continuation is a run with origin
 `continuation` and a `continuation` row in place of the question
 ([below](#a-card-can-continue-the-agent)).
 
@@ -965,7 +1033,7 @@ gives the binding its native session (a different one opens a new binding),
 and its own turn's `TurnFinished` settles the run
 ([Events say whose they are](#events-say-whose-they-are)). A turn the provider starts
 itself (`UnpromptedTurn`) is unowned and leaves an open run as it is, as is every row from before migration
-54: their delivery stays `unknown`. `begin_run` sets the thread `running` and
+54: their delivery stays `unknown`. `store::begin` sets the thread `running` and
 settlement sets it back; only an unowned turn's `UnpromptedTurn` and
 `TurnFinished` set it themselves. A rewind deletes runs asked from the
 removed rows (and their gaps and drafts).
@@ -1061,9 +1129,9 @@ the app and the replay (`ClaudeSession::closed`, `CodexServer::closed`,
 text as partial with a gap.
 
 Envelopes carry a `sequence` that rises with each one (seeded from the clock
-at startup); `harnessStore.apply` ignores one it has seen. `load` re-folds
-the envelopes that arrived while it read the rows, so a slow read cannot
-overwrite newer rows.
+at startup); `harnessStore.apply` ignores one it has seen. They also carry
+the thread's `revision`, which is what a reload compares
+([One command path](#one-command-path)).
 
 ### A run's work folds above its answer
 
@@ -1179,7 +1247,7 @@ reaches the consumer as `BusMsg::Bound` and `RunScope::bind` records
 | the open run's turn | the run settles (`Terminal::Run`) |
 | a turn the provider started itself (`UnpromptedTurn`, then its `TurnStarted`) | that turn ends; its rows were unowned and the run, if one is open, is untouched (`Own`) |
 | any other turn: a repeat, or one the server ran itself | logged and ignored; nothing settles and no queued message is let go (`Stray`) |
-| no turn, from the app (`send::dispatch` closing a send that failed) | the open run settles; with none open, the thread's claim is released (`Claim`) |
+| no turn, from the app (the start step in `app/send.rs`, or the consumer, closing a send that failed) | the open run settles; with none open, the thread's claim is released (`Claim`) |
 
 A replaced session's terminal is still heard when it names the turn the open
 run is bound to. A run whose bridge never named its turn (a `turn/start`
@@ -1206,9 +1274,9 @@ next send resumes the thread by session id under a new generation.
 | Reason | Who releases | A turn the session left open |
 | --- | --- | --- |
 | `Stopped` | a stop that kills the process; no command in the app releases with it, since Stop interrupts the turn and keeps the session | interrupted |
-| `Replaced` | `ensure`, for a different reasoning level; `send::start_turn`, for a different model on Claude or Antigravity; an Antigravity rule allowed or revoked | interrupted |
+| `Replaced` | `ensure`, for a different reasoning level; the start step (`app/send.rs`), for a different model on Claude or Antigravity; an Antigravity rule allowed or revoked | interrupted |
 | `Exited` | `ensure`, finding the session dead | failed |
-| `Deleted` | `harness_delete_thread` | forgotten with the thread's rows |
+| `Deleted` | the `DeleteThread` command's `Release` effect, after its commit; the consumer has already stopped hearing the session (`RunScope::silence`), so nothing it still says writes a row | forgotten with the thread's rows |
 | `Quit` | `Harness::shutdown` | left for the next startup's repair |
 
 **A session that ends with a turn open has that turn closed by the
@@ -1225,8 +1293,9 @@ prompt and before the turn's first event.
 
 ## Going back rewinds the agent too
 
-Edit, Retry and Rewind truncate at a row (`harness::store::truncate_from`, announced as
-`Rewound`); Edit/Retry then send (`harness_edit_resend`), Rewind returns the
+Edit, Retry and Rewind truncate at a row (`harness::store::truncate`, announced as
+`Rewound`); Edit/Retry then send in the same commit (`harness_edit_resend`,
+the `EditResend` command), Rewind returns the
 words to the composer (`harness_rewind`). No branching; idle threads only; not
 offered where the bridge's `rewind` capability is false (Antigravity). The provider
 rewinds first, resuming an exited session without a turn:
@@ -1709,7 +1778,8 @@ outgoing editors in every mounted view: their final blur/unmount callbacks
 cannot overwrite a reset or switch. Rewind and thread deletion prune parked
 drafts alongside widget progress. Original snapshots stay in SQLite.
 
-Every `start_turn` reads pending cards and newly decided statuses after the
+Every start (`send::prompt`, the one place a prompt's text is finalised)
+reads pending cards and newly decided statuses after the
 lecture moment, appending "Cards in this thread" to the provider prompt.
 The user row keeps only the student's typed text. Pending cards repeat on
 every send; decided cards repeat until a send is accepted. A conditional
@@ -1774,10 +1844,10 @@ claims nothing. The claim then goes through `Queue` like a message: out at
 once on an idle thread, or behind the running turn, never listed in the
 composer's queue.
 
-At dispatch `store::begin_run` turns the claim into the run in the same
+When its turn comes `store::begin` turns the claim into the run in the same
 transaction (`phase: "started"`, `run_id`), or refuses with `NOT_CLAIMED` and
-writes nothing; the consumer's `BusMsg::Unclaimed` then passes the thread to
-whatever waits next. The run's origin is `continuation`, and its head row is a
+writes nothing; the consumer then passes the thread to
+whatever waits next (`Consumer::start_next`). The run's origin is `continuation`, and its head row is a
 `continuation` row holding the timeline's line ("Sync finished — continuing",
 meta `{proposal}`), announced as `Continued`, not `UserMessage`. The webview
 draws it as a small centred line, folds the run under it like a question's,

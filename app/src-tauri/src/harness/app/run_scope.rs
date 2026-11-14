@@ -141,6 +141,13 @@ impl RunScope {
         session.ended = session.ended.max(generation);
     }
 
+    /// The thread is gone: its newest session is heard no more either.
+    pub fn silence(&mut self, thread_id: i64) {
+        if let Some(session) = self.sessions.get_mut(&thread_id) {
+            session.ended = session.generation;
+        }
+    }
+
     /// What the session `generation` leaves open on this thread: the run
     /// bound to one of its turns, and a turn of its own (unnamed when its
     /// `TurnStarted` never came).

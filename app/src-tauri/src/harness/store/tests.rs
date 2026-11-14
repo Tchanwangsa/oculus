@@ -70,7 +70,7 @@ async fn reconcile_idles_running_threads_and_closes_open_tool_rows() {
     .await
     .unwrap();
     let garbled = insert_item(
-        &pool,
+        &mut pool.acquire().await.unwrap(),
         thread,
         "tool",
         Some("c"),
@@ -124,12 +124,23 @@ async fn pruning_removes_cards_with_foreign_keys_off_but_preserves_the_journal()
     let thread = create_thread(&pool, Provider::Claude, None, None, None, "test")
         .await
         .unwrap();
-    let early = insert_item(&pool, thread, "assistant", None, Some("card"), None, None)
-        .await
-        .unwrap();
-    let later = insert_item(&pool, thread, "assistant", None, Some("card"), None, None)
-        .await
-        .unwrap();
+    let (early, later) = {
+        let mut conn = pool.acquire().await.unwrap();
+        let mut card = async || {
+            insert_item(
+                &mut conn,
+                thread,
+                "assistant",
+                None,
+                Some("card"),
+                None,
+                None,
+            )
+            .await
+            .unwrap()
+        };
+        (card().await, card().await)
+    };
     for item in [early, later] {
         sqlx::query("INSERT INTO chat_proposals(item_id,block,thread_id,kind,status,state,initial_state) VALUES(?1,0,?2,'NewTasks','created','{}','{}')").bind(item).bind(thread).execute(&pool).await.unwrap();
     }

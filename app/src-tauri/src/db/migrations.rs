@@ -940,6 +940,13 @@ INSERT OR IGNORE INTO task_tags (name, color, position) VALUES
             sql: include_str!("../harness/store/viewed.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 56,
+            description:
+                "command receipts, a revision per chat thread and runs that wait in a queue",
+            sql: include_str!("../harness/store/commands.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

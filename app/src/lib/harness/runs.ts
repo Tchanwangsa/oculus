@@ -1,7 +1,9 @@
 import { sqliteUtcToMs } from "@/lib/format/format";
 import type { HarnessRun, RunStatus } from "./types";
 
-/** A `harness_runs` row as `getHarnessRuns` selects it. */
+/** A `harness_runs` row as `harnessLoad` returns it (`Run` in
+ *  `harness/core/load.rs`); a run that never started reads its interval
+ *  from its request. */
 export interface RunRow {
   id: number;
   execution_status: string;

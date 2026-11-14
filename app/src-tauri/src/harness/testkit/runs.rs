@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::harness::app::consumer::{consume, ConsumerIo};
 use crate::harness::app::{BusMsg, Envelope};
-use crate::harness::{jobs, store, HarnessEvent, Provider, Queue, QueuedMessage, SendOptions};
+use crate::harness::core::effect::Effect;
+use crate::harness::core::{Command, Kind, Outcome};
+use crate::harness::{jobs, store, HarnessEvent, Provider, Queue, SendOptions};
 
 use super::guard::{assert_scratch, scratch};
 use super::replay::run;
@@ -116,6 +118,29 @@ pub(super) fn intent(thread_id: i64, receipt: &str, session: Option<&str>) -> st
         at: None,
         continuation: None,
     }
+}
+
+/// A student's send as `harness_send` puts it on the bus, and where its
+/// result comes back.
+pub(super) fn send(
+    thread_id: i64,
+    provider: Provider,
+    id: &str,
+) -> (
+    BusMsg,
+    tokio::sync::oneshot::Receiver<Result<Outcome, String>>,
+) {
+    let (reply, answer) = tokio::sync::oneshot::channel();
+    let command = Command {
+        id: id.into(),
+        thread_id: Some(thread_id),
+        kind: Kind::Send {
+            provider,
+            text: "question".into(),
+            options: SendOptions::default(),
+        },
+    };
+    (BusMsg::Command { command, reply }, answer)
 }
 
 async fn count(pool: &SqlitePool, sql: &str) -> i64 {
@@ -260,9 +285,7 @@ impl ConsumerIo for Recorder {
     fn name(&mut self, _: i64, _: Provider, _: Vec<jobs::JobSelection>, _: store::NamingSeed) {
         panic!("no naming in this test");
     }
-    fn dispatch(&mut self, _: i64, _: Provider, _: QueuedMessage, _: SendOptions) {
-        panic!("no queued send in this test");
-    }
+    fn perform(&mut self, _: Effect) {}
     fn emit(&mut self, envelope: Envelope) {
         self.rows.push(envelope.item_id);
     }
@@ -284,17 +307,14 @@ fn a_stray_row_on_the_bus_is_written_before_the_next_question() {
             "q",
         ))
         .unwrap();
-    let (reply, answer) = tokio::sync::oneshot::channel();
+    let (next, answer) = send(thread, Provider::Claude, "next");
     let bus = vec![
         BusMsg::app(
             thread,
             Provider::Claude,
             HarnessEvent::error("late from the previous turn"),
         ),
-        BusMsg::Begin {
-            intent: intent(thread, "next", None),
-            reply,
-        },
+        next,
     ];
     let mut io = Recorder {
         pool: pool.clone(),
@@ -304,7 +324,7 @@ fn a_stray_row_on_the_bus_is_written_before_the_next_question() {
     std::thread::scope(|s| {
         s.spawn(|| consume(bus, queue, &mut io));
     });
-    let run = runtime.block_on(answer).unwrap().unwrap();
+    let run = runtime.block_on(answer).unwrap().unwrap().run.unwrap();
     let (stray, question) = (io.rows[0].unwrap(), io.rows[1].unwrap());
     assert_eq!(question, run.item_id);
     assert!(stray < question, "stray {stray}, question {question}");

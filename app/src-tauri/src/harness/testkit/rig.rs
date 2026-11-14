@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -16,11 +16,12 @@ use sqlx::SqlitePool;
 use tokio::runtime::Runtime;
 
 use crate::harness::app::consumer::consume;
-use crate::harness::app::send::begin_run;
 use crate::harness::app::startup::Startup;
 use crate::harness::app::BusMsg;
+use crate::harness::core::effect::{Pools, Runtime as Effects};
+use crate::harness::core::{Command, Kind, Outcome};
 use crate::harness::{
-    jobs, store, Harness, HarnessEvent, Provider, Queue, QueuedMessage, SendOptions, Sink, Sinks,
+    jobs, store, Harness, HarnessEvent, Provider, Queue, SendOptions, Sink, Sinks,
 };
 
 use super::io::{Clock, Feed, Io};
@@ -38,7 +39,7 @@ pub(super) struct Rig {
     /// The gate a command waits at, as `HarnessState` holds it: already
     /// passed in a fresh rig, not yet after [`Rig::restart`].
     startup: Startup,
-    pub harness: Harness,
+    pub harness: Arc<Harness>,
     pub bus: Sender<BusMsg>,
     /// Where the app's own events go: a send that failed before its turn.
     pub sink: Sink,
@@ -54,10 +55,9 @@ pub(super) struct Rig {
     /// What the consumers of earlier runtimes emitted, before a restart.
     envelopes: Vec<Value>,
     snapshots: Vec<Vec<Value>>,
-    /// Continuations the consumer dispatched, which the rig starts itself.
-    dispatched: Receiver<(QueuedMessage, SendOptions)>,
     card: Option<String>,
-    continuations: Vec<SendOptions>,
+    /// The cards whose continuation a consumer started.
+    continuations: Vec<String>,
     /// How many of the scenario's frames have gone in.
     fed_frames: usize,
 }
@@ -145,7 +145,6 @@ impl Rig {
             consumer: Some(running.consumer),
             envelopes: Vec::new(),
             snapshots: Vec::new(),
-            dispatched: running.dispatched,
             card,
             continuations: Vec::new(),
             fed_frames: 0,
@@ -188,7 +187,6 @@ impl Rig {
         self.clock = running.clock;
         self.drained = running.drained;
         self.consumer = Some(running.consumer);
-        self.dispatched = running.dispatched;
         self
     }
 
@@ -206,6 +204,7 @@ impl Rig {
             let io = consumer.join().unwrap();
             self.envelopes.extend(io.envelopes);
             self.snapshots.extend(io.snapshots);
+            self.continuations.extend(io.continued);
         }
     }
 
@@ -227,8 +226,8 @@ impl Rig {
         }
     }
 
-    /// The card's click settled it: the consumer claims the idle thread and
-    /// dispatches, and the rig runs the production start steps.
+    /// The card's click settled it: the consumer claims the idle thread,
+    /// writes the continuation's run and sends it.
     fn continue_card(&mut self, card: &str) {
         self.bus
             .send(BusMsg::app(
@@ -239,50 +238,12 @@ impl Rig {
                 },
             ))
             .unwrap();
-        let (msg, opts) = self
-            .dispatched
-            .recv_timeout(Duration::from_secs(10))
-            .expect("the settled card dispatched its continuation");
-        let started = self.runtime.block_on(crate::harness::app::send::begin_turn(
-            &self.pool,
-            &self.bus,
-            store::SendIntent {
-                thread_id: self.thread,
-                provider: self.provider,
-                model: None,
-                native_session: None,
-                receipt: "replay-continuation".into(),
-                text: msg.text,
-                at: None,
-                continuation: opts.continuation.clone(),
-            },
-            None,
-        ));
-        let (run, prompt, cards) = started.unwrap();
-        self.continuations.push(opts);
-        self.harness
-            .send(
-                self.thread,
-                self.provider,
-                None,
-                &SendOptions::default(),
-                &prompt,
-                &self.sinks,
-            )
-            .unwrap();
-        self.runtime
-            .block_on(store::mark_sent(&self.pool, &run))
-            .unwrap();
-        self.runtime
-            .block_on(crate::harness::app::proposal_context::accepted(
-                &self.pool, cards,
-            ))
-            .unwrap();
+        self.drain();
     }
 
-    /// One student send under `receipt`, as the app makes it: the run is
-    /// written on the consumer, then the provider hears of it. A refusal
-    /// closes the turn the way `send::dispatch` does.
+    /// One student send under the command id `receipt`, as `harness_send`
+    /// makes it: decided and committed on the consumer, then sent to the
+    /// provider by the start step. The run it started, or the refusal.
     pub fn send(&mut self, receipt: &str) -> Result<store::RunStart, String> {
         self.send_with(receipt, &SendOptions::default())
     }
@@ -293,41 +254,31 @@ impl Rig {
         receipt: &str,
         opts: &SendOptions,
     ) -> Result<store::RunStart, String> {
-        // As `harness_send` does, before anything else.
-        self.startup()?;
-        assert!(
-            self.queue.lock().unwrap().try_claim(self.thread),
-            "a send on a busy thread waits in the queue"
-        );
-        let begun = self.runtime.block_on(begin_run(
-            &self.bus,
-            store::SendIntent {
-                thread_id: self.thread,
+        let sent = self.command(Command {
+            id: receipt.into(),
+            thread_id: Some(self.thread),
+            kind: Kind::Send {
                 provider: self.provider,
-                model: None,
-                native_session: None,
-                receipt: receipt.into(),
                 text: "Replay request".into(),
-                at: None,
-                continuation: None,
+                options: opts.clone(),
             },
-        ));
-        let sent = begun.and_then(|run| {
-            self.harness.send(
-                self.thread,
-                self.provider,
-                None,
-                opts,
-                "Replay request",
-                &self.sinks,
-            )?;
-            self.runtime.block_on(store::mark_sent(&self.pool, &run))?;
-            Ok(run)
-        });
-        if let Err(error) = &sent {
-            crate::harness::child::fail_turn(&self.sink, self.provider, error.clone(), None);
-        }
-        sent
+        })?;
+        sent.run
+            .ok_or_else(|| "the send waits behind the running turn".to_string())
+    }
+
+    /// One command through the consumer, as a Tauri command sends it: it
+    /// waits at startup's gate first, then for the commit. The effects the
+    /// commit left have run by the time this returns.
+    pub fn command(&mut self, command: Command) -> Result<Outcome, String> {
+        self.startup()?;
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        self.bus
+            .send(BusMsg::Command { command, reply })
+            .map_err(|_| "the consumer has stopped".to_string())?;
+        self.runtime
+            .block_on(answer)
+            .map_err(|_| "the consumer has stopped".to_string())?
     }
 
     /// A second recorded session for the thread, which the manager's next
@@ -467,8 +418,6 @@ impl Rig {
         runtime.block_on(reopened_pool.close());
         self.harness.shutdown();
         drop(self.bridge);
-        self.continuations
-            .extend(self.dispatched.try_iter().map(|(_, opts)| opts));
         Replay {
             envelopes: self.envelopes,
             snapshots: self.snapshots,
@@ -490,7 +439,7 @@ impl Rig {
 /// What a restart tears down and brings up again: the manager, the consumer
 /// on its bus, and a recorded session for the thread's next spawn.
 struct Running {
-    harness: Harness,
+    harness: Arc<Harness>,
     bus: Sender<BusMsg>,
     sink: Sink,
     sinks: Arc<dyn Sinks>,
@@ -500,7 +449,6 @@ struct Running {
     clock: Arc<Clock>,
     drained: Sender<Sender<()>>,
     consumer: JoinHandle<Io>,
-    dispatched: Receiver<(QueuedMessage, SendOptions)>,
 }
 
 fn boot(
@@ -512,7 +460,7 @@ fn boot(
     provider: Provider,
     native_session: &str,
 ) -> Running {
-    let harness = Harness::replay(assert_scratch(scratch, scratch));
+    let harness = Arc::new(Harness::replay(assert_scratch(scratch, scratch)));
     assert_scratch(&crate::harness::thread_cwd(scratch), scratch);
     // The consumer runs beside the replay, as in the app: a send's run is
     // written on it before the provider write.
@@ -521,7 +469,6 @@ fn boot(
     let sinks = crate::harness::app::sinks_for(&bus, thread, provider);
     let queue = Arc::new(Mutex::new(Queue::default()));
     let fed = Arc::new(AtomicBool::new(false));
-    let (continued, dispatched) = std::sync::mpsc::channel();
     let (drained, waiters) = std::sync::mpsc::channel();
     let clock = Clock::new();
     let consumer = {
@@ -535,7 +482,12 @@ fn boot(
             snapshots: Vec::new(),
             runtime: None,
             epoch: std::time::Instant::now(),
-            continued,
+            effects: Effects {
+                harness: harness.clone(),
+                bus: bus.clone(),
+                pools: Pools::Given(pool.clone()),
+            },
+            continued: Vec::new(),
             clock: clock.clone(),
         };
         std::thread::spawn(move || {
@@ -569,7 +521,6 @@ fn boot(
         clock,
         drained,
         consumer,
-        dispatched,
     }
 }
 

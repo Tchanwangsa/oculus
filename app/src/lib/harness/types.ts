@@ -88,6 +88,10 @@ export interface HarnessEnvelope {
   entityId?: string;
   /** Increases with every envelope; a repeat is ignored. */
   sequence?: number;
+  /** The thread's revision when Rust emitted this: everything it tells of
+   *  was saved at or below it, so a snapshot at that revision or later
+   *  (`harnessLoad`) already holds its rows. */
+  revision?: number;
   event: HarnessEvent;
 }
 

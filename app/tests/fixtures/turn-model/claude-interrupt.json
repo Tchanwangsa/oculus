@@ -8,7 +8,8 @@
       "itemId": 1,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794054811994045,
+      "sequence": 1794678271168553,
+      "revision": 2,
       "event": {
         "type": "user_message",
         "text": "Replay request"
@@ -20,7 +21,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794054811994046,
+      "sequence": 1794678271168554,
+      "revision": 3,
       "event": {
         "type": "session_started",
         "provider_session_id": "1665e77f-a2fb-4943-ab5f-773676a74809",
@@ -34,7 +36,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794054811994047,
+      "sequence": 1794678271168555,
+      "revision": 3,
       "event": {
         "type": "turn_started"
       }
@@ -45,7 +48,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794054811994048,
+      "sequence": 1794678271168556,
+      "revision": 3,
       "event": {
         "type": "assistant_delta",
         "text": "1."
@@ -57,7 +61,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794054811994049,
+      "sequence": 1794678271168557,
+      "revision": 3,
       "event": {
         "type": "assistant_delta",
         "text": " Start"
@@ -69,7 +74,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794054811994050,
+      "sequence": 1794678271168558,
+      "revision": 3,
       "event": {
         "type": "assistant_delta",
         "text": " studying"
@@ -81,7 +87,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794054811994051,
+      "sequence": 1794678271168559,
+      "revision": 3,
       "event": {
         "type": "assistant_delta",
         "text": ".\n9."
@@ -93,7 +100,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794054811994052,
+      "sequence": 1794678271168560,
+      "revision": 3,
       "event": {
         "type": "assistant_delta",
         "text": " Use the Fe"
@@ -105,7 +113,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794054811994053,
+      "sequence": 1794678271168561,
+      "revision": 3,
       "event": {
         "type": "assistant_delta",
         "text": "ynman Technique"
@@ -117,7 +126,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794054811994054,
+      "sequence": 1794678271168562,
+      "revision": 3,
       "event": {
         "type": "assistant_delta",
         "text": ": explain concepts"
@@ -130,7 +140,8 @@
       "runId": 1,
       "attemptId": 1,
       "entityId": "weak:0",
-      "sequence": 1794054811994055,
+      "sequence": 1794678271168563,
+      "revision": 4,
       "event": {
         "type": "assistant_message",
         "text": "1. Start studying.\n9. Use the Feynman Technique: explain concepts",
@@ -146,15 +157,16 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794054811994056,
+      "sequence": 1794678271168564,
+      "revision": 6,
       "event": {
         "type": "run_settled",
         "answer_item_id": 2,
         "work_item_ids": [],
         "delivery": "incomplete",
         "status": "interrupted",
-        "started_at": "2026-11-07 12:33:31",
-        "ended_at": "2026-11-07 12:33:31"
+        "started_at": "2026-11-14 17:44:31",
+        "ended_at": "2026-11-14 17:44:31"
       }
     },
     {
@@ -164,7 +176,8 @@
       "runId": 1,
       "attemptId": 1,
       "entityId": "weak:1",
-      "sequence": 1794054811994057,
+      "sequence": 1794678271168565,
+      "revision": 6,
       "event": {
         "type": "turn_finished",
         "status": "interrupted"
@@ -174,7 +187,8 @@
       "threadId": 1,
       "provider": "claude",
       "itemId": null,
-      "sequence": 1794054811994058,
+      "sequence": 1794678271168566,
+      "revision": 6,
       "event": {
         "type": "exited",
         "code": null
@@ -189,7 +203,7 @@
       "ref_id": null,
       "content": "Replay request",
       "meta": null,
-      "created_at": "2026-11-07 12:33:31",
+      "created_at": "2026-11-14 17:44:31",
       "anchor": null,
       "run_id": 1,
       "attempt_id": null,
@@ -206,7 +220,7 @@
       "ref_id": null,
       "content": "1. Start studying.\n9. Use the Feynman Technique: explain concepts",
       "meta": null,
-      "created_at": "2026-11-07 12:33:31",
+      "created_at": "2026-11-14 17:44:31",
       "anchor": null,
       "run_id": 1,
       "attempt_id": 1,
@@ -223,7 +237,7 @@
       "ref_id": null,
       "content": null,
       "meta": null,
-      "created_at": "2026-11-07 12:33:31",
+      "created_at": "2026-11-14 17:44:31",
       "anchor": null,
       "run_id": 1,
       "attempt_id": 1,
@@ -244,8 +258,8 @@
       "origin": "student",
       "delivery_state": "incomplete",
       "answer_item_id": 2,
-      "started_at": "2026-11-07 12:33:31",
-      "ended_at": "2026-11-07 12:33:31"
+      "started_at": "2026-11-14 17:44:31",
+      "ended_at": "2026-11-14 17:44:31"
     }
   ]
 }

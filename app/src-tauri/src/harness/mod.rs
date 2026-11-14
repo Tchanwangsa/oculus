@@ -16,6 +16,7 @@ pub mod app;
 pub mod attach;
 mod child;
 pub mod cli;
+mod core;
 pub mod event;
 pub mod jobs;
 mod manager;

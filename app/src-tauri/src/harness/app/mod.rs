@@ -14,6 +14,7 @@ pub(in crate::harness) mod proposal_context;
 mod proposal_context_tests;
 pub mod proposal_jobs;
 pub mod revision;
+pub(in crate::harness) mod rewind;
 mod run_scope;
 pub(in crate::harness) mod send;
 pub mod setup;
@@ -50,11 +51,15 @@ pub(in crate::harness) struct Envelope {
     pub(in crate::harness) entity_id: Option<String>,
     /// Increases with every envelope; the webview ignores one it has seen.
     pub(in crate::harness) sequence: u64,
+    /// The thread's revision when this was emitted: every change it tells
+    /// of is saved at or below it, so a reload at that revision or later
+    /// already holds them (`core/load.rs`).
+    pub(in crate::harness) revision: i64,
     pub(in crate::harness) event: HarnessEvent,
 }
 
-/// What the one consumer reads, in order; see [`init`]. Events, the hot path,
-/// stay unboxed as they were before `Begin` joined them.
+/// What the one consumer reads, in order; see [`init`]. Events, the hot
+/// path, stay unboxed beside the larger commands.
 #[allow(clippy::large_enum_variant)]
 pub(in crate::harness) enum BusMsg {
     /// An event, tagged with its thread and with the session that reported
@@ -65,15 +70,21 @@ pub(in crate::harness) enum BusMsg {
         generation: Option<Generation>,
         event: HarnessEvent,
     },
-    /// A send to persist before its provider write. On the consumer, so every
-    /// row already queued for the thread is written before the question's.
-    Begin {
-        intent: crate::harness::store::SendIntent,
-        reply: tokio::sync::oneshot::Sender<Result<crate::harness::store::RunStart, String>>,
+    /// Something the student did, to be decided and committed here, on the
+    /// consumer: every row already on the bus for the chat is written first,
+    /// and no other command or event can come between its decision and its
+    /// commit. `reply` gets what was committed.
+    Command {
+        command: crate::harness::core::Command,
+        reply: Reply,
     },
-    /// A claimed send that will not go out (a continuation whose card lost
-    /// its claim): the thread's claim passes to whatever waits behind it.
-    Unclaimed(i64, Provider),
+    /// The provider's answer to what the command `command` asked before it
+    /// could commit (`core::decide::Ask`).
+    Answer {
+        thread_id: i64,
+        command: String,
+        answer: crate::harness::core::decide::Answer,
+    },
     /// A send on the thread's open run was accepted as `turn` of the session
     /// `generation`; only that turn's `TurnFinished` settles the run.
     Bound {
@@ -106,7 +117,11 @@ impl BusMsg {
     }
 }
 
-type Bus = mpsc::Sender<BusMsg>;
+pub(in crate::harness) type Bus = mpsc::Sender<BusMsg>;
+
+/// Where a command's result goes: back to the Tauri command that waits.
+pub(in crate::harness) type Reply =
+    tokio::sync::oneshot::Sender<Result<crate::harness::core::Outcome, String>>;
 
 pub struct HarnessState {
     pub harness: Arc<Harness>,
@@ -180,10 +195,6 @@ pub(in crate::harness) fn sinks_for(
 impl HarnessState {
     fn sink(&self, thread_id: i64, provider: Provider) -> Sink {
         sink_for(&self.bus, thread_id, provider)
-    }
-
-    fn sinks(&self, thread_id: i64, provider: Provider) -> Arc<dyn Sinks> {
-        sinks_for(&self.bus, thread_id, provider)
     }
 
     /// Returns once startup's repair has run (`startup.rs`). A command that

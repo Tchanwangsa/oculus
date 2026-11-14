@@ -11,7 +11,8 @@ use sqlx::SqlitePool;
 use crate::harness::app::consumer::{consume, ConsumerIo};
 use crate::harness::app::continuation::{self, SKIPPED_JOB, SKIPPED_QUEUED, STOPPED};
 use crate::harness::app::{BusMsg, Envelope};
-use crate::harness::{jobs, store, HarnessEvent, Provider, Queue, QueuedMessage, SendOptions};
+use crate::harness::core::effect::{Effect, Start};
+use crate::harness::{jobs, store, HarnessEvent, Provider, Queue};
 
 use super::guard::{assert_scratch, scratch};
 use super::replay::run;
@@ -359,10 +360,10 @@ async fn a_restart_or_a_stop_never_continues_and_the_card_says_why() {
     pool.close().await;
 }
 
-/// Records dispatches and envelopes; nothing is sent.
+/// Records the runs the consumer started and its envelopes; nothing is sent.
 struct Recorder {
     pool: SqlitePool,
-    dispatched: Vec<(QueuedMessage, SendOptions)>,
+    started: Vec<Start>,
     events: Vec<Value>,
 }
 
@@ -371,8 +372,10 @@ impl ConsumerIo for Recorder {
         Some(self.pool.clone())
     }
     fn name(&mut self, _: i64, _: Provider, _: Vec<jobs::JobSelection>, _: store::NamingSeed) {}
-    fn dispatch(&mut self, _: i64, _: Provider, msg: QueuedMessage, opts: SendOptions) {
-        self.dispatched.push((msg, opts));
+    fn perform(&mut self, effect: Effect) {
+        if let Effect::Start(start) = effect {
+            self.started.push(*start);
+        }
     }
     fn emit(&mut self, envelope: Envelope) {
         self.events
@@ -399,7 +402,7 @@ fn a_continuation_waits_behind_a_busy_thread_and_goes_out_once() {
     assert!(queue.lock().unwrap().try_claim(thread), "a turn is running");
     let mut io = Recorder {
         pool: pool.clone(),
-        dispatched: Vec::new(),
+        started: Vec::new(),
         events: Vec::new(),
     };
 
@@ -408,10 +411,7 @@ fn a_continuation_waits_behind_a_busy_thread_and_goes_out_once() {
         queue.clone(),
         &mut io,
     );
-    assert!(
-        io.dispatched.is_empty(),
-        "the running turn keeps the thread"
-    );
+    assert!(io.started.is_empty(), "the running turn keeps the thread");
     assert!(
         queue.lock().unwrap().list(thread).is_empty(),
         "never shown as typed"
@@ -422,32 +422,52 @@ fn a_continuation_waits_behind_a_busy_thread_and_goes_out_once() {
         "queued"
     );
 
-    let finished = BusMsg::app(
-        thread,
-        Provider::Codex,
-        HarnessEvent::TurnFinished {
-            status: "completed".into(),
-            turn: None,
-        },
+    let finished = |status: &str| {
+        BusMsg::app(
+            thread,
+            Provider::Codex,
+            HarnessEvent::TurnFinished {
+                status: status.into(),
+                turn: None,
+            },
+        )
+    };
+    consume(vec![finished("completed")], queue.clone(), &mut io);
+    assert_eq!(io.started.len(), 1, "one continuation, after the turn");
+    let start = &io.started[0];
+    assert_eq!(start.text, "Sync finished — continuing");
+    assert_eq!(start.options.continuation.as_deref(), Some(card.as_str()));
+    let origin: String = rt
+        .block_on(
+            sqlx::query_scalar("SELECT origin FROM harness_runs WHERE id = ?1")
+                .bind(start.run.run_id)
+                .fetch_one(&pool),
+        )
+        .unwrap();
+    assert_eq!(
+        origin, "continuation",
+        "its run was written before the send"
     );
-    consume(vec![finished], queue.clone(), &mut io);
-    assert_eq!(io.dispatched.len(), 1, "one continuation, after the turn");
-    let (msg, opts) = &io.dispatched[0];
-    assert_eq!(msg.text, "Sync finished — continuing");
-    assert_eq!(opts.continuation.as_deref(), Some(card.as_str()));
+    assert_eq!(
+        rt.block_on(state(&pool, &card))["continuation"]["phase"],
+        "started"
+    );
 
-    // A continuation whose claim is gone hands the thread on.
-    consume(
-        vec![BusMsg::Unclaimed(thread, Provider::Codex)],
-        queue.clone(),
-        &mut io,
-    );
+    // A continuation whose claim is gone by its turn starts nothing and
+    // hands the thread on.
+    let stopped = rt.block_on(seed_card(&pool, thread));
+    consume(vec![settled(thread, &stopped)], queue.clone(), &mut io);
+    assert!(rt
+        .block_on(continuation::cancel(&pool, &stopped, STOPPED))
+        .unwrap());
+    consume(vec![finished("completed")], queue.clone(), &mut io);
+    assert_eq!(io.started.len(), 1, "the cancelled card started nothing");
     assert!(!queue.lock().unwrap().is_busy(thread));
 
     // On an idle thread it goes out at once.
     let idle = rt.block_on(seed_card(&pool, thread));
     consume(vec![settled(thread, &idle)], queue.clone(), &mut io);
-    assert_eq!(io.dispatched.len(), 2);
+    assert_eq!(io.started.len(), 2);
     assert!(queue.lock().unwrap().is_busy(thread));
     rt.block_on(pool.close());
 }

@@ -28,8 +28,8 @@ pub(super) struct Replay {
     /// The app restarted after the stream and ran its startup repair.
     pub restarted: bool,
     pub load_race: bool,
-    /// Continuations the consumer dispatched (`Scenario::continuation`).
-    pub continuations: Vec<SendOptions>,
+    /// The cards whose continuation the consumer started (`Scenario::continuation`).
+    pub continuations: Vec<String>,
 }
 
 /// A whole recording through the [`Rig`]: its request, every frame, then the

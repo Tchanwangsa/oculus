@@ -1,4 +1,4 @@
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, SqliteConnection, SqlitePool};
 
 use crate::harness::event::Provider;
 
@@ -13,11 +13,33 @@ pub async fn create_thread(
     lecture_id: Option<&str>,
     first_message: &str,
 ) -> Result<i64, String> {
+    let mut conn = pool.acquire().await.map_err(|e| e.to_string())?;
+    create(
+        &mut conn,
+        provider,
+        model,
+        subject_id,
+        lecture_id,
+        first_message,
+    )
+    .await
+}
+
+/// [`create_thread`] on the caller's connection, so a send that creates its
+/// thread writes both in one transaction (`core/commit.rs`).
+pub async fn create(
+    conn: &mut SqliteConnection,
+    provider: Provider,
+    model: Option<&str>,
+    subject_id: Option<i64>,
+    lecture_id: Option<&str>,
+    first_message: &str,
+) -> Result<i64, String> {
     let subject_id = match lecture_id {
         Some(id) => {
             sqlx::query_scalar::<_, Option<i64>>("SELECT subject_id FROM lectures WHERE id = ?1")
                 .bind(id)
-                .fetch_optional(pool)
+                .fetch_optional(&mut *conn)
                 .await
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| format!("no lecture {id}"))?
@@ -34,10 +56,34 @@ pub async fn create_thread(
     .bind(subject_id)
     .bind(lecture_id)
     .bind(title)
-    .execute(pool)
+    .execute(&mut *conn)
     .await
     .map_err(|e| e.to_string())?;
     Ok(res.last_insert_rowid())
+}
+
+/// Count one more committed change to the thread's rows or runs, and return
+/// the count. Every envelope carries it, and a reload reads it with the rows
+/// (`core/load.rs`), so the webview can tell what a snapshot already holds.
+pub async fn raise_revision(conn: &mut SqliteConnection, thread_id: i64) -> Result<i64, String> {
+    sqlx::query_scalar(
+        "UPDATE harness_threads SET revision = revision + 1 WHERE id = ?1 RETURNING revision",
+    )
+    .bind(thread_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map(Option::unwrap_or_default)
+    .map_err(|e| e.to_string())
+}
+
+/// The thread's revision as stored; 0 for a thread that is gone.
+pub async fn revision(pool: &SqlitePool, thread_id: i64) -> Result<i64, String> {
+    sqlx::query_scalar("SELECT revision FROM harness_threads WHERE id = ?1")
+        .bind(thread_id)
+        .fetch_optional(pool)
+        .await
+        .map(Option::unwrap_or_default)
+        .map_err(|e| e.to_string())
 }
 
 /// The first line of the first message, clipped: the name until the naming
@@ -160,6 +206,12 @@ pub async fn harness_thread_viewed(thread_id: i64) -> Result<Option<String>, Str
 /// Explicit dependent deletes, children first: a connection may lack `foreign_keys`.
 pub async fn delete_thread(pool: &SqlitePool, id: i64) -> Result<(), String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    delete(&mut tx, id).await?;
+    tx.commit().await.map_err(|e| e.to_string())
+}
+
+/// [`delete_thread`] inside the caller's transaction.
+pub async fn delete(conn: &mut SqliteConnection, id: i64) -> Result<(), String> {
     for sql in [
         "DELETE FROM chat_proposals WHERE thread_id = ?1",
         "DELETE FROM harness_items WHERE thread_id = ?1",
@@ -173,11 +225,11 @@ pub async fn delete_thread(pool: &SqlitePool, id: i64) -> Result<(), String> {
     ] {
         sqlx::query(sql)
             .bind(id)
-            .execute(&mut *tx)
+            .execute(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
     }
-    tx.commit().await.map_err(|e| e.to_string())
+    Ok(())
 }
 
 #[cfg(test)]

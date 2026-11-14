@@ -1,0 +1,90 @@
+import { afterAll, beforeEach, expect, mock, test } from "bun:test";
+import type { HarnessEnvelope, HarnessItem, HarnessSnapshot } from "@/lib/harness";
+
+let answer: (command: string, args: Record<string, unknown>) => Promise<unknown> = async () => {
+  throw new Error("Tauri is not available");
+};
+mock.module("@tauri-apps/api/core", () => ({ invoke: (command: string, args: Record<string, unknown>) => answer(command, args) }));
+afterAll(() => {
+  // Module mocks outlive the file; leave later files an invoke that fails as it does without Tauri.
+  answer = async () => { throw new Error("Tauri is not available"); };
+});
+
+const { useHarnessStore } = await import("@/stores/chat/harnessStore");
+
+const THREAD = 7;
+const row = (id: number, kind: HarnessItem["kind"], content: string): HarnessItem => ({
+  id, thread_id: THREAD, kind, ref_id: null, content, meta: null, created_at: "2026-11-15 00:00:00", run_id: null,
+});
+const told = (revision: number, itemId: number | null, event: HarnessEnvelope["event"]): HarnessEnvelope => ({
+  threadId: THREAD, provider: "codex", itemId, revision, event,
+});
+const ids = () => useHarnessStore.getState().items[THREAD].map((i) => i.id);
+
+/** A `harness_load` that answers when the test says. */
+function pendingLoad() {
+  let resolve!: (snapshot: HarnessSnapshot) => void;
+  const read = new Promise<HarnessSnapshot>((r) => (resolve = r));
+  answer = async (command, args) => {
+    expect(command).toBe("harness_load");
+    expect(args.threadId).toBe(THREAD);
+    return read;
+  };
+  return resolve;
+}
+
+beforeEach(() => {
+  useHarnessStore.getState().removed(THREAD);
+  useHarnessStore.setState({ threads: [], items: {}, runs: {}, live: {}, holds: {}, queued: {}, contextDrift: {} });
+});
+
+test("a reload keeps what was written during its read and takes nothing twice", async () => {
+  const resolve = pendingLoad();
+  const loading = useHarnessStore.getState().load(THREAD);
+  const apply = useHarnessStore.getState().apply;
+  // Told while the read is out. The snapshot, at revision 7, holds the first three.
+  apply(told(5, 11, { type: "assistant_message", text: "first answer" }));
+  apply(told(6, null, { type: "rewound", from_item_id: 12, context: true }));
+  apply(told(7, 13, { type: "user_message", text: "asked again" }));
+  apply(told(8, 14, { type: "assistant_message", text: "second answer" }));
+  resolve({
+    revision: 7,
+    items: [row(10, "user", "asked"), row(11, "assistant", "first answer"), row(13, "user", "asked again")],
+    runs: [],
+    queued: [{ id: "q1", text: "waiting" }],
+  });
+  await loading;
+
+  // 11 and 13 once each; the rewind, already in the snapshot, did not take
+  // 13 (written after it, with a higher id); 14 came after the snapshot.
+  expect(ids()).toEqual([10, 11, 13, 14]);
+  const state = useHarnessStore.getState();
+  expect(state.queued[THREAD]).toEqual([{ id: "q1", text: "waiting" }]);
+  expect(state.live[THREAD].running).toBe(true);
+});
+
+test("an envelope the snapshot already holds changes no rows but still ends the turn", async () => {
+  const resolve = pendingLoad();
+  const loading = useHarnessStore.getState().load(THREAD);
+  resolve({ revision: 9, items: [row(10, "user", "asked"), row(11, "assistant", "answer")], runs: [], queued: [] });
+  await loading;
+  const apply = useHarnessStore.getState().apply;
+  apply(told(9, 10, { type: "user_message", text: "asked" }));
+  expect(useHarnessStore.getState().live[THREAD].running).toBe(true);
+  apply(told(8, null, { type: "rewound", from_item_id: 11, context: true }));
+  apply(told(9, null, { type: "turn_finished", status: "completed" }));
+  expect(ids()).toEqual([10, 11]);
+  expect(useHarnessStore.getState().live[THREAD].running).toBe(false);
+
+  // A later one is new.
+  apply(told(10, 12, { type: "assistant_message", text: "more" }));
+  expect(ids()).toEqual([10, 11, 12]);
+});
+
+test("a failed read leaves an empty thread that the stream still fills", async () => {
+  answer = async () => { throw new Error("database is locked"); };
+  await useHarnessStore.getState().load(THREAD);
+  expect(ids()).toEqual([]);
+  useHarnessStore.getState().apply(told(3, 11, { type: "assistant_message", text: "answer" }));
+  expect(ids()).toEqual([11]);
+});

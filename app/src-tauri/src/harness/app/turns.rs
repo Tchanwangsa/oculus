@@ -1,94 +1,66 @@
-//! A thread's turns: send, edit and resend, rewind, the queue behind a
-//! running turn, interrupt and delete.
+//! A thread's turns as Tauri commands: send, edit and resend, rewind, the
+//! queue behind a running turn, interrupt and delete. Each builds a
+//! [`Command`], hands it to the consumer and returns what was committed
+//! (`harness/core/`); none writes or calls a provider itself.
 
-use sqlx::SqlitePool;
 use tauri::State;
 
+use crate::harness::core::{load, Command, Kind, Outcome};
 use crate::harness::manager::validate_effort;
 use crate::harness::store;
-use crate::harness::{HarnessEvent, Provider, QueuedMessage, Release, RewindTo, SendOptions};
+use crate::harness::{HarnessEvent, Provider, SendOptions};
 use crate::runtime::blocking::run as blocking;
 
-use super::send::{dispatch, lecture_brief, studio_brief};
-use super::HarnessState;
+use super::{BusMsg, HarnessState};
+
+impl HarnessState {
+    /// Put a command on the consumer's bus once startup's repair is over,
+    /// and wait for its commit.
+    pub(in crate::harness) async fn command(&self, command: Command) -> Result<Outcome, String> {
+        self.ready().await?;
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        self.bus
+            .send(BusMsg::Command { command, reply })
+            .map_err(|_| "the harness consumer has stopped".to_string())?;
+        answer
+            .await
+            .map_err(|_| "the harness consumer has stopped".to_string())?
+    }
+}
 
 /// Send a message; creates the thread when `thread_id` is null. Returns
-/// the thread id. A message sent mid-turn waits in the [`Queue`] and the
-/// webview gets only a `queued` event until it goes out.
+/// the thread id once the message is saved: its run goes out afterwards, and
+/// a message sent mid-turn waits in the [`Queue`](crate::harness::Queue).
+/// `command_id` is the webview's id for this send; the same one again
+/// starts nothing and returns the same thread.
 #[tauri::command]
 pub async fn harness_send(
     state: State<'_, HarnessState>,
+    command_id: String,
     thread_id: Option<i64>,
     provider: String,
     text: String,
     options: Option<SendOptions>,
 ) -> Result<i64, String> {
-    state.ready().await?;
     let provider =
         Provider::parse(&provider).ok_or_else(|| format!("unknown provider {provider}"))?;
-    let mut opts = options.unwrap_or_default();
-    opts.reasoning_effort = validate_effort(opts.reasoning_effort)?;
-    opts.scope_new_thread(thread_id)?;
-    let pool = crate::db::store::open_pool().await?;
-
-    let id = match thread_id {
-        Some(id) => {
-            let row = store::thread(&pool, id).await?;
-            if row.provider != provider {
-                return Err(format!("thread {id} is a {} thread", row.provider.label()));
-            }
-            id
-        }
-        None => {
-            if let Some(video) = &opts.studio {
-                crate::studio::videos::video_in(&crate::studio::videos::videos_dir(), &video.slug)?;
-            }
-            let id = store::create_thread(
-                &pool,
-                provider,
-                opts.model.as_deref(),
-                opts.subject_id,
-                opts.lecture_id.as_deref(),
-                &text,
-            )
-            .await?;
-            if let Some(video) = &opts.studio {
-                let length = video.length_secs.map(i64::from);
-                let linked =
-                    crate::db::store::link_studio_video(&pool, &video.slug, id, length).await;
-                if let Err(e) = linked {
-                    store::delete_thread(&pool, id).await.ok();
-                    return Err(e);
-                }
-            }
-            id
-        }
-    };
-
-    // A send already accepted under this receipt (a retried call) starts nothing.
-    if let Some(receipt) = &opts.receipt {
-        if store::receipt_run(&pool, receipt).await?.is_some() {
-            return Ok(id);
-        }
+    let mut options = options.unwrap_or_default();
+    options.reasoning_effort = validate_effort(options.reasoning_effort)?;
+    options.scope_new_thread(thread_id)?;
+    if let (None, Some(video)) = (thread_id, &options.studio) {
+        crate::studio::videos::video_in(&crate::studio::videos::videos_dir(), &video.slug)?;
     }
-    if !state.queue.lock().unwrap().try_claim(id) {
-        let msg = state.queue.lock().unwrap().push(id, &text, &opts);
-        state.sink(id, provider)(HarnessEvent::Queued {
-            id: msg.id,
-            text: msg.text,
-        });
-        return Ok(id);
-    }
-    dispatch(
-        state.harness.clone(),
-        state.bus.clone(),
-        id,
+    let kind = Kind::Send {
         provider,
-        opts,
         text,
-    )
-    .await?;
-    Ok(id)
+        options,
+    };
+    let sent = state.command(Command {
+        id: command_id,
+        thread_id,
+        kind,
+    });
+    Ok(sent.await?.thread_id)
 }
 
 /// Ask a question again, differently: rewind the thread to that question
@@ -98,86 +70,25 @@ pub async fn harness_send(
 #[tauri::command]
 pub async fn harness_edit_resend(
     state: State<'_, HarnessState>,
+    command_id: String,
     thread_id: i64,
     item_id: i64,
     text: String,
     options: Option<SendOptions>,
 ) -> Result<(), String> {
-    state.ready().await?;
-    let mut opts = options.unwrap_or_default();
-    opts.reasoning_effort = validate_effort(opts.reasoning_effort)?;
-    let pool = crate::db::store::open_pool().await?;
-    let row = store::thread(&pool, thread_id).await?;
-    // Checked against the row: everything from it on is about to go.
-    let question = store::user_item(&pool, thread_id, item_id).await?;
-    if !state.queue.lock().unwrap().try_claim(thread_id) {
-        return Err("stop the current turn before editing a question".into());
-    }
-    let context = rewind_provider(&state, &pool, thread_id, &row, &question, &opts).await;
-    if let Err(e) = store::truncate_from(&pool, thread_id, item_id).await {
-        // Nothing was sent, so nothing will close the turn this claimed.
-        state.queue.lock().unwrap().next(thread_id);
-        return Err(e);
-    }
-    let sink = state.sink(thread_id, row.provider);
-    sink(HarnessEvent::Rewound {
-        from_item_id: item_id,
-        context,
-    });
-    dispatch(
-        state.harness.clone(),
-        state.bus.clone(),
-        thread_id,
-        row.provider,
-        opts,
+    let mut options = options.unwrap_or_default();
+    options.reasoning_effort = validate_effort(options.reasoning_effort)?;
+    let kind = Kind::EditResend {
+        item_id,
         text,
-    )
-    .await
-}
-
-/// Ask the provider to forget this question and everything after it, and
-/// answer whether it did. No anchor, a refusal or an unresumable session
-/// all answer `false`, which the timeline shows as a note.
-async fn rewind_provider(
-    state: &State<'_, HarnessState>,
-    pool: &SqlitePool,
-    thread_id: i64,
-    row: &store::ThreadRow,
-    question: &store::Question,
-    opts: &SendOptions,
-) -> bool {
-    let Some(anchor) = question.anchor.clone() else {
-        return false;
+        options,
     };
-    let Some(resume) = row.provider_session_id.clone() else {
-        return false;
-    };
-    let last_seen = store::newest_anchor(pool, thread_id).await.ok().flatten();
-    let (h, provider) = (state.harness.clone(), row.provider);
-    let sinks = state.sinks(thread_id, provider);
-    // A rewind may respawn the session, which binds the brief.
-    let opts = SendOptions {
-        model: opts.model.clone().or_else(|| row.model.clone()),
-        scope: row.subject_code.clone(),
-        lecture: lecture_brief(pool, row).await,
-        studio_brief: studio_brief(pool, thread_id).await,
-        ..opts.clone()
-    };
-    blocking(move || {
-        h.rewind(
-            thread_id,
-            provider,
-            Some(&resume),
-            &opts,
-            RewindTo {
-                anchor: &anchor,
-                last_seen: last_seen.as_deref(),
-            },
-            &sinks,
-        )
-    })
-    .await
-    .is_ok()
+    let edited = state.command(Command {
+        id: command_id,
+        thread_id: Some(thread_id),
+        kind,
+    });
+    edited.await.map(|_| ())
 }
 
 /// Take the thread back to just before a question and hand the question
@@ -185,37 +96,30 @@ async fn rewind_provider(
 #[tauri::command]
 pub async fn harness_rewind(
     state: State<'_, HarnessState>,
+    command_id: String,
     thread_id: i64,
     item_id: i64,
 ) -> Result<String, String> {
-    state.ready().await?;
-    let pool = crate::db::store::open_pool().await?;
-    let row = store::thread(&pool, thread_id).await?;
-    let question = store::user_item(&pool, thread_id, item_id).await?;
-    if state.queue.lock().unwrap().is_busy(thread_id) {
-        return Err("stop the current turn before rewinding".into());
-    }
-    let opts = SendOptions {
-        model: row.model.clone(),
-        ..Default::default()
-    };
-    let context = rewind_provider(&state, &pool, thread_id, &row, &question, &opts).await;
-    store::truncate_from(&pool, thread_id, item_id).await?;
-    state.sink(thread_id, row.provider)(HarnessEvent::Rewound {
-        from_item_id: item_id,
-        context,
+    let rewound = state.command(Command {
+        id: command_id,
+        thread_id: Some(thread_id),
+        kind: Kind::Rewind { item_id },
     });
-    Ok(question.text)
+    Ok(rewound.await?.text.unwrap_or_default())
 }
 
-/// What is still waiting behind this thread's turn (the queue is only in
-/// memory), for a reloaded page.
+/// A thread as a reload reads it: rows, runs and the revision that covers
+/// them in one read, then what waits behind its turn (the queue is only in
+/// memory).
 #[tauri::command]
-pub async fn harness_queued(
+pub async fn harness_load(
     state: State<'_, HarnessState>,
     thread_id: i64,
-) -> Result<Vec<QueuedMessage>, String> {
-    Ok(state.queue.lock().unwrap().list(thread_id))
+) -> Result<load::Snapshot, String> {
+    let pool = crate::db::store::open_pool().await?;
+    let mut snapshot = load::read(&pool, thread_id).await?;
+    snapshot.queued = state.queue.lock().unwrap().list(thread_id);
+    Ok(snapshot)
 }
 
 /// Drop one message that has not gone out yet.
@@ -289,11 +193,13 @@ pub async fn harness_interrupt(
 #[tauri::command]
 pub async fn harness_delete_thread(
     state: State<'_, HarnessState>,
+    command_id: String,
     thread_id: i64,
 ) -> Result<(), String> {
-    state.ready().await?;
-    state.harness.release(thread_id, Release::Deleted);
-    state.queue.lock().unwrap().forget(thread_id);
-    let pool = crate::db::store::open_pool().await?;
-    store::delete_thread(&pool, thread_id).await
+    let deleted = state.command(Command {
+        id: command_id,
+        thread_id: Some(thread_id),
+        kind: Kind::DeleteThread,
+    });
+    deleted.await.map(|_| ())
 }

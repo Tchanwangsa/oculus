@@ -13,7 +13,8 @@ use tokio::runtime::Runtime;
 
 use crate::harness::app::consumer::ConsumerIo;
 use crate::harness::app::{BusMsg, Envelope};
-use crate::harness::{jobs, store, Provider, QueuedMessage, SendOptions};
+use crate::harness::core::effect::{self, Effect};
+use crate::harness::{jobs, store, Provider};
 
 use super::{guard::assert_scratch, outbound::Outbound, snapshot};
 
@@ -26,8 +27,11 @@ pub(super) struct Io {
     pub snapshots: Vec<Vec<Value>>,
     pub runtime: Option<Runtime>,
     pub epoch: std::time::Instant,
-    /// A continuation's dispatch, which the replay starts itself.
-    pub continued: Sender<(QueuedMessage, SendOptions)>,
+    /// What the consumer's effects run against: the replay's manager, its
+    /// bus and the scratch database.
+    pub effects: effect::Runtime,
+    /// The cards whose continuation the consumer started.
+    pub continued: Vec<String>,
     pub clock: Arc<Clock>,
 }
 
@@ -88,13 +92,16 @@ impl ConsumerIo for Io {
     fn name(&mut self, _: i64, _: Provider, _: Vec<jobs::JobSelection>, _: store::NamingSeed) {
         self.outbound.exchange(json!({"operation":"thread naming"}));
     }
-    fn dispatch(&mut self, _: i64, _: Provider, msg: QueuedMessage, opts: SendOptions) {
-        if opts.continuation.is_some() {
-            let _ = self.continued.send((msg, opts));
-            return;
+    /// An effect runs at once, on the consumer's thread: the recorded
+    /// session answers inline, so the turn is open when the command returns.
+    /// Its writes to the provider are checked like any other, so a start the
+    /// recording did not make fails the replay.
+    fn perform(&mut self, effect: Effect) {
+        if let Effect::Start(start) = &effect {
+            self.continued.extend(start.options.continuation.clone());
         }
-        self.outbound
-            .exchange(json!({"operation":"queued dispatch", "text":msg.text}));
+        let runtime = self.runtime.as_ref().unwrap();
+        runtime.block_on(effect::run(&self.effects, effect));
     }
     fn emit(&mut self, envelope: Envelope) {
         self.snapshots.push(

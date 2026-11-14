@@ -9,8 +9,9 @@ use sqlx::SqlitePool;
 
 use crate::harness::app::consumer::{consume, ConsumerIo};
 use crate::harness::app::{BusMsg, Envelope};
+use crate::harness::core::effect::Effect;
 use crate::harness::event::Source;
-use crate::harness::{jobs, store, HarnessEvent, Provider, Queue, QueuedMessage, SendOptions};
+use crate::harness::{jobs, store, HarnessEvent, Provider, Queue};
 
 /// A consumer whose clock the test sets before each message, recording what
 /// the draft table held as each envelope went out.
@@ -36,7 +37,7 @@ impl ConsumerIo for Timed {
         Some(self.pool.clone())
     }
     fn name(&mut self, _: i64, _: Provider, _: Vec<jobs::JobSelection>, _: store::NamingSeed) {}
-    fn dispatch(&mut self, _: i64, _: Provider, _: QueuedMessage, _: SendOptions) {}
+    fn perform(&mut self, _: Effect) {}
     fn emit(&mut self, envelope: Envelope) {
         let kind = serde_json::to_value(&envelope.event).unwrap()["type"]
             .as_str()
@@ -79,16 +80,10 @@ fn streamed_text_reaches_the_draft_once_per_interval_and_leaves_with_its_message
             item: Some(item.into()),
         })
     };
-    let (reply, _begun) = tokio::sync::oneshot::channel();
+    let (send, _begun) = super::runs::send(thread, Provider::Codex, "drafts");
     // Milliseconds since the start, and what arrives then.
     let script = vec![
-        (
-            0,
-            BusMsg::Begin {
-                intent: super::runs::intent(thread, "drafts", None),
-                reply,
-            },
-        ),
+        (0, send),
         (0, delta("m1", "He")),
         (10, delta("m1", "llo")),
         (20, delta("m2", " and")),
@@ -164,7 +159,7 @@ fn a_failed_settle_is_retried_at_growing_intervals_until_it_lands() {
             "q",
         ))
         .unwrap();
-    let (reply, _begun) = tokio::sync::oneshot::channel();
+    let (send, _begun) = super::runs::send(thread, Provider::Codex, "retry");
     let ended = BusMsg::Event {
         thread_id: thread,
         provider: Provider::Codex,
@@ -177,14 +172,7 @@ fn a_failed_settle_is_retried_at_growing_intervals_until_it_lands() {
     // Milliseconds since the start, whether the database then refuses
     // writes, and what arrives.
     let script = vec![
-        (
-            0,
-            false,
-            BusMsg::Begin {
-                intent: super::runs::intent(thread, "retry", None),
-                reply,
-            },
-        ),
+        (0, false, send),
         (
             0,
             false,
@@ -216,7 +204,6 @@ fn a_failed_settle_is_retried_at_growing_intervals_until_it_lands() {
         msg
     });
     let queue = Arc::new(Mutex::new(Queue::default()));
-    assert!(queue.lock().unwrap().try_claim(thread));
     let mut io = Timed {
         pool: pool.clone(),
         now,

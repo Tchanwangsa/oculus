@@ -3,6 +3,7 @@ import { createWidgetStore, widgetKey } from "../../src/stores/chat/widgetStore"
 import { buildRows } from "../../src/components/harness/timeline/rows";
 import { useHarnessStore } from "../../src/stores/chat/harnessStore";
 import { runFromRow, type RunRow } from "../../src/lib/harness/runs";
+import type { HarnessSnapshot } from "../../src/lib/harness/commands";
 import type { HarnessEnvelope, HarnessItem } from "../../src/lib/harness/types";
 
 const input = await Bun.stdin.json();
@@ -36,22 +37,14 @@ const restored = createWidgetStore(storage).getState().entries;
 const artifactStateStable = widgetKeys.every((key) => restored[key]?.state.progress === 1 && restored[key]?.ask == null);
 let racedItems: HarnessItem[] | null = null;
 if (input.loadRace) {
-  let resolveRead!: (items: HarnessItem[]) => void;
-  const read = new Promise<HarnessItem[]>((resolve) => { resolveRead = resolve; });
-  // Substitute the SQL plugin transport; the production reads and load reducer run.
-  Database.load = (async (path: string) => {
-    if (path !== "sqlite:oculus.db") throw new Error(`unrecorded SQL open: ${path}`);
-    return { select: async (query: string, values: unknown[]) => {
-      if (values[0] !== thread) throw new Error(`unrecorded SQL read: ${query}`);
-      // The runs are read beside the rows; the race is over the rows.
-      if (query.includes("FROM harness_runs WHERE thread_id = $1")) return [];
-      if (query !== "SELECT * FROM harness_items WHERE thread_id = $1 ORDER BY id ASC") throw new Error(`unrecorded SQL read: ${query}`);
-      return read;
-    } };
-  }) as typeof Database.load;
-  (globalThis as any).window = { __TAURI_INTERNALS__: { invoke: async (command: string) => {
-    if (command !== "harness_queued") throw new Error(`unrecorded native operation: ${command}`);
-    return [];
+  let resolveRead!: (snapshot: HarnessSnapshot) => void;
+  const read = new Promise<HarnessSnapshot>((resolve) => { resolveRead = resolve; });
+  // Substitute the native read; the production load reducer runs. Nothing
+  // reads the thread through the SQL plugin.
+  Database.load = (async (path: string) => { throw new Error(`unrecorded SQL open: ${path}`); }) as typeof Database.load;
+  (globalThis as any).window = { __TAURI_INTERNALS__: { invoke: async (command: string, args: { threadId?: number }) => {
+    if (command !== "harness_load" || args.threadId !== thread) throw new Error(`unrecorded native operation: ${command}`);
+    return read;
   } } };
   useHarnessStore.setState({ items: { [thread]: [] }, holds: { [thread]: 1 }, live: {}, threads: [], queued: {} });
   const cut = Math.max(1, input.envelopes.findIndex((e: HarnessEnvelope) => e.event.type === "assistant_message"));
@@ -61,7 +54,8 @@ if (input.loadRace) {
   for (const envelope of race.slice(0, cut)) useHarnessStore.getState().apply(envelope);
   const loading = useHarnessStore.getState().load(thread);
   for (const envelope of race.slice(cut)) useHarnessStore.getState().apply(envelope);
-  resolveRead(input.snapshots[cut - 1]);
+  // The rows as they stood when envelope `cut - 1` went out, at its revision.
+  resolveRead({ revision: race[cut - 1].revision ?? 0, items: input.snapshots[cut - 1], runs: [], queued: [] });
   await loading;
   useHarnessStore.getState().flushLive();
   racedItems = useHarnessStore.getState().items[thread];

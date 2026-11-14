@@ -17,7 +17,7 @@ pub struct StudioLink {
 
 /// Link `slug` to `thread_id`, replacing a row a deleted video left behind.
 pub async fn link_studio_video(
-    pool: &SqlitePool,
+    db: impl sqlx::SqliteExecutor<'_>,
     slug: &str,
     thread_id: i64,
     length_secs: Option<i64>,
@@ -32,7 +32,7 @@ pub async fn link_studio_video(
     .bind(slug)
     .bind(thread_id)
     .bind(length_secs)
-    .execute(pool)
+    .execute(db)
     .await
     .map(|_| ())
     .map_err(|e| e.to_string())
