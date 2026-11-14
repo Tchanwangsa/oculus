@@ -83,7 +83,8 @@ thread's next spawn (`Harness::replay_spawn`) and opened by the send that
 would have started a process, on the sink of the generation minted for it.
 `rig.next_session()` registers another and hands back the one it replaces,
 whose reader the test can go on feeding: a process the app no longer listens
-to.
+to. A replayed process records a kill, so `handle.is_alive()` says whether
+the manager ended it.
 
 ```rust
 let scenario = Scenario::recorded("codex-ls")
@@ -126,7 +127,10 @@ assistant rows from schema 24, checks source IDs/bodies, that they stay
 unowned after migration 54, and proposal source keys, then drives production
 rewind/delete pruning. `testkit/identity.rs` replays the holes turn and session ids close (a second
 Codex `turn/completed` under the next run, a replaced process speaking into
-its successor's run, a send racing a turn Claude starts itself).
+its successor's run, a send racing a turn Claude starts itself, a
+reasoning-level change leaving two processes, a killed process's last words
+after the next question started, a process dying before or during its
+answer).
 `testkit/runs.rs` checks run identity: one run,
 attempt, binding and receipt per send on all four bridges, with every later
 row owned by them; a repeated receipt starting nothing; a failed intent

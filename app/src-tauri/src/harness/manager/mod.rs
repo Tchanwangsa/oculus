@@ -10,6 +10,7 @@ mod one_off;
 mod options;
 mod queue;
 mod raw_log;
+mod release;
 mod session;
 mod sinks;
 mod stoppable;
@@ -24,6 +25,7 @@ pub(in crate::harness) use options::validate_effort;
 pub use options::{LectureBrief, SendOptions, StudioSend};
 pub use queue::{Queue, QueuedMessage};
 pub use raw_log::RawLog;
+pub use release::Release;
 pub use sinks::{Generation, OneSink, Sinks};
 pub use studio::StudioBrief;
 

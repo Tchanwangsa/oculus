@@ -38,7 +38,7 @@ impl Harness {
             let _ = h.cancel();
         }
         let Some(prompt) = prompt(path, before, after) else {
-            self.release(request_id);
+            self.end_request(request_id);
             return Ok(String::new());
         };
 
@@ -47,7 +47,7 @@ impl Harness {
             let is_primary = primary.is_some_and(|p| std::ptr::eq(p, sel));
             self.attempt(request_id, sel, is_primary, &prompt)
         });
-        self.release(request_id);
+        self.end_request(request_id);
         Ok(match outcome? {
             Some(raw) => clean(&raw, before, after),
             None => String::new(),
@@ -149,7 +149,7 @@ impl Harness {
 
     /// This request is over; a later one with a lower id (a reloaded page
     /// counts from 1 again) is no longer refused.
-    fn release(&self, request_id: u64) {
+    fn end_request(&self, request_id: u64) {
         let mut s = self.suggest.lock().unwrap();
         if s.wanted == Some(request_id) {
             s.wanted = None;

@@ -438,7 +438,7 @@ fn a_continuation_waits_behind_a_busy_thread_and_goes_out_once() {
 
     // A continuation whose claim is gone hands the thread on.
     consume(
-        vec![BusMsg::Release(thread, Provider::Codex)],
+        vec![BusMsg::Unclaimed(thread, Provider::Codex)],
         queue.clone(),
         &mut io,
     );

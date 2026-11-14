@@ -6,7 +6,7 @@ use tauri::State;
 
 use crate::harness::manager::validate_effort;
 use crate::harness::store;
-use crate::harness::{HarnessEvent, Provider, QueuedMessage, RewindTo, SendOptions};
+use crate::harness::{HarnessEvent, Provider, QueuedMessage, Release, RewindTo, SendOptions};
 use crate::runtime::blocking::run as blocking;
 
 use super::send::{dispatch, lecture_brief, studio_brief};
@@ -288,7 +288,7 @@ pub async fn harness_delete_thread(
     state: State<'_, HarnessState>,
     thread_id: i64,
 ) -> Result<(), String> {
-    state.harness.close(thread_id);
+    state.harness.release(thread_id, Release::Deleted);
     state.queue.lock().unwrap().forget(thread_id);
     let pool = crate::db::store::open_pool().await?;
     store::delete_thread(&pool, thread_id).await

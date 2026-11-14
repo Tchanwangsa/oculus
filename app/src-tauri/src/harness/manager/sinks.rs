@@ -4,6 +4,8 @@
 use crate::harness::event::TurnId;
 use crate::harness::Sink;
 
+use super::release::Release;
+
 /// One spawn or attach of a thread's session. Never reused, so an event from
 /// a session that was replaced or has ended can be told from the live one's.
 pub type Generation = u64;
@@ -17,6 +19,10 @@ pub trait Sinks: Send + Sync {
     /// A send was accepted as `turn` of that session. Called before any
     /// event of the turn can arrive.
     fn bound(&self, _generation: Generation, _turn: TurnId) {}
+
+    /// That session has ended, and why. Called before its process is
+    /// killed, so everything it says afterwards is known to be stale.
+    fn released(&self, _generation: Generation, _reason: Release) {}
 }
 
 /// The same sink for every session: a caller with no consumer behind it.

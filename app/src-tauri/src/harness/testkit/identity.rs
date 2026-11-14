@@ -9,7 +9,9 @@ use sqlx::SqlitePool;
 
 use crate::harness::app::consumer::{consume, ConsumerIo};
 use crate::harness::app::{BusMsg, Envelope};
-use crate::harness::{jobs, store, HarnessEvent, Provider, Queue, QueuedMessage, SendOptions};
+use crate::harness::{
+    jobs, store, HarnessEvent, Provider, Queue, QueuedMessage, Release, SendOptions,
+};
 
 use super::rig::Rig;
 use super::scenario::Scenario;
@@ -144,6 +146,114 @@ fn a_replaced_session_is_heard_no_more() {
     assert!(!replay.busy);
 }
 
+/// A different reasoning level needs a new process, and the old one must not
+/// outlive the swap: left running, it would resume the same session id
+/// beside its successor.
+#[test]
+fn changing_the_reasoning_level_leaves_one_live_process() {
+    for name in ["claude-ls", "antigravity-ls"] {
+        let mut scenario = Scenario::recorded(name);
+        let again = scenario.fixture.expected_outbound[0].clone();
+        scenario.fixture.expected_outbound.push(again);
+        let mut rig = Rig::start(scenario);
+        rig.open();
+        rig.resume();
+        rig.drain();
+
+        let replaced = rig.next_session();
+        assert!(replaced.handle.is_alive(), "{name}");
+        let opts = SendOptions {
+            reasoning_effort: Some("high".into()),
+            ..SendOptions::default()
+        };
+        rig.send_with("second", &opts).unwrap();
+        assert!(
+            !replaced.handle.is_alive(),
+            "{name}: the old process was killed"
+        );
+        assert_eq!(rig.harness.live_threads(rig.provider), vec![rig.thread]);
+        rig.finish();
+    }
+}
+
+/// The process is killed mid-answer. The run ends there, interrupted, with
+/// what had streamed kept; whatever the dying process still says, even after
+/// the next question has started, reaches no run.
+#[test]
+fn a_killed_processs_late_terminal_reaches_no_run() {
+    let mut scenario = Scenario::recorded("claude-ls");
+    let again = scenario.fixture.expected_outbound[0].clone();
+    scenario.fixture.expected_outbound.push(again);
+    let frames = scenario.frames.clone();
+    let answer = frames
+        .iter()
+        .rposition(|f| f["type"] == "assistant")
+        .unwrap();
+    let last = frames[answer].clone();
+    let mut rig = Rig::start(scenario.gate("answer", move |f| *f == last));
+    rig.open();
+    rig.until("answer");
+    rig.harness.release(rig.thread, Release::Stopped);
+    rig.drain();
+    assert!(
+        !rig.queue.lock().unwrap().is_busy(rig.thread),
+        "the stopped run let go of the thread"
+    );
+
+    let mut killed = rig.next_session();
+    let second = rig.send("second").unwrap();
+    for frame in &frames[answer..] {
+        (killed.inbound)(frame);
+    }
+    (killed.eof)();
+    rig.drain();
+    assert_eq!(status_of(&rig, second.run_id), "running");
+
+    for frame in &frames {
+        rig.feed(frame);
+    }
+    rig.eof();
+    let replay = rig.finish();
+    let runs = replay.ledger["runs"].as_array().unwrap();
+    assert_eq!(runs[0]["execution_status"], "interrupted", "{runs:?}");
+    assert_eq!(runs[1]["execution_status"], "completed", "{runs:?}");
+    let partial: Vec<_> = replay
+        .items
+        .iter()
+        .filter(|i| i["lifecycle"] == "partial")
+        .collect();
+    assert_eq!(partial.len(), 1, "what streamed before the kill is kept");
+    assert_eq!(partial[0]["run_id"], runs[0]["id"]);
+    assert!(!partial[0]["content"].as_str().unwrap().is_empty());
+    assert!(
+        !replay.items.iter().any(|i| i["kind"] == "error"),
+        "the dying process's exit is nobody's error"
+    );
+    let terminals = replay
+        .envelopes
+        .iter()
+        .filter(|e| e["event"]["type"] == "turn_finished")
+        .count();
+    assert_eq!(terminals, 2, "one per run");
+    assert!(!replay.busy);
+}
+
+/// opencode's server dies after taking the prompt and before the turn's
+/// first event: its bridge has no turn open to fail, so the consumer does.
+#[test]
+fn a_process_that_dies_before_its_turn_opens_fails_the_turn() {
+    let mut scenario = Scenario::recorded("opencode-v1-text");
+    scenario.frames.clear();
+    let replay = super::replay::run(scenario);
+    let runs = replay.ledger["runs"].as_array().unwrap();
+    assert_eq!(runs[0]["execution_status"], "failed", "{runs:?}");
+    assert!(replay
+        .items
+        .iter()
+        .any(|i| i["kind"] == "error" && i["run_id"] == runs[0]["id"]));
+    assert!(!replay.busy, "nothing waits behind a dead turn");
+}
+
 /// Records envelopes; nothing is named or sent.
 struct Recorder {
     pool: SqlitePool,
@@ -264,4 +374,134 @@ fn a_send_racing_a_turn_the_cli_starts_is_settled_by_its_own_turn() {
         "both turns let go of the thread"
     );
     runtime.block_on(pool.close());
+}
+
+fn delta(text: &str) -> HarnessEvent {
+    HarnessEvent::AssistantDelta { text: text.into() }
+}
+
+/// One run on a scratch thread, bound to turn `1` of session `1`, then `bus`.
+fn one_run(
+    name: &str,
+    bus: impl FnOnce(i64) -> Vec<BusMsg>,
+) -> (Value, Vec<Value>, Vec<Value>, bool) {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let (_dir, pool) = runtime.block_on(super::runs::scratch_pool(name));
+    let thread = runtime
+        .block_on(store::create_thread(
+            &pool,
+            Provider::Claude,
+            None,
+            None,
+            None,
+            "q",
+        ))
+        .unwrap();
+    let (reply, _begun) = tokio::sync::oneshot::channel();
+    let mut messages = vec![
+        BusMsg::Begin {
+            intent: super::runs::intent(thread, name, None),
+            reply,
+        },
+        BusMsg::Bound {
+            thread_id: thread,
+            generation: 1,
+            turn: "1".into(),
+        },
+    ];
+    messages.extend(bus(thread));
+    let queue = Arc::new(Mutex::new(Queue::default()));
+    assert!(queue.lock().unwrap().try_claim(thread));
+    let mut io = Recorder {
+        pool: pool.clone(),
+        events: Vec::new(),
+    };
+    consume(messages, queue.clone(), &mut io);
+    let ledger = runtime.block_on(super::snapshot::ledger(&pool, thread));
+    let items = runtime.block_on(super::snapshot::items(&pool, thread));
+    let busy = queue.lock().unwrap().is_busy(thread);
+    runtime.block_on(pool.close());
+    (ledger, items, io.events, busy)
+}
+
+fn released(thread: i64, reason: Release) -> BusMsg {
+    BusMsg::Released {
+        thread_id: thread,
+        provider: Provider::Claude,
+        generation: 1,
+        reason,
+    }
+}
+
+/// One rule, whichever bridge: a session that ends with its turn open fails
+/// that turn, and what had streamed is kept as a partial reply with its gap.
+#[test]
+fn a_process_that_dies_mid_answer_fails_its_turn_with_the_text_kept() {
+    let (ledger, items, events, busy) = one_run("turn-died", |thread| {
+        vec![
+            from_session(thread, 1, delta("Half an ans")),
+            from_session(thread, 1, HarnessEvent::Exited { code: Some(1) }),
+            // Nothing more is heard from it, not even a second exit.
+            from_session(thread, 1, said("late")),
+            from_session(thread, 1, HarnessEvent::Exited { code: Some(1) }),
+        ]
+    });
+    let run = &ledger["runs"][0];
+    assert_eq!(run["execution_status"], "failed");
+    assert_eq!(run["delivery_state"], "incomplete");
+    let kept = items.iter().find(|i| i["kind"] == "assistant").unwrap();
+    assert_eq!(kept["content"], "Half an ans");
+    assert_eq!(kept["lifecycle"], "partial");
+    assert_eq!(kept["run_id"], run["id"]);
+    assert_eq!(ledger["gaps"][0]["cause"], "missing_snapshot");
+    assert_eq!(items.iter().filter(|i| i["kind"] == "error").count(), 1);
+    assert!(!items.iter().any(|i| i["content"] == "late"));
+    let kinds: Vec<_> = events
+        .iter()
+        .map(|e| e["event"]["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        kinds.iter().filter(|k| **k == "turn_finished").count(),
+        1,
+        "{kinds:?}"
+    );
+    assert_eq!(kinds.iter().filter(|k| **k == "exited").count(), 1);
+    assert!(!busy);
+}
+
+/// The reason a session ended decides what becomes of its open turn.
+#[test]
+fn a_release_closes_the_open_turn_by_its_reason() {
+    for (reason, status) in [
+        (Release::Stopped, "interrupted"),
+        (Release::Replaced, "interrupted"),
+        (Release::Exited, "failed"),
+    ] {
+        let (ledger, items, _, busy) = one_run("turn-released", |thread| {
+            vec![
+                from_session(thread, 1, delta("So far")),
+                released(thread, reason),
+                from_session(thread, 1, ended("1")),
+            ]
+        });
+        assert_eq!(ledger["runs"][0]["execution_status"], status, "{reason:?}");
+        assert!(
+            items
+                .iter()
+                .any(|i| i["content"] == "So far" && i["lifecycle"] == "partial"),
+            "{reason:?}"
+        );
+        assert!(!busy, "{reason:?}");
+    }
+    // A quit writes nothing: the next startup repairs the run.
+    let (ledger, _, events, busy) = one_run("turn-quit", |thread| {
+        vec![
+            from_session(thread, 1, delta("So far")),
+            released(thread, Release::Quit),
+            from_session(thread, 1, said("late")),
+        ]
+    });
+    assert_eq!(ledger["runs"][0]["execution_status"], "preparing");
+    assert!(busy);
+    assert!(!events.iter().any(|e| e["event"]["type"] == "turn_finished"));
 }

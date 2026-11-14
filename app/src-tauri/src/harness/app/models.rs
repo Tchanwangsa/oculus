@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use tauri::State;
 
 use crate::harness::codex::ModelInfo;
-use crate::harness::Provider;
 use crate::harness::{antigravity, antigravity_rules, claude, opencode, store};
+use crate::harness::{Provider, Release};
 use crate::runtime::blocking::run as blocking;
 
 use super::HarnessState;
@@ -66,7 +66,7 @@ pub async fn harness_antigravity_allow(
         rules.push(rule);
         antigravity_rules::save(&pool, &rules).await?;
     }
-    state.harness.close(thread_id);
+    state.harness.release(thread_id, Release::Replaced);
     Ok(rules)
 }
 
@@ -94,7 +94,7 @@ pub async fn harness_antigravity_revoke(
         .await?;
     for id in state.harness.live_threads(Provider::Antigravity) {
         if !state.queue.lock().unwrap().is_busy(id) {
-            state.harness.close(id);
+            state.harness.release(id, Release::Replaced);
         }
     }
     Ok(rules)

@@ -27,7 +27,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use serde::Serialize;
 
 use crate::harness::event::TurnId;
-use crate::harness::{Generation, Harness, HarnessEvent, Provider, Queue, Sink, Sinks};
+use crate::harness::{Generation, Harness, HarnessEvent, Provider, Queue, Release, Sink, Sinks};
 
 /// What the webview gets on `harness-event`, plus the row id when the
 /// event became a row. Account-scoped events arrive with `threadId` 0,
@@ -70,13 +70,21 @@ pub(in crate::harness) enum BusMsg {
     },
     /// A claimed send that will not go out (a continuation whose card lost
     /// its claim): the thread's claim passes to whatever waits behind it.
-    Release(i64, Provider),
+    Unclaimed(i64, Provider),
     /// A send on the thread's open run was accepted as `turn` of the session
     /// `generation`; only that turn's `TurnFinished` settles the run.
     Bound {
         thread_id: i64,
         generation: Generation,
         turn: TurnId,
+    },
+    /// The session `generation` has ended (`Harness::release`): it is heard
+    /// no more, and `reason` decides what becomes of a turn it left open.
+    Released {
+        thread_id: i64,
+        provider: Provider,
+        generation: Generation,
+        reason: Release,
     },
 }
 
@@ -136,6 +144,15 @@ impl Sinks for ThreadSinks {
             thread_id: self.thread_id,
             generation,
             turn,
+        });
+    }
+
+    fn released(&self, generation: Generation, reason: Release) {
+        let _ = self.bus.send(BusMsg::Released {
+            thread_id: self.thread_id,
+            provider: self.provider,
+            generation,
+            reason,
         });
     }
 }

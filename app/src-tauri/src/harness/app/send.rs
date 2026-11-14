@@ -7,7 +7,9 @@ use sqlx::SqlitePool;
 
 use crate::harness::antigravity_rules;
 use crate::harness::store;
-use crate::harness::{Harness, HarnessEvent, LectureBrief, Provider, SendOptions, StudioBrief};
+use crate::harness::{
+    Harness, HarnessEvent, LectureBrief, Provider, Release, SendOptions, StudioBrief,
+};
 use crate::runtime::blocking::run as blocking;
 
 use super::{sink_for, sinks_for, Bus, BusMsg};
@@ -29,7 +31,7 @@ pub(super) async fn dispatch(
     match start_turn(&harness, &bus, thread_id, provider, opts, &text).await {
         Ok(()) => Ok(()),
         Err(e) if continuation && e == store::NOT_CLAIMED => {
-            let _ = bus.send(BusMsg::Release(thread_id, provider));
+            let _ = bus.send(BusMsg::Unclaimed(thread_id, provider));
             Ok(())
         }
         Err(e) => {
@@ -96,7 +98,7 @@ async fn start_turn(
         // Claude and agy fix `--model` at spawn. The thread is between
         // turns here, so nothing is killed mid-answer.
         if matches!(provider, Provider::Claude | Provider::Antigravity) {
-            harness.close(thread_id);
+            harness.release(thread_id, Release::Replaced);
         }
     }
     // The row, not the payload, decides model, subject, lecture and video.

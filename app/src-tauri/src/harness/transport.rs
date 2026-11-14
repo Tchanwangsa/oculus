@@ -11,6 +11,9 @@ pub struct ChildProc {
     process: Option<Process>,
     #[cfg(test)]
     replay: Option<super::testkit::outbound::Wire>,
+    /// A replayed process that was killed.
+    #[cfg(test)]
+    killed: std::sync::atomic::AtomicBool,
 }
 
 impl ChildProc {
@@ -25,6 +28,8 @@ impl ChildProc {
                 process: Some(process),
                 #[cfg(test)]
                 replay: None,
+                #[cfg(test)]
+                killed: Default::default(),
             },
             stdout,
         ))
@@ -35,14 +40,21 @@ impl ChildProc {
         Self {
             process: None,
             replay: Some(wire),
+            killed: Default::default(),
         }
     }
 
     pub fn is_alive(&self) -> bool {
+        #[cfg(test)]
+        if self.replay.is_some() {
+            return !self.killed.load(std::sync::atomic::Ordering::SeqCst);
+        }
         self.process.as_ref().is_none_or(Process::is_alive)
     }
 
     pub fn kill(&self) -> Option<i32> {
+        #[cfg(test)]
+        self.killed.store(true, std::sync::atomic::Ordering::SeqCst);
         self.process.as_ref().and_then(Process::kill)
     }
 

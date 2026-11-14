@@ -1139,6 +1139,34 @@ turn already over. Codex's translator compares too: a `turn/completed` for
 another turn emits only the terminal and leaves the open turn's state and
 streamed text alone.
 
+**A session ends one way.** `Harness::release(thread, reason)`
+(`manager/release.rs`) removes the live entry, tells the consumer
+(`Sinks::released`, `BusMsg::Released`) and only then ends the handle: a
+kill for Claude and Antigravity, a detach from the shared server for Codex
+and opencode. Told first, the consumer marks that generation ended before
+the dying process can say anything else, so all of it arrives stale. The
+next send resumes the thread by session id under a new generation.
+
+| Reason | Who releases | A turn the session left open |
+| --- | --- | --- |
+| `Stopped` | a stop that kills the process; no command in the app releases with it, since Stop interrupts the turn and keeps the session | interrupted |
+| `Replaced` | `ensure`, for a different reasoning level; `send::start_turn`, for a different model on Claude or Antigravity; an Antigravity rule allowed or revoked | interrupted |
+| `Exited` | `ensure`, finding the session dead | failed |
+| `Deleted` | `harness_delete_thread` | forgotten with the thread's rows |
+| `Quit` | `Harness::shutdown` | left for the next startup's repair |
+
+**A session that ends with a turn open has that turn closed by the
+consumer**, whichever bridge it was (`Consumer::end_session`), on a
+`Released` and on a session's own `Exited`. The run bound to one of its
+turns gets what it had streamed and not committed as a partial reply
+(source `cut-short`), then its `TurnFinished`; a process that died also
+leaves a `missing_snapshot` gap and an error row ("The agent's process ended
+before it finished this turn."). A turn of the provider's own is ended too,
+so its hold on the queue is let go. The bridges still close the turns they
+know of as their process dies, with the CLI's own exit message; this rule
+covers what they cannot, such as opencode's server dying after it took a
+prompt and before the turn's first event.
+
 ## Going back rewinds the agent too
 
 Edit, Retry and Rewind truncate at a row (`harness::store::truncate_from`, announced as
@@ -1692,7 +1720,7 @@ composer's queue.
 
 At dispatch `store::begin_run` turns the claim into the run in the same
 transaction (`phase: "started"`, `run_id`), or refuses with `NOT_CLAIMED` and
-writes nothing; the consumer's `BusMsg::Release` then passes the thread to
+writes nothing; the consumer's `BusMsg::Unclaimed` then passes the thread to
 whatever waits next. The run's origin is `continuation`, and its head row is a
 `continuation` row holding the timeline's line ("Sync finished — continuing",
 meta `{proposal}`), announced as `Continued`, not `UserMessage`. The webview

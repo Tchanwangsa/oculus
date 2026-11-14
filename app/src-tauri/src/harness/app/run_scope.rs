@@ -21,6 +21,17 @@ pub(super) enum From {
     App,
     /// A bridge's session.
     Session(Generation),
+    /// The consumer itself, closing what a session that ended left open.
+    Ended(Generation),
+}
+
+impl From {
+    fn generation(self) -> Option<Generation> {
+        match self {
+            From::App => None,
+            From::Session(g) | From::Ended(g) => Some(g),
+        }
+    }
 }
 
 /// One turn of one session.
@@ -35,11 +46,13 @@ struct Open {
     turn: Option<Turn>,
 }
 
-/// A thread's newest session, and the turns of it that have ended.
+/// A thread's newest session, the turns of it that are over, and how far
+/// its sessions have ended: every generation up to `ended` is gone.
 #[derive(Default)]
 struct Session {
     generation: Generation,
     finished: HashSet<TurnId>,
+    ended: Generation,
 }
 
 #[derive(Default)]
@@ -75,19 +88,23 @@ pub(super) enum Terminal {
 }
 
 impl RunScope {
-    /// Whether `ev`, from the session `generation`, is still to be heard. A
-    /// newer session replaces an older one for good (generations only count
-    /// up), except that the older one's terminal may still settle the run
-    /// bound to it.
-    pub fn admit(&mut self, thread_id: i64, generation: Generation, ev: &HarnessEvent) -> bool {
+    /// The thread's sessions, with `generation` known: a newer one replaces
+    /// an older one for good, since generations only count up.
+    fn session(&mut self, thread_id: i64, generation: Generation) -> &mut Session {
         let session = self.sessions.entry(thread_id).or_default();
         if generation > session.generation {
-            *session = Session {
-                generation,
-                finished: HashSet::new(),
-            };
+            session.generation = generation;
+            session.finished.clear();
         }
-        if generation == session.generation {
+        session
+    }
+
+    /// Whether `ev`, from the session `generation`, is still to be heard:
+    /// not once that session has ended or been replaced, except that its
+    /// terminal may still settle the run bound to it.
+    pub fn admit(&mut self, thread_id: i64, generation: Generation, ev: &HarnessEvent) -> bool {
+        let session = self.session(thread_id, generation);
+        if generation == session.generation && generation > session.ended {
             return true;
         }
         match (ev, self.open.get(&thread_id)) {
@@ -107,9 +124,42 @@ impl RunScope {
     /// A send on the thread's open run was accepted as `turn` of the session
     /// `generation`.
     pub fn bind(&mut self, thread_id: i64, generation: Generation, turn: TurnId) {
+        self.session(thread_id, generation);
         if let Some(open) = self.open.get_mut(&thread_id) {
             open.turn.get_or_insert((generation, turn));
         }
+    }
+
+    /// The session `generation` has ended: nothing more from it is heard.
+    pub fn end(&mut self, thread_id: i64, generation: Generation) {
+        let session = self.session(thread_id, generation);
+        session.ended = session.ended.max(generation);
+    }
+
+    /// What the session `generation` leaves open on this thread: the run
+    /// bound to one of its turns, and a turn of its own (unnamed when its
+    /// `TurnStarted` never came).
+    pub fn left_open(
+        &self,
+        thread_id: i64,
+        generation: Generation,
+    ) -> (Option<(i64, TurnId)>, Option<Option<TurnId>>) {
+        let run = self.open.get(&thread_id).and_then(|open| {
+            let (g, turn) = open.turn.as_ref()?;
+            (*g == generation).then(|| (open.run_id, turn.clone()))
+        });
+        let own = self.own.get(&thread_id).and_then(|own| match own {
+            Some((g, turn)) => (*g == generation).then(|| Some(turn.clone())),
+            None => Some(None),
+        });
+        (run, own)
+    }
+
+    /// The thread is being deleted: whatever was open is nobody's now.
+    pub fn forget(&mut self, thread_id: i64) {
+        self.open.remove(&thread_id);
+        self.own.remove(&thread_id);
+        self.failed_writes.remove(&thread_id);
     }
 
     /// What a `TurnFinished` naming `turn` ends on this thread.
@@ -125,8 +175,10 @@ impl RunScope {
         // No turn is named by the app, closing a send that failed, or by a
         // bridge that could not tell: whatever is open ends, as it would
         // have before turns had ids.
-        let (From::Session(generation), Some(turn)) = (from, turn) else {
+        let (Some(generation), Some(turn)) = (from.generation(), turn) else {
             return match (open, own) {
+                // A session cut short in a turn of its own it never named.
+                (_, Some(_)) if matches!(from, From::Ended(_)) => Terminal::Own,
                 (Some(_), _) => Terminal::Run,
                 (None, Some(_)) => Terminal::Own,
                 (None, None) if queue.lock().unwrap().is_busy(thread_id) => Terminal::Claim,
@@ -162,7 +214,7 @@ impl RunScope {
         if was == Terminal::Own {
             self.own.remove(&thread_id);
         }
-        if let (From::Session(generation), Some(turn)) = (from, turn) {
+        if let (Some(generation), Some(turn)) = (from.generation(), turn) {
             if let Some(session) = self.sessions.get_mut(&thread_id) {
                 if session.generation == generation {
                     session.finished.insert(turn.clone());

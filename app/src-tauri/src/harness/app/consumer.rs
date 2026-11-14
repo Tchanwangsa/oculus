@@ -3,8 +3,10 @@ use std::sync::{Arc, Mutex};
 use sqlx::SqlitePool;
 use tokio::runtime::Runtime;
 
-use crate::harness::event::GapCause;
-use crate::harness::{jobs, store, HarnessEvent, Provider, Queue, QueuedMessage, SendOptions};
+use crate::harness::event::{GapCause, Source};
+use crate::harness::{
+    jobs, store, Generation, HarnessEvent, Provider, Queue, QueuedMessage, Release, SendOptions,
+};
 
 use super::run_scope::{From, RunScope, Terminal};
 use super::thought_clock::ThoughtClock;
@@ -101,7 +103,7 @@ impl Consumer {
                 };
                 self.event(intent.thread_id, intent.provider, From::App, ev, card, io);
             }
-            BusMsg::Release(thread_id, provider) => {
+            BusMsg::Unclaimed(thread_id, provider) => {
                 let next = self.queue.lock().unwrap().next(thread_id);
                 if let Some((msg, opts)) = next {
                     io.dispatch(thread_id, provider, msg, opts);
@@ -112,7 +114,89 @@ impl Consumer {
                 generation,
                 turn,
             } => self.runs.bind(thread_id, generation, turn),
+            BusMsg::Released {
+                thread_id,
+                provider,
+                generation,
+                reason,
+            } => self.end_session(thread_id, provider, generation, reason, io),
         }
+    }
+
+    /// A session is over. One rule for every bridge: a turn it left open is
+    /// closed here, with the text that streamed kept as a partial reply. A
+    /// stop or a replacement interrupts the turn and a dead process fails
+    /// it; a deleted thread has nothing left to close, and a quit leaves the
+    /// run to the next startup's repair.
+    fn end_session(
+        &mut self,
+        thread_id: i64,
+        provider: Provider,
+        generation: Generation,
+        reason: Release,
+        io: &mut impl ConsumerIo,
+    ) {
+        let status = match reason {
+            Release::Stopped | Release::Replaced => Some("interrupted"),
+            Release::Exited => Some("failed"),
+            Release::Deleted | Release::Quit => None,
+        };
+        if let Some(status) = status {
+            let from = From::Ended(generation);
+            let (run, own) = self.runs.left_open(thread_id, generation);
+            if let Some((run_id, turn)) = run {
+                for event in self.cut_short(run_id, status) {
+                    self.event(thread_id, provider, from, event, None, io);
+                }
+                let finished = HarnessEvent::TurnFinished {
+                    status: status.into(),
+                    turn: Some(turn),
+                };
+                self.event(thread_id, provider, from, finished, None, io);
+            }
+            if let Some(turn) = own {
+                let finished = HarnessEvent::TurnFinished {
+                    status: status.into(),
+                    turn,
+                };
+                self.event(thread_id, provider, from, finished, None, io);
+            }
+        }
+        if reason == Release::Deleted {
+            self.runs.forget(thread_id);
+        }
+        self.runs.end(thread_id, generation);
+    }
+
+    /// What is said for a run whose session ended under it: the text it had
+    /// streamed, as a partial reply, and for a process that died, the gap
+    /// and an error row.
+    fn cut_short(&mut self, run_id: i64, status: &str) -> Vec<HarnessEvent> {
+        let mut out = Vec::new();
+        let draft = match &self.pool {
+            Some(p) => self.rt.block_on(store::draft(p, run_id)),
+            None => Ok(None),
+        };
+        match draft {
+            Ok(Some(text)) if !text.trim().is_empty() => {
+                out.push(HarnessEvent::AssistantMessage {
+                    text: text.trim().to_string(),
+                    source: Source::partial(CUT_SHORT),
+                });
+                if status == "failed" {
+                    out.push(HarnessEvent::DeliveryGap {
+                        source: Some(CUT_SHORT.into()),
+                        cause: GapCause::MissingSnapshot,
+                    });
+                }
+            }
+            Ok(_) => {}
+            Err(e) => elog!("[oculus] harness run {run_id}: {e}"),
+        }
+        if status == "failed" {
+            out.push(HarnessEvent::error(SESSION_ENDED));
+        }
+        out
     }
 
     /// Store one event and tell the webview. `card` is a proposal whose
@@ -126,15 +210,19 @@ impl Consumer {
         mut card: Option<String>,
         io: &mut impl ConsumerIo,
     ) {
-        // A session that was replaced is heard no more: its late events
-        // belong to no run the thread has now.
+        // A session that has ended or been replaced is heard no more: its
+        // late events belong to no run the thread has now.
         if let (true, From::Session(generation)) = (thread_id > 0, from) {
             if !self.runs.admit(thread_id, generation, &ev) {
                 elog!(
-                    "[oculus] harness thread {thread_id}: dropped {} from replaced session {generation}",
+                    "[oculus] harness thread {thread_id}: dropped {} from ended session {generation}",
                     kind(&ev)
                 );
                 return;
+            }
+            // The process is gone, and so is its session.
+            if matches!(ev, HarnessEvent::Exited { .. }) {
+                self.end_session(thread_id, provider, generation, Release::Exited, io);
             }
         }
         match io.clock_time() {
@@ -321,6 +409,12 @@ fn kind(ev: &HarnessEvent) -> String {
         .and_then(|v| v["type"].as_str().map(String::from))
         .unwrap_or_default()
 }
+
+/// The error row of a turn whose process ended without closing it.
+const SESSION_ENDED: &str = "The agent's process ended before it finished this turn.";
+
+/// The source id of the partial reply made from a cut-short run's draft.
+const CUT_SHORT: &str = "cut-short";
 
 const STORAGE_FAILED: &str =
     "Oculus could not save part of this reply, so some of it may be missing.";

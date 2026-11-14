@@ -425,6 +425,15 @@ pub async fn append_draft(pool: &SqlitePool, run_id: i64, text: &str) -> Result<
     .map_err(|e| e.to_string())
 }
 
+/// What a run streamed and has not committed as a row.
+pub async fn draft(pool: &SqlitePool, run_id: i64) -> Result<Option<String>, String> {
+    sqlx::query_scalar("SELECT text FROM harness_stream_drafts WHERE run_id = ?1")
+        .bind(run_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// The streamed text became a row: nothing is left to recover.
 pub async fn clear_draft(pool: &SqlitePool, run_id: i64) -> Result<(), String> {
     sqlx::query("DELETE FROM harness_stream_drafts WHERE run_id = ?1")

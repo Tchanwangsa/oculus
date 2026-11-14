@@ -1,5 +1,5 @@
 //! Bringing a thread's session up and talking to it: send, rewind,
-//! interrupt, close and the sweep on quit.
+//! interrupt and the sweep on quit. Ending one is `release.rs`.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -18,6 +18,7 @@ use super::handle::{Handle, Live, RewindTo};
 use super::instructions::{instructions, thread_cwd, thread_sections};
 use super::options::SendOptions;
 use super::raw_log::RawLog;
+use super::release::Release;
 use super::sinks::Sinks;
 use super::Harness;
 
@@ -97,7 +98,15 @@ impl Harness {
         {
             return Ok(());
         }
-        live.remove(&thread_id);
+        // A session that died is gone; a live one under another reasoning
+        // level has to go before its successor resumes the same session id.
+        if let Some(old) = live.remove(&thread_id) {
+            let reason = match old.is_alive() {
+                true => Release::Replaced,
+                false => Release::Exited,
+            };
+            old.end(reason);
+        }
         let generation = self.mint();
         let sink = sinks.events(generation);
         #[cfg(test)]
@@ -244,14 +253,6 @@ impl Harness {
         }
     }
 
-    /// End the thread's process. The thread row stays; the next send
-    /// resumes it by session id.
-    pub fn close(&self, thread_id: i64) {
-        if let Some(l) = self.live.lock().unwrap().remove(&thread_id) {
-            l.handle.close(false);
-        }
-    }
-
     /// The threads with a live process of this provider's.
     pub fn live_threads(&self, provider: Provider) -> Vec<i64> {
         self.live
@@ -269,7 +270,7 @@ impl Harness {
         self.stop_all_one_offs();
         let ids: Vec<i64> = self.live.lock().unwrap().keys().copied().collect();
         for id in ids {
-            self.close(id);
+            self.release(id, Release::Quit);
         }
         if let Some(s) = self.codex.lock().unwrap().take() {
             s.kill();
