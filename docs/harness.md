@@ -846,6 +846,15 @@ the name lands.
   in front and the window visible — so a run settling on screen is read at
   once, and one that settled in another tab when the student comes back.
   Threads from before the migration count as seen.
+- **A screen reader hears the open thread's status.** `ThreadAnnouncer`,
+  mounted by `Timeline` (so once per view: a Chat tab, the lecture dock), is
+  one polite `sr-only` live region, not `role="status"`. It says "Working",
+  "Needs approval", "Needs your input", "Done", "Failed" or "Stopped" when the
+  status changes (`createAnnouncer` and `spokenStatus` in
+  `app/src/lib/harness/announce.ts`): never the status a view opens on or
+  switches to, only one that holds for 300 ms (a queued message going out
+  flips Done to Working at once), never the same word twice, and never a
+  message or a step.
 
 Deleting a thread drops its retained live output, view holds and context-drift
 marker as well as rows and queue, so removed turns cannot leave the sidebar busy.

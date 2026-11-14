@@ -14,6 +14,7 @@ import type { PendingActions, QuestionActions } from "./types";
 import { useRowWindow } from "./useRowWindow";
 import { useRowVisibility } from "./useRowVisibility";
 import { RetainedRow } from "./RetainedRow";
+import { ThreadAnnouncer } from "./ThreadAnnouncer";
 import { AssistantSend } from "@/components/markdown/openui/assistant";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { useThreadViewed } from "@/hooks/agents/useThreadViewed";
@@ -140,6 +141,7 @@ export const Timeline = memo(function Timeline({
             </RetainedRow>
           ) : [],
         )}
+        {threadId != null && <ThreadAnnouncer threadId={threadId} />}
         {threadId != null && <ContextDrift threadId={threadId} />}
         {threadId != null && <LiveTail threadId={threadId} quiet={!folding} text={!streamRow} />}
         {threadId != null && pending && <Pending threadId={threadId} actions={pending} />}
