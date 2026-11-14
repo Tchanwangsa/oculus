@@ -39,10 +39,7 @@ export function SubjectPicker({
   const listId = useId();
 
   const { listed, past } = useMemo(() => subjectOptions(subjects, query), [subjects, query]);
-  const chosen = useMemo(() => {
-    const all = subjectOptions(subjects, "");
-    return [...all.listed, ...all.past].find((o) => o.scope === value) ?? null;
-  }, [subjects, value]);
+  const chosen = useMemo(() => chosenOption(subjects, value), [subjects, value]);
   // The fold never hides the choice, and a search shows every match.
   const pastChosen = past.some((o) => o.scope === value);
   const foldOpen = pastOpen || pastChosen || query.trim() !== "";
@@ -99,7 +96,6 @@ export function SubjectPicker({
     />
   );
 
-  const label = chosen ? chosen.label : variant === "chip" ? "General" : "Choose a subject";
   const title = chosen ? chosen.title : "Choose a subject, or General for the whole library";
 
   return (
@@ -110,21 +106,13 @@ export function SubjectPicker({
           title={title}
           aria-label={`Subject: ${title}`}
           className={cn(
-            "inline-flex min-w-0 max-w-full cursor-pointer items-center rounded-full border bg-card transition-[color,background-color,border-color] outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/25 data-[state=open]:bg-accent",
-            variant === "heading"
-              ? "gap-2 border-border px-3 py-0.5 align-middle leading-tight shadow-xs"
-              : "h-6 max-w-[200px] gap-1.5 border-border/70 px-2 text-[11px] text-muted-foreground hover:text-foreground",
-            variant === "heading" && !chosen && "border-dashed text-brand",
+            faceClass(variant, chosen),
+            "cursor-pointer transition-[color,background-color,border-color] outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/25 data-[state=open]:bg-accent",
+            variant === "chip" && "hover:text-foreground",
             className,
           )}
         >
-          {chosen && <OptionGlyph option={chosen} size={variant === "heading" ? 22 : 12} />}
-          <span className="min-w-0 truncate">{label}</span>
-          <CaretDown
-            size={variant === "heading" ? 16 : 12}
-            weight={variant === "heading" ? "bold" : "regular"}
-            className="shrink-0 text-muted-foreground"
-          />
+          <Face option={chosen} variant={variant} />
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -176,6 +164,52 @@ export function SubjectPicker({
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+function chosenOption(subjects: readonly Subject[], value: ChatScope | null): SubjectOption | null {
+  const all = subjectOptions(subjects, "");
+  return [...all.listed, ...all.past].find((o) => o.scope === value) ?? null;
+}
+
+function faceClass(variant: "heading" | "chip", chosen: SubjectOption | null): string {
+  return cn(
+    "inline-flex min-w-0 max-w-full items-center rounded-full border bg-card",
+    variant === "heading"
+      ? "gap-2 border-border px-3 py-0.5 align-middle leading-tight shadow-xs"
+      : "h-6 max-w-[200px] gap-1.5 border-border/70 px-2 text-[11px] text-muted-foreground",
+    variant === "heading" && !chosen && "border-dashed text-brand",
+  );
+}
+
+/** The trigger's glyph, label and caret. */
+function Face({ option, variant }: { option: SubjectOption | null; variant: "heading" | "chip" }) {
+  const heading = variant === "heading";
+  return (
+    <>
+      {option && <OptionGlyph option={option} size={heading ? 22 : 12} />}
+      <span className="min-w-0 truncate">{option ? option.label : heading ? "Choose a subject" : "General"}</span>
+      <CaretDown size={heading ? 16 : 12} weight={heading ? "bold" : "regular"} className="shrink-0 text-muted-foreground" />
+    </>
+  );
+}
+
+/** The trigger's exact box with nothing behind it, for a layout to measure
+ *  (`DraftHero` sizes its sentence with one). */
+export function SubjectPickerFace({
+  subjects,
+  value,
+  variant,
+}: {
+  subjects: readonly Subject[];
+  value: ChatScope | null;
+  variant: "heading" | "chip";
+}) {
+  const chosen = chosenOption(subjects, value);
+  return (
+    <span className={faceClass(variant, chosen)}>
+      <Face option={chosen} variant={variant} />
+    </span>
   );
 }
 

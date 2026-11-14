@@ -55,3 +55,15 @@ test("the heading trigger asks for a choice until one is made; the chip shows Ge
   expect(chosen).toContain('title="Probability"');
   expect(html(null, "chip")).toContain(">General<");
 });
+
+test("the headline asks for a subject, then asks the question in it", async () => {
+  const { DraftHero } = await import("@/components/harness/composer/DraftHero");
+  const text = (scope: "general" | number | null) =>
+    renderToStaticMarkup(<DraftHero subjects={subjects} scope={scope} onScope={() => {}} />)
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ");
+  expect(text(null)).toContain("Choose a subject to start");
+  expect(text(null)).not.toContain("What should we work on");
+  expect(text(2)).toContain("What should we work on in COMP30027 ?");
+  expect(text("general")).toContain("What should we work on in General ?");
+});
