@@ -7,6 +7,7 @@ import { ModelPicker } from "@/components/harness/composer/ModelPicker";
 import { UsageMeter } from "@/components/harness/composer/UsageMeter";
 import { SubjectPicker } from "@/components/harness/composer/SubjectPicker";
 import { ThreadBanners } from "@/components/harness/composer/ThreadBanners";
+import { canSend, enterAction, UNSCOPED_PLACEHOLDER } from "@/components/harness/composer/sendGate";
 import { type Subject } from "@/lib/db";
 import {
   defaultSelection,
@@ -30,7 +31,9 @@ import { cn } from "@/lib/utils";
  * The chat box: text, then model picker / usage / send+stop. Enter sends,
  * Shift+Enter breaks. While a turn runs a send is queued by Rust (`Queue` in
  * `app/src-tauri/src/harness/mod.rs`); Stop hands the queue back as `restore`.
- * Scope is chosen above the box, only while the thread is new. `@` mentions
+ * Scope is chosen above the box, only while the thread is new; a new Chat
+ * thread chooses it in the headline (`DraftHero`) and, while it has none,
+ * the box is `unscoped`: it keeps collecting but will not send. `@` mentions
  * insert library paths (drawn as chips by `MentionInput`), never file content.
  * Unsent text lives in `draftStore` under `draftKey`, so it outlives the box;
  * so do long pastes, held as cards in the attachment strip.
@@ -45,6 +48,7 @@ export function Composer({
   subjectId,
   onSubject,
   subjectLocked,
+  unscoped = false,
   running,
   usage,
   rateLimits,
@@ -77,6 +81,9 @@ export function Composer({
    *  video); Chat's new thread picks it in the headline instead. */
   onSubject?: (id: number | null) => void;
   subjectLocked: boolean;
+  /** A new Chat thread with no subject or General chosen yet: Enter and the
+   *  send button do nothing, and the placeholder says why. */
+  unscoped?: boolean;
   running: boolean;
   usage: ThreadUsage | null;
   rateLimits: RateWindow[];
@@ -149,7 +156,7 @@ export function Composer({
 
   /** Send or queue. Pictures are written first; if that fails the box is kept as is. */
   const send = async () => {
-    if (dictation.busy) return;
+    if (dictation.busy || unscoped) return;
     const message = await att.prepare(text);
     if (message == null) return;
 
@@ -246,15 +253,16 @@ export function Composer({
               // The menu's claimed keys come back prevented, so a pick never sends.
               mentions.keyDown(e);
               if (e.defaultPrevented) return;
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
+              const action = enterAction(e, unscoped);
+              if (action) e.preventDefault();
+              if (action === "send") void send();
             }}
             placeholder={
               running
                 ? "Working… your next message waits its turn"
-                : (placeholder ?? "What would you like to work on?")
+                : unscoped
+                  ? UNSCOPED_PLACEHOLDER
+                  : (placeholder ?? "What would you like to work on?")
             }
           />
         </div>
@@ -273,7 +281,7 @@ export function Composer({
           <div className="flex-1" />
           <UsageMeter usage={usage} rateLimits={rateLimits} />
           <DictationMic dictation={dictation} />
-          <SendControls running={running} ready={ready} writing={att.writing} onSend={() => void send()} onStop={onStop} />
+          <SendControls running={running} ready={canSend({ ready, unscoped })} writing={att.writing} onSend={() => void send()} onStop={onStop} />
         </div>}
       </div>
     </div>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { draftKey, useDraftStore } from "@/stores/chat/draftStore";
 import { useNavigate } from "react-router-dom";
+import { chatHref } from "@/lib/harness/route";
 import { RevisionPage } from "@/components/revision/RevisionPage";
 import { TopicPicker } from "@/components/revision/TopicPicker";
 import { SourceLink } from "@/components/revision/SourceLink";
@@ -94,7 +95,8 @@ function Artifact({
                   .filter(Boolean)
                   .join("\n\n"),
               );
-            navigate("/chat");
+            // Its subject pre-fills the new chat's choice; with none, the student picks.
+            navigate(chatHref(null, null, artifact.subject_id != null ? { subject: artifact.subject_id } : undefined));
           }}
         >
           Ask about this

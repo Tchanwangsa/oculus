@@ -28,7 +28,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Live state and event folding | `app/src/stores/chat/harnessStore.ts`, `app/src/hooks/backend/useBackendEvents.ts` |
 | Row titles: a reasoning block's "Thought for 12s" and latest line, an `oculus …` command's "Saved a memory" | `app/src/lib/harness/thought.ts`, `app/src/lib/harness/oculusCli.ts`, `app/src-tauri/src/harness/app/thought_clock.rs` |
 | Page, thread list, recent list, timeline, rows, composer | `app/src/pages/tools/ChatPage.tsx`, `app/src/components/harness/` (`threads/`, `timeline/`, `composer/`; recent list: `threads/RecentThreads.tsx`) |
-| Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/chat/draftStore.ts` |
+| Unsent text per thread (and per new-thread box), and a new thread's chosen scope, kept across switches and relaunches | `app/src/stores/chat/draftStore.ts` |
 | Proposal dispatch context and confirmed jobs | `app/src-tauri/src/harness/app/proposal_context.rs`, `app/src-tauri/src/harness/app/proposal_jobs/` |
 | Local OpenUI Query tools and event refresh | `app/src/components/markdown/openui/query/` |
 | Seeded simulation and maths functions | `app/src/components/markdown/openui/functions/` |
@@ -825,7 +825,9 @@ message, because Claude's trims the leading space that says "new word".
 back walks the threads that tab has shown (opening pushes; a rename or the
 composer becoming a thread replaces). `n` is there because `tabInfo` titles a
 tab from its path alone; it is written once the thread is known and again when
-the name lands.
+the name lands. Bare `/chat` may carry `s=<id|general>`, an entry point's
+scope for the new thread ([Subject scope](#subject-scope-and-)); the page
+writes it into the draft once and drops it from the route.
 
 - The store keeps only a count per thread (`holds`, via `hold` / `unhold`), so
   the dock's `release` cannot empty rows a Chat tab is reading. `hold` borrows
@@ -841,10 +843,12 @@ the name lands.
   column answers it too. Its resize handle goes with it, so it can't clash with a
   side panel's; the toggle or ⌘⌥B brings it back.
 - Bare `/chat` is a new thread: the composer docked at the bottom as in a
-  thread, and above it the three latest threads (`RecentThreads`) — provider
-  mark, title, a chip naming its subject or General, age, and the last reply
-  flattened to one muted line (`getThreadPreviews`, one read for the list).
-  The list has its own scroller, since a thread's follows its bottom.
+  thread, and above it the headline that picks the subject (`DraftHero`) over
+  the three latest threads (`RecentThreads`) — provider mark, title, a chip
+  naming its subject or General, age, and the last reply flattened to one
+  muted line (`getThreadPreviews`, one read for the list). The list stays
+  because it is the empty chat's only way back to a recent thread. The page
+  has its own scroller, since a thread's follows its bottom.
 - **Each listed thread shows one status** (`StatusPill` in `threads/`, from
   `threadStatus` in `app/src/lib/harness/threadStatus.ts`), first match
   wins: Approval (warning), Input (brand), Working (a brand spinner), Failed
@@ -1352,9 +1356,35 @@ rule rather than carrying separate versions of it.
 
 ## Subject scope and `@`
 
-**A subject, or General** (`SubjectPicker.tsx`), locked after the first
-message because every CLI binds appended instructions at session start. It is
-not a sandbox; it appends the course folder and `agents/memories/<CODE>/`.
+**A subject, or General**, chosen before the first message and locked after
+it, because every CLI binds appended instructions at session start. It is not
+a sandbox; it appends the course folder and `agents/memories/<CODE>/`.
+
+**A new Chat thread chooses it in its headline** (`composer/DraftHero.tsx`):
+"What should we work on in [MAST20004]?", or "[Choose a subject] to start"
+until one is chosen. The picker drops under "What should we work on?" when
+the one-line sentence is wider than the column ([ui.md](./ui.md)). An open
+thread's header has no picker. `SubjectPicker` is a searchable popover:
+General first, then this term's subjects, then past terms' (newest first)
+under a fold that a search or a past choice opens, matched by code and name,
+each row a `SubjectIcon` and short code with the full name as its tooltip and
+label. Arrows move, Enter picks, Escape closes back to the trigger. It has the
+headline's trigger and a compact chip, which Studio's New video shows above
+its composer for a subject of its own.
+
+**Until then the composer is `unscoped`**: words, pictures and pasted cards
+collect, but Enter and the send button do nothing and the placeholder reads
+"Choose a subject above to start a chat". The choice belongs to the draft
+(`oculus.chatScopes` in `draftStore`, keyed like drafts: `"general"` or a
+subject id, never null, so no entry is unchosen and General is a choice of
+its own). It outlives a thread switch and a relaunch, a deleted subject's id
+reads as unchosen, and creating the thread forgets it, so the next new chat
+asks again. Every Chat tab's new thread shares one draft key, and so one
+choice. An entry point names the scope in the route instead: a group's "+"
+opens `/chat?s=<id|general>`, and a revision artifact's Ask about this
+`/chat?s=<id>` when the artifact has a subject. The lecture dock is always
+its lecture's subject and Studio's threads their video's; neither shows the
+headline.
 
 **`@` inserts a library path**, not content — the path is what `oculus read`
 takes. Words are ANDed against filenames (`safe_filename` turns spaces into

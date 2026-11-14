@@ -61,9 +61,9 @@ interface HarnessState {
   model: string | null;
   /** A per-turn dial, not stored on the thread. */
   reasoning: string | null;
-  /** Subject scope for the *next* thread; null is the general one. */
-  subjectId: number | null;
   subjects: Subject[];
+  /** `subjects` has been read once; before that an empty list says nothing. */
+  subjectsLoaded: boolean;
   /** A mirror of Rust's queue, folded from `queued`/`unqueued` events. */
   queued: Record<number, QueuedMessage[]>;
   /** Threads where a rewind could not reach the agent. Never cleared: the
@@ -82,7 +82,6 @@ interface HarnessState {
   setProvider: (p: Provider) => void;
   setModel: (m: string | null) => void;
   setReasoning: (level: string | null) => void;
-  setSubject: (id: number | null) => void;
   loadSubjects: () => Promise<void>;
   apply: (env: HarnessEnvelope) => void;
   /** `apply` without the repeat check; `load` re-folds what arrived during its read. */
@@ -150,8 +149,8 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   queued: {},
   contextDrift: {},
   provider: DEFAULT_CHAT_PROVIDER,
-  subjectId: null,
   subjects: [],
+  subjectsLoaded: false,
   // Empty until `useProviderModels` lands the list.
   ...defaultSelectionFor(DEFAULT_CHAT_PROVIDER),
 
@@ -218,8 +217,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   },
   setModel: (model) => set({ model }),
   setReasoning: (reasoning) => set({ reasoning }),
-  setSubject: (subjectId) => set({ subjectId }),
-  loadSubjects: async () => set({ subjects: await getSubjects() }),
+  loadSubjects: async () => set({ subjects: await getSubjects(), subjectsLoaded: true }),
 
   release: (id) =>
     set((s) => {

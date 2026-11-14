@@ -277,6 +277,13 @@ themes are opt-in and keep the same structure.
   button groups. Descriptions are short hints; errors and confirmation copy
   retain the detail needed to act. Dense tables scroll sideways with readable
   column widths; `GridTable`'s optional `minWidth` keeps header and rows together.
+- **A new chat's headline** (`DraftHero`) takes Studio's hero type
+  (`font-display`, 26px, semibold, as New video's question) with the subject
+  picker as a pill inside the sentence. Whether the sentence fits on one line
+  is measured from a hidden copy against the column's own box with a
+  `ResizeObserver`, never against `window` or a viewport breakpoint, which page
+  zoom and a split pane make wrong; when it does not, the picker drops to a
+  line of its own.
 - **A long list's rows can skip layout off screen with `skip-offscreen`**
   (`content-visibility: auto`, remembering each row's drawn height), so a
   resize lays out only what is visible. The row clips its paint to its box:

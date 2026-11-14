@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/layout/SideNav";
 import type { HarnessThread } from "@/lib/harness";
 import type { Subject } from "@/lib/db";
+import { GENERAL_SCOPE, type ChatScope } from "@/lib/harness/scope";
 import { groupBySubject } from "@/lib/ui/subjectGroups";
 import { useCollapsedGroups } from "@/hooks/shell/useCollapsedGroups";
 import type { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
@@ -47,8 +48,8 @@ export const ThreadList = memo(function ThreadList({
   /** Ids, not the store's live map, which changes on every streamed token. */
   runningIds: Set<number>;
   onOpen: (id: number) => void;
-  /** No argument: the composer's scope; otherwise that group's subject (null = General). */
-  onNew: (subjectId?: number | null) => void;
+  /** No argument: the new chat keeps its own choice; otherwise that group's scope. */
+  onNew: (scope?: ChatScope) => void;
   onDelete: (id: number) => void;
 }) {
   const { collapsed } = panel;
@@ -202,7 +203,7 @@ export const ThreadList = memo(function ThreadList({
                     onClick={() => {
                       if (gesture.didDrag()) return;
                       setGroupOpen(g.key, true);
-                      onNew(g.subjectId);
+                      onNew(g.subjectId ?? GENERAL_SCOPE);
                     }}
                     className="absolute inset-0 hidden items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground group-hover/head:flex"
                   >

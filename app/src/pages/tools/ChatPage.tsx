@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Composer } from "@/components/harness/composer/Composer";
+import { DraftHero } from "@/components/harness/composer/DraftHero";
 import { RecentThreads } from "@/components/harness/threads/RecentThreads";
 import { THREAD_LIST_PANEL, ThreadList } from "@/components/harness/threads/ThreadList";
 import { ThreadMap } from "@/components/harness/timeline/ThreadMap";
@@ -18,8 +19,12 @@ import { useScrollFade } from "@/hooks/ui/useScrollFade";
 import {
   harnessDeleteThread,
   chatHref,
+  chatScope,
   chatThreadId,
+  liveScope,
   parseUsage,
+  scopeSubject,
+  type ChatScope,
 } from "@/lib/harness";
 import { itemsFor, useHarnessStore } from "@/stores/chat/harnessStore";
 import { draftKey, useDraftStore } from "@/stores/chat/draftStore";
@@ -27,9 +32,10 @@ import { draftKey, useDraftStore } from "@/stores/chat/draftStore";
 /**
  * Chat with a CLI agent running from the library's `agents/` folder
  * (`docs/harness.md`): the conversations column (`ThreadList`) beside a thread.
- * `?t=<id>` is that thread's timeline; bare `/chat` is a new thread, the
- * recent threads (`RecentThreads`) filling its empty timeline. The composer is
- * docked at the bottom of both.
+ * `?t=<id>` is that thread's timeline; bare `/chat` is a new thread: its
+ * headline picks the subject (`DraftHero`), the recent threads
+ * (`RecentThreads`) below it. The composer is docked at the bottom of both,
+ * and a new thread's will not send until a subject or General is chosen.
  *
  * Subscribes slice by slice: `live` is written many times a second mid-turn,
  * so the streaming parts subscribe where they are drawn, not here.
@@ -54,7 +60,12 @@ export default function ChatPage() {
   const model = useHarnessStore((s) => s.model);
   const reasoning = useHarnessStore((s) => s.reasoning);
   const subjects = useHarnessStore((s) => s.subjects);
-  const subjectId = useHarnessStore((s) => s.subjectId);
+  const subjectsLoaded = useHarnessStore((s) => s.subjectsLoaded);
+  // A new thread's scope is its draft's (`draftStore`), shared by every Chat
+  // tab as the draft is; unchosen until the student or an entry point picks.
+  const newKey = draftKey(null, "chat");
+  const storedScope = useDraftStore((s) => s.scopes[newKey]);
+  const scope = subjectsLoaded ? liveScope(storedScope, subjects) : null;
   const running = useHarnessStore((s) => (activeId != null && s.live[activeId]?.running) || false);
   // Words a stop or a rewind handed back to this tab's composer — local, so a
   // stop in one Chat tab doesn't type into every tab. `n` makes the same text
@@ -78,8 +89,8 @@ export default function ChatPage() {
   const thread = threads.find((t) => t.id === activeId) ?? null;
   const activeProvider = thread?.provider ?? provider;
   const activeModel = thread ? thread.model : model;
-  // An open thread keeps its own scope; only a new one reads the composer's.
-  const activeSubject = thread ? thread.subject_id : subjectId;
+  // An open thread keeps its own scope; only a new one reads the draft's.
+  const activeSubject = thread ? thread.subject_id : scope == null ? null : scopeSubject(scope);
   const usage = useMemo(() => parseUsage(thread), [thread]);
   const rateLimits = useRateLimits(activeProvider);
 
@@ -113,6 +124,13 @@ export default function ChatPage() {
   // `?n=` (`chatHref`), updated when the title lands — but not before the
   // thread is known, or a restored tab loses its name. Replace, not push, so
   // the back arrow is unchanged.
+  // An entry point's `?s=` (a group's "+") seeds the new thread's scope once;
+  // the route effect below then drops it, so a re-render cannot seed again.
+  const seed = activeId == null ? chatScope(here.search) : null;
+  useEffect(() => {
+    if (seed != null) useDraftStore.getState().setScope(newKey, seed);
+  }, [seed, newKey]);
+
   const tabName = thread?.title?.trim() || "";
   useEffect(() => {
     if (activeId != null && thread == null) return;
@@ -144,12 +162,20 @@ export default function ChatPage() {
     model: activeModel,
     onRestore: handBack,
     // The empty composer became this conversation; replace, it isn't a page
-    // to go back to.
-    onCreated: (id) => navigate(chatHref(id), { replace: true }),
+    // to go back to. The next new chat chooses its subject afresh.
+    onCreated: (id) => {
+      useDraftStore.getState().setScope(newKey, null);
+      navigate(chatHref(id), { replace: true });
+    },
   });
   const send = useCallback(
-    (text: string) => sendTurn(text, () => ({ subjectId: store.getState().subjectId })),
-    [sendTurn, store],
+    (text: string) =>
+      sendTurn(text, () => {
+        if (activeRef.current != null) return {};
+        const chosen = useDraftStore.getState().scopeFor(newKey, store.getState().subjects);
+        return chosen == null ? {} : { subjectId: scopeSubject(chosen) };
+      }),
+    [sendTurn, store, newKey],
   );
 
   // Opening a thread pushes, so back walks this tab's conversations.
@@ -162,12 +188,13 @@ export default function ChatPage() {
     [store, navigate],
   );
   const onNew = useCallback(
-    (subject?: number | null) => {
-      if (activeRef.current != null) navigate(chatHref(null));
-      // A group header's `+` sets the subject; plain New thread leaves it.
-      if (subject !== undefined) store.getState().setSubject(subject);
+    (subject?: ChatScope) => {
+      // A group header's `+` names its scope; plain New thread keeps the choice.
+      const leaving = activeRef.current != null;
+      if (subject !== undefined) navigate(chatHref(null, null, { subject }), { replace: !leaving });
+      else if (leaving) navigate(chatHref(null));
     },
-    [store, navigate],
+    [navigate],
   );
   const onDelete = useCallback(
     (id: number) => {
@@ -183,7 +210,7 @@ export default function ChatPage() {
     },
     [store],
   );
-  const onSubject = useCallback((id: number | null) => store.getState().setSubject(id), [store]);
+  const onScope = useCallback((next: ChatScope) => useDraftStore.getState().setScope(newKey, next), [newKey]);
   const onRestored = useCallback(() => setRestore(null), []);
   /** Pictures drop anywhere on the conversation, not only on the box. */
   const columnRef = useRef<HTMLDivElement>(null);
@@ -198,8 +225,8 @@ export default function ChatPage() {
       providerLocked={thread != null}
       subjects={subjects}
       subjectId={activeSubject}
-      onSubject={onSubject}
       subjectLocked={thread != null}
+      unscoped={fresh && scope == null}
       running={running}
       usage={usage}
       rateLimits={rateLimits}
@@ -242,6 +269,7 @@ export default function ChatPage() {
         {fresh ? (
           <div ref={recentScroll} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6">
             <div className="mx-auto w-full max-w-[760px]">
+              {subjectsLoaded && <DraftHero subjects={subjects} scope={scope} onScope={onScope} className="pt-10 pb-8" />}
               <RecentThreads threads={threads} subjects={subjects} runningIds={runningIds} onOpen={onOpen} />
             </div>
           </div>

@@ -49,8 +49,8 @@ there are no toasts or bars ([ui.md](./ui.md)).
 
 `NewVideo` is Chat's `Composer` with two additions every caller shares: a
 `leading` slot, chips after the subject's above the box, and a
-`placeholder`. Its chips are the subject (this page's own choice, not
-Chat's "next thread" scope) and the style chip. Sending runs
+`placeholder`. Its chips are the subject (`SubjectPicker`'s compact chip, this
+page's own choice, not a new Chat thread's) and the style chip. Sending runs
 `useNewVideo`:
 
 1. Read what narration needs (`readSetupProblems`: the saved voice settings,
