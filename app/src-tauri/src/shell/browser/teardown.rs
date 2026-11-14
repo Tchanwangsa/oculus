@@ -1,5 +1,6 @@
-//! Ending a page for good, shared by closing a tab and discarding one, and
-//! asking whether a page is in use before a discard.
+//! Ending a page for good, shared by closing a tab and discarding one,
+//! keeping a closed tab's page quietly until its downloads end, and asking
+//! whether a page is in use before a discard.
 //!
 //! macOS: the page stops loading, its media pauses and leaves fullscreen and
 //! picture-in-picture, and WebKit's `_close` closes the page in the WebContent
@@ -27,13 +28,25 @@ pub(super) fn destroy(webview: &Webview<tauri::Wry>) {
     }
 }
 
+/// Hides a closed tab's page and silences it, but keeps it loaded: closing
+/// or stopping it could end the download it is kept for.
+pub(super) fn park(webview: &Webview<tauri::Wry>) {
+    webview.hide().ok();
+    #[cfg(target_os = "macos")]
+    if let Err(e) = crate::shell::wk::with_view(webview, |view| unsafe { silence(view) }) {
+        elog!(
+            "[oculus] browser: {}: could not silence the page: {e}",
+            webview.label()
+        );
+    }
+}
+
 /// SAFETY: main thread, a live view.
 #[cfg(target_os = "macos")]
-unsafe fn stop(view: &objc2_web_kit::WKWebView) {
+unsafe fn silence(view: &objc2_web_kit::WKWebView) {
     use objc2::runtime::NSObjectProtocol;
-    use objc2::{msg_send, sel};
+    use objc2::sel;
 
-    view.stopLoading();
     // Both are macOS 12 and later.
     if view.respondsToSelector(sel!(pauseAllMediaPlaybackWithCompletionHandler:)) {
         view.pauseAllMediaPlaybackWithCompletionHandler(None);
@@ -41,6 +54,16 @@ unsafe fn stop(view: &objc2_web_kit::WKWebView) {
     if view.respondsToSelector(sel!(closeAllMediaPresentationsWithCompletionHandler:)) {
         view.closeAllMediaPresentationsWithCompletionHandler(None);
     }
+}
+
+/// SAFETY: main thread, a live view.
+#[cfg(target_os = "macos")]
+unsafe fn stop(view: &objc2_web_kit::WKWebView) {
+    use objc2::runtime::NSObjectProtocol;
+    use objc2::{msg_send, sel};
+
+    view.stopLoading();
+    silence(view);
     // WebKit SPI (`WKWebViewPrivate.h`), which Safari calls on every tab it
     // closes.
     if view.respondsToSelector(sel!(_close)) {

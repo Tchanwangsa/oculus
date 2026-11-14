@@ -3,10 +3,9 @@ use std::time::Instant;
 use tauri::AppHandle;
 
 use super::discard::restore;
-use super::layout::{hide_all, layout_tab, page, parse};
+use super::layout::{close_tab, hide_all, layout_tab, page, parse};
 use super::page::{find_string, go_history, reload_page, ZOOM_MAX, ZOOM_MIN};
 use super::seed::wants_sessions;
-use super::teardown::destroy;
 use super::{broadcast, open_tab, seed_sessions, snapshot, with_state, Snapshot, Viewport};
 
 #[tauri::command]
@@ -154,12 +153,8 @@ pub fn browser_find_clear(app: AppHandle, id: u32) {
 }
 
 /// The page is stopped and closed for good (`teardown`), so it plays,
-/// runs and holds memory no longer.
+/// runs and holds memory no longer — once its downloads end (`close_tab`).
 #[tauri::command]
 pub fn browser_close_tab(app: AppHandle, id: u32) {
-    if let Some(webview) = page(&app, id) {
-        destroy(&webview);
-    }
-    with_state(&app, |s| s.forget(id));
-    broadcast(&app);
+    close_tab(&app, id);
 }

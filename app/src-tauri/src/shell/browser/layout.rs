@@ -6,6 +6,7 @@ use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl, Window
 use super::favicon::ensure_favicon;
 use super::page::refresh_nav;
 use super::seed::{is_sso_app_entry, recover_sso, wants_sessions};
+use super::teardown::{destroy, park};
 #[cfg(not(target_os = "windows"))]
 use super::PAGE_USER_AGENT;
 use super::{broadcast, label, seed_sessions, with_state, Tab, Viewport, LABEL_PREFIX, MAIN};
@@ -19,6 +20,7 @@ pub fn init(app: &AppHandle) {
         crate::shell::menu::windows::install(&main, false);
     }
     seed_sessions(app, || {});
+    super::downloads::sweep_incoming(&super::downloads::incoming_root());
     super::discard::start(app);
     let Some(window) = app.get_window(MAIN) else {
         elog!("[oculus] browser: no main window at setup; pages will not follow resizes");
@@ -124,6 +126,7 @@ pub(super) fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(),
     let load_app = app.clone();
     let title_app = app.clone();
     let popup_app = app.clone();
+    let download_app = app.clone();
     let builder = WebviewBuilder::new(label(id), WebviewUrl::External(url))
         // A tab opened in the background must not take the keyboard; a shown
         // one is focused below.
@@ -143,6 +146,11 @@ pub(super) fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(),
                 if let Some(tab) = s.tabs.iter_mut().find(|t| t.id == id) {
                     tab.url = url;
                     tab.loading = started;
+                }
+                // Started is the commit (WebKit) or content loading
+                // (WebView2): the popup shows a page now.
+                if started {
+                    s.popups.remove(&id);
                 }
             });
             broadcast(&load_app);
@@ -178,7 +186,7 @@ pub(super) fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(),
             std::thread::spawn(move || {
                 let open_app = app.clone();
                 let open = move || {
-                    if let Err(e) = open_tab(&open_app, url) {
+                    if let Err(e) = open_popup(&open_app, url, id) {
                         elog!("[oculus] browser: could not open popup: {e}");
                     }
                 };
@@ -188,7 +196,9 @@ pub(super) fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(),
                 app.run_on_main_thread(open).ok();
             });
             NewWindowResponse::Deny
-        });
+        })
+        // Every download is staged; never `~/Downloads` (`downloads/`).
+        .on_download(move |_, event| super::downloads::on_download(&download_app, id, event));
 
     #[cfg(not(target_os = "windows"))]
     let builder = builder.user_agent(PAGE_USER_AGENT);
@@ -234,13 +244,33 @@ pub(super) fn hide_all(app: &AppHandle) {
 
 /// Opens `url` in a new tab — the entry point for every link in the app.
 pub fn open_tab(app: &AppHandle, url: url::Url) -> Result<u32, String> {
+    open(app, url, None)
+}
+
+/// Opens `url` in a new tab on behalf of tab `opener`: a page's popup, or a
+/// download fetched again. It closes if the URL turns out to be a download.
+pub(super) fn open_popup(app: &AppHandle, url: url::Url, opener: u32) -> Result<u32, String> {
+    open(app, url, Some(opener))
+}
+
+fn open(app: &AppHandle, url: url::Url, opener: Option<u32>) -> Result<u32, String> {
     let id = with_state(app, |s| {
         s.next_id += 1;
         s.tabs.push(Tab::new(s.next_id, url.to_string()));
         s.backgrounded.insert(s.next_id, Instant::now());
+        if let Some(opener) = opener {
+            s.popups.insert(s.next_id, opener);
+        }
         s.next_id
     });
-    elog!("[oculus] browser: opening tab {id} → {url}");
+    match opener {
+        // Often a download, whose URL can carry a signed token.
+        Some(opener) => elog!(
+            "[oculus] browser: opening tab {id} for tab {opener} → {}",
+            super::downloads::origin(&url)
+        ),
+        None => elog!("[oculus] browser: opening tab {id} → {url}"),
+    }
     if wants_sessions(&url) {
         broadcast(app);
         let app = app.clone();
@@ -263,4 +293,26 @@ pub fn open_tab(app: &AppHandle, url: url::Url) -> Result<u32, String> {
     }
     broadcast(app);
     Ok(id)
+}
+
+/// Closes tab `id`. Its page ends at once (`teardown`), unless a download in
+/// it has not finished: tauri hears a download's end only from a live page,
+/// so that page is kept hidden and quiet until the download settles.
+pub(super) fn close_tab(app: &AppHandle, id: u32) {
+    let keep = with_state(app, |s| {
+        s.forget(id);
+        let keep = s.downloads.unfinished_in(id);
+        if keep {
+            s.parked.insert(id);
+        }
+        keep
+    });
+    if let Some(webview) = page(app, id) {
+        if keep {
+            park(&webview);
+        } else {
+            destroy(&webview);
+        }
+    }
+    broadcast(app);
 }

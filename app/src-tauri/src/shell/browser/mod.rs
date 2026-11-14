@@ -13,6 +13,8 @@
 //!   `with_webview` returns nothing, so answers are pushed as events.
 //! - **A tab backgrounded for a while loses its page, not its place**
 //!   (`discard.rs`); showing it again loads its URL in a new one.
+//! - **Downloads are staged, then moved where the student says**
+//!   (`downloads/`); a page lives until its downloads end.
 //!
 //! `canvas_session` is HttpOnly and session-scoped, so the browser loses it
 //! on quit; `seed_sessions` restores it and the SSO session from oculus-keyd
@@ -25,6 +27,7 @@ pub(crate) mod commands;
 mod discard;
 #[cfg(test)]
 mod discard_test;
+pub(crate) mod downloads;
 mod favicon;
 mod layout;
 mod page;
@@ -121,6 +124,12 @@ struct Inner {
     /// One favicon attempt per host per run, found or not; the frontend
     /// persists what was found.
     favicons_tried: HashSet<String>,
+    /// Popup tabs that have not shown a page yet, to the tab that opened
+    /// each. A download from one closes it, as Chrome does.
+    popups: HashMap<u32, u32>,
+    /// Pages of closed tabs kept, hidden, until their downloads end.
+    parked: HashSet<u32>,
+    downloads: downloads::Downloads,
 }
 
 impl Inner {
@@ -143,6 +152,7 @@ impl Inner {
         self.shown.remove(&id);
         self.backgrounded.remove(&id);
         self.discarded.remove(&id);
+        self.popups.remove(&id);
     }
 }
 

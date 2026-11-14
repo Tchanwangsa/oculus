@@ -23,11 +23,13 @@ pub(super) const IDLE: Duration = Duration::from_secs(15 * 60);
 const TICK: Duration = Duration::from_secs(60);
 
 /// Whether tab `id` may lose its page at `now`: it exists, is not shown
-/// anywhere, still has one, and has been backgrounded for at least `after`.
+/// anywhere, still has one, is not downloading, and has been backgrounded
+/// for at least `after`.
 pub(super) fn is_due(s: &Inner, id: u32, now: Instant, after: Duration) -> bool {
     s.tabs.iter().any(|t| t.id == id)
         && !s.shown.contains(&id)
         && !s.discarded.contains(&id)
+        && !s.downloads.unfinished_in(id)
         && s.backgrounded
             .get(&id)
             .is_some_and(|&at| now.saturating_duration_since(at) >= after)

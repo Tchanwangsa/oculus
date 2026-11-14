@@ -4,7 +4,7 @@
 use std::path::Path;
 
 /// One file that landed, in the shape the frontend writes its row from.
-#[derive(serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ImportedFile {
     pub filename: String,
     pub relative_path: String,
@@ -14,7 +14,7 @@ pub struct ImportedFile {
 
 /// What became of one picked file. `file` and `error` are both set when the
 /// bytes landed but the PDF conversion did not.
-#[derive(serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ImportOutcome {
     /// The name the user picked it under.
     pub source: String,
@@ -30,37 +30,43 @@ pub async fn import_uploads(
     paths: Vec<String>,
 ) -> Result<Vec<ImportOutcome>, String> {
     crate::runtime::blocking::run(move || {
-        // Imports share name allocation; keep simultaneous batches from choosing
-        // the same unused upload name while conversion runs off the command thread.
-        static IMPORT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = IMPORT_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let data_dir = crate::library::paths::data_dir();
-        Ok(paths
-            .iter()
-            .map(|p| {
-                let src = Path::new(p);
-                let source = src
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| p.clone());
-                match store_upload(&data_dir, &subject_code, src) {
-                    Ok((file, error)) => ImportOutcome {
-                        source,
-                        file: Some(file),
-                        error,
-                    },
-                    Err(e) => ImportOutcome {
-                        source,
-                        file: None,
-                        error: Some(e),
-                    },
-                }
-            })
-            .collect())
+        let paths: Vec<&Path> = paths.iter().map(Path::new).collect();
+        Ok(import_files(&data_dir, &subject_code, &paths))
     })
     .await
+}
+
+/// Stores each of `paths` as an upload of `code`, the one way files enter
+/// `uploads/` (picked files, and browser downloads). Imports share name
+/// allocation, so one lock keeps simultaneous batches from choosing the same
+/// unused name while conversion runs.
+pub(crate) fn import_files(data_dir: &Path, code: &str, paths: &[&Path]) -> Vec<ImportOutcome> {
+    static IMPORT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = IMPORT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    paths
+        .iter()
+        .map(|src| {
+            let source = src
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| src.display().to_string());
+            match store_upload(data_dir, code, src) {
+                Ok((file, error)) => ImportOutcome {
+                    source,
+                    file: Some(file),
+                    error,
+                },
+                Err(e) => ImportOutcome {
+                    source,
+                    file: None,
+                    error: Some(e),
+                },
+            }
+        })
+        .collect()
 }
 
 fn store_upload(
