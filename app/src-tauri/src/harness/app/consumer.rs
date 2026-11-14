@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sqlx::SqlitePool;
 use tokio::runtime::Runtime;
@@ -10,7 +11,7 @@ use crate::harness::{
 };
 
 use super::drafts::Drafts;
-use super::run_scope::{From, RunScope, Terminal};
+use super::run_scope::{From, RunScope, Tags, Terminal};
 use super::thought_clock::ThoughtClock;
 use super::{BusMsg, Envelope};
 
@@ -20,7 +21,8 @@ pub(in crate::harness) trait ConsumerIo {
     fn clock_time(&self) -> Option<std::time::Instant> {
         None
     }
-    /// The clock work that waits is timed by (a draft's next write).
+    /// The clock work that waits is timed by (a draft's next write, a
+    /// failed settle's next try).
     fn now(&self) -> Instant {
         Instant::now()
     }
@@ -51,6 +53,7 @@ pub(in crate::harness) fn consume(
         clock: ThoughtClock::default(),
         runs: RunScope::default(),
         drafts: Drafts::default(),
+        parked: HashMap::new(),
         sequence: first_sequence(),
     };
     for msg in rx {
@@ -70,6 +73,8 @@ struct Consumer {
     clock: ThoughtClock,
     runs: RunScope,
     drafts: Drafts,
+    /// Terminals whose settle write has not landed yet, by thread.
+    parked: HashMap<i64, Parked>,
     sequence: u64,
 }
 
@@ -140,9 +145,12 @@ impl Consumer {
 
     /// Work whose time has come, then the alarm for what still waits.
     fn due(&mut self, io: &mut impl ConsumerIo) {
-        let due = self.drafts.due(io.now());
+        let now = io.now();
+        let due = self.drafts.due(now);
         self.store_drafts(due);
-        if let Some(at) = self.drafts.next_due() {
+        self.retry(now, io);
+        let retries = self.parked.values().map(|parked| parked.due).min();
+        if let Some(at) = self.drafts.next_due().into_iter().chain(retries).min() {
             io.wake_at(at);
         }
     }
@@ -222,6 +230,7 @@ impl Consumer {
         }
         if reason == Release::Deleted {
             self.runs.forget(thread_id);
+            self.parked.remove(&thread_id);
         }
         self.runs.end(thread_id, generation);
     }
@@ -261,7 +270,7 @@ impl Consumer {
         provider: Provider,
         from: From,
         mut ev: HarnessEvent,
-        mut card: Option<String>,
+        card: Option<String>,
         io: &mut impl ConsumerIo,
     ) {
         // A session that has ended or been replaced is heard no more: its
@@ -306,6 +315,7 @@ impl Consumer {
         }
         let mut item_id = None;
         let mut entity_id = None;
+        let mut settled = Vec::new();
         self.runs.enter(thread_id, from, &ev);
         let tags = self.runs.tags(thread_id, terminal);
         let (pool, now) = (self.pool.clone(), io.now());
@@ -353,26 +363,169 @@ impl Consumer {
                     }
                     Err(e) => elog!("[oculus] harness store: {e}"),
                 }
-                let settled = self.runs.after(&self.rt, p, thread_id, &ev, terminal);
-                for (event, id) in settled {
-                    io.emit(Envelope {
-                        thread_id,
-                        provider,
-                        item_id: id,
-                        run_id: tags.run_id,
-                        attempt_id: tags.attempt_id,
-                        entity_id: None,
-                        sequence: next_sequence(&mut self.sequence),
-                        event,
-                    });
-                }
-                match (tags.run_id, terminal) {
-                    // Settlement removed the stored draft with the run.
-                    (Some(run_id), Some(Terminal::Run)) => drop(self.drafts.take(run_id)),
-                    (Some(run_id), _) => self.draft(run_id, &ev, now),
-                    (None, _) => {}
+                settled = match (terminal, tags.run_id, tags.attempt_id, &ev) {
+                    (
+                        Some(Terminal::Run),
+                        Some(run_id),
+                        Some(attempt_id),
+                        HarnessEvent::TurnFinished { status, .. },
+                    ) => match self.settle(p, thread_id, run_id, attempt_id, status) {
+                        Ok(settled) => settled,
+                        // The one write that may not be lost: nobody hears
+                        // of the terminal until it has landed (`retry`).
+                        Err(e) => {
+                            elog!("[oculus] harness run {run_id}: settle failed, retrying: {e}");
+                            self.runs.settling(thread_id);
+                            let parked = Parked {
+                                run_id,
+                                attempt_id,
+                                status: status.clone(),
+                                wait: RETRY_FIRST,
+                                due: now + RETRY_FIRST,
+                                stored: Stored {
+                                    thread_id,
+                                    provider,
+                                    from,
+                                    ev,
+                                    card,
+                                    tags,
+                                    item_id,
+                                    entity_id,
+                                    terminal,
+                                },
+                            };
+                            self.parked.insert(thread_id, parked);
+                            return;
+                        }
+                    },
+                    (_, run_id, ..) => {
+                        self.runs
+                            .learn_session(&self.rt, p, thread_id, &ev, terminal);
+                        if let Some(run_id) = run_id {
+                            self.draft(run_id, &ev, now);
+                        }
+                        Vec::new()
+                    }
+                };
+            }
+        }
+        let stored = Stored {
+            thread_id,
+            provider,
+            from,
+            ev,
+            card,
+            tags,
+            item_id,
+            entity_id,
+            terminal,
+        };
+        self.publish(stored, settled, io);
+    }
+
+    /// Close the run on its own terminal (`store::settle_run`) and say what
+    /// was decided. An `Err` wrote nothing and left the run open.
+    fn settle(
+        &mut self,
+        pool: &SqlitePool,
+        thread_id: i64,
+        run_id: i64,
+        attempt_id: i64,
+        status: &str,
+    ) -> Result<Vec<(HarnessEvent, Option<i64>)>, String> {
+        let settlement = self
+            .rt
+            .block_on(store::settle_run(pool, run_id, attempt_id, status))?;
+        self.runs.close(thread_id);
+        // Settlement removed the stored draft with the run.
+        self.drafts.take(run_id);
+        let mut out = Vec::new();
+        if let Some(s) = settlement {
+            if let Some((id, text)) = s.notice {
+                out.push((HarnessEvent::DeliveryNotice { text }, Some(id)));
+            }
+            out.push((
+                HarnessEvent::RunSettled {
+                    answer_item_id: s.answer_item_id,
+                    work_item_ids: s.work_item_ids,
+                    delivery: s.delivery.into(),
+                    status: s.status.into(),
+                    started_at: s.started_at,
+                    ended_at: s.ended_at,
+                },
+                None,
+            ));
+        }
+        Ok(out)
+    }
+
+    /// Settle writes that failed and are due another try. Each waits twice
+    /// as long as the last, up to [`RETRY_MAX`], until it lands; its
+    /// terminal is published then, and until then the thread stays claimed,
+    /// so the chat's next message does not start.
+    fn retry(&mut self, now: Instant, io: &mut impl ConsumerIo) {
+        let Some(pool) = self.pool.clone() else {
+            return;
+        };
+        let due: Vec<i64> = self
+            .parked
+            .iter()
+            .filter(|(_, parked)| parked.due <= now)
+            .map(|(thread_id, _)| *thread_id)
+            .collect();
+        for thread_id in due {
+            let Some(mut parked) = self.parked.remove(&thread_id) else {
+                continue;
+            };
+            let (run_id, attempt_id) = (parked.run_id, parked.attempt_id);
+            match self.settle(&pool, thread_id, run_id, attempt_id, &parked.status) {
+                Ok(settled) => self.publish(parked.stored, settled, io),
+                Err(e) => {
+                    parked.wait = (parked.wait * 2).min(RETRY_MAX);
+                    parked.due = now + parked.wait;
+                    elog!(
+                        "[oculus] harness run {run_id}: settle failed again, next try in {:?}: {e}",
+                        parked.wait
+                    );
+                    self.parked.insert(thread_id, parked);
                 }
             }
+        }
+    }
+
+    /// Tell the webview about a stored event, and do what follows from it:
+    /// the settlement's events first, naming, the queue, a card's
+    /// continuation.
+    fn publish(
+        &mut self,
+        stored: Stored,
+        settled: Vec<(HarnessEvent, Option<i64>)>,
+        io: &mut impl ConsumerIo,
+    ) {
+        let Stored {
+            thread_id,
+            provider,
+            from,
+            ev,
+            mut card,
+            tags,
+            item_id,
+            entity_id,
+            terminal,
+        } = stored;
+        for (event, id) in settled {
+            io.emit(Envelope {
+                thread_id,
+                provider,
+                item_id: id,
+                run_id: tags.run_id,
+                attempt_id: tags.attempt_id,
+                entity_id: None,
+                sequence: next_sequence(&mut self.sequence),
+                event,
+            });
+        }
+        if let Some(p) = &self.pool {
             if let Err(e) = self.rt.block_on(store::save_rate_limits(p, provider, &ev)) {
                 elog!("[oculus] harness rate limits: {e}");
             }
@@ -463,6 +616,34 @@ impl Consumer {
         }
     }
 }
+
+/// An event that has been stored and not yet told to the webview.
+struct Stored {
+    thread_id: i64,
+    provider: Provider,
+    from: From,
+    ev: HarnessEvent,
+    /// A proposal whose continuation state the event changed.
+    card: Option<String>,
+    tags: Tags,
+    item_id: Option<i64>,
+    entity_id: Option<String>,
+    terminal: Option<Terminal>,
+}
+
+/// A run's terminal whose settle write failed, waiting for its next try.
+struct Parked {
+    run_id: i64,
+    attempt_id: i64,
+    status: String,
+    wait: Duration,
+    due: Instant,
+    stored: Stored,
+}
+
+/// The first wait before a failed settle is tried again, and the longest.
+const RETRY_FIRST: Duration = Duration::from_millis(100);
+const RETRY_MAX: Duration = Duration::from_secs(30);
 
 /// An event's wire name, for a log line.
 fn kind(ev: &HarnessEvent) -> String {

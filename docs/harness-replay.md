@@ -77,8 +77,12 @@ has applied everything sent so far (`Rig::drain`: the feed answers when it
 finds the bus empty, with no sleep to tune). The consumer's clock is the
 rig's (`io.rs`, `Clock`): when the consumer has asked to be woken and the
 bus is empty, the feed moves the clock to that moment and delivers the
-`Wake`, so work that waits on time (a draft write) runs without a real
-timer. `testkit/pacing.rs` scripts that clock message by message. The test then does what a
+`Wake`, so work that waits on time (a draft write, a settle retry) runs
+without a real timer. `testkit/pacing.rs` scripts that clock message by
+message. `rig.read_only(true)` makes every write fail, as a full disk would
+(`PRAGMA query_only` on the rig's one connection), and
+`rig.await_wakes(n)` waits for the consumer's retries
+(`testkit/recovery.rs`). The test then does what a
 student or the app would do mid-turn, such as a second `rig.send` or a call
 on `rig.harness`, and `resume`s. Races are tested this way, never by timing.
 

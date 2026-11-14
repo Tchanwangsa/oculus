@@ -44,6 +44,7 @@ pub(super) struct Rig {
     outbound: Outbound,
     bridge: Bridge,
     fed: Arc<AtomicBool>,
+    clock: Arc<Clock>,
     drained: Sender<Sender<()>>,
     consumer: JoinHandle<Io>,
     /// Continuations the consumer dispatched, which the rig starts itself.
@@ -117,9 +118,9 @@ impl Rig {
         let fed = Arc::new(AtomicBool::new(false));
         let (continued, dispatched) = std::sync::mpsc::channel();
         let (drained, waiters) = std::sync::mpsc::channel();
+        let clock = Clock::new();
         let consumer = {
-            let (queue, fed) = (queue.clone(), fed.clone());
-            let clock = Clock::new();
+            let (queue, fed, clock) = (queue.clone(), fed.clone(), clock.clone());
             let mut io = Io {
                 pool: pool.clone(),
                 database: database.clone(),
@@ -168,6 +169,7 @@ impl Rig {
             outbound,
             bridge,
             fed,
+            clock,
             drained,
             consumer,
             dispatched,
@@ -351,6 +353,35 @@ impl Rig {
         waiting
             .recv_timeout(Duration::from_secs(10))
             .expect("the consumer caught up");
+    }
+
+    /// Make every write to the database fail (`on`), or work again: the
+    /// rig's one connection goes read-only, as a full disk would leave it.
+    pub fn read_only(&self, on: bool) {
+        let pragma = match on {
+            true => "PRAGMA query_only = ON",
+            false => "PRAGMA query_only = OFF",
+        };
+        self.runtime
+            .block_on(sqlx::query(pragma).execute(&self.pool))
+            .unwrap();
+    }
+
+    /// How many times the consumer has been woken for work that waits.
+    pub fn wakes(&self) -> u64 {
+        self.clock.fired.load(Ordering::SeqCst)
+    }
+
+    /// Wait until the consumer has been woken `count` times in all.
+    pub fn await_wakes(&self, count: u64) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while self.wakes() < count {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the consumer was not woken {count} times"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 
     /// The transport closing, through the bridge's production EOF path.

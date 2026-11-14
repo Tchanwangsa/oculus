@@ -2,7 +2,7 @@
 //! the feed that hands it messages until the test has fed everything.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -37,6 +37,8 @@ pub(super) struct Io {
 pub(super) struct Clock {
     now: Mutex<Instant>,
     wake: Mutex<Option<Instant>>,
+    /// How many wakes the feed has delivered.
+    pub fired: AtomicU64,
 }
 
 impl Clock {
@@ -44,6 +46,7 @@ impl Clock {
         Arc::new(Clock {
             now: Mutex::new(Instant::now()),
             wake: Mutex::new(None),
+            fired: AtomicU64::new(0),
         })
     }
 
@@ -54,6 +57,7 @@ impl Clock {
         };
         let mut now = self.now.lock().unwrap();
         *now = (*now).max(at);
+        self.fired.fetch_add(1, Ordering::SeqCst);
         true
     }
 }

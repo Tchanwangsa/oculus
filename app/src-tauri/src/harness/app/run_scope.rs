@@ -44,6 +44,8 @@ struct Open {
     next: u64,
     /// The turn the send was accepted as; none until the bridge says.
     turn: Option<Turn>,
+    /// Its terminal was seen; the settle write has not landed yet.
+    settling: bool,
 }
 
 /// A thread's newest session, the turns of it that are over, and how far
@@ -113,10 +115,13 @@ impl RunScope {
                     turn: Some(turn), ..
                 },
                 Some(open),
-            ) => open
-                .turn
-                .as_ref()
-                .is_some_and(|(g, t)| *g == generation && t == turn),
+            ) => {
+                !open.settling
+                    && open
+                        .turn
+                        .as_ref()
+                        .is_some_and(|(g, t)| *g == generation && t == turn)
+            }
             _ => false,
         }
     }
@@ -146,7 +151,7 @@ impl RunScope {
     ) -> (Option<(i64, TurnId)>, Option<Option<TurnId>>) {
         let run = self.open.get(&thread_id).and_then(|open| {
             let (g, turn) = open.turn.as_ref()?;
-            (*g == generation).then(|| (open.run_id, turn.clone()))
+            (*g == generation && !open.settling).then(|| (open.run_id, turn.clone()))
         });
         let own = self.own.get(&thread_id).and_then(|own| match own {
             Some((g, turn)) => (*g == generation).then(|| Some(turn.clone())),
@@ -170,8 +175,21 @@ impl RunScope {
         turn: Option<&TurnId>,
         queue: &Mutex<Queue>,
     ) -> Terminal {
-        let open = self.open.get(&thread_id);
         let own = self.own.get(&thread_id);
+        let open = match self.open.get(&thread_id) {
+            // Already ending: nothing but a turn of the provider's own can
+            // end here until the run's settle lands.
+            Some(open) if open.settling => {
+                let own_turn = from.generation().zip(turn).is_some_and(|(g, t)| {
+                    own.is_some_and(|own| own.as_ref().is_some_and(|(og, ot)| *og == g && ot == t))
+                });
+                return match own_turn {
+                    true => Terminal::Own,
+                    false => Terminal::Stray,
+                };
+            }
+            open => open,
+        };
         // No turn is named by the app, closing a send that failed, or by a
         // bridge that could not tell: whatever is open ends, as it would
         // have before turns had ids.
@@ -237,6 +255,7 @@ impl RunScope {
                         attempt_id: run.attempt_id,
                         next: 0,
                         turn: None,
+                        settling: false,
                     },
                 );
             }
@@ -308,60 +327,42 @@ impl RunScope {
         self.failed_writes.insert(thread_id)
     }
 
-    /// Run-level effects of an already stored event: the binding learns its
-    /// session; the run's own `TurnFinished` settles it and closes the scope.
-    /// Returns the settlement's events, each with its row, to emit before
-    /// the terminal.
-    pub fn after(
-        &mut self,
+    /// The provider named its session: the open run's binding learns it.
+    pub fn learn_session(
+        &self,
         rt: &Runtime,
         pool: &SqlitePool,
         thread_id: i64,
         ev: &HarnessEvent,
         terminal: Option<Terminal>,
-    ) -> Vec<(HarnessEvent, Option<i64>)> {
-        let Some(open) = self.scope(thread_id, terminal) else {
-            return Vec::new();
-        };
-        let mut out = Vec::new();
-        let stored = match ev {
+    ) {
+        let (
+            Some(open),
             HarnessEvent::SessionStarted {
                 provider_session_id,
                 ..
-            } => rt.block_on(store::bind_session(pool, open.run_id, provider_session_id)),
-            HarnessEvent::TurnFinished { status, .. } => {
-                let settled = rt.block_on(store::settle_run(
-                    pool,
-                    open.run_id,
-                    open.attempt_id,
-                    status,
-                ));
-                self.open.remove(&thread_id);
-                settled.map(|s| {
-                    if let Some(s) = s {
-                        if let Some((id, text)) = s.notice {
-                            out.push((HarnessEvent::DeliveryNotice { text }, Some(id)));
-                        }
-                        out.push((
-                            HarnessEvent::RunSettled {
-                                answer_item_id: s.answer_item_id,
-                                work_item_ids: s.work_item_ids,
-                                delivery: s.delivery.into(),
-                                status: s.status.into(),
-                                started_at: s.started_at,
-                                ended_at: s.ended_at,
-                            },
-                            None,
-                        ));
-                    }
-                })
-            }
-            _ => Ok(()),
+            },
+        ) = (self.scope(thread_id, terminal), ev)
+        else {
+            return;
         };
-        if let Err(e) = stored {
+        let bound = rt.block_on(store::bind_session(pool, open.run_id, provider_session_id));
+        if let Err(e) = bound {
             elog!("[oculus] harness run {thread_id}: {e}");
         }
-        out
+    }
+
+    /// The run's terminal was seen and its settle write failed: until the
+    /// write lands, no other terminal ends the run or frees its claim.
+    pub fn settling(&mut self, thread_id: i64) {
+        if let Some(open) = self.open.get_mut(&thread_id) {
+            open.settling = true;
+        }
+    }
+
+    /// The run settled.
+    pub fn close(&mut self, thread_id: i64) {
+        self.open.remove(&thread_id);
     }
 }
 

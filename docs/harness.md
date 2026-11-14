@@ -1012,7 +1012,19 @@ waits; the consumer asks its bus for a `BusMsg::Wake` when the interval ends
 (`ConsumerIo::wake_at`, `app/wake.rs`), so it is written even if nothing
 else arrives. An `AssistantMessage` takes its own text out of the draft at
 once (and any text under no id), so a restart cannot bring a committed
-message back a second time. Startup `reconcile` turns each run a dead process
+message back a second time.
+
+The settle is the one write that may not be lost: a run left `running`
+after its terminal would be relabelled as cut off by the next startup. When
+`store::settle_run` fails, the consumer parks the terminal
+(`Consumer::retry`): nothing of it is told to the webview, the run stays
+open and the thread stays claimed, so the chat's next message waits. The
+write is tried again after 100 ms, then at doubling intervals up to 30 s,
+until it lands; then the settlement and the `TurnFinished` go out as they
+would have. Meanwhile any other terminal for that run is ignored, and a
+session ending leaves it alone.
+
+Startup `reconcile` turns each run a dead process
 left open into an interrupted run whose draft becomes a partial answer row,
 with a notice: "Oculus closed before this reply finished. What arrived is
 kept."
