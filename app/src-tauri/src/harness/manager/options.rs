@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use super::studio::StudioBrief;
 
@@ -9,9 +9,13 @@ use super::studio::StudioBrief;
 pub struct SendOptions {
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
-    /// Read only when the send creates the thread; afterwards the row is the
-    /// authority, since the brief is bound at session start.
+    /// Read only when the send creates a Studio thread; afterwards the row is
+    /// the authority, since the brief is bound at session start. A plain Chat
+    /// thread names its subject in `chat_scope` instead.
     pub subject_id: Option<i64>,
+    /// The scope the student chose for a new plain Chat thread. Creating one
+    /// without it is refused ([`SendOptions::scope_new_thread`]).
+    pub chat_scope: Option<ChatScope>,
     /// That subject's folder name, resolved from the thread row.
     #[serde(skip)]
     pub scope: Option<String>,
@@ -43,6 +47,55 @@ pub struct SendOptions {
     /// that card (`app/continuation.rs`), not something the student typed.
     #[serde(skip)]
     pub continuation: Option<String>,
+}
+
+/// A new Chat thread's scope as the composer sends it: `"general"` or a
+/// subject's id. Unchosen is the field's absence, so it is never General by
+/// default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChatScope {
+    General,
+    Subject(i64),
+}
+
+impl<'de> Deserialize<'de> for ChatScope {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Id(i64),
+            Word(String),
+        }
+        match Raw::deserialize(d)? {
+            Raw::Id(id) if id > 0 => Ok(ChatScope::Subject(id)),
+            Raw::Word(w) if w == "general" => Ok(ChatScope::General),
+            _ => Err(serde::de::Error::custom(
+                "a chat scope is \"general\" or a subject id",
+            )),
+        }
+    }
+}
+
+impl SendOptions {
+    /// Settle the subject a thread-creating send files under, before any row
+    /// is written. A lecture's thread takes its lecture's subject and a Studio
+    /// video's its own, so only a plain Chat thread must name a scope: without
+    /// one a missed entry point would file into General silently. A send to
+    /// an existing thread is never checked.
+    pub(in crate::harness) fn scope_new_thread(
+        &mut self,
+        thread_id: Option<i64>,
+    ) -> Result<(), String> {
+        if thread_id.is_some() || self.lecture_id.is_some() || self.studio.is_some() {
+            return Ok(());
+        }
+        self.subject_id = match self.chat_scope {
+            Some(ChatScope::General) => None,
+            Some(ChatScope::Subject(id)) => Some(id),
+            None => return Err("choose a subject or General before starting a chat".into()),
+        };
+        Ok(())
+    }
 }
 
 /// The video a thread is created for, as `StudioSend` in
@@ -81,5 +134,73 @@ pub(in crate::harness) fn validate_effort(value: Option<String>) -> Result<Optio
         None => Ok(None),
         Some(v) if REASONING_EFFORTS.contains(&v.as_str()) => Ok(Some(v)),
         Some(v) => Err(format!("unknown reasoning effort: {v}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opts(json: &str) -> SendOptions {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn a_plain_chat_without_a_scope_is_refused() {
+        let mut o = opts(r#"{"model":"opus"}"#);
+        assert!(o.scope_new_thread(None).is_err());
+        // A stray subject id is not a choice either.
+        let mut o = opts(r#"{"subjectId":4}"#);
+        assert!(o.scope_new_thread(None).is_err());
+    }
+
+    #[test]
+    fn a_plain_chat_files_under_its_chosen_scope() {
+        let mut o = opts(r#"{"chatScope":"general","subjectId":4}"#);
+        o.scope_new_thread(None).unwrap();
+        assert_eq!(o.subject_id, None);
+        let mut o = opts(r#"{"chatScope":12}"#);
+        o.scope_new_thread(None).unwrap();
+        assert_eq!(o.subject_id, Some(12));
+    }
+
+    #[test]
+    fn lecture_and_studio_creations_carry_their_own_subject() {
+        let mut lecture = opts(r#"{"lectureId":"abc"}"#);
+        lecture.scope_new_thread(None).unwrap();
+        assert_eq!(lecture.subject_id, None);
+        let mut studio = opts(r#"{"subjectId":4,"studio":{"slug":"limits"}}"#);
+        studio.scope_new_thread(None).unwrap();
+        assert_eq!(studio.subject_id, Some(4));
+    }
+
+    #[test]
+    fn an_existing_thread_sends_without_a_scope() {
+        // A General thread's row has no subject and its sends name no scope.
+        let mut o = opts(r#"{"model":"opus"}"#);
+        o.scope_new_thread(Some(7)).unwrap();
+        assert_eq!(o.subject_id, None);
+    }
+
+    #[test]
+    fn a_scope_is_general_or_a_positive_id() {
+        assert_eq!(
+            opts(r#"{"chatScope":"general"}"#).chat_scope,
+            Some(ChatScope::General)
+        );
+        assert_eq!(
+            opts(r#"{"chatScope":3}"#).chat_scope,
+            Some(ChatScope::Subject(3))
+        );
+        assert_eq!(opts("{}").chat_scope, None);
+        for bad in [r#""General""#, r#""3""#, "0", "-1", "1.5", "null"] {
+            let json = format!(r#"{{"chatScope":{bad}}}"#);
+            let parsed = serde_json::from_str::<SendOptions>(&json);
+            if bad == "null" {
+                assert_eq!(parsed.unwrap().chat_scope, None);
+            } else {
+                assert!(parsed.is_err(), "{bad} parsed");
+            }
+        }
     }
 }

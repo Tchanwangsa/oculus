@@ -1386,6 +1386,15 @@ opens `/chat?s=<id|general>`, and a revision artifact's Ask about this
 its lecture's subject and Studio's threads their video's; neither shows the
 headline.
 
+**Rust holds the same line.** A send that creates a plain Chat thread must
+name its scope (`chatScope`: `"general"` or a subject id; `ChatScope` in
+`manager/options.rs`), and `harness_send` refuses one that does not before
+it writes any row, so a missed entry point can never file into General
+silently. A lecture's creation takes its lecture's subject and a Studio
+video's its own `subjectId`; a send to an existing thread, General ones
+included, is never checked. Studio's Ask for a change starts a plain thread,
+so it names its scope too ([studio-page.md](./studio-page.md)).
+
 **`@` inserts a library path**, not content — the path is what `oculus read`
 takes. Words are ANDed against filenames (`safe_filename` turns spaces into
 `_`); the token is bounded (no space after `@`, four words, 60 characters, a

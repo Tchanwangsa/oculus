@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Provider } from "./providers";
+import type { ChatScope } from "./scope";
 import type { BridgeHealth, QueuedMessage } from "./types";
 import type { StudioSend } from "@/lib/studio/videos";
 import { openNotebookContext } from "@/lib/canvas/openNotebooks";
@@ -8,8 +9,11 @@ import { useProposalStore } from "@/stores/chat/proposalStore";
 export interface SendOptions {
   model?: string | null;
   reasoningEffort?: string | null;
-  /** Only read when the send creates the thread. */
+  /** Only read when the send creates a Studio thread (`studio`). */
   subjectId?: number | null;
+  /** Only read when the send creates a plain Chat thread, which Rust refuses
+   *  to create without one (`docs/harness.md`, "Subject scope and `@`"). */
+  chatScope?: ChatScope;
   /** Only read on creation; overrides `subjectId`. */
   lectureId?: string | null;
   /** What the student has open (a lecture's moment, a notebook), appended to the prompt but never to the message. */

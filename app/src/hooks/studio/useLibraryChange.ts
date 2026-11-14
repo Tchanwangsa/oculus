@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useDefaultModel } from "@/hooks/studio/useDefaultModel";
-import { harnessSend } from "@/lib/harness";
+import { GENERAL_SCOPE, harnessSend } from "@/lib/harness";
 import { changeRequestText, type LibraryItemKind } from "@/lib/studio/changeRequest";
 import {
   componentHistory,
@@ -102,7 +102,8 @@ export function useLibraryChange(kind: LibraryItemKind, subject: ChangeSubject |
           {
             model: row ? row.model : store.model,
             reasoningEffort: store.reasoning,
-            subjectId: subject?.id ?? null,
+            // A plain thread, so it names its scope as Chat's composer does.
+            chatScope: subject?.id ?? GENERAL_SCOPE,
           },
         );
         if (!open) await store.loadThreads();

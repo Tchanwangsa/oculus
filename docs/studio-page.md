@@ -305,8 +305,8 @@ when the next lands.
 from. Ask for a change is one box that sends the request to the agent
 (`useLibraryChange`): the first send of a page session creates a Chat
 harness thread (provider and model from the harness store, filled from the
-provider's list as the composer does, `useDefaultModel`; `subjectId` from the
-library select), later sends continue it, and a different subject starts a
+provider's list as the composer does, `useDefaultModel`; its `chatScope` is
+the library select's subject, or General), later sends continue it, and a different subject starts a
 new one since a thread's subject is fixed at creation. The text is
 `changeRequestText` (`lib/studio/changeRequest.ts`): a first line naming the
 component and its level, the request, then the instruction to use the

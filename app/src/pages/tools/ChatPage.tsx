@@ -120,10 +120,6 @@ export default function ChatPage() {
     if (missing) navigate(chatHref(null), { replace: true });
   }, [missing, navigate]);
 
-  // `tabInfo` titles a tab from its path, so the thread's name travels as
-  // `?n=` (`chatHref`), updated when the title lands — but not before the
-  // thread is known, or a restored tab loses its name. Replace, not push, so
-  // the back arrow is unchanged.
   // An entry point's `?s=` (a group's "+") seeds the new thread's scope once;
   // the route effect below then drops it, so a re-render cannot seed again.
   const seed = activeId == null ? chatScope(here.search) : null;
@@ -131,6 +127,10 @@ export default function ChatPage() {
     if (seed != null) useDraftStore.getState().setScope(newKey, seed);
   }, [seed, newKey]);
 
+  // `tabInfo` titles a tab from its path, so the thread's name travels as
+  // `?n=` (`chatHref`), updated when the title lands — but not before the
+  // thread is known, or a restored tab loses its name. Replace, not push, so
+  // the back arrow is unchanged.
   const tabName = thread?.title?.trim() || "";
   useEffect(() => {
     if (activeId != null && thread == null) return;
@@ -173,7 +173,8 @@ export default function ChatPage() {
       sendTurn(text, () => {
         if (activeRef.current != null) return {};
         const chosen = useDraftStore.getState().scopeFor(newKey, store.getState().subjects);
-        return chosen == null ? {} : { subjectId: scopeSubject(chosen) };
+        // None chosen: the composer holds the send, and Rust refuses one anyway.
+        return chosen == null ? {} : { chatScope: chosen };
       }),
     [sendTurn, store, newKey],
   );

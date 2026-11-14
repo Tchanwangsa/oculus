@@ -27,6 +27,7 @@ pub async fn harness_send(
         Provider::parse(&provider).ok_or_else(|| format!("unknown provider {provider}"))?;
     let mut opts = options.unwrap_or_default();
     opts.reasoning_effort = validate_effort(opts.reasoning_effort)?;
+    opts.scope_new_thread(thread_id)?;
     let pool = crate::db::store::open_pool().await?;
 
     let id = match thread_id {
