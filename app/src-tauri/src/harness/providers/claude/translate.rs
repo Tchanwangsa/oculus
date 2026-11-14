@@ -260,7 +260,11 @@ impl Translator {
                                     let t = str_of(cb, "text");
                                     if !t.is_empty() {
                                         self.open_turn(&mut out);
-                                        out.push(HarnessEvent::AssistantDelta { text: t });
+                                        // The stream names no block a committed message is known by.
+                                        out.push(HarnessEvent::AssistantDelta {
+                                            text: t,
+                                            item: None,
+                                        });
                                     }
                                 }
                                 Some("thinking") => {
@@ -281,7 +285,10 @@ impl Translator {
                                     let t = str_of(d, "text");
                                     if !t.is_empty() {
                                         self.open_turn(&mut out);
-                                        out.push(HarnessEvent::AssistantDelta { text: t });
+                                        out.push(HarnessEvent::AssistantDelta {
+                                            text: t,
+                                            item: None,
+                                        });
                                     }
                                 }
                                 Some("thinking_delta") => {
@@ -785,7 +792,7 @@ mod tests {
         let deltas: String = events
             .iter()
             .filter_map(|e| match e {
-                HarnessEvent::AssistantDelta { text } => Some(text.as_str()),
+                HarnessEvent::AssistantDelta { text, .. } => Some(text.as_str()),
                 _ => None,
             })
             .collect();
@@ -835,7 +842,7 @@ mod tests {
         let deltas: String = events
             .iter()
             .filter_map(|e| match e {
-                HarnessEvent::AssistantDelta { text } => Some(text.as_str()),
+                HarnessEvent::AssistantDelta { text, .. } => Some(text.as_str()),
                 _ => None,
             })
             .collect();

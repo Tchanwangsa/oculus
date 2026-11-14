@@ -411,11 +411,12 @@ pub async fn settle(
     }))
 }
 
-/// Streamed answer text, kept per run until its message row is written.
-pub async fn append_draft(pool: &SqlitePool, run_id: i64, text: &str) -> Result<(), String> {
+/// The answer text a run has streamed and not yet committed as a row, whole
+/// (`app/drafts.rs` gathers it): what a restart keeps.
+pub async fn set_draft(pool: &SqlitePool, run_id: i64, text: &str) -> Result<(), String> {
     sqlx::query(
         "INSERT INTO harness_stream_drafts (run_id, text) VALUES (?1, ?2)
-         ON CONFLICT(run_id) DO UPDATE SET text = text || excluded.text",
+         ON CONFLICT(run_id) DO UPDATE SET text = excluded.text",
     )
     .bind(run_id)
     .bind(text)
@@ -423,15 +424,6 @@ pub async fn append_draft(pool: &SqlitePool, run_id: i64, text: &str) -> Result<
     .await
     .map(|_| ())
     .map_err(|e| e.to_string())
-}
-
-/// What a run streamed and has not committed as a row.
-pub async fn draft(pool: &SqlitePool, run_id: i64) -> Result<Option<String>, String> {
-    sqlx::query_scalar("SELECT text FROM harness_stream_drafts WHERE run_id = ?1")
-        .bind(run_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| e.to_string())
 }
 
 /// The streamed text became a row: nothing is left to recover.

@@ -7,6 +7,7 @@ use crate::harness::{Harness, HarnessEvent, Provider, Queue};
 
 use super::consumer::ConsumerIo;
 use super::send::dispatch;
+use super::wake::{Alarm, Wakeful};
 use super::{sink_for, BusMsg, Envelope, HarnessState};
 
 /// One consumer thread folds every event, from every thread, in order:
@@ -24,7 +25,18 @@ pub fn init(app: &AppHandle) -> HarnessState {
     // so it is written and forwarded by this same loop.
     let (namer, bus, queued) = (harness.clone(), tx.clone(), queue.clone());
     std::thread::spawn(move || {
-        super::consumer::consume(rx, queued, &mut AppIo { handle, namer, bus });
+        let alarm = Alarm::default();
+        let wakeful = Wakeful {
+            rx,
+            alarm: alarm.clone(),
+        };
+        let mut io = AppIo {
+            handle,
+            namer,
+            bus,
+            alarm,
+        };
+        super::consumer::consume(wakeful, queued, &mut io);
     });
     HarnessState {
         harness,
@@ -37,6 +49,8 @@ struct AppIo {
     handle: AppHandle,
     namer: Arc<Harness>,
     bus: super::Bus,
+    /// When the bus should send the consumer a `Wake` (`wake.rs`).
+    alarm: Alarm,
 }
 
 impl ConsumerIo for AppIo {
@@ -93,6 +107,10 @@ impl ConsumerIo for AppIo {
 
     fn emit(&mut self, envelope: Envelope) {
         let _ = self.handle.emit("harness-event", envelope);
+    }
+
+    fn wake_at(&mut self, at: std::time::Instant) {
+        *self.alarm.lock().unwrap() = Some(at);
     }
 }
 

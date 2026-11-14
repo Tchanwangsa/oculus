@@ -22,7 +22,7 @@ use crate::harness::{
     jobs, store, Harness, HarnessEvent, Provider, Queue, QueuedMessage, SendOptions, Sink, Sinks,
 };
 
-use super::io::{Feed, Io};
+use super::io::{Clock, Feed, Io};
 use super::replay::{Bridge, Replay};
 use super::{guard::assert_scratch, outbound::Outbound, scenario::Scenario, snapshot};
 
@@ -119,6 +119,7 @@ impl Rig {
         let (drained, waiters) = std::sync::mpsc::channel();
         let consumer = {
             let (queue, fed) = (queue.clone(), fed.clone());
+            let clock = Clock::new();
             let mut io = Io {
                 pool: pool.clone(),
                 database: database.clone(),
@@ -129,6 +130,7 @@ impl Rig {
                 runtime: None,
                 epoch: std::time::Instant::now(),
                 continued,
+                clock: clock.clone(),
             };
             std::thread::spawn(move || {
                 io.runtime = Some(Runtime::new().unwrap());
@@ -136,6 +138,7 @@ impl Rig {
                     rx,
                     fed,
                     drained: waiters,
+                    clock,
                 };
                 consume(feed, queue, &mut io);
                 io

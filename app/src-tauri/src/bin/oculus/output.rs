@@ -52,7 +52,7 @@ impl AgentPrinter {
                         .unwrap_or_default()
                 );
             }
-            HarnessEvent::AssistantDelta { text } => {
+            HarnessEvent::AssistantDelta { text, .. } => {
                 if self.show_text {
                     let _ = write!(out, "{text}");
                     *mid = true;

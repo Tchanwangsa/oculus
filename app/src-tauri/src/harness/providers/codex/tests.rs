@@ -240,7 +240,7 @@ fn a_stopped_turn_keeps_what_was_said() {
     let deltas: String = events
         .iter()
         .filter_map(|e| match e {
-            HarnessEvent::AssistantDelta { text } => Some(text.as_str()),
+            HarnessEvent::AssistantDelta { text, .. } => Some(text.as_str()),
             _ => None,
         })
         .collect();

@@ -9,6 +9,7 @@ mod identity;
 mod io;
 mod matrix;
 pub(in crate::harness) mod outbound;
+mod pacing;
 mod projection;
 pub(in crate::harness) mod replay;
 mod rig;

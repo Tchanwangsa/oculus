@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use sqlx::SqlitePool;
 use tokio::runtime::Runtime;
@@ -8,6 +9,7 @@ use crate::harness::{
     jobs, store, Generation, HarnessEvent, Provider, Queue, QueuedMessage, Release, SendOptions,
 };
 
+use super::drafts::Drafts;
 use super::run_scope::{From, RunScope, Terminal};
 use super::thought_clock::ThoughtClock;
 use super::{BusMsg, Envelope};
@@ -18,6 +20,13 @@ pub(in crate::harness) trait ConsumerIo {
     fn clock_time(&self) -> Option<std::time::Instant> {
         None
     }
+    /// The clock work that waits is timed by (a draft's next write).
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+    /// Ask for a `BusMsg::Wake` at `at`, sooner if another message comes
+    /// first. Unanswered, waiting work is found by the next message.
+    fn wake_at(&mut self, _at: Instant) {}
     fn open_pool(&mut self, rt: &Runtime) -> Option<SqlitePool>;
     fn name(
         &mut self,
@@ -41,11 +50,15 @@ pub(in crate::harness) fn consume(
         queue,
         clock: ThoughtClock::default(),
         runs: RunScope::default(),
+        drafts: Drafts::default(),
         sequence: first_sequence(),
     };
     for msg in rx {
         consumer.handle(msg, io);
+        consumer.due(io);
     }
+    let waiting = consumer.drafts.waiting();
+    consumer.store_drafts(waiting);
 }
 
 /// The one ordered fold over every thread's events: what [`consume`] keeps
@@ -56,6 +69,7 @@ struct Consumer {
     queue: Arc<Mutex<Queue>>,
     clock: ThoughtClock,
     runs: RunScope,
+    drafts: Drafts,
     sequence: u64,
 }
 
@@ -120,6 +134,50 @@ impl Consumer {
                 generation,
                 reason,
             } => self.end_session(thread_id, provider, generation, reason, io),
+            BusMsg::Wake => {}
+        }
+    }
+
+    /// Work whose time has come, then the alarm for what still waits.
+    fn due(&mut self, io: &mut impl ConsumerIo) {
+        let due = self.drafts.due(io.now());
+        self.store_drafts(due);
+        if let Some(at) = self.drafts.next_due() {
+            io.wake_at(at);
+        }
+    }
+
+    /// Write each run's draft, whole; one with no text left is removed.
+    fn store_drafts(&mut self, drafts: Vec<(i64, String)>) {
+        let Some(p) = &self.pool else { return };
+        for (run_id, text) in drafts {
+            let stored = match text.is_empty() {
+                true => self.rt.block_on(store::clear_draft(p, run_id)),
+                false => self.rt.block_on(store::set_draft(p, run_id, &text)),
+            };
+            if let Err(e) = stored {
+                elog!("[oculus] harness draft {run_id}: {e}");
+            }
+        }
+    }
+
+    /// Answer text that has streamed and is not a row yet survives a
+    /// restart (`store::recover`): gathered by message and written at most
+    /// once per interval (`drafts.rs`). A committed message leaves it at
+    /// once, so a restart cannot bring its text back a second time.
+    fn draft(&mut self, run_id: i64, ev: &HarnessEvent, now: Instant) {
+        let text = match ev {
+            HarnessEvent::AssistantDelta { text, item } => {
+                self.drafts.push(run_id, item.as_deref(), text, now)
+            }
+            HarnessEvent::AssistantMessage { source, .. } => {
+                let item = source.as_ref().map(|s| s.id.as_str());
+                self.drafts.commit(run_id, item, now)
+            }
+            _ => None,
+        };
+        if let Some(text) = text {
+            self.store_drafts(vec![(run_id, text)]);
         }
     }
 
@@ -173,25 +231,21 @@ impl Consumer {
     /// and an error row.
     fn cut_short(&mut self, run_id: i64, status: &str) -> Vec<HarnessEvent> {
         let mut out = Vec::new();
-        let draft = match &self.pool {
-            Some(p) => self.rt.block_on(store::draft(p, run_id)),
-            None => Ok(None),
-        };
-        match draft {
-            Ok(Some(text)) if !text.trim().is_empty() => {
-                out.push(HarnessEvent::AssistantMessage {
-                    text: text.trim().to_string(),
-                    source: Source::partial(CUT_SHORT),
-                });
-                if status == "failed" {
-                    out.push(HarnessEvent::DeliveryGap {
-                        source: Some(CUT_SHORT.into()),
-                        cause: GapCause::MissingSnapshot,
-                    });
-                }
+        for (item, text) in self.drafts.take(run_id) {
+            if text.trim().is_empty() {
+                continue;
             }
-            Ok(_) => {}
-            Err(e) => elog!("[oculus] harness run {run_id}: {e}"),
+            let id = item.unwrap_or_else(|| CUT_SHORT.into());
+            out.push(HarnessEvent::AssistantMessage {
+                text: text.trim().to_string(),
+                source: Source::partial(id.clone()),
+            });
+            if status == "failed" {
+                out.push(HarnessEvent::DeliveryGap {
+                    source: Some(id),
+                    cause: GapCause::MissingSnapshot,
+                });
+            }
         }
         if status == "failed" {
             out.push(HarnessEvent::error(SESSION_ENDED));
@@ -254,7 +308,8 @@ impl Consumer {
         let mut entity_id = None;
         self.runs.enter(thread_id, from, &ev);
         let tags = self.runs.tags(thread_id, terminal);
-        if let Some(p) = &self.pool {
+        let (pool, now) = (self.pool.clone(), io.now());
+        if let Some(p) = &pool {
             if thread_id > 0 {
                 let owner = self.runs.owner(thread_id, &ev, terminal);
                 match self
@@ -298,7 +353,8 @@ impl Consumer {
                     }
                     Err(e) => elog!("[oculus] harness store: {e}"),
                 }
-                for (event, id) in self.runs.after(&self.rt, p, thread_id, &ev, terminal) {
+                let settled = self.runs.after(&self.rt, p, thread_id, &ev, terminal);
+                for (event, id) in settled {
                     io.emit(Envelope {
                         thread_id,
                         provider,
@@ -309,6 +365,12 @@ impl Consumer {
                         sequence: next_sequence(&mut self.sequence),
                         event,
                     });
+                }
+                match (tags.run_id, terminal) {
+                    // Settlement removed the stored draft with the run.
+                    (Some(run_id), Some(Terminal::Run)) => drop(self.drafts.take(run_id)),
+                    (Some(run_id), _) => self.draft(run_id, &ev, now),
+                    (None, _) => {}
                 }
             }
             if let Err(e) = self.rt.block_on(store::save_rate_limits(p, provider, &ev)) {
@@ -413,7 +475,8 @@ fn kind(ev: &HarnessEvent) -> String {
 /// The error row of a turn whose process ended without closing it.
 const SESSION_ENDED: &str = "The agent's process ended before it finished this turn.";
 
-/// The source id of the partial reply made from a cut-short run's draft.
+/// The source id of the partial reply made from a cut-short run's draft,
+/// when the provider named no message for it.
 const CUT_SHORT: &str = "cut-short";
 
 const STORAGE_FAILED: &str =

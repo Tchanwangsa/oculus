@@ -377,7 +377,10 @@ fn a_send_racing_a_turn_the_cli_starts_is_settled_by_its_own_turn() {
 }
 
 fn delta(text: &str) -> HarnessEvent {
-    HarnessEvent::AssistantDelta { text: text.into() }
+    HarnessEvent::AssistantDelta {
+        text: text.into(),
+        item: None,
+    }
 }
 
 /// One run on a scratch thread, bound to turn `1` of session `1`, then `bus`.

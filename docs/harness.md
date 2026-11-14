@@ -1001,7 +1001,18 @@ source again replaces its text.
 A row the store cannot write is never shown as written: the run gets one
 error row and a `storage_failure` gap, and later failed rows of that turn are
 dropped. Answer text that streams but is not yet a row is kept per run in
-`harness_stream_drafts`. Startup `reconcile` turns each run a dead process
+`harness_stream_drafts`. `AssistantDelta` carries `item`, the provider's id
+for the message the text belongs to (Codex's item id, opencode's part id,
+Antigravity's `step-<index>`; none on Claude, whose stream names no block
+its committed message is known by; never serialized). `app/drafts.rs`
+gathers the deltas by that id and the consumer writes a run's whole
+uncommitted text at most once per 50 ms, not once per delta: every chat's
+events wait behind the one consumer thread. A delta inside the interval
+waits; the consumer asks its bus for a `BusMsg::Wake` when the interval ends
+(`ConsumerIo::wake_at`, `app/wake.rs`), so it is written even if nothing
+else arrives. An `AssistantMessage` takes its own text out of the draft at
+once (and any text under no id), so a restart cannot bring a committed
+message back a second time. Startup `reconcile` turns each run a dead process
 left open into an interrupted run whose draft becomes a partial answer row,
 with a notice: "Oculus closed before this reply finished. What arrived is
 kept."

@@ -101,7 +101,7 @@ fn folds_a_recorded_session() {
     let deltas: String = events
         .iter()
         .filter_map(|e| match e {
-            HarnessEvent::AssistantDelta { text } => Some(text.as_str()),
+            HarnessEvent::AssistantDelta { text, .. } => Some(text.as_str()),
             _ => None,
         })
         .collect();

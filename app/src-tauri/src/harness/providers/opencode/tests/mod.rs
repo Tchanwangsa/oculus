@@ -59,7 +59,7 @@ pub(super) fn deltas(events: &[HarnessEvent]) -> String {
     events
         .iter()
         .filter_map(|e| match e {
-            HarnessEvent::AssistantDelta { text } => Some(text.as_str()),
+            HarnessEvent::AssistantDelta { text, .. } => Some(text.as_str()),
             _ => None,
         })
         .collect()

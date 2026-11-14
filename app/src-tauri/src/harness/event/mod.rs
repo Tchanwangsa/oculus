@@ -201,6 +201,11 @@ pub enum HarnessEvent {
     /// Live assistant text, superseded by the [`Self::AssistantMessage`] that follows.
     AssistantDelta {
         text: String,
+        /// The provider's id for the message this text belongs to, the one
+        /// its [`Self::AssistantMessage`] names as `source`; `None` when the
+        /// stream gives none that would match. Never serialized.
+        #[serde(skip)]
+        item: Option<String>,
     },
     /// Live reasoning text.
     ThinkingDelta {

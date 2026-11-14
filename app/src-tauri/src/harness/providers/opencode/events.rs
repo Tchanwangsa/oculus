@@ -274,13 +274,16 @@ pub(super) fn translate(ty: &str, p: &Value, st: &mut SessionState) -> Vec<Harne
                         if !st.order.contains(&id) {
                             st.order.push(id.clone());
                         }
-                        let acc = map.entry(id).or_default();
+                        let acc = map.entry(id.clone()).or_default();
                         if let Some(text) = held.filter(|t| !t.is_empty()) {
                             acc.push_str(&text);
                             out.push(if thinking {
                                 HarnessEvent::ThinkingDelta { text }
                             } else {
-                                HarnessEvent::AssistantDelta { text }
+                                HarnessEvent::AssistantDelta {
+                                    text,
+                                    item: Some(id),
+                                }
                             });
                         }
                     } else {
@@ -371,7 +374,10 @@ pub(super) fn translate(ty: &str, p: &Value, st: &mut SessionState) -> Vec<Harne
                 out.push(HarnessEvent::ThinkingDelta { text });
             } else if let Some(acc) = st.text.get_mut(&id) {
                 acc.push_str(&text);
-                out.push(HarnessEvent::AssistantDelta { text });
+                out.push(HarnessEvent::AssistantDelta {
+                    text,
+                    item: Some(id),
+                });
             } else {
                 if !st.order.contains(&id) {
                     st.order.push(id.clone());

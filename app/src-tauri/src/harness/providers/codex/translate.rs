@@ -202,7 +202,10 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
             if !text.is_empty() {
                 st.partial_item = Some(s(p, "itemId"));
                 st.partial_message.push_str(&text);
-                out.push(HarnessEvent::AssistantDelta { text });
+                out.push(HarnessEvent::AssistantDelta {
+                    text,
+                    item: Some(s(p, "itemId")),
+                });
             }
         }
         "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => {

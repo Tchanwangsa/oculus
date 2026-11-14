@@ -6,6 +6,7 @@
 pub(in crate::harness) mod consumer;
 pub(in crate::harness) mod continuation;
 pub mod dictation;
+mod drafts;
 pub mod lifecycle;
 pub mod models;
 pub(in crate::harness) mod proposal_context;
@@ -19,6 +20,7 @@ pub mod setup;
 pub mod suggest;
 mod thought_clock;
 pub mod turns;
+mod wake;
 
 pub use lifecycle::{init, reconcile, shutdown, sweep_strays};
 
@@ -86,6 +88,9 @@ pub(in crate::harness) enum BusMsg {
         generation: Generation,
         reason: Release,
     },
+    /// The time the consumer asked to be woken at has come
+    /// (`ConsumerIo::wake_at`): work that was waiting on it is due.
+    Wake,
 }
 
 impl BusMsg {

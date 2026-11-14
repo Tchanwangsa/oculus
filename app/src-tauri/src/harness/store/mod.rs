@@ -15,8 +15,8 @@ pub use apply::{apply, apply_event, Stored};
 pub use items::{newest_anchor, truncate_from, user_item, Question};
 pub use naming::{claim_naming, reconcile, save_rate_limits, NamingSeed, Reconciled};
 pub use runs::{
-    append_draft, begin as begin_run, bind_session, clear_draft, draft, fresh_receipt, mark_sent,
-    receipt_run, settle as settle_run, Owner, RunStart, SendIntent, Settlement, NOT_CLAIMED,
+    begin as begin_run, bind_session, clear_draft, fresh_receipt, mark_sent, receipt_run,
+    set_draft, settle as settle_run, Owner, RunStart, SendIntent, Settlement, NOT_CLAIMED,
     NO_ANSWER, PART_MISSING,
 };
 pub use threads::{create_thread, delete_thread, set_model, thread, LectureRef, ThreadRow};

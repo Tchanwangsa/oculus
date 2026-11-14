@@ -199,7 +199,7 @@ impl OneOff {
         let (mut replies, mut streamed) = (Replies::default(), String::new());
         let failed = drain_turn(&self.rx, timeout, doing, |ev| {
             replies.observe(ev);
-            if let HarnessEvent::AssistantDelta { text } = ev {
+            if let HarnessEvent::AssistantDelta { text, .. } = ev {
                 streamed.push_str(text);
             }
         });

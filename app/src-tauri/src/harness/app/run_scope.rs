@@ -329,13 +329,6 @@ impl RunScope {
                 provider_session_id,
                 ..
             } => rt.block_on(store::bind_session(pool, open.run_id, provider_session_id)),
-            // Uncommitted answer text survives a restart (`store::recover`).
-            HarnessEvent::AssistantDelta { text } => {
-                rt.block_on(store::append_draft(pool, open.run_id, text))
-            }
-            HarnessEvent::AssistantMessage { .. } => {
-                rt.block_on(store::clear_draft(pool, open.run_id))
-            }
             HarnessEvent::TurnFinished { status, .. } => {
                 let settled = rt.block_on(store::settle_run(
                     pool,

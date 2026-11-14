@@ -180,7 +180,10 @@ impl Translator {
                 if let Some(d) = su.get("text_delta").and_then(|s| s.as_str()) {
                     if !d.is_empty() {
                         self.step_text.push_str(d);
-                        out.push(HarnessEvent::AssistantDelta { text: d.into() });
+                        out.push(HarnessEvent::AssistantDelta {
+                            text: d.into(),
+                            item: Some(format!("step-{index}")),
+                        });
                     }
                 }
                 if state == "DONE" {
