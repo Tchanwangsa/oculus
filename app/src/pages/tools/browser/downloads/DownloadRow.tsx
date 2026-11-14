@@ -14,7 +14,10 @@ interface Action {
   run: () => Promise<unknown>;
 }
 
-/** What can be done with a download that is not waiting for a choice. */
+/** What can be done with a download that is not waiting for a choice. One
+ *  that failed or was refused offers nothing: its address is not kept (a
+ *  signed link, a form post or a `blob:` cannot be fetched a second time),
+ *  so it is started again from its page. */
 function actionsFor(d: Download): Action[] {
   const saved = d.state === "saved" ? d.saved_to : null;
   if (saved?.kind === "oculus") {
@@ -29,15 +32,13 @@ function actionsFor(d: Download): Action[] {
       { label: "Open", run: () => downloads.open(d.id) },
     ];
   }
-  if (d.state === "failed" && d.can_retry) {
-    return [{ label: "Retry", run: () => downloads.retry(d.id) }];
-  }
   return [];
 }
 
 /** The icon and the text column every row shares. */
 function Details({ download, children }: { download: Download; children?: ReactNode }) {
   const Icon = fileIconFor(download.name);
+  const size = sizeWords(download);
   return (
     <>
       <Icon size={14} className="mt-0.5 shrink-0 opacity-60" aria-hidden />
@@ -47,8 +48,8 @@ function Details({ download, children }: { download: Download; children?: ReactN
         </span>
         <span className="flex min-w-0 gap-1 text-[11px] text-muted-foreground">
           {download.host ? <span className="min-w-0 truncate">{download.host}</span> : null}
-          {download.host ? <span aria-hidden>·</span> : null}
-          <span className="shrink-0 tabular-nums">{sizeWords(download)}</span>
+          {download.host && size ? <span aria-hidden>·</span> : null}
+          {size ? <span className="shrink-0 tabular-nums">{size}</span> : null}
         </span>
         <DownloadState download={download} />
         {children}

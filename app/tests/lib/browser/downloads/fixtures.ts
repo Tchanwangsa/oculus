@@ -12,7 +12,6 @@ export function download(id: number, over: Partial<Download> = {}): Download {
     choice: null,
     saved_to: null,
     error: null,
-    can_retry: true,
     ...over,
   };
 }

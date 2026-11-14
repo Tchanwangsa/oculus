@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { folderOf, sizeWords, stateWords } from "@/lib/browser/downloads/describe";
+import { isProblem, isSettled, isWaiting } from "@/lib/browser/downloads/types";
 import { download } from "./fixtures";
 
 const upload = {
@@ -67,6 +68,21 @@ describe("stateWords", () => {
       tone: "error",
     });
   });
+
+  test("a refused playlist says why in Rust's words, and counts no bytes", () => {
+    const refused = download(1, {
+      name: "master.m3u8",
+      state: "refused",
+      error: "this is a video stream's playlist, not the video itself",
+    });
+    expect(stateWords(refused)).toEqual({
+      text: "Not downloaded",
+      place: null,
+      detail: "this is a video stream's playlist, not the video itself",
+      tone: "error",
+    });
+    expect(sizeWords(refused)).toBeNull();
+  });
 });
 
 describe("sizeWords", () => {
@@ -74,6 +90,21 @@ describe("sizeWords", () => {
     expect(sizeWords(download(1, { received: 4.2 * 1024 * 1024 }))).toBe("4.2 MB received");
     expect(sizeWords(download(1, { state: "ready", received: 2048 }))).toBe("2.0 KB");
   });
+});
+
+test("which rows wait, which are done with, and which ended with nothing kept", () => {
+  const by = (state: Parameters<typeof download>[1]) => download(1, state);
+  expect(isWaiting(by({ state: "receiving" }))).toBe(true);
+  expect(isWaiting(by({ state: "receiving", choice: { kind: "discard" } }))).toBe(false);
+  expect(isWaiting(by({ state: "ready" }))).toBe(true);
+  for (const state of ["saved", "discarded", "failed", "refused"] as const) {
+    expect(isWaiting(by({ state }))).toBe(false);
+    expect(isSettled(by({ state }))).toBe(true);
+  }
+  for (const state of ["receiving", "ready", "delivering"] as const) expect(isSettled(by({ state }))).toBe(false);
+  expect(isProblem(by({ state: "failed" }))).toBe(true);
+  expect(isProblem(by({ state: "refused" }))).toBe(true);
+  expect(isProblem(by({ state: "discarded" }))).toBe(false);
 });
 
 test("folderOf takes the parent of either separator", () => {

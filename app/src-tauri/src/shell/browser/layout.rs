@@ -46,7 +46,17 @@ pub(super) fn parse(url: &str) -> Result<url::Url, String> {
     }
 }
 
+/// The page of open tab `id`. A closed tab's page kept for a download
+/// (`close_tab`) is not one: no command, load event or timer reaches it.
 pub(super) fn page(app: &AppHandle, id: u32) -> Option<Webview<tauri::Wry>> {
+    if with_state(app, |s| s.parked.contains(&id)) {
+        return None;
+    }
+    webview(app, id)
+}
+
+/// The webview of tab `id`, open or kept after its tab closed.
+pub(super) fn webview(app: &AppHandle, id: u32) -> Option<Webview<tauri::Wry>> {
     app.get_webview(&label(id))
 }
 
@@ -148,9 +158,9 @@ pub(super) fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(),
                     tab.loading = started;
                 }
                 // Started is the commit (WebKit) or content loading
-                // (WebView2): the popup shows a page now.
+                // (WebView2): the tab shows a page now.
                 if started {
-                    s.popups.remove(&id);
+                    s.blank.remove(&id);
                 }
             });
             broadcast(&load_app);
@@ -247,30 +257,28 @@ pub fn open_tab(app: &AppHandle, url: url::Url) -> Result<u32, String> {
     open(app, url, None)
 }
 
-/// Opens `url` in a new tab on behalf of tab `opener`: a page's popup, or a
-/// download fetched again. It closes if the URL turns out to be a download.
+/// Opens `url` in a new tab for a page's popup, on behalf of tab `opener`.
 pub(super) fn open_popup(app: &AppHandle, url: url::Url, opener: u32) -> Result<u32, String> {
     open(app, url, Some(opener))
 }
 
+/// A new tab is blank until its page commits; if it downloads first, it was
+/// opened only for that and closes (`downloads/stage.rs`).
 fn open(app: &AppHandle, url: url::Url, opener: Option<u32>) -> Result<u32, String> {
     let id = with_state(app, |s| {
         s.next_id += 1;
         s.tabs.push(Tab::new(s.next_id, url.to_string()));
         s.backgrounded.insert(s.next_id, Instant::now());
-        if let Some(opener) = opener {
-            s.popups.insert(s.next_id, opener);
-        }
+        s.blank.insert(s.next_id, opener);
         s.next_id
     });
-    match opener {
-        // Often a download, whose URL can carry a signed token.
-        Some(opener) => elog!(
-            "[oculus] browser: opening tab {id} for tab {opener} → {}",
-            super::downloads::origin(&url)
-        ),
-        None => elog!("[oculus] browser: opening tab {id} → {url}"),
-    }
+    // The origin only: any new tab can turn out to be a download, whose URL
+    // can carry a signed token.
+    let from = opener.map(|t| format!(" for tab {t}")).unwrap_or_default();
+    elog!(
+        "[oculus] browser: opening tab {id}{from} → {}",
+        super::downloads::origin(&url)
+    );
     if wants_sessions(&url) {
         broadcast(app);
         let app = app.clone();
@@ -297,7 +305,8 @@ fn open(app: &AppHandle, url: url::Url, opener: Option<u32>) -> Result<u32, Stri
 
 /// Closes tab `id`. Its page ends at once (`teardown`), unless a download in
 /// it has not finished: tauri hears a download's end only from a live page,
-/// so that page is kept hidden and quiet until the download settles.
+/// so that page is kept hidden and quiet until the download settles. Never
+/// asks the page for its URL, which a download-only page does not have.
 pub(super) fn close_tab(app: &AppHandle, id: u32) {
     let keep = with_state(app, |s| {
         s.forget(id);
@@ -307,7 +316,7 @@ pub(super) fn close_tab(app: &AppHandle, id: u32) {
         }
         keep
     });
-    if let Some(webview) = page(app, id) {
+    if let Some(webview) = webview(app, id) {
         if keep {
             park(&webview);
         } else {

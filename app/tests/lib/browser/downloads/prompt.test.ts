@@ -48,6 +48,71 @@ describe("which download the Save dialog asks about", () => {
     expect(p.arrivals).toEqual({});
   });
 
+  test("a download-only tab the student opened, in front, asks at once and stays open when it closes", () => {
+    // A link from the app, a typed address or an attachment opened in tab 5:
+    // no opener, so the download is tab 5's own.
+    const rows = [download(1, { tab: 5 })];
+    let p = step(EMPTY_PROMPT, rows, view([5], [1, 5]), 0);
+    expect(p.open).toBe(1);
+    // Rust closes tab 5; the strip has not moved off it yet.
+    p = step(p, rows, view([5], [1]), 50);
+    expect(p.open).toBe(1);
+    // The strip brings its neighbour forward: the dialog is over that tab.
+    p = step(p, rows, view([1], [1]), 60);
+    expect(p.open).toBe(1);
+    // The 1–2 ms finish changes nothing.
+    p = step(p, [download(1, { tab: 5, state: "ready", received: 900 })], view([1], [1]), 70);
+    expect(p.open).toBe(1);
+    // A switch of tabs after that dismisses it, as for any download.
+    p = step(p, rows, view([2], [1, 2]), 80);
+    expect(p.open).toBeNull();
+  });
+
+  test("it stays open when the closed tab was the last one and no browser tab is left in front", () => {
+    const rows = [download(1, { tab: 5 })];
+    let p = step(EMPTY_PROMPT, rows, view([5], [5]), 0);
+    p = step(p, rows, view([5], []), 50);
+    // The strip's last tab goes back to the new-tab page.
+    p = step(p, rows, view([], []), 60);
+    expect(p.open).toBe(1);
+    expect(p.arrivals).toEqual({});
+  });
+
+  test("a download-only tab opened in the background only waits in the list", () => {
+    const rows = [download(1, { tab: 5 })];
+    let p = step(EMPTY_PROMPT, rows, view([1], [1, 5]), 0);
+    expect(p.open).toBeNull();
+    // Once it has closed nothing can bring it forward: no grace to sit out.
+    p = step(p, rows, view([1], [1]), 50);
+    expect(p.open).toBeNull();
+    expect(p.arrivals).toEqual({});
+    expect(nextDeadline(p)).toBeNull();
+  });
+
+  test("a save that bounces for a download whose tab is gone asks again wherever the student is", () => {
+    const saving = download(1, { tab: 5, state: "delivering", choice: { kind: "path", path: "/x/a.pdf" } });
+    let p = step(EMPTY_PROMPT, [download(1, { tab: 5 })], view([5], [5]), 0);
+    p = step(p, [saving], view([], []), 100);
+    expect(p.open).toBeNull();
+    p = step(p, [download(1, { tab: 5, state: "ready", error: "a.pdf already exists there" })], view([], []), 200);
+    expect(p.open).toBe(1);
+  });
+
+  test("a tab closed under its dialog leaves the dialog open", () => {
+    const rows = [download(1, { tab: 1 })];
+    let p = step(EMPTY_PROMPT, rows, view([1], [1, 2]), 0);
+    p = step(p, rows, view([2], [2]), 10);
+    expect(p.open).toBe(1);
+  });
+
+  test("a popup whose opener has closed leaves its download waiting", () => {
+    const rows = [download(1, { tab: 1 })];
+    let p = step(EMPTY_PROMPT, rows, view([5], [1, 5]), 0);
+    p = step(p, rows, view([3], [3]), 50);
+    expect(p.open).toBeNull();
+    expect(p.arrivals).toEqual({});
+  });
+
   test("the mount's fetch learns rows without asking", () => {
     const p = step(EMPTY_PROMPT, [download(1, { tab: 1 }), download(2, { tab: 1, state: "ready" })], view([1]), 0, true);
     expect(p.open).toBeNull();
@@ -113,5 +178,26 @@ describe("which download the Save dialog asks about", () => {
     const rows = [download(1, { state: "failed", error: "x" })];
     const p = step(EMPTY_PROMPT, rows, view([1]), 0, true);
     expect(ask(p, rows, 1)).toBe(p);
+  });
+
+  test("a refused playlist, or a download that ends before it is seen, never asks", () => {
+    const rows = [
+      download(1, { state: "refused", error: "a playlist" }),
+      download(2, { state: "failed", error: "the download did not finish" }),
+    ];
+    const p = step(EMPTY_PROMPT, rows, view([1]), 0);
+    expect(p.open).toBeNull();
+    expect(p.arrivals).toEqual({});
+  });
+
+  test("a download already finished when it is first seen asks like any other", () => {
+    const p = step(EMPTY_PROMPT, [download(1, { state: "ready", received: 900 })], view([1]), 0);
+    expect(p.open).toBe(1);
+  });
+
+  test("the dialog closes when the download it asks about fails", () => {
+    let p = step(EMPTY_PROMPT, [download(1)], view([1]), 0);
+    p = step(p, [download(1, { state: "failed", error: "the download did not finish" })], view([1]), 10);
+    expect(p.open).toBeNull();
   });
 });

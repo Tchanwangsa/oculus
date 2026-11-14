@@ -14,8 +14,6 @@ export const downloads = {
     invoke<string | null>("browser_download_save_panel", { id }),
   reveal: (id: number) => invoke<void>("browser_download_reveal", { id }),
   open: (id: number) => invoke<void>("browser_download_open", { id }),
-  /** Only a saved, discarded or failed row. */
+  /** Only a saved, discarded, failed or refused row. */
   clear: (id: number) => invoke<void>("browser_download_clear", { id }),
-  /** A failed row: fetched again in a new tab; it returns as a new row. */
-  retry: (id: number) => invoke<number>("browser_download_retry", { id }),
 };

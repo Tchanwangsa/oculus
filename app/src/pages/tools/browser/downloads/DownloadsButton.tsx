@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DownloadSimple } from "@phosphor-icons/react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
@@ -9,34 +9,48 @@ import { DownloadRow } from "./DownloadRow";
 
 /**
  * The toolbar's downloads button, shown once there has been a download this
- * session, with a dot while one waits for a choice. Its popover lists every
- * download, newest first; the list is the popover's one scroller.
+ * session, with a dot while one waits for a choice or has failed or been
+ * refused since the list was last opened. Its popover lists every download,
+ * newest first; the list is the popover's one scroller.
  */
 export function DownloadsButton({ className }: { className: string }) {
   const seen = useBrowserDownloadsStore((s) => s.seen);
   const list = useBrowserDownloadsStore((s) => s.downloads);
   const ask = useBrowserDownloadsStore((s) => s.ask);
+  const problem = useBrowserDownloadsStore((s) => s.problem);
+  const acknowledge = useBrowserDownloadsStore((s) => s.acknowledge);
   const [open, setOpen] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   // Set while the popover closes to open the dialog, so focus is left to it.
   const asking = useRef(false);
   useScrollFade(scroller, "y", open ? list.length : -1);
+  // A problem is seen once the list shows it, open already or opened later.
+  useEffect(() => {
+    if (open && problem) acknowledge();
+  }, [open, problem, acknowledge]);
 
   if (!seen) return null;
   const waiting = list.some(isWaiting);
   const newest = [...list].reverse();
+  const label = waiting
+    ? "Downloads, one waiting for a choice"
+    : problem
+      ? "Downloads, one was not saved"
+      : "Downloads";
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button
-          aria-label={waiting ? "Downloads, one waiting for a choice" : "Downloads"}
-          title="Downloads"
-          className={cn(className, "relative")}
-        >
+        <button aria-label={label} title="Downloads" className={cn(className, "relative")}>
           <DownloadSimple size={15} />
-          {waiting ? (
-            <span aria-hidden className="absolute top-1 right-1 size-1.5 rounded-full bg-brand" />
+          {waiting || problem ? (
+            <span
+              aria-hidden
+              className={cn(
+                "absolute top-1 right-1 size-1.5 rounded-full",
+                waiting ? "bg-brand" : "bg-destructive",
+              )}
+            />
           ) : null}
         </button>
       </PopoverTrigger>

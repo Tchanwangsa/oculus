@@ -3,7 +3,6 @@ use tauri_plugin_dialog::DialogExt;
 
 use super::deliver::run;
 use super::{broadcast, snapshot, Dest, Snapshot};
-use crate::shell::browser::layout::open_popup;
 use crate::shell::browser::with_state;
 
 /// For the frontend's mount, which may have missed earlier events.
@@ -73,23 +72,10 @@ pub fn browser_download_open(app: AppHandle, id: u32) -> Result<(), String> {
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| e.to_string())
 }
 
-/// Removes a saved, discarded or failed download from the list.
+/// Removes a saved, discarded, failed or refused download from the list.
 #[tauri::command]
 pub fn browser_download_clear(app: AppHandle, id: u32) -> Result<(), String> {
     with_state(&app, |s| s.downloads.clear(id))?;
     broadcast(&app);
     Ok(())
-}
-
-/// Fetches a failed download again in a new tab, which closes itself if the
-/// URL downloads again; the failed row is replaced by the new download.
-/// Returns the new tab. Async, as `browser_open_url` is: Windows must not
-/// make a page on its event loop.
-#[tauri::command]
-pub async fn browser_download_retry(app: AppHandle, id: u32) -> Result<u32, String> {
-    let (tab, url) = with_state(&app, |s| s.downloads.retry_target(id))?;
-    let opened = open_popup(&app, url, tab)?;
-    with_state(&app, |s| s.downloads.forget(id));
-    broadcast(&app);
-    Ok(opened)
 }

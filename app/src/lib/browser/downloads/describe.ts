@@ -18,7 +18,7 @@ export interface StateWords {
   /** Leads the line: "Receiving", "Will save to", "Saved to"… */
   text: string;
   place: Place | null;
-  /** Why it failed, or a saved file's conversion problem. */
+  /** Why it failed or was refused, or a saved file's conversion problem. */
   detail: string | null;
   tone: Tone;
 }
@@ -59,11 +59,15 @@ export function stateWords(d: Download): StateWords {
       return { text: "Discarded", place: null, detail: null, tone: "muted" };
     case "failed":
       return { text: "Failed", place: null, detail: d.error, tone: "error" };
+    case "refused":
+      return { text: "Not downloaded", place: null, detail: d.error, tone: "error" };
   }
 }
 
 /** The size beside a download: bytes so far while it arrives (there is no
- *  total to give), the final size after. */
-export function sizeWords(d: Download): string {
+ *  total to give), the final size after; null for one that was refused,
+ *  which has no bytes to count. */
+export function sizeWords(d: Download): string | null {
+  if (d.state === "refused") return null;
   return d.state === "receiving" ? `${fmtBytes(d.received)} received` : fmtBytes(d.received);
 }

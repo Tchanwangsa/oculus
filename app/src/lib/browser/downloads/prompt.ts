@@ -7,11 +7,14 @@ import { isWaiting, type Download, type DownloadState } from "./types";
  * delivery that failed (the row is `ready` again with an `error`) asks
  * again, as a new download would.
  *
- * Rust credits a blank popup's download to the tab that opened it and closes
- * the popup, so the popup can be in front when the download arrives. An
- * arrival is therefore decided once the tabs settle: when a tab in front at
- * arrival has closed and the download's tab is in front, it asks. One whose
- * tab was not in front waits `ARRIVAL_GRACE_MS` for that to happen.
+ * A tab that had shown no page when it started downloading was opened only
+ * for that, and Rust closes it as the download arrives (`Download.tab`).
+ * Opened by a page's popup, its download is the opener's: the popup is in
+ * front at the arrival, so the arrival is decided once the tabs settle, and
+ * asks if the opener comes to the front within `ARRIVAL_GRACE_MS`. Opened by
+ * the student (a link from the app, a typed address), its download is its
+ * own: in front it asks at once, and the dialog stays open over whatever the
+ * app shows once the tab is gone; in the background it waits in the list.
  */
 
 /** How long a download from a tab not in front waits for the popup in front
@@ -22,6 +25,8 @@ interface Arrival {
   since: number;
   /** The browser tabs in front when it arrived. */
   front: number[];
+  /** A delivery that did not land, not a new download. */
+  bounced: boolean;
 }
 
 export interface Prompt {
@@ -53,7 +58,11 @@ type Verdict = "ask" | "background" | "wait";
 
 function decide(arrival: Arrival, tab: number, view: View, now: number): Verdict {
   const inFront = view.front.includes(tab);
-  if (arrival.front.includes(tab)) return inFront ? "ask" : "background";
+  const closed = !view.live.has(tab);
+  // Its own tab was in front; a download-only tab may have closed since.
+  if (arrival.front.includes(tab)) return inFront || closed ? "ask" : "background";
+  // No tab is left to come forward: only the student's own failed save asks.
+  if (closed) return arrival.bounced ? "ask" : "background";
   if (arrival.front.some((t) => !view.live.has(t))) {
     if (inFront) return "ask";
     // The strip still shows the closed popup until it catches up.
@@ -75,8 +84,16 @@ export function step(
   now: number,
   initial = false,
 ): Prompt {
-  // Switching tabs dismisses the dialog; the download waits in the list.
-  let open = sameTabs(prev.front, view.front) ? prev.open : null;
+  const byId = new Map(downloads.map((d) => [d.id, d]));
+  let open = prev.open;
+  const shown = open == null ? undefined : byId.get(open);
+  if (!shown || !isWaiting(shown)) open = null;
+  else if (!sameTabs(prev.front, view.front)) {
+    // Switching tabs dismisses the dialog; the download waits in the list.
+    // Its own tab closing in front is no switch: it stays, over what is next.
+    const closedUnderIt = prev.front.includes(shown.tab) && !view.live.has(shown.tab);
+    if (!closedUnderIt) open = null;
+  }
   const arrivals = { ...prev.arrivals };
   const states: Record<number, DownloadState> = {};
 
@@ -85,12 +102,8 @@ export function step(
     states[d.id] = d.state;
     const arrived = before === undefined ? !initial && isWaiting(d) : false;
     const bounced = before !== undefined && before !== "ready" && d.state === "ready" && d.error != null;
-    if (arrived || bounced) arrivals[d.id] = { since: now, front: [...view.front] };
+    if (arrived || bounced) arrivals[d.id] = { since: now, front: [...view.front], bounced };
   }
-
-  const byId = new Map(downloads.map((d) => [d.id, d]));
-  const shown = open == null ? undefined : byId.get(open);
-  if (!shown || !isWaiting(shown)) open = null;
 
   for (const key of Object.keys(arrivals)) {
     const id = Number(key);

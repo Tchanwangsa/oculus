@@ -1,6 +1,8 @@
 //! The name a download is staged under, from the path WebKit or WebView2
 //! proposes. The server picks that name, so only its last component is kept,
-//! and nothing in it can leave the download's own staging folder.
+//! and nothing in it can leave the download's own staging folder. WebKit has
+//! already turned separators into `_` and dropped a leading dot; nothing
+//! cuts a long name, and one over 255 bytes fails the download.
 
 use std::path::Path;
 
@@ -11,9 +13,12 @@ const MAX_BYTES: usize = 200;
 const MAX_EXT_BYTES: usize = 16;
 const FALLBACK: &str = "download";
 
-/// The safe file name for a download proposed at `proposed`. `downloads`
-/// is the folder the engine proposed it in (`~/Downloads`), where it may have
-/// counted past a taken name.
+/// Streaming playlists (HLS, DASH): "Download Video" on a streaming player
+/// saves the playlist, whose lines can be signed segment URLs.
+const STREAM_MANIFESTS: [&str; 3] = [".m3u8", ".m3u", ".mpd"];
+
+/// The safe file name for a download proposed at `proposed`. `downloads` is
+/// the folder the engine numbered the name against, where it does (Windows).
 pub(super) fn staged_name(proposed: &Path, downloads: Option<&Path>) -> String {
     // The text after the last separator, not `file_name()`, which would
     // read `~/Downloads/.` or a bare `~/Downloads/` as "Downloads".
@@ -26,9 +31,9 @@ pub(super) fn staged_name(proposed: &Path, downloads: Option<&Path>) -> String {
     safe(&last)
 }
 
-/// wry and WebView2 turn `notes.pdf` into `notes (1).pdf` when `~/Downloads`
-/// holds one already; that counter means nothing in staging. Dropped only
-/// when the name it stepped around is really there.
+/// Windows only. wry hands over WebView2's `ResultFilePath` as is, which
+/// Chromium numbers past a taken name in `~/Downloads` (`notes (1).pdf`);
+/// the counter is dropped when the name it stepped around is really there.
 pub(super) fn uncounted(name: &str, exists: impl Fn(&str) -> bool) -> String {
     let Some(open) = name.rfind(" (") else {
         return name.to_string();
@@ -47,6 +52,12 @@ pub(super) fn uncounted(name: &str, exists: impl Fn(&str) -> bool) -> String {
     } else {
         name.to_string()
     }
+}
+
+/// Whether `name` is a streaming playlist, which is never staged.
+pub(super) fn is_stream_manifest(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    STREAM_MANIFESTS.iter().any(|ext| lower.ends_with(ext))
 }
 
 /// One path component on macOS and Windows alike: no separators, no

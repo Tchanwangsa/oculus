@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CircleNotch, Warning } from "@phosphor-icons/react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -11,11 +11,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useSubjects } from "@/hooks/data/useSubjects";
+import { browser } from "@/lib/browser";
 import { downloads } from "@/lib/browser/downloads/commands";
 import { sizeWords } from "@/lib/browser/downloads/describe";
 import { guessSubject, preselectSubject } from "@/lib/browser/downloads/subjectGuess";
 import type { Download, LastDestination } from "@/lib/browser/downloads/types";
 import { isPipelineFile } from "@/lib/files/fileTypes";
+import { isWindows } from "@/lib/platform";
 import { useAskedDownload, useBrowserDownloadsStore } from "@/stores/shell/browserDownloadsStore";
 import { useBrowserPrefsStore } from "@/stores/shell/browserPrefsStore";
 import { useBrowserStore } from "@/stores/shell/browserStore";
@@ -28,13 +30,19 @@ import { problem, THIS_COMPUTER } from "./words";
  * The Save dialog: where a download goes, asked while its bytes still arrive.
  * A portal, so it draws over the browser page and the holes keep its clicks
  * (`nativeHoles.ts`); Radix focuses its first control on open, which takes
- * the keyboard from the page. Dismissing it never discards: the download
- * waits in the toolbar's list. Mounted once, in AppLayout.
+ * the keyboard from the page on macOS, and on Windows Rust hands it over
+ * (`browser.focusApp`). Dismissing it never discards: the download waits in
+ * the toolbar's list. Mounted once, in AppLayout, so it also opens over a
+ * page that is not the browser's.
  */
 export function BrowserDownloadDialog() {
   const download = useAskedDownload();
   const dismiss = useBrowserDownloadsStore((s) => s.dismiss);
   const [busy, setBusy] = useState(false);
+  const asked = download?.id;
+  useEffect(() => {
+    if (asked != null && isWindows) browser.focusApp().catch(() => {});
+  }, [asked]);
   // A choice's own event may have closed it already; never close another.
   const done = (id: number) => {
     if (useBrowserDownloadsStore.getState().prompt.open === id) dismiss();
@@ -67,7 +75,11 @@ function SaveForm({
 }) {
   const { subjects } = useSubjects();
   const institution = useInstitution();
-  const tabUrl = useBrowserStore((s) => s.tabs.find((t) => t.id === download.tab)?.url);
+  // A download-only tab closes as the dialog opens: the address it was
+  // opened at is kept, since it still names the subject.
+  const liveUrl = useBrowserStore((s) => s.tabs.find((t) => t.id === download.tab)?.url);
+  const [tabUrl, setTabUrl] = useState(liveUrl);
+  if (liveUrl && liveUrl !== tabUrl) setTabUrl(liveUrl);
   const lastDestination = useBrowserPrefsStore((s) => s.lastDestination);
   const lastSubject = useBrowserPrefsStore((s) => s.lastSubject);
   const remember = useBrowserPrefsStore((s) => s.rememberDestination);

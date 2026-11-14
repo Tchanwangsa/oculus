@@ -20,13 +20,22 @@ pub fn browser_state(app: AppHandle) -> Snapshot {
 }
 
 /// A slot for tab `id` has mounted: place and show that page only. A
-/// discarded tab's page is made again, and shows once it exists.
+/// discarded tab's page is made again, and shows once it exists. A closed
+/// tab's slot can mount late; its page may be kept for a download and must
+/// stay hidden.
 #[tauri::command]
 pub fn browser_place(app: AppHandle, id: u32, viewport: Viewport) {
-    with_state(&app, |s| {
+    let open = with_state(&app, |s| {
+        if !s.tabs.iter().any(|t| t.id == id) {
+            return false;
+        }
         s.viewports.insert(id, viewport);
         s.show(id);
+        true
     });
+    if !open {
+        return;
+    }
     restore(&app, id);
     layout_tab(&app, id);
     if let Some(page) = page(&app, id) {
@@ -35,13 +44,34 @@ pub fn browser_place(app: AppHandle, id: u32, viewport: Viewport) {
     }
 }
 
-/// Placement only — a hidden page stays hidden.
+/// Placement only — a hidden page stays hidden, a closed tab's untouched.
 #[tauri::command]
 pub fn browser_set_viewport(app: AppHandle, id: u32, viewport: Viewport) {
-    with_state(&app, |s| {
-        s.viewports.insert(id, viewport);
+    let open = with_state(&app, |s| {
+        let open = s.tabs.iter().any(|t| t.id == id);
+        if open {
+            s.viewports.insert(id, viewport);
+        }
+        open
     });
-    layout_tab(&app, id);
+    if open {
+        layout_tab(&app, id);
+    }
+}
+
+/// Gives the app's own webview the keyboard, for a dialog over a page. On
+/// Windows a DOM focus cannot move it off a WebView2 page (the same call
+/// as `shell/menu/windows.rs`); elsewhere the dialog's own focus does.
+#[tauri::command]
+pub fn browser_focus_app(app: AppHandle) {
+    #[cfg(target_os = "windows")]
+    if let Some(main) = tauri::Manager::get_webview(&app, super::MAIN) {
+        if let Err(e) = main.set_focus() {
+            elog!("[oculus] browser: could not focus the app: {e}");
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = app;
 }
 
 /// Hidden, not destroyed until it has stayed hidden a while (`discard`).

@@ -124,7 +124,11 @@ pub(super) fn restore(app: &AppHandle, id: u32) {
     let Some(url) = parse(&url).ok().or_else(|| "about:blank".parse().ok()) else {
         return;
     };
-    elog!("[oculus] browser: restoring tab {id} → {url}");
+    // The origin only, as `open` logs it.
+    elog!(
+        "[oculus] browser: restoring tab {id} → {}",
+        super::downloads::origin(&url)
+    );
     if wants_sessions(&url) {
         let seeded_app = app.clone();
         seed_sessions(app, move || recreate(&seeded_app, id, url));

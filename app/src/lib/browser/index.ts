@@ -199,6 +199,9 @@ export const browser = {
     invoke("browser_find", { id, query, backwards }),
   findClear: (id: number) => invoke("browser_find_clear", { id }),
   close: (id: number) => invoke("browser_close_tab", { id }),
+  /** Windows: gives the app's webview the keyboard, which a DOM focus cannot
+   *  take from a page. A no-op elsewhere. */
+  focusApp: () => invoke("browser_focus_app"),
 };
 
 export function stepZoom(current: number, direction: 1 | -1): number {

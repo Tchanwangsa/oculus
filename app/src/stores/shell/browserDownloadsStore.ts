@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { ask, dismiss, EMPTY_PROMPT, step, type Prompt, type View } from "@/lib/browser/downloads/prompt";
-import type { Download, DownloadsSnapshot } from "@/lib/browser/downloads/types";
+import { isProblem, type Download, type DownloadsSnapshot } from "@/lib/browser/downloads/types";
 
 /** A mirror of Rust's download list (`app/src-tauri/src/shell/browser/downloads/`),
  *  fed by `useBrowserDownloads`, with which download the Save dialog is
@@ -10,6 +10,9 @@ interface DownloadsState {
   /** Whether any download has been seen this session: the toolbar's button
    *  shows from then on, even once the list is cleared. */
   seen: boolean;
+  /** A download failed or was refused since the list was last opened: the
+   *  toolbar's button marks it, as nothing else says so. */
+  problem: boolean;
   prompt: Prompt;
   /** The tabs in front and the live tabs, as last reported. */
   view: View;
@@ -21,17 +24,23 @@ interface DownloadsState {
   /** Opens the dialog for a waiting download. */
   ask: (id: number) => void;
   dismiss: () => void;
+  /** The list was opened: its problems have been seen. */
+  acknowledge: () => void;
 }
 
 export const useBrowserDownloadsStore = create<DownloadsState>((set) => ({
   downloads: [],
   seen: false,
+  problem: false,
   prompt: EMPTY_PROMPT,
   view: { front: [], live: new Set() },
   apply: (snapshot, now, initial = false) =>
     set((s) => ({
       downloads: snapshot.downloads,
       seen: s.seen || snapshot.downloads.length > 0,
+      problem:
+        s.problem ||
+        (!initial && snapshot.downloads.some((d) => isProblem(d) && s.prompt.states[d.id] !== d.state)),
       prompt: step(s.prompt, snapshot.downloads, s.view, now, initial),
     })),
   setView: (view, now) =>
@@ -39,6 +48,7 @@ export const useBrowserDownloadsStore = create<DownloadsState>((set) => ({
   tick: (now) => set((s) => ({ prompt: step(s.prompt, s.downloads, s.view, now) })),
   ask: (id) => set((s) => ({ prompt: ask(s.prompt, s.downloads, id) })),
   dismiss: () => set((s) => ({ prompt: dismiss(s.prompt) })),
+  acknowledge: () => set((s) => (s.problem ? { problem: false } : s)),
 }));
 
 /** The download the dialog shows, or undefined. */

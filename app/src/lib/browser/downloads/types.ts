@@ -13,7 +13,9 @@ export type DownloadState =
   | "delivering"
   | "saved"
   | "discarded"
-  | "failed";
+  | "failed"
+  /** Never downloaded: a streaming playlist. `error` says so. */
+  | "refused";
 
 /** The student's answer to the Save dialog. */
 export type Dest =
@@ -30,12 +32,14 @@ export type SavedTo =
 export interface Download {
   /** Unique for the session, never reused. */
   id: number;
-  /** The tab it belongs to; for a blank popup Rust closed, the tab that
-   *  opened it. May be closed by now. */
+  /** The tab it belongs to. A tab that had shown no page when it started
+   *  downloading was opened only for that, and Rust closes it: its download
+   *  belongs to the tab that opened it, or with no opener to the closed tab
+   *  itself. Any tab may be closed by now. */
   tab: number;
   /** A safe file name: what the dialog shows and the save panel suggests. */
   name: string;
-  /** Null for `blob:` and `data:` downloads. */
+  /** Null for a `data:` download; a `blob:` gives its page's host. */
   host: string | null;
   state: DownloadState;
   /** Bytes on disk; the final size once ready. There is no total. */
@@ -43,9 +47,9 @@ export interface Download {
   /** A choice made while it was still receiving. */
   choice: Dest | null;
   saved_to: SavedTo | null;
-  /** Why it failed, or why a delivery did not land (it is `ready` again). */
+  /** Why it failed or was refused, or why a delivery did not land (it is
+   *  `ready` again). */
   error: string | null;
-  can_retry: boolean;
 }
 
 export interface DownloadsSnapshot {
@@ -62,5 +66,10 @@ export function isWaiting(d: Download): boolean {
 
 /** Done with: the list can drop it (`browser_download_clear`). */
 export function isSettled(d: Download): boolean {
-  return d.state === "saved" || d.state === "discarded" || d.state === "failed";
+  return d.state === "saved" || d.state === "discarded" || isProblem(d);
+}
+
+/** Ended with nothing kept, by no choice of the student's. */
+export function isProblem(d: Download): boolean {
+  return d.state === "failed" || d.state === "refused";
 }

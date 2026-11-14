@@ -23,6 +23,8 @@ import { panesOf, useTabStore } from "@/stores/shell/tabStore";
  * pages exist; the strip owns order and focus): a page no pane shows opens as
  * a tab in front, and a pane whose page is gone closes. Works per pane, so a
  * page held by a side panel item, in front or not, gets no tab of its own.
+ * A tab Rust closes while it is in front (one opened only to download) hands
+ * the front back to the tab it was opened from, not to its neighbour.
  *
  * Also writes history from the snapshots — on **finished** loads only, since
  * a commit fires for every redirect hop. Mounted once, in AppLayout.
@@ -32,6 +34,8 @@ export function useBrowserTabs() {
   const seen = useRef(new Map<number, string>());
   /** URLs whose title is written — WebKit repeats scripted title changes. */
   const titled = useRef(new Set<string>());
+  /** The strip tab in front when each page was given a tab of its own. */
+  const openedFrom = useRef(new Map<number, number>());
 
   useEffect(() => {
     let cancelled = false;
@@ -65,7 +69,10 @@ export function useBrowserTabs() {
       for (const tab of useTabStore.getState().tabs) {
         const main = browseId(tab.path);
         if (main != null && !live.has(main)) {
-          useTabStore.getState().closeTab(tab.id);
+          const { tabs, activeId, setActive, closeTab } = useTabStore.getState();
+          const from = openedFrom.current.get(main);
+          if (activeId === tab.id && from != null && tabs.some((t) => t.id === from)) setActive(from);
+          closeTab(tab.id);
           continue;
         }
         for (const item of tab.side?.items ?? []) {
@@ -82,8 +89,11 @@ export function useBrowserTabs() {
           .tabs.flatMap((t) => panesOf(t).map((p) => browseId(p.path)))
           .filter((id): id is number => id != null),
       );
+      for (const id of openedFrom.current.keys())
+        if (!live.has(id)) openedFrom.current.delete(id);
       for (const tab of snapshot.tabs) {
         if (known.has(tab.id)) continue;
+        openedFrom.current.set(tab.id, useTabStore.getState().activeId);
         useTabStore.getState().addTab(browsePath(tab.id));
       }
     };

@@ -1,20 +1,17 @@
 //! Browser downloads: every download is staged, then moved where the student
-//! says once both the choice and the last byte are in.
+//! says once both the choice and the last byte are in (`state.rs`).
 //!
 //! WebKit's download hook is synchronous and starts writing at once, so a
 //! prompt cannot block it. Each download goes to
-//! `downloads/.incoming/<pid>-<id>/<name>` under the data directory, never to
-//! `~/Downloads`; the frontend asks where it should go meanwhile. Either order
-//! of choice and finish delivers exactly once (`state.rs`).
+//! `downloads/.incoming/<pid>-<id>/<name>` in the data directory, never to
+//! `~/Downloads`, and the frontend asks where it should go meanwhile.
 //!
-//! - **Finished is matched by URL**, oldest first; WebView2 also names the
-//!   path (`correlate.rs`). macOS reports no progress, so a poller reads the
-//!   staged file's size while anything is receiving (`stage.rs`).
-//! - **In Oculus** goes through `import_files`, the uploads path; the
-//!   frontend writes the `files` row from the outcome. **On this Mac** is a
-//!   rename, or a copy across volumes (`deliver.rs`).
-//! - **The list is per session**, pushed whole on `browser-downloads` to the
-//!   app's webview. URLs stay in Rust (they can carry signed tokens).
+//! - `stage.rs` is the hook; `correlate.rs` matches a `Finished` to its
+//!   download by staged path; `deliver.rs` moves it (In Oculus is the
+//!   uploads path, `import_files`); `sweep.rs` clears a crash's leftovers.
+//! - The list is per session, pushed whole on `browser-downloads` to the
+//!   app's webview. A download's URL can carry a signed token, so it is
+//!   never kept, sent or logged: only its host, and a hash for matching.
 
 pub(crate) mod commands;
 mod correlate;
@@ -28,12 +25,17 @@ mod name;
 mod name_test;
 mod stage;
 mod state;
+mod sweep;
+#[cfg(test)]
+mod sweep_test;
 #[cfg(test)]
 mod tests;
 
-pub(super) use stage::{on_download, sweep_incoming};
+pub(super) use stage::on_download;
 pub(super) use state::Downloads;
+pub(super) use sweep::sweep_incoming;
 
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -56,8 +58,11 @@ pub enum State {
     Saved,
     /// Thrown away by the student.
     Discarded,
-    /// The download failed; nothing was kept.
+    /// The download failed; nothing was kept. `error` says so.
     Failed,
+    /// Never staged: a streaming playlist, whose lines can be signed segment
+    /// URLs and which is never the file meant. `error` says so.
+    Refused,
 }
 
 /// The student's answer to the Save dialog.
@@ -95,22 +100,23 @@ pub struct Download {
     /// Unique for the session; never reused.
     pub id: u32,
     /// The tab it belongs to: the one it started in, or the tab that opened
-    /// the blank popup it came from. The tab may be closed since.
+    /// the download-only tab it came from. The tab may be closed since; a
+    /// download-only tab with no opener is itself this tab, and is closed.
     pub tab: u32,
     /// The file name, already made safe; what the dialog and panel suggest.
     pub name: String,
-    /// The host it came from, for display; absent for `blob:`/`data:`.
+    /// The host it came from, for display: a `blob:`'s is its page's, and a
+    /// `data:` URL has none.
     pub host: Option<String>,
     pub state: State,
-    /// Bytes on disk so far.
+    /// Bytes on disk so far; the file's size once every byte is in.
     pub received: u64,
     /// A choice made while it was still receiving.
     pub choice: Option<Dest>,
     pub saved_to: Option<SavedTo>,
-    /// Why it failed, or why a delivery did not land (it is `ready` again).
+    /// Why it failed or was refused, or why a delivery did not land (it is
+    /// `ready` again).
     pub error: Option<String>,
-    /// Whether `browser_download_retry` can fetch it again.
-    pub can_retry: bool,
 }
 
 /// Everything the frontend mirrors, sent whole on every change.
@@ -146,6 +152,14 @@ pub(super) fn origin(url: &url::Url) -> String {
         url::Origin::Tuple(..) => url.origin().ascii_serialization(),
         url::Origin::Opaque(_) => format!("{}:", url.scheme()),
     }
+}
+
+/// The URL as a number, to match a `Finished` that names no path; the URL
+/// itself is not kept.
+fn url_key(url: &url::Url) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    url.as_str().hash(&mut hasher);
+    hasher.finish()
 }
 
 fn host(url: &url::Url) -> Option<String> {

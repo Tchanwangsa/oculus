@@ -124,9 +124,9 @@ struct Inner {
     /// One favicon attempt per host per run, found or not; the frontend
     /// persists what was found.
     favicons_tried: HashSet<String>,
-    /// Popup tabs that have not shown a page yet, to the tab that opened
-    /// each. A download from one closes it, as Chrome does.
-    popups: HashMap<u32, u32>,
+    /// Tabs that have not shown a page yet, to the tab that opened each, if
+    /// a page did. A download from one closes it, as Chrome does.
+    blank: HashMap<u32, Option<u32>>,
     /// Pages of closed tabs kept, hidden, until their downloads end.
     parked: HashSet<u32>,
     downloads: downloads::Downloads,
@@ -152,7 +152,7 @@ impl Inner {
         self.shown.remove(&id);
         self.backgrounded.remove(&id);
         self.discarded.remove(&id);
-        self.popups.remove(&id);
+        self.blank.remove(&id);
     }
 }
 
