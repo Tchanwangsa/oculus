@@ -42,6 +42,7 @@ pub fn init(app: &AppHandle) -> HarnessState {
         harness,
         bus: tx,
         queue,
+        startup: Arc::default(),
     }
 }
 
@@ -126,26 +127,16 @@ pub fn sweep_strays() {
     }
 }
 
-/// Startup: nothing survives a restart as `running`.
+/// Startup: nothing survives a restart as `running` (`startup.rs`). Begun
+/// here so the repair is usually over before the first command; a command
+/// that arrives sooner waits at the same gate, and one that finds the repair
+/// failed runs it again.
 pub fn reconcile(app: &AppHandle) {
-    let _ = app;
-    tauri::async_runtime::spawn(async {
-        if let Ok(pool) = crate::db::store::open_pool().await {
-            if let Err(error) = super::proposal_jobs::reconcile(&pool).await {
-                elog!("[oculus] proposal jobs: {error}");
-            }
-            if let Err(error) = super::continuation::reconcile(&pool).await {
-                elog!("[oculus] card continuations: {error}");
-            }
-            if let Ok(r) = store::reconcile(&pool).await {
-                if r.threads > 0 || r.tools > 0 {
-                    elog!(
-                        "[oculus] harness: marked {} interrupted thread(s) idle, closed {} open tool row(s)",
-                        r.threads,
-                        r.tools
-                    );
-                }
-            }
+    let startup = app.state::<HarnessState>().startup.clone();
+    tauri::async_runtime::spawn(async move {
+        // A first launch has no database yet, and so nothing to repair.
+        if crate::db::store::db_path().exists() {
+            let _ = startup.ready(crate::db::store::open_pool).await;
         }
     });
 }

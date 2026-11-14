@@ -17,6 +17,7 @@ use tokio::runtime::Runtime;
 
 use crate::harness::app::consumer::consume;
 use crate::harness::app::send::begin_run;
+use crate::harness::app::startup::Startup;
 use crate::harness::app::BusMsg;
 use crate::harness::{
     jobs, store, Harness, HarnessEvent, Provider, Queue, QueuedMessage, SendOptions, Sink, Sinks,
@@ -34,6 +35,9 @@ pub(super) struct Rig {
     pub pool: SqlitePool,
     pub thread: i64,
     pub provider: Provider,
+    /// The gate a command waits at, as `HarnessState` holds it: already
+    /// passed in a fresh rig, not yet after [`Rig::restart`].
+    startup: Startup,
     pub harness: Harness,
     pub bus: Sender<BusMsg>,
     /// Where the app's own events go: a send that failed before its turn.
@@ -46,7 +50,10 @@ pub(super) struct Rig {
     fed: Arc<AtomicBool>,
     clock: Arc<Clock>,
     drained: Sender<Sender<()>>,
-    consumer: JoinHandle<Io>,
+    consumer: Option<JoinHandle<Io>>,
+    /// What the consumers of earlier runtimes emitted, before a restart.
+    envelopes: Vec<Value>,
+    snapshots: Vec<Vec<Value>>,
     /// Continuations the consumer dispatched, which the rig starts itself.
     dispatched: Receiver<(QueuedMessage, SendOptions)>,
     card: Option<String>,
@@ -95,8 +102,6 @@ impl Rig {
                 "Replay request",
             ))
             .unwrap();
-        let harness = Harness::replay(assert_scratch(&scratch, &scratch));
-        assert_scratch(&crate::harness::thread_cwd(&scratch), &scratch);
         // A continuation sends its card's prompt where the recording sent the request.
         let card = scenario
             .continuation
@@ -109,49 +114,14 @@ impl Rig {
             }
         }
         let outbound = Outbound::new(expected, &scratch);
-        // The consumer runs beside the replay, as in the app: a send's run is
-        // written on it before the provider write.
-        let (bus, rx) = std::sync::mpsc::channel::<BusMsg>();
-        let sink = crate::harness::app::sink_for(&bus, thread, provider);
-        let sinks = crate::harness::app::sinks_for(&bus, thread, provider);
-        let queue = Arc::new(Mutex::new(Queue::default()));
-        let fed = Arc::new(AtomicBool::new(false));
-        let (continued, dispatched) = std::sync::mpsc::channel();
-        let (drained, waiters) = std::sync::mpsc::channel();
-        let clock = Clock::new();
-        let consumer = {
-            let (queue, fed, clock) = (queue.clone(), fed.clone(), clock.clone());
-            let mut io = Io {
-                pool: pool.clone(),
-                database: database.clone(),
-                scratch: scratch.to_path_buf(),
-                outbound: outbound.clone(),
-                envelopes: Vec::new(),
-                snapshots: Vec::new(),
-                runtime: None,
-                epoch: std::time::Instant::now(),
-                continued,
-                clock: clock.clone(),
-            };
-            std::thread::spawn(move || {
-                io.runtime = Some(Runtime::new().unwrap());
-                let feed = Feed {
-                    rx,
-                    fed,
-                    drained: waiters,
-                    clock,
-                };
-                consume(feed, queue, &mut io);
-                io
-            })
-        };
-        let bridge = session(
-            &harness,
+        let running = boot(
+            &pool,
+            &database,
+            &scratch,
+            &outbound,
             thread,
             provider,
-            &outbound,
             &scenario.fixture.native_session,
-            &scratch,
         );
         Rig {
             scenario,
@@ -161,21 +131,81 @@ impl Rig {
             pool,
             thread,
             provider,
-            harness,
-            bus,
-            sink,
-            sinks,
-            queue,
+            startup: Startup::repaired(),
+            harness: running.harness,
+            bus: running.bus,
+            sink: running.sink,
+            sinks: running.sinks,
+            queue: running.queue,
             outbound,
-            bridge,
-            fed,
-            clock,
-            drained,
-            consumer,
-            dispatched,
+            bridge: running.bridge,
+            fed: running.fed,
+            clock: running.clock,
+            drained: running.drained,
+            consumer: Some(running.consumer),
+            envelopes: Vec::new(),
+            snapshots: Vec::new(),
+            dispatched: running.dispatched,
             card,
             continuations: Vec::new(),
             fed_frames: 0,
+        }
+    }
+
+    /// The app is killed and started again on the same database file: the
+    /// consumer, the manager and every session go, and new ones come up as
+    /// `lifecycle::init` makes them. Nothing has run startup's repair yet;
+    /// [`Self::startup`] does, as does the first [`Self::send`], through the
+    /// gate the app's commands wait at.
+    pub fn restart(mut self) -> Self {
+        self.stop();
+        self.runtime.block_on(self.pool.close());
+        self.harness.shutdown();
+        self.pool = self
+            .runtime
+            .block_on(crate::db::store::pool(&assert_scratch(
+                &self.database,
+                &self.scratch,
+            )))
+            .unwrap();
+        let running = boot(
+            &self.pool,
+            &self.database,
+            &self.scratch,
+            &self.outbound,
+            self.thread,
+            self.provider,
+            &self.scenario.fixture.native_session,
+        );
+        self.startup = Startup::default();
+        self.harness = running.harness;
+        self.bus = running.bus;
+        self.sink = running.sink;
+        self.sinks = running.sinks;
+        self.queue = running.queue;
+        self.bridge = running.bridge;
+        self.fed = running.fed;
+        self.clock = running.clock;
+        self.drained = running.drained;
+        self.consumer = Some(running.consumer);
+        self.dispatched = running.dispatched;
+        self
+    }
+
+    /// Startup's repair, through the production gate (`app/startup.rs`).
+    pub fn startup(&self) -> Result<(), String> {
+        let pool = self.pool.clone();
+        self.runtime
+            .block_on(self.startup.ready(|| async { Ok(pool) }))
+    }
+
+    /// Stop the consumer, keeping what it emitted.
+    fn stop(&mut self) {
+        self.fed.store(true, Ordering::SeqCst);
+        if let Some(consumer) = self.consumer.take() {
+            let io = consumer.join().unwrap();
+            self.envelopes.extend(io.envelopes);
+            self.snapshots.extend(io.snapshots);
         }
     }
 
@@ -263,6 +293,8 @@ impl Rig {
         receipt: &str,
         opts: &SendOptions,
     ) -> Result<store::RunStart, String> {
+        // As `harness_send` does, before anything else.
+        self.startup()?;
         assert!(
             self.queue.lock().unwrap().try_claim(self.thread),
             "a send on a busy thread waits in the queue"
@@ -411,12 +443,8 @@ impl Rig {
 
     /// Stop the consumer and read what it left.
     pub fn finish(mut self) -> Replay {
-        self.fed.store(true, Ordering::SeqCst);
-        let io = self.consumer.join().unwrap();
+        self.stop();
         let (runtime, pool, thread) = (&self.runtime, &self.pool, self.thread);
-        if self.scenario.restart {
-            runtime.block_on(store::reconcile(pool)).unwrap();
-        }
         let items = runtime.block_on(snapshot::items(pool, thread));
         let schema = runtime
             .block_on(
@@ -442,8 +470,8 @@ impl Rig {
         self.continuations
             .extend(self.dispatched.try_iter().map(|(_, opts)| opts));
         Replay {
-            envelopes: io.envelopes,
-            snapshots: io.snapshots,
+            envelopes: self.envelopes,
+            snapshots: self.snapshots,
             items,
             reopened,
             // A send refused before its write leaves the recorded write unused.
@@ -456,6 +484,92 @@ impl Rig {
             load_race: self.scenario.load_race,
             continuations: self.continuations,
         }
+    }
+}
+
+/// What a restart tears down and brings up again: the manager, the consumer
+/// on its bus, and a recorded session for the thread's next spawn.
+struct Running {
+    harness: Harness,
+    bus: Sender<BusMsg>,
+    sink: Sink,
+    sinks: Arc<dyn Sinks>,
+    queue: Arc<Mutex<Queue>>,
+    bridge: Bridge,
+    fed: Arc<AtomicBool>,
+    clock: Arc<Clock>,
+    drained: Sender<Sender<()>>,
+    consumer: JoinHandle<Io>,
+    dispatched: Receiver<(QueuedMessage, SendOptions)>,
+}
+
+fn boot(
+    pool: &SqlitePool,
+    database: &std::path::Path,
+    scratch: &std::path::Path,
+    outbound: &Outbound,
+    thread: i64,
+    provider: Provider,
+    native_session: &str,
+) -> Running {
+    let harness = Harness::replay(assert_scratch(scratch, scratch));
+    assert_scratch(&crate::harness::thread_cwd(scratch), scratch);
+    // The consumer runs beside the replay, as in the app: a send's run is
+    // written on it before the provider write.
+    let (bus, rx) = std::sync::mpsc::channel::<BusMsg>();
+    let sink = crate::harness::app::sink_for(&bus, thread, provider);
+    let sinks = crate::harness::app::sinks_for(&bus, thread, provider);
+    let queue = Arc::new(Mutex::new(Queue::default()));
+    let fed = Arc::new(AtomicBool::new(false));
+    let (continued, dispatched) = std::sync::mpsc::channel();
+    let (drained, waiters) = std::sync::mpsc::channel();
+    let clock = Clock::new();
+    let consumer = {
+        let (queue, fed, clock) = (queue.clone(), fed.clone(), clock.clone());
+        let mut io = Io {
+            pool: pool.clone(),
+            database: database.to_path_buf(),
+            scratch: scratch.to_path_buf(),
+            outbound: outbound.clone(),
+            envelopes: Vec::new(),
+            snapshots: Vec::new(),
+            runtime: None,
+            epoch: std::time::Instant::now(),
+            continued,
+            clock: clock.clone(),
+        };
+        std::thread::spawn(move || {
+            io.runtime = Some(Runtime::new().unwrap());
+            let feed = Feed {
+                rx,
+                fed,
+                drained: waiters,
+                clock,
+            };
+            consume(feed, queue, &mut io);
+            io
+        })
+    };
+    let bridge = session(
+        &harness,
+        thread,
+        provider,
+        outbound,
+        native_session,
+        scratch,
+    );
+    Running {
+        harness,
+        bus,
+        sink,
+        sinks,
+        queue,
+        bridge,
+        fed,
+        clock,
+        drained,
+        consumer,
+        dispatched,
     }
 }
 

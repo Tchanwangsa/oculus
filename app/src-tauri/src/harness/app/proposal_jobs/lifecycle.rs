@@ -9,6 +9,8 @@ pub async fn proposal_job_start(
     app: AppHandle,
     id: String,
 ) -> Result<crate::db::proposals::Proposal, String> {
+    // Startup's repair fails every job it finds running: this one starts after it.
+    crate::harness::app::ready(&app).await?;
     let pool = crate::db::store::open_pool().await?;
     let (proposal, claimed) = claim(&pool, &id).await?;
     if !claimed {

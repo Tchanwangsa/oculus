@@ -25,7 +25,7 @@ pub(super) struct Replay {
     /// Run, attempt, binding and receipt rows for the thread (`snapshot::ledger`).
     pub ledger: Value,
     pub repeat_envelope: bool,
-    /// The app restarted after the stream (startup reconciliation ran).
+    /// The app restarted after the stream and ran its startup repair.
     pub restarted: bool,
     pub load_race: bool,
     /// Continuations the consumer dispatched (`Scenario::continuation`).
@@ -39,6 +39,10 @@ pub(super) fn run(scenario: Scenario) -> Replay {
     rig.open();
     rig.resume();
     rig.close();
+    if rig.scenario.restart {
+        rig = rig.restart();
+        rig.startup().unwrap();
+    }
     rig.finish()
 }
 

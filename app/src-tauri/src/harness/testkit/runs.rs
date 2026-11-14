@@ -233,7 +233,10 @@ async fn a_restart_interrupts_runs_left_open() {
         .await
         .unwrap();
     store::mark_sent(&pool, &open).await.unwrap();
-    store::reconcile(&pool).await.unwrap();
+    crate::harness::app::startup::Startup::default()
+        .ready(|| async { Ok(pool.clone()) })
+        .await
+        .unwrap();
     let status: String =
         sqlx::query_scalar("SELECT execution_status FROM harness_runs WHERE id = ?1")
             .bind(open.run_id)

@@ -23,6 +23,7 @@ pub async fn harness_send(
     text: String,
     options: Option<SendOptions>,
 ) -> Result<i64, String> {
+    state.ready().await?;
     let provider =
         Provider::parse(&provider).ok_or_else(|| format!("unknown provider {provider}"))?;
     let mut opts = options.unwrap_or_default();
@@ -102,6 +103,7 @@ pub async fn harness_edit_resend(
     text: String,
     options: Option<SendOptions>,
 ) -> Result<(), String> {
+    state.ready().await?;
     let mut opts = options.unwrap_or_default();
     opts.reasoning_effort = validate_effort(opts.reasoning_effort)?;
     let pool = crate::db::store::open_pool().await?;
@@ -186,6 +188,7 @@ pub async fn harness_rewind(
     thread_id: i64,
     item_id: i64,
 ) -> Result<String, String> {
+    state.ready().await?;
     let pool = crate::db::store::open_pool().await?;
     let row = store::thread(&pool, thread_id).await?;
     let question = store::user_item(&pool, thread_id, item_id).await?;
@@ -288,6 +291,7 @@ pub async fn harness_delete_thread(
     state: State<'_, HarnessState>,
     thread_id: i64,
 ) -> Result<(), String> {
+    state.ready().await?;
     state.harness.release(thread_id, Release::Deleted);
     state.queue.lock().unwrap().forget(thread_id);
     let pool = crate::db::store::open_pool().await?;

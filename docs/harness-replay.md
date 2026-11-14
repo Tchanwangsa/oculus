@@ -82,7 +82,7 @@ without a real timer. `testkit/pacing.rs` scripts that clock message by
 message. `rig.read_only(true)` makes every write fail, as a full disk would
 (`PRAGMA query_only` on the rig's one connection), and
 `rig.await_wakes(n)` waits for the consumer's retries
-(`testkit/recovery.rs`). The test then does what a
+(`testkit/recovery.rs`, which also sends during startup). The test then does what a
 student or the app would do mid-turn, such as a second `rig.send` or a call
 on `rig.harness`, and `resume`s. Races are tested this way, never by timing.
 
@@ -103,6 +103,23 @@ rig.until("terminal"); // the turn is open here
 rig.resume();
 rig.close();
 let replay = rig.finish();
+```
+
+A **restart** is `rig.restart()`: the consumer is joined, the manager shut
+down and the pool closed, as a killed app would leave them; then the same
+database file is opened through the production pool (`db::store::pool`) and
+a new manager, consumer and recorded session come up. Nothing has repaired
+anything yet. `rig.startup()` runs the production startup path
+(`app/startup.rs`, the gate `lifecycle::reconcile` and every thread command
+go through), and `rig.send` waits at that gate first, as `harness_send`
+does, so a test can send before the repair and see which ran first. A test
+of what a restart does to runs goes through that gate, never
+`store::reconcile` alone. `Replay::envelopes` keeps
+what every runtime emitted, in order.
+
+```rust
+let mut rig = rig.restart();          // killed mid-answer, started again
+let second = rig.send("after-restart").unwrap(); // waits for the repair
 ```
 
 ## Manifests preserve evidence boundaries
@@ -256,7 +273,7 @@ folding needs superseded attempts. No mutation proves protocol support.
 - `gap_survives_reload` reads `harness_delivery_gaps` for the run, not the notice row settlement writes from it.
 - `codex-ls` has two distinct messages, so its repeat-snapshot row checks `two_messages`: the repeat must add no third.
 - `phase_and_plan` needs both Codex phases stored and the plan as one `Plan` tool row, never an assistant message.
-- Every recording ends with its bridge's production EOF path (`Bridge::eof`), as a closed transport would; a `restart` scenario skips it and runs startup `reconcile` instead.
+- Every recording ends with its bridge's production EOF path (`Bridge::eof`), as a closed transport would; a `restart` scenario skips it, restarts the rig and runs the startup gate instead.
 - After a restart the checks read the reloaded rows (`Replay::restarted`), since a reload is the app's only view then.
 - The load-race projection strips `sequence`: its fresh store replays a stream whose sequence numbers the first pass already consumed.
 - A bridge's repeated terminal names a turn that is already over and is dropped whatever the thread holds. Only the app's own terminal, which names no turn, goes by the claim: with no run open it releases the thread's claim, and with neither it is dropped.

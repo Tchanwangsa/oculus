@@ -91,6 +91,17 @@ display policy: no thinking flags or summary setting, with
   at startup: threads left `running` go `idle`, and tool rows whose `meta.ok`
   is still null are closed as failed with "the session ended before this
   finished" — otherwise the row draws as running forever.
+- **The repair comes before the first command.** It is one gate,
+  `app/startup.rs` (`Startup::ready`): proposal jobs left running, queued
+  card continuations, then `store::reconcile`. `lifecycle::reconcile` starts
+  it at launch, and `harness_send`, `harness_edit_resend`, `harness_rewind`,
+  `harness_delete_thread` and `proposal_job_start` await the same gate
+  first, so a send made the moment the app opens cannot be cut by the repair
+  meant for the process before it. A repair that fails is logged and is the
+  error of the command that waited on it ("Oculus could not finish checking
+  the chats its last session left open, so nothing was started: …"); the
+  next command runs it again. A first launch, with no database file yet,
+  has nothing to repair.
 - **Settings storage is shared.** Job selections, rate limits and Antigravity
   approvals use `db::store::setting` / `db::store::set_setting`; each caller owns its
   JSON shape and fallback policy.

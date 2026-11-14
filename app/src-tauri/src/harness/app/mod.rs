@@ -17,6 +17,7 @@ pub mod revision;
 mod run_scope;
 pub(in crate::harness) mod send;
 pub mod setup;
+pub(in crate::harness) mod startup;
 pub mod suggest;
 mod thought_clock;
 pub mod turns;
@@ -112,6 +113,8 @@ pub struct HarnessState {
     bus: Bus,
     /// Which threads have a turn open, and what is waiting behind each.
     queue: Arc<Mutex<Queue>>,
+    /// Startup's repair, which every thread command waits for.
+    startup: Arc<startup::Startup>,
 }
 
 /// Where the app's own events for a thread go: from no session.
@@ -182,6 +185,18 @@ impl HarnessState {
     fn sinks(&self, thread_id: i64, provider: Provider) -> Arc<dyn Sinks> {
         sinks_for(&self.bus, thread_id, provider)
     }
+
+    /// Returns once startup's repair has run (`startup.rs`). A command that
+    /// starts, rewinds or deletes anything awaits this first.
+    async fn ready(&self) -> Result<(), String> {
+        self.startup.ready(crate::db::store::open_pool).await
+    }
+}
+
+/// [`HarnessState::ready`], for a command that holds only the app.
+pub(in crate::harness) async fn ready(app: &tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    app.state::<HarnessState>().ready().await
 }
 
 /// A card was applied or discarded, or its job finished: when the agent gave
