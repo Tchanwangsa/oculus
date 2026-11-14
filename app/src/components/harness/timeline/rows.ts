@@ -6,7 +6,6 @@ import {
   parseToolMeta,
   thoughtLabel,
   thoughtMs,
-  type CliAction,
   type CliIcon,
   type HarnessItem,
   type HarnessRun,
@@ -242,53 +241,88 @@ function plural(n: number, one: string, many = `${one}s`) {
 /** A bundle's glyph: a tool kind's, an oculus command's, or none for thoughts alone. */
 export type BundleIcon = { tool: ToolKind } | { cli: CliIcon } | null;
 
-/** "Explored 3 files, saved 2 memories, ran 1 command" */
+/** One clause of a bundle's summary: what it counts, how many, its rank
+ *  (0 effects, 1 reads and searches, 2 the rest) and where it was first seen. */
+interface Clause {
+  text: (n: number) => string;
+  n: number;
+  tier: 0 | 1 | 2;
+  first: number;
+  icon: BundleIcon;
+}
+
+const TOOL_CLAUSE: Record<ToolKind, { tier: 0 | 1 | 2; text: (n: number) => string; key?: string }> = {
+  bash: { tier: 0, text: (n) => `ran ${plural(n, "command")}` },
+  edit: { tier: 0, key: "edit", text: (n) => `edited ${plural(n, "file")}` },
+  write: { tier: 0, key: "edit", text: (n) => `edited ${plural(n, "file")}` },
+  task: { tier: 0, text: (n) => `ran ${plural(n, "subagent")}` },
+  read: { tier: 1, text: (n) => `explored ${plural(n, "file")}` },
+  search: { tier: 1, text: (n) => plural(n, "search", "searches") },
+  web: { tier: 1, text: (n) => plural(n, "web lookup") },
+  plan: { tier: 2, text: () => "updated the plan" },
+  other: { tier: 2, text: (n) => plural(n, "tool call") },
+  // Each oculus command is its own clause (below); this is never read.
+  oculus_cli: { tier: 2, text: (n) => plural(n, "tool call") },
+};
+
+/** How many clauses a summary names before "performed N other actions". */
+const SHOWN_CLAUSES = 2;
+
+/**
+ * A bundle's summary: one count per category, the two that rank highest
+ * (effects — commands, edits, `oculus` writes — then reads and searches,
+ * then the rest) in the order first seen, then "performed N other actions"
+ * for everything else, joined with "and": "Ran 3 commands and edited 2
+ * files". Reasoning is not counted. Thought-only and reply-only bundles keep
+ * their own labels.
+ */
 export function bundleLabel(items: HarnessItem[]): { label: string; icon: BundleIcon } {
-  const counts: Partial<Record<ToolKind | "thinking", number>> = {};
-  // Oculus commands tally by what they did, in the order first seen.
-  const cli = new Map<string, { action: CliAction; n: number }>();
+  const clauses = new Map<string, Clause>();
   let replies = 0;
-  for (const i of items) {
+  let thoughts = 0;
+  const add = (key: string, at: number, c: Omit<Clause, "n" | "first">) => {
+    const hit = clauses.get(key);
+    if (hit) hit.n += 1;
+    else clauses.set(key, { ...c, n: 1, first: at });
+  };
+  items.forEach((i, at) => {
     if (i.kind === "assistant") {
       replies += 1;
-      continue;
+      add("reply", at, { tier: 2, icon: null, text: (n) => plural(n, "earlier reply", "earlier replies") });
+      return;
     }
-    const k = i.kind === "thinking" ? "thinking" : (parseToolMeta(i).kind ?? "other");
-    counts[k] = (counts[k] ?? 0) + 1;
-    if (k !== "oculus_cli") continue;
-    for (const action of describeOculusCli(i.content ?? "")) {
-      const hit = cli.get(action.key);
-      if (hit) hit.n += 1;
-      else cli.set(action.key, { action, n: 1 });
+    if (i.kind === "thinking") {
+      thoughts += 1;
+      return;
     }
-  }
+    const kind = parseToolMeta(i).kind ?? "other";
+    if (kind !== "oculus_cli") {
+      const c = TOOL_CLAUSE[kind];
+      add(c.key ?? kind, at, { tier: c.tier, text: c.text, icon: { tool: kind } });
+      return;
+    }
+    // Oculus commands tally by what they did; a tally that reads the same
+    // ("listed memories" twice) is one clause.
+    const actions = describeOculusCli(i.content ?? "");
+    if (!actions.length) add("cli:other", at, { tier: 2, icon: { tool: "oculus_cli" }, text: (n) => plural(n, "tool call") });
+    for (const action of actions) {
+      add(`cli:${action.tally(1)}`, at, { tier: action.writes ? 0 : 1, text: action.tally, icon: { cli: action.icon } });
+    }
+  });
   if (replies > 0 && replies === items.length) {
     return { label: replies === 1 ? "Earlier reply" : `${replies} earlier replies`, icon: null };
   }
-  if (counts.thinking === items.length) {
+  if (thoughts === items.length) {
     const ms = items.map(thoughtMs);
     const total = ms.every((m) => m != null) ? ms.reduce<number>((a, m) => a + (m ?? 0), 0) : null;
     return { label: thoughtLabel(total), icon: null };
   }
-  const parts: string[] = [];
-  const reads = counts.read ?? 0;
-  if (reads) parts.push(`explored ${plural(reads, "file")}`);
-  if (counts.search) parts.push(plural(counts.search, "search", "searches"));
-  // A tally merges clauses that read the same ("listed memories" twice).
-  for (const clause of new Set([...cli.values()].map(({ action, n }) => action.tally(n)))) parts.push(clause);
-  if (counts.bash) parts.push(`ran ${plural(counts.bash, "command")}`);
-  const edits = (counts.edit ?? 0) + (counts.write ?? 0);
-  if (edits) parts.push(`edited ${plural(edits, "file")}`);
-  if (counts.web) parts.push(plural(counts.web, "web lookup"));
-  if (counts.task) parts.push(`ran ${plural(counts.task, "subagent")}`);
-  if (counts.plan) parts.push("updated the plan");
-  if (counts.other) parts.push(plural(counts.other, "tool call"));
-  if (replies) parts.push(plural(replies, "earlier reply", "earlier replies"));
-  const label = parts.join(", ");
-  const dominant = (Object.entries(counts) as [ToolKind | "thinking", number][])
-    .filter(([k]) => k !== "thinking")
-    .sort((a, b) => b[1] - a[1])[0]?.[0] as ToolKind | undefined;
-  const topCli = [...cli.values()].sort((a, b) => b.n - a.n)[0]?.action.icon;
-  const icon: BundleIcon = dominant === "oculus_cli" && topCli ? { cli: topCli } : { tool: dominant ?? "other" };
+  const ranked = [...clauses.values()].sort((a, b) => a.tier - b.tier || a.first - b.first);
+  const shown = ranked.slice(0, SHOWN_CLAUSES);
+  const others = ranked.slice(SHOWN_CLAUSES).reduce((sum, c) => sum + c.n, 0);
+  const parts = [...shown].sort((a, b) => a.first - b.first).map((c) => c.text(c.n));
+  if (others) parts.push(`performed ${others} other ${others === 1 ? "action" : "actions"}`);
+  const label = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : (parts[0] ?? "");
+  const icon: BundleIcon = ranked.find((c) => c.icon)?.icon ?? { tool: "other" };
   return { label: label.charAt(0).toUpperCase() + label.slice(1), icon };
 }

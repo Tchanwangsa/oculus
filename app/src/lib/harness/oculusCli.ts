@@ -26,6 +26,9 @@ export interface CliAction {
   verb: (done: boolean, n: number) => string;
   /** The bundle's clause for `n` of these: "saved 2 memories". */
   tally: (n: number) => string;
+  /** It changes the library (a memory, a task, a sync): a bundle's summary
+   *  ranks it with commands and edits, above reads. */
+  writes?: boolean;
 }
 
 export interface CliSummary {
@@ -176,21 +179,21 @@ function describeOne(sub: string[], a: Args): CliAction {
       switch (action) {
         case "write":
           return {
-            key: "memory-write", icon: "memory",
+            key: "memory-write", writes: true, icon: "memory",
             em: flag(a, "--about") ?? (name ? humanizeSlug(name) : undefined),
             verb: verbs("Saving a memory", "Saved a memory", (n) => [`Saving ${n} memories`, `Saved ${n} memories`]),
             tally: counted("saved a memory", (n) => `saved ${n} memories`),
           };
         case "append":
           return {
-            key: "memory-write", icon: "memory", em: name ? humanizeSlug(name) : undefined,
+            key: "memory-write", writes: true, icon: "memory", em: name ? humanizeSlug(name) : undefined,
             verb: verbs("Saving a memory", "Saved a memory", (n) => [`Saving ${n} memories`, `Saved ${n} memories`]),
             tally: counted("saved a memory", (n) => `saved ${n} memories`),
           };
         case "fold": {
           const into = flag(a, "--into");
           return {
-            key: "memory-fold", icon: "memory", em: into ? humanizeSlug(into) : undefined,
+            key: "memory-fold", writes: true, icon: "memory", em: into ? humanizeSlug(into) : undefined,
             verb: verbs("Folding memories into", "Folded memories into"),
             tally: once("folded memories"),
           };
@@ -210,19 +213,19 @@ function describeOne(sub: string[], a: Args): CliAction {
           };
         case "rm":
           return {
-            key: "memory-rm", icon: "memory", em: name,
+            key: "memory-rm", writes: true, icon: "memory", em: name,
             verb: verbs("Deleting memory", "Deleted memory", (n) => [`Deleting ${n} memories`, `Deleted ${n} memories`]),
             tally: counted("deleted a memory", (n) => `deleted ${n} memories`),
           };
         case "move":
         case "promote":
           return {
-            key: "memory-move", icon: "memory", em: name,
+            key: "memory-move", writes: true, icon: "memory", em: name,
             verb: verbs("Moving memory", "Moved memory", (n) => [`Moving ${n} memories`, `Moved ${n} memories`]),
             tally: counted("moved a memory", (n) => `moved ${n} memories`),
           };
         case "reindex":
-          return { key: "memory-reindex", icon: "memory", verb: verbs("Reindexing memories", "Reindexed memories"), tally: once("reindexed memories") };
+          return { key: "memory-reindex", writes: true, icon: "memory", verb: verbs("Reindexing memories", "Reindexed memories"), tally: once("reindexed memories") };
       }
       break;
     case "grep":
@@ -264,17 +267,17 @@ function describeOne(sub: string[], a: Args): CliAction {
     case "tag":
       return action === "list"
         ? { key: "tag-list", icon: "tag", verb: verbs("Listing tags", "Listed tags"), tally: once("listed tags") }
-        : { key: "tag", icon: "tag", em: name, verb: verbs("Updating tags", "Updated tags"), tally: once("updated tags") };
+        : { key: "tag", writes: true, icon: "tag", em: name, verb: verbs("Updating tags", "Updated tags"), tally: once("updated tags") };
     case "lecture":
       return { key: "lecture", icon: "lecture", em: action, verb: verbs("Looking inside a lecture", "Looked inside a lecture"), tally: once("looked inside a lecture") };
     case "transcribe":
-      return { key: "transcribe", icon: "lecture", em: name && base(name), verb: verbs("Transcribing", "Transcribed"), tally: once("transcribed a recording") };
+      return { key: "transcribe", writes: true, icon: "lecture", em: name && base(name), verb: verbs("Transcribing", "Transcribed"), tally: once("transcribed a recording") };
     case "studio":
       return describeStudio(action);
     case "docs":
       return { key: "docs", icon: "library", em: name, verb: verbs("Reading the Oculus docs", "Read the Oculus docs"), tally: once("read the Oculus docs") };
     case "run":
-      return { key: "run", icon: "library", verb: verbs("Syncing Canvas", "Synced Canvas"), tally: once("synced Canvas") };
+      return { key: "run", writes: true, icon: "library", verb: verbs("Syncing Canvas", "Synced Canvas"), tally: once("synced Canvas") };
   }
   return {
     key: `other-${sub.join(" ")}`, icon: "library",
@@ -290,14 +293,14 @@ function describeTask(action: string | undefined, a: Args): CliAction {
   switch (action) {
     case "add":
       return {
-        key: "task-add", icon: "task", em: flag(a, "--title") ?? a.pos[0],
+        key: "task-add", writes: true, icon: "task", em: flag(a, "--title") ?? a.pos[0],
         verb: verbs("Adding a task", "Added a task", (n) => [`Adding ${tasks(n)}`, `Added ${tasks(n)}`]),
         tally: counted("added a task", (n) => `added ${tasks(n)}`),
       };
     case "move": {
       const col = flag(a, "-c", "--column");
       return {
-        key: "task-move", icon: "task", em: col ? column(col) : id,
+        key: "task-move", writes: true, icon: "task", em: col ? column(col) : id,
         verb: verbs(col ? "Moving task to" : "Moving task", col ? "Moved task to" : "Moved task", (n) => [
           `Moving ${tasks(n)}${col ? " to" : ""}`, `Moved ${tasks(n)}${col ? " to" : ""}`,
         ]),
@@ -306,18 +309,18 @@ function describeTask(action: string | undefined, a: Args): CliAction {
     }
     case "update":
       return {
-        key: "task-update", icon: "task", em: flag(a, "--title") ?? id,
+        key: "task-update", writes: true, icon: "task", em: flag(a, "--title") ?? id,
         verb: verbs("Updating task", "Updated task", (n) => [`Updating ${tasks(n)}`, `Updated ${tasks(n)}`]),
         tally: counted("updated a task", (n) => `updated ${tasks(n)}`),
       };
     case "rm":
       return {
-        key: "task-rm", icon: "task", em: id,
+        key: "task-rm", writes: true, icon: "task", em: id,
         verb: verbs("Deleting task", "Deleted task", (n) => [`Deleting ${tasks(n)}`, `Deleted ${tasks(n)}`]),
         tally: counted("deleted a task", (n) => `deleted ${tasks(n)}`),
       };
     case "refile":
-      return { key: "task-refile", icon: "task", em: id, verb: verbs("Refiling task", "Refiled task"), tally: counted("refiled a task", (n) => `refiled ${tasks(n)}`) };
+      return { key: "task-refile", writes: true, icon: "task", em: id, verb: verbs("Refiling task", "Refiled task"), tally: counted("refiled a task", (n) => `refiled ${tasks(n)}`) };
     case "show":
       return { key: "task-show", icon: "task", em: id, verb: verbs("Opening task", "Opened task"), tally: counted("opened a task", (n) => `opened ${tasks(n)}`) };
     default:
@@ -329,9 +332,9 @@ function describeProject(action: string | undefined, a: Args): CliAction {
   const name = flag(a, "--title", "--name") ?? a.pos[0];
   switch (action) {
     case "create":
-      return { key: "project-create", icon: "project", em: name, verb: verbs("Creating project", "Created project"), tally: counted("created a project", (n) => `created ${n} projects`) };
+      return { key: "project-create", writes: true, icon: "project", em: name, verb: verbs("Creating project", "Created project"), tally: counted("created a project", (n) => `created ${n} projects`) };
     case "update":
-      return { key: "project-update", icon: "project", em: name, verb: verbs("Updating project", "Updated project"), tally: counted("updated a project", (n) => `updated ${n} projects`) };
+      return { key: "project-update", writes: true, icon: "project", em: name, verb: verbs("Updating project", "Updated project"), tally: counted("updated a project", (n) => `updated ${n} projects`) };
     case "show":
       return { key: "project-show", icon: "project", em: name, verb: verbs("Opening project", "Opened project"), tally: counted("opened a project", (n) => `opened ${n} projects`) };
     case "events":
@@ -342,14 +345,14 @@ function describeProject(action: string | undefined, a: Args): CliAction {
 }
 
 function describeStudio(action: string | undefined): CliAction {
-  const studio = (live: string, done: string): CliAction => ({
-    key: `studio-${action}`, icon: "studio", verb: verbs(live, done),
+  const studio = (live: string, done: string, writes = false): CliAction => ({
+    key: `studio-${action}`, icon: "studio", verb: verbs(live, done), writes,
     tally: counted("ran a Studio step", (n) => `ran ${n} Studio steps`),
   });
   switch (action) {
-    case "render": return studio("Rendering the video", "Rendered the video");
-    case "frame": return studio("Rendering a frame", "Rendered a frame");
-    case "narrate": return studio("Narrating", "Narrated");
+    case "render": return studio("Rendering the video", "Rendered the video", true);
+    case "frame": return studio("Rendering a frame", "Rendered a frame", true);
+    case "narrate": return studio("Narrating", "Narrated", true);
     case "lint": return studio("Checking the scenes", "Checked the scenes");
     default: return { ...studio("Running Studio", "Ran Studio"), em: action };
   }

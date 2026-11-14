@@ -425,7 +425,18 @@ still update the picker.
   the shell line (chains counted, pipes and redirects dropped) and gives each
   command a glyph and a bundle clause ("saved 2 memories"). The command
   leads the opened row's detail, muted above the output; a running one shimmers its verb. An
-  unrecognised command reads "Ran oculus" with its subcommand.
+  unrecognised command reads "Ran oculus" with its subcommand. A command
+  that changes the library (a memory, a task, a project, a sync, a render)
+  is marked `writes`.
+- **A bundle names two things** (`bundleLabel` in `rows.ts`): one count per
+  category, the two that rank highest in the order first seen, then
+  "performed N other actions", joined with "and" — "Ran 3 commands, edited 2
+  files and performed 4 other actions". Effects rank first (commands, edits,
+  subagents, `oculus` writes), then reads and searches (files, searches, web
+  lookups, `oculus` reads), then the rest (plan updates, other tool calls,
+  earlier replies). Each `oculus` clause keeps its own tally, and the glyph is
+  the top-ranked clause's. Reasoning is not counted; a bundle of thoughts or
+  of replies alone keeps its own label.
 - **A Read of a picture expands to the picture** (`ReadPicture` in
   `WorkRow.tsx`), click for the lightbox. It loads over the asset protocol, so
   only `courses/`, `lectures/` and `agents/` under the data dir show; any other
