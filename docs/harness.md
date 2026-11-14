@@ -1150,6 +1150,13 @@ turn already over. Codex's translator compares too: a `turn/completed` for
 another turn emits only the terminal and leaves the open turn's state and
 streamed text alone.
 
+**The session map is never held across a call into a CLI.** `Harness::send`,
+`interrupt` and `rewind` take the thread's `Handle` (cheap to clone) under
+the `live` lock and call the bridge after dropping it: Codex can take a
+minute to answer `turn/start`, and a held map would stall every other
+thread's send and every Stop, the waiting thread's own included
+(`testkit/locks.rs`). `ensure` still spawns under the lock.
+
 **A session ends one way.** `Harness::release(thread, reason)`
 (`manager/release.rs`) removes the live entry, tells the consumer
 (`Sinks::released`, `BusMsg::Released`) and only then ends the handle: a

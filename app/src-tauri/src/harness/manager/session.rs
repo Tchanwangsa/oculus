@@ -35,13 +35,22 @@ impl Harness {
         text: &str,
         sinks: &Arc<dyn Sinks>,
     ) -> Result<(), String> {
-        let mut live = self.live.lock().unwrap();
-        self.ensure(&mut live, thread_id, provider, resume, opts, sinks)?;
-        let session = live.get(&thread_id).ok_or("no session")?;
+        // Sent outside the lock: the CLI can take a minute to accept a
+        // message, and holding the map would stall every other thread's
+        // send and Stop, this thread's Stop included.
+        let (handle, generation, sinks) = {
+            let mut live = self.live.lock().unwrap();
+            self.ensure(&mut live, thread_id, provider, resume, opts, sinks)?;
+            let session = live.get(&thread_id).ok_or("no session")?;
+            (
+                session.handle.clone(),
+                session.generation,
+                session.sinks.clone(),
+            )
+        };
         // The run this send belongs to is bound to the turn it is accepted as.
-        let (generation, sinks) = (session.generation, session.sinks.clone());
         let bound: Bound = Arc::new(move |turn| sinks.bound(generation, turn));
-        session.handle.send_turn(text, &bound)
+        handle.send_turn(text, &bound)
     }
 
     /// The reasoning level the thread's live session runs under, if one is
@@ -245,10 +254,15 @@ impl Harness {
         Ok(())
     }
 
+    /// Ask the thread's CLI to stop its turn. Asked outside the lock, like
+    /// a send.
     pub fn interrupt(&self, thread_id: i64) -> Result<(), String> {
-        let live = self.live.lock().unwrap();
-        match live.get(&thread_id) {
-            Some(l) => l.handle.interrupt(),
+        let handle = {
+            let live = self.live.lock().unwrap();
+            live.get(&thread_id).map(|l| l.handle.clone())
+        };
+        match handle {
+            Some(handle) => handle.interrupt(),
             None => Ok(()),
         }
     }

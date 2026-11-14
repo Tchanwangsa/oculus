@@ -7,6 +7,7 @@ mod fixture;
 mod guard;
 mod identity;
 mod io;
+mod locks;
 mod matrix;
 pub(in crate::harness) mod outbound;
 mod pacing;
