@@ -7,6 +7,7 @@ import { downloadBlob } from "@/lib/canvas/platform";
 import type { ShareCredentials } from "@/lib/companion/link";
 import type { ShareClient, ShareClientState } from "@/lib/companion/shareClient";
 import { ShareHeader } from "./ShareHeader";
+import { DebugToggle } from './DebugToggle';
 import { useShareClient } from "./useShareClient";
 import { useCanvasFocus } from './useCanvasFocus';
 import { cn } from '@/lib/utils';
@@ -54,13 +55,14 @@ function SharedCanvas({ credentials }: { credentials: ShareCredentials }) {
     {!focus.focused ? <ShareHeader state={state} onRetry={() => client.retry()} onDownloadDraft={() => saveDraft(client.draftText(), draftName(state))} /> : null}
     <main className={cn('relative min-h-0 flex-1 overflow-hidden bg-card', !focus.focused && 'rounded-2xl border border-border-subtle')}>
       <Button variant="outline" size="icon" aria-label={focus.focused ? 'Exit expanded canvas' : 'Expand canvas'} title={focus.focused ? 'Exit expanded canvas' : 'Expand canvas'} className="canvas-expand absolute top-3 right-3 z-40 bg-card shadow-xs" onClick={() => void focus.toggle()}>{focus.focused ? <ArrowsInIcon size={17} /> : <ArrowsOutIcon size={17} />}</Button>
+      <DebugToggle />
       {focus.focused && (state.status === 'reconnecting' || state.status === 'offline-unsaved' || state.status === 'paused') ? <div role="status" className="absolute top-3 left-3 z-40 rounded-full border border-warning/30 bg-card px-3 py-1.5 text-xs text-warning">{state.status === 'reconnecting' ? 'Reconnecting…' : 'Changes not saved yet'}<button className="ml-2 underline" onClick={() => client.retry()}>Retry</button></div> : null}
       <div className="pointer-events-none absolute inset-x-3 bottom-16 z-30 flex max-h-[45%] flex-col gap-2 overflow-y-auto [&>*]:pointer-events-auto" data-canvas-notices>
         <Notices client={client} state={state} />
         {focus.focused && state.status === 'ended' && state.hasDraft ? <Button variant="outline" size="sm" className="self-start bg-card" onClick={() => saveDraft(client.draftText(), draftName(state))}>Download draft</Button> : null}
       </div>
       {state.document
-        ? <div inert={blocked} className="h-full"><CanvasSurface suppressNativeGestures document={state.document} kind={state.kind} onChange={(document) => client.edit(document)} onViewportChange={keepCameraLocal} /></div>
+        ? <div inert={blocked} className="h-full"><CanvasSurface suppressNativeGestures document={state.document} kind={state.kind} onChange={(document) => client.edit(document)} onViewportChange={keepCameraLocal} cameraKey={`share:${credentials.shareId}`} /></div>
         : <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
           {state.status === "ended" ? "This canvas is no longer shared." : <><SpinnerGapIcon className="animate-spin" aria-hidden />Opening the canvas from the Mac…</>}
         </div>}

@@ -86,7 +86,7 @@ function attachDiagnostics(credentials: ShareCredentials, config: { port: number
   window.addEventListener('error', event => record('javascript.error', { message: event.message, stack: event.error instanceof Error ? event.error.stack ?? '' : '', line: event.lineno, column: event.colno }));
   window.addEventListener('unhandledrejection', event => record('javascript.rejection', { message: event.reason instanceof Error ? event.reason.message : 'Unhandled rejection', stack: event.reason instanceof Error ? event.reason.stack ?? '' : '' }));
   for (const name of ['pageshow', 'pagehide', 'online', 'offline', 'focus', 'blur']) window.addEventListener(name, () => record(`page.${name}`));
-  record('diagnostics.started', { userAgent: navigator.userAgent, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, offsetMinutes: new Date().getTimezoneOffset(), build: 'input-trace-v7', page, touchPolicy: page === 'input-test' ? 'probe-body-touch-defaults-blocked' : 'canvas-touch-defaults-blocked-at-body', gesturePolicy: page === 'input-test' ? 'browser-defaults' : 'canvas-native-gestures-blocked', width: innerWidth, height: innerHeight });
+  record('diagnostics.started', { userAgent: navigator.userAgent, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, offsetMinutes: new Date().getTimezoneOffset(), build: 'input-trace-v8', page, touchPolicy: page === 'input-test' ? 'probe-body-touch-defaults-blocked' : 'canvas-touch-defaults-blocked-at-body', gesturePolicy: page === 'input-test' ? 'browser-defaults' : 'canvas-native-gestures-blocked', width: innerWidth, height: innerHeight });
   let lastViewport = 0;
   const recordViewport = () => {
     const now = performance.now();

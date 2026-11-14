@@ -1,29 +1,35 @@
-/** Optional companion tracing; the desktop pays only the disabled-sink check. */
+/** Optional companion tracing; the desktop pays only the empty-sink check. */
 export type TraceFields = Record<string, string | number | boolean | null>;
 export interface CanvasTraceSink {
   event(name: string, fields: TraceFields): void;
-  begin(name: string, fields: TraceFields): () => void;
+  /** Spans are timed only by sinks that want them (the diagnostics log); the on-screen overlay has none. */
+  begin?(name: string, fields: TraceFields): () => void;
 }
-let sink: CanvasTraceSink | null = null;
+/** Both the diagnostics log and the gesture overlay can listen at once. */
+const sinks = new Set<CanvasTraceSink>();
 export function installCanvasTrace(next: CanvasTraceSink): () => void {
-  sink = next;
-  return () => { if (sink === next) sink = null; };
+  sinks.add(next);
+  return () => { sinks.delete(next); };
 }
 export function traceCanvas(name: string, fields: TraceFields = {}): void {
-  try { sink?.event(name, fields); } catch { /* tracing must never break input */ }
+  for (const sink of sinks) {
+    try { sink.event(name, fields); } catch { /* tracing must never break input */ }
+  }
 }
 function begin(name: string, fields: TraceFields): () => void {
-  let finish: (() => void) | undefined;
-  try { finish = sink?.begin(name, fields); } catch { /* receiver unavailable */ }
-  return () => { try { finish?.(); } catch { /* tracing must never break input */ } };
+  const finishes: (() => void)[] = [];
+  for (const sink of sinks) {
+    try { const finish = sink.begin?.(name, fields); if (finish) finishes.push(finish); } catch { /* receiver unavailable */ }
+  }
+  return () => { for (const finish of finishes) { try { finish(); } catch { /* tracing must never break input */ } } };
 }
 export function measureCanvas<T>(name: string, run: () => T, fields: TraceFields = {}): T {
-  if (!sink) return run();
+  if (!sinks.size) return run();
   const finish = begin(name, fields);
   try { return run(); } finally { finish(); }
 }
 export async function measureCanvasAsync<T>(name: string, run: () => T | PromiseLike<T>): Promise<T> {
-  if (!sink) return await run();
+  if (!sinks.size) return await run();
   const finish = begin(name, { asynchronous: true });
   try { return await run(); } finally { finish(); }
 }

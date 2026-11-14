@@ -12,8 +12,9 @@ independently of Oculus and needs no desktop restart.
 | Capture browser inputs, lifecycle, slow operations and errors | `app/src/companion/diagnostics/index.ts` |
 | Isolated browser input comparison pad | `app/input-test.html`, `app/src/companion/diagnostics/inputTest.ts` |
 | Independent worker watchdog and bounded upload queue | `app/src/companion/diagnostics/worker.ts`, `app/src/companion/diagnostics/protocol.ts` |
-| Optional tracing hooks shared with the desktop | `app/src/lib/canvas/diagnostics.ts` |
-| Gesture and tool decisions, paint timing | `app/src/hooks/canvas/useCanvasInteraction.ts` |
+| Optional tracing hooks shared with the desktop, the log and the overlay | `app/src/lib/canvas/diagnostics.ts` |
+| Gesture and tool decisions, camera moves, paint timing | `app/src/hooks/canvas/useCanvasInteraction.ts` |
+| The debug button's on-screen touch, Pencil and gesture overlay | `app/src/companion/DebugToggle.tsx`, `app/src/companion/gestureOverlay.ts` |
 | Rebase, operation persistence and drawing serialization timing | `app/src/lib/companion/shareClient.ts`, `app/src/lib/companion/drafts.ts` |
 
 ## A local receiver enables tracing on the next page refresh
@@ -67,6 +68,32 @@ serialization and storage have named timing spans. Synchronous operations over
 caller stack. JavaScript errors and rejected promises record their error stacks.
 Hidden source maps are emitted beside the companion bundle for local decoding
 of these stack locations.
+
+## Camera records explain an unexpected scroll
+
+Every pan or two-finger navigation that ends records `camera.pan`: its source
+(`touch-pan`, `pen-pan`, `two-finger`, `two-finger-cancel`), whether it glided
+and why not (`verdict`: `few-samples`, `held`, `short-span`, `short-travel`,
+`pinch`, `slow`), its travel, the release speed, how late the release was
+handled, and up to 80 camera samples as `ms,dx,dy` from the pan's start. A
+glide ends with `camera.glide-end` (`rest`, `pinned`, or `halted:` and what
+stopped it) and how far it moved. Any single camera write of 150 px or a
+quarter's zoom records `camera.jump` with its cause (pan, glide, wheel, page,
+fit, zoom, resize, external, publish), and a canvas size change records
+`canvas.resize`. `gesture.down` carries the contact's width and height.
+
+## The debug button shows gestures for a screen recording
+
+The bug button beside Expand on the drawing page turns an overlay on and off,
+remembered on that device and independent of the receiver. It draws a ring
+under each finger (red when the system cancels the touch), a filled dot under
+the Pencil and a hollow one while it hovers, and a panel in the bottom-left
+corner: a clock to match the video to the log, then the last few decisions —
+what each contact became when it lifted, cancels, a second finger turning a
+gesture into navigation, ignored input, tool changes, pan releases and why they
+did or didn't glide, glide ends, camera jumps (two-finger ones aside, which a
+pinch makes on every frame) and resizes. It never takes input. Both it and the
+log listen to the same canvas traces, so either works without the other.
 
 ## A worker detects a blocked main thread without waiting for it to recover
 

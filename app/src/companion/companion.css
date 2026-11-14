@@ -23,6 +23,7 @@ html, body, #root { height: 100%; overflow: hidden; overscroll-behavior: none; }
 .companion-focused .canvas-editor { --canvas-top-edge: max(16px, env(safe-area-inset-top)); --canvas-bottom-edge: max(16px, env(safe-area-inset-bottom)); }
 .companion-focused .canvas-bottom, .companion-focused .canvas-utilities { bottom: var(--canvas-bottom-edge); }
 .companion-focused .canvas-expand { top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); }
+.companion-focused .canvas-debug { top: max(12px, env(safe-area-inset-top)); right: calc(max(12px, env(safe-area-inset-right)) + 44px); }
 .companion-shell:fullscreen { width: 100%; height: 100%; }
 .companion-shell { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .companion-shell :is(input, textarea, [contenteditable="true"], [data-selectable="true"]) { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
