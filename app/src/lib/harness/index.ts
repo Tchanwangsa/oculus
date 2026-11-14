@@ -8,6 +8,7 @@ export * from "./availability";
 export * from "./models";
 export * from "./registry";
 export * from "./route";
+export * from "./scope";
 export * from "./meta";
 export * from "./thought";
 export * from "./oculusCli";
