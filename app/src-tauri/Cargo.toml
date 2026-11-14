@@ -213,3 +213,9 @@ debug = false
 # Bump it with the other librespot crates' rev.
 [patch."https://github.com/librespot-org/librespot"]
 librespot-connect = { path = "vendor/librespot-connect" }
+
+# wry as published (`vendor/wry`, its changes listed in `vendor/wry/VENDORED.md`).
+# The version must equal the one tauri-runtime-wry resolves, or cargo ignores
+# the patch: `cargo tree -i wry` must print the path.
+[patch.crates-io]
+wry = { path = "vendor/wry" }
