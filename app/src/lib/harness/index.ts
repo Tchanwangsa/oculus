@@ -6,6 +6,7 @@
 export * from "./providers";
 export * from "./availability";
 export * from "./models";
+export * from "./capabilities";
 export * from "./registry";
 export * from "./route";
 export * from "./scope";

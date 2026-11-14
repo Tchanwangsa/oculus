@@ -1,6 +1,6 @@
 /** Edit, rewind and retry truncate the thread, so they are absent for a
  *  provider that cannot take a question back out of its own context
- *  (`ProviderInfo.rewind`). */
+ *  (the bridge's `rewind` capability). */
 export interface QuestionActions {
   /** Ask it again, differently. The thread rewinds to this row. */
   edit?: (itemId: number, text: string) => void;

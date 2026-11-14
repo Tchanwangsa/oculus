@@ -26,6 +26,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | The brief appended to each prompt; `AGENTS.md`; skills | `app/src-tauri/templates/HARNESS.template.md`, `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/skills/`, `app/src-tauri/src/agents/mod.rs` |
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
 | Provider table (`PROVIDERS`), platform capabilities, types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/availability.ts`, `app/src/lib/harness/` |
+| What each bridge can do (Stop, rewind, steering), declared in Rust and read by the webview | `app/src-tauri/src/harness/providers/capabilities.rs`, `app/src/lib/harness/capabilities.ts`, `app/src/hooks/agents/useCapabilities.ts` |
 | Live state and event folding | `app/src/stores/chat/harnessStore.ts`, `app/src/hooks/backend/useBackendEvents.ts` |
 | Row titles: a reasoning block's "Thought for 12s" and latest line, an `oculus …` command's "Saved a memory" | `app/src/lib/harness/thought.ts`, `app/src/lib/harness/oculusCli.ts`, `app/src-tauri/src/harness/app/thought_clock.rs` |
 | Page, thread list, recent list, timeline, rows, composer | `app/src/pages/tools/ChatPage.tsx`, `app/src/components/harness/` (`threads/`, `timeline/`, `composer/`; recent list: `threads/RecentThreads.tsx`) |
@@ -49,6 +50,19 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Library paths in rows and prose; copy as markdown | `app/src/lib/files/openFile.ts`, `app/src/lib/markdown/selection.ts` |
 | Timeline window, off-screen layout, scroll anchoring, the expand protocol | `app/src/components/harness/timeline/useRowWindow.ts`, `app/src/components/harness/timeline/rowWindow.ts`, `app/src/components/harness/timeline/useRowVisibility.ts`, `app/src/components/harness/timeline/RetainedRow.tsx`, `app/src/hooks/ui/useStickToBottom.ts`, `app/src/lib/ui/followTimeline.ts`, `app/src/lib/ui/scrollAnchor.ts`, `app/src/lib/ui/expandable.ts` |
 | The lecture dock's chat | `app/src/components/lectures/LectureChatPanel.tsx`, `app/src/components/lectures/LectureChatComposer.tsx`, `lecture_grab_frames` in `app/src-tauri/src/lectures/chapters/app.rs` |
+
+**A bridge's capabilities are one struct.** `providers/capabilities.rs`
+(`Capabilities`, `of`) says per bridge whether Stop ends a turn
+(`interrupt`), whether the CLI can take a question back (`rewind`), whether
+one server process serves every chat (`shared_process`: Codex, opencode), and
+the steering flags (`active_steering`, `steer_by_restart`), which are false
+on every bridge. A flag for work that is not built starts false and turns
+true only with the recording under `fixtures/harness/` that shows the CLI
+doing it (`fixture`, checked by the module's tests). `harness_capabilities`
+serves the list; the webview keeps one cached answer (`capabilities` in
+`lib/harness/capabilities.ts`, `providerCapabilities` in `registry.ts`,
+`useCapabilities` for components) and reads every optional action as
+unavailable until it lands.
 
 Windows offers Codex and opencode; native Claude Code is disabled because its
 Windows sandbox is unsupported. Settings shows “Needs WSL2 (coming soon)” for
@@ -1214,7 +1228,7 @@ prompt and before the turn's first event.
 Edit, Retry and Rewind truncate at a row (`harness::store::truncate_from`, announced as
 `Rewound`); Edit/Retry then send (`harness_edit_resend`), Rewind returns the
 words to the composer (`harness_rewind`). No branching; idle threads only; not
-offered where `ProviderInfo.rewind` is false (Antigravity). The provider
+offered where the bridge's `rewind` capability is false (Antigravity). The provider
 rewinds first, resuming an exited session without a turn:
 
 | | Call | Names |

@@ -3,6 +3,7 @@
 
 use tauri::{AppHandle, Emitter, State};
 
+use crate::harness::providers::capabilities;
 use crate::harness::Provider;
 use crate::harness::{discover, install, signin, update};
 use crate::runtime::blocking::run as blocking;
@@ -25,6 +26,13 @@ pub async fn harness_health(recheck: bool) -> Vec<discover::BridgeHealth> {
     })
     .await
     .unwrap_or_default()
+}
+
+/// What each bridge can do: Stop, rewind, steering. The webview reads it
+/// here rather than keeping its own table (`providers/capabilities.rs`).
+#[tauri::command]
+pub fn harness_capabilities() -> Vec<capabilities::Capabilities> {
+    capabilities::all()
 }
 
 /// The ways this machine could install one of the CLIs, and which it can

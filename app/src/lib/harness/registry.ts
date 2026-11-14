@@ -13,6 +13,7 @@ import {
   type HarnessModel,
 } from "./models";
 import type { Provider } from "./providers";
+import { capabilities, type Capabilities } from "./capabilities";
 import { filterOffered, loadCatalogue } from "@/lib/harness/opencodeCatalogue";
 import type { SettingsPageId } from "@/lib/search/settings";
 
@@ -42,9 +43,6 @@ export interface ProviderInfo {
   emptyNote?: string;
   /** The Settings page the empty or dormant note's button opens. */
   emptyNotePage?: SettingsPageId;
-  /** Whether the CLI can drop a question from its own context — gates Rewind,
-   *  Edit and Retry. `agy` 1.2.9 cannot in print mode. */
-  rewind: boolean;
 }
 
 /** Every provider, in picker order — the one place a provider is declared;
@@ -56,7 +54,6 @@ export const PROVIDERS: ProviderInfo[] = [
     staticModels: null,
     fetchModels: () => harnessClaudeModels().then(claudeAsModels),
     signIn: "code",
-    rewind: true,
   },
   {
     id: "codex",
@@ -64,7 +61,6 @@ export const PROVIDERS: ProviderInfo[] = [
     staticModels: null,
     fetchModels: () => harnessCodexModels().then(codexAsModels),
     signIn: "callback",
-    rewind: true,
   },
   {
     id: "opencode",
@@ -85,7 +81,6 @@ export const PROVIDERS: ProviderInfo[] = [
     signIn: null,
     emptyNote: "Sign in to a provider in Settings → opencode to get models here.",
     emptyNotePage: "opencode",
-    rewind: true,
   },
   {
     id: "antigravity",
@@ -96,12 +91,18 @@ export const PROVIDERS: ProviderInfo[] = [
     signIn: "code",
     emptyNote: "Sign in to Antigravity in Settings → Agents to get models here.",
     emptyNotePage: "agents",
-    rewind: false,
   },
 ];
 
 export function providerInfo(provider: Provider): ProviderInfo | undefined {
   return PROVIDERS.find((p) => p.id === provider);
+}
+
+/** What the provider's bridge can do (interrupt, rewind, steering). Rust
+ *  declares it (`harness_capabilities`), so it is read, never listed here;
+ *  components subscribe through `useCapabilities`. */
+export function providerCapabilities(provider: Provider): Capabilities {
+  return capabilities.of(provider);
 }
 
 export function providerLabel(provider: Provider): string {

@@ -7,10 +7,10 @@ import {
   harnessRewind,
   harnessSend,
   harnessUnqueue,
-  providerInfo,
   type Provider,
   type SendOptions,
 } from "@/lib/harness";
+import { useCapabilities } from "@/hooks/agents/useCapabilities";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 
 interface ThreadActionsOptions {
@@ -35,7 +35,7 @@ export function useThreadActions(opts: ThreadActionsOptions) {
   const store = useHarnessStore;
   const ref = useRef(opts);
   ref.current = opts;
-  const rewinds = providerInfo(opts.provider)?.rewind ?? false;
+  const rewinds = useCapabilities(opts.provider).rewind;
 
   /** `extra` runs after the thread id is read, for options that take a while. */
   const send = useCallback(
@@ -90,8 +90,8 @@ export function useThreadActions(opts: ThreadActionsOptions) {
   const onReasoning = useCallback((r: string | null) => store.getState().setReasoning(r), [store]);
 
   // Edit/retry rewind the thread to that row and send anew; Rust rewinds the
-  // agent's session first (`docs/harness.md`). Offered only where
-  // `ProviderInfo.rewind` is true.
+  // agent's session first (`docs/harness.md`). Offered only where the
+  // bridge's `rewind` capability is true.
   const questions = useMemo((): QuestionActions => {
     // The composer's send on the open thread, e.g. after an approved permission.
     const followUp = async (text: string) => {
