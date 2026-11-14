@@ -359,6 +359,7 @@ features = [
     "std",
     "objc2-core-foundation",
     "NSURLRequest",
+    "NSURLResponse",
     "NSURL",
     "NSString",
     "NSKeyValueCoding",

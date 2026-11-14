@@ -1,5 +1,5 @@
 use objc2::DeclaredClass;
-use objc2_foundation::{NSObjectProtocol, NSString};
+use objc2_foundation::{ns_string, NSHTTPURLResponse, NSObjectProtocol, NSString, NSURLResponse};
 use objc2_web_kit::{
   WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationResponse,
   WKNavigationResponsePolicy,
@@ -92,7 +92,10 @@ pub(crate) fn navigation_policy_response(
   unsafe {
     let can_show_mime_type = response.canShowMIMEType();
 
-    if !can_show_mime_type {
+    // A response the server marks `Content-Disposition: attachment` is a
+    // download even when WebKit could show it (a PDF, an image, text), in any
+    // frame — what Safari does.
+    if !can_show_mime_type || is_attachment(&response.response()) {
       let has_download_handler = this.ivars().has_download_handler;
       if has_download_handler {
         (*handler).call((WKNavigationResponsePolicy::Download,));
@@ -102,6 +105,22 @@ pub(crate) fn navigation_policy_response(
 
     (*handler).call((WKNavigationResponsePolicy::Allow,));
   }
+}
+
+/// Whether an HTTP response's `Content-Disposition` type is `attachment`
+/// (case-insensitive, parameters ignored), as WebKit's own
+/// `ResourceResponseBase::isAttachment` reads it.
+#[allow(unused_unsafe)]
+fn is_attachment(response: &NSURLResponse) -> bool {
+  let Some(http) = response.downcast_ref::<NSHTTPURLResponse>() else {
+    return false;
+  };
+  let header = unsafe { http.valueForHTTPHeaderField(ns_string!("Content-Disposition")) };
+  header.is_some_and(|value| {
+    let value = value.to_string();
+    let kind = value.split(';').next().unwrap_or_default();
+    kind.trim().eq_ignore_ascii_case("attachment")
+  })
 }
 
 pub(crate) fn web_content_process_did_terminate(

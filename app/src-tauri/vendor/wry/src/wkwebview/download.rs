@@ -43,6 +43,25 @@ pub(crate) fn navigation_download_response(
   }
 }
 
+// Context-menu download handler
+pub(crate) fn context_menu_download(
+  this: &WryNavigationDelegate,
+  _webview: &WKWebView,
+  download: &WKDownload,
+) {
+  unsafe {
+    if let Some(delegate) = &this.ivars().download_delegate {
+      let proto_delegate = ProtocolObject::from_ref(&**delegate);
+      download.setDelegate(Some(proto_delegate));
+    }
+  }
+}
+
+/// The key a download's destination is remembered under until it ends.
+fn download_key(download: &WKDownload) -> usize {
+  download as *const WKDownload as usize
+}
+
 pub(crate) fn download_policy(
   this: &WryDownloadDelegate,
   download: &WKDownload,
@@ -54,28 +73,36 @@ pub(crate) fn download_policy(
     let request = download.originalRequest().unwrap();
     let url = request.URL().unwrap().absoluteString().unwrap();
     let suggested_filename = suggested_filename.to_string();
-    let mut download_destination =
-      dirs::download_dir().unwrap_or_else(|| current_dir().unwrap_or_default());
-
-    download_destination.push(&suggested_filename);
-
-    let (suggested_filename, ext) = suggested_filename
-      .split_once('.')
-      .map(|(base, ext)| (base, format!(".{ext}")))
-      .unwrap_or((&suggested_filename, "".to_string()));
-
-    // WebView2 does not overwrite files but appends numbers
-    let mut counter = 1;
-    while download_destination.exists() {
-      download_destination.set_file_name(format!("{suggested_filename} ({counter}){ext}"));
-      counter += 1;
-    }
+    // The handler is handed WebKit's suggested name as it is; the numbering
+    // below is only for a handler that keeps this default destination.
+    let default_destination = dirs::download_dir()
+      .unwrap_or_else(|| current_dir().unwrap_or_default())
+      .join(&suggested_filename);
+    let mut download_destination = default_destination.clone();
 
     let started_fn = &this.ivars().started;
     if let Some(started_fn) = started_fn {
       let mut started_fn = started_fn.borrow_mut();
       match started_fn(url.to_string(), &mut download_destination) {
         true => {
+          if download_destination == default_destination {
+            let (suggested_filename, ext) = suggested_filename
+              .split_once('.')
+              .map(|(base, ext)| (base, format!(".{ext}")))
+              .unwrap_or((&suggested_filename, "".to_string()));
+
+            // WebView2 does not overwrite files but appends numbers
+            let mut counter = 1;
+            while download_destination.exists() {
+              download_destination.set_file_name(format!("{suggested_filename} ({counter}){ext}"));
+              counter += 1;
+            }
+          }
+          this
+            .ivars()
+            .destinations
+            .borrow_mut()
+            .insert(download_key(download), download_destination.clone());
           let path = NSString::from_str(&download_destination.display().to_string());
           let ns_url = NSURL::fileURLWithPath_isDirectory(&path, false);
           (*completion_handler).call((Retained::as_ptr(&ns_url),))
@@ -94,8 +121,9 @@ pub(crate) fn download_did_finish(this: &WryDownloadDelegate, download: &WKDownl
   unsafe {
     let original_request = download.originalRequest().unwrap();
     let url = original_request.URL().unwrap().absoluteString().unwrap();
+    let destination = this.ivars().destinations.borrow_mut().remove(&download_key(download));
     if let Some(completed_fn) = this.ivars().completed.clone() {
-      completed_fn(url.to_string(), None, true);
+      completed_fn(url.to_string(), destination, true);
     }
   }
 }
@@ -115,8 +143,9 @@ pub(crate) fn download_did_fail(
 
     let original_request = download.originalRequest().unwrap();
     let url = original_request.URL().unwrap().absoluteString().unwrap();
+    let destination = this.ivars().destinations.borrow_mut().remove(&download_key(download));
     if let Some(completed_fn) = this.ivars().completed.clone() {
-      completed_fn(url.to_string(), None, false);
+      completed_fn(url.to_string(), destination, false);
     }
   }
 }

@@ -19,7 +19,7 @@ use objc2_web_kit::WKWebView;
 use crate::{
   url_from_webview,
   wkwebview::{
-    download::{navigation_download_action, navigation_download_response},
+    download::{context_menu_download, navigation_download_action, navigation_download_response},
     navigation::{
       did_commit_navigation, did_finish_navigation, navigation_policy, navigation_policy_response,
       web_content_process_did_terminate,
@@ -101,6 +101,17 @@ define_class!(
     #[unsafe(method(webViewWebContentProcessDidTerminate:))]
     fn web_content_process_did_terminate(&self, webview: &WKWebView) {
       web_content_process_did_terminate(self, webview);
+    }
+  }
+
+  /// `WKNavigationDelegatePrivate` (macOS 12+). WebKit's own context-menu
+  /// items ("Download Image", "Download Linked File", "Download Video") start
+  /// a `WKDownload` and report it only here; without a delegate it is
+  /// cancelled when it asks for a destination.
+  impl WryNavigationDelegate {
+    #[unsafe(method(_webView:contextMenuDidCreateDownload:))]
+    fn context_menu_did_create_download(&self, webview: &WKWebView, download: &WKDownload) {
+      context_menu_download(self, webview, download);
     }
   }
 );
