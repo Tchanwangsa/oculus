@@ -1,23 +1,12 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { CaretRight } from "@phosphor-icons/react";
-import { elapsedText } from "@/lib/harness";
 import { EXPANDABLE, onExpand } from "@/lib/ui/expandable";
 import { cn } from "@/lib/utils";
 import { chooseFold, foldChoice } from "@/stores/chat/runFolds";
 import { Bundle, Item } from "./ItemRows";
+import { Working } from "./Working";
 import { foldFindText, foldLabel, foldMatches, foldOpens, foldRows, type WorkFold } from "./rows";
-
-/** "Working for 8s", ticking. Its own component, so the second hand
- *  re-renders this line and nothing else. */
-function Working({ since }: { since: number | null }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  return <>{since == null ? "Working" : `Working for ${elapsedText(Math.max(0, now - since))}`}</>;
-}
 
 /**
  * One run's work — earlier replies, reasoning and tools — as one disclosure
@@ -72,7 +61,8 @@ export const RunWorkGroup = memo(
               open ? "text-foreground" : "text-muted-foreground",
             )}
           >
-            <span className={cn("min-w-0 truncate tabular-nums", live && "text-shimmer")}>
+            {/* Steady while the run works: only its live step shimmers. */}
+            <span className="min-w-0 truncate tabular-nums">
               {live ? <Working since={fold.startedMs} /> : foldLabel(fold)}
             </span>
             <CaretRight

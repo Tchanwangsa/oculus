@@ -21,7 +21,9 @@
 
 /* Text still at work (a live thought, a running oculus command): a
    foreground band sweeps across muted text. Only the background moves, so no
-   compositing layer is gained or dropped (docs/ui.md, icon jitter). */
+   compositing layer is gained or dropped (docs/ui.md, icon jitter). The band
+   stays neutral: a brand band over body text reads as a link.
+   `--shimmer-state` pauses it while nobody can see it (`useVisibleAnimation`). */
 @utility text-shimmer {
   background-image: linear-gradient(
     90deg,
@@ -34,6 +36,7 @@
   background-clip: text;
   color: transparent;
   animation: text-shimmer 2s linear infinite;
+  animation-play-state: var(--shimmer-state, running);
   @media (prefers-reduced-motion: reduce) {
     animation: none;
     color: var(--color-muted-foreground);
@@ -46,25 +49,6 @@
   }
   to {
     background-position: 0 0;
-  }
-}
-
-/* Bouncing dots for the quiet gap before the chat agent emits its next row. */
-@utility chat-loading-dot {
-  animation: chat-dot-bounce 500ms ease-in-out infinite alternate;
-  will-change: transform;
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-    will-change: auto;
-  }
-}
-
-@keyframes chat-dot-bounce {
-  from {
-    transform: translateY(28%);
-  }
-  to {
-    transform: translateY(-72%);
   }
 }
 

@@ -44,6 +44,7 @@ import {
   type ToolKind,
 } from "@/lib/harness";
 import { libraryPath, openLibraryPath } from "@/lib/files/openFile";
+import { useVisibleAnimation } from "@/hooks/ui/useVisibleAnimation";
 import { cn } from "@/lib/utils";
 import { useOverflows } from "./useOverflows";
 
@@ -103,7 +104,7 @@ export function RowShell({
   em?: string;
   /** Muted text after the title, truncating (a live thought's latest line). */
   note?: string;
-  /** Still at work: the title shimmers. */
+  /** Still at work: the title shimmers while it can be seen. */
   live?: boolean;
   trailing?: React.ReactNode;
   expandable: boolean;
@@ -116,6 +117,7 @@ export function RowShell({
   flush?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const shimmer = useVisibleAnimation<HTMLSpanElement>(!!live);
   const canOpen = expandable && (!!children || !!code);
   const wrap = !!code && open;
   // A library path in `em` becomes a link that opens the file.
@@ -155,6 +157,7 @@ export function RowShell({
               narrow dock's scroller gains a horizontal axis. */}
           {code ? (
             <span
+              ref={shimmer}
               className={cn(
                 "min-w-0 font-mono text-[11.5px] text-foreground/80",
                 wrap ? "whitespace-pre-wrap break-all" : "truncate",
@@ -166,6 +169,7 @@ export function RowShell({
             </span>
           ) : (
             <span
+              ref={shimmer}
               className={cn("min-w-0", em || note ? "shrink-0" : "truncate", live && "text-shimmer")}
               title={em || note ? undefined : title}
             >

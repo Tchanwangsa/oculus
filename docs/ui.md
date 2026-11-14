@@ -42,6 +42,12 @@ destructive tokens. Nothing inside the widget sets a fixed pixel width, so
 the cards reflow with the chat pane and page zoom. The runtime and its state
 contract are in [harness.md](./harness.md#openui-fences-draw-interactive-study-widgets).
 
+`text-shimmer` sweeps a neutral band (foreground over muted text), never the
+brand: indigo over body text reads as a link. Its `animation-play-state` is
+`var(--shimmer-state, running)`, which `useVisibleAnimation` sets to `paused`
+while the text is off screen, in a hidden tab or a hidden window
+([harness.md](./harness.md#the-timeline-never-re-renders-per-token)).
+
 Streaming OpenUI cards use `text-shimmer` and `block-shimmer` for unresolved
 content. New sections fade in only while streaming; a committed-row remount
 has no entrance animation. Both shimmer and entrance motion respect

@@ -3,15 +3,17 @@ import { ANCHOR_ROW } from "@/hooks/ui/useStickToBottom";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { cn } from "@/lib/utils";
 import { LiveThinkingRow } from "./WorkRow";
+import { Working } from "./Working";
+import { runningSince } from "@/lib/harness";
 import { Assistant } from "./MessageActions";
 import { QuestionBubble } from "./QuestionBubble";
 import type { PendingActions } from "./types";
 
-/** The turn in flight: reasoning and text with no row yet, or "Working…"
- *  (`quiet`; off while the run's fold shows its own clock). One anchor row,
- *  never `skip-offscreen`: it changes size every fold and is on screen
- *  whenever it is read. `text` off: the streaming reply holds a widget and
- *  `Timeline` draws it as the row it will become. */
+/** The turn in flight: reasoning and text with no row yet, or a steady
+ *  "Working for 8s" (`quiet`; off while the run's fold shows its own clock).
+ *  One anchor row, never `skip-offscreen`: it changes size every fold and is
+ *  on screen whenever it is read. `text` off: the streaming reply holds a
+ *  widget and `Timeline` draws it as the row it will become. */
 export function LiveTail({
   threadId,
   quiet: allowQuiet = true,
@@ -26,6 +28,8 @@ export function LiveTail({
     streaming: s.live[threadId]?.streaming ?? "",
     thinking: s.live[threadId]?.thinking ?? "",
   })));
+  // The run in flight's start; none for a turn the agent started itself.
+  const since = useHarnessStore((s) => runningSince(s.runs[threadId]));
   const quiet = allowQuiet && running && !streaming && !thinking;
   const shown = text ? streaming : "";
   if (!thinking && !shown && !quiet) return null;
@@ -34,17 +38,8 @@ export function LiveTail({
       {thinking && <LiveThinkingRow text={thinking} />}
       {shown && <Assistant text={shown} />}
       {quiet && (
-        <div role="status" className="mt-1 flex items-center gap-2 px-2 text-xs text-muted-foreground">
-          <span aria-hidden="true" className="flex h-4 shrink-0 items-center gap-0.5">
-            {[0, 1, 2].map((dot) => (
-              <span
-                key={dot}
-                className="chat-loading-dot size-[3px] rounded-full bg-current"
-                style={{ animationDelay: `${(dot - 3) / 6}s` }}
-              />
-            ))}
-          </span>
-          <span>Working…</span>
+        <div className="mt-1 px-2 text-xs leading-5 tabular-nums text-muted-foreground">
+          <Working since={since} />
         </div>
       )}
     </div>

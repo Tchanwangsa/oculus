@@ -381,16 +381,28 @@ A reply streaming a ` ```widget ` fence is the one exception: `Timeline` draws
 its text as the row it will become, a `Reply` with `stream` under the key the
 committed answer takes (`replyKey`, `streamingReply` in `rows.ts`), and that
 row reads the text per delta in place of `LiveTail`, which keeps the reasoning
-and "Working…". The commit swaps the row's item in the same render, so the
+and "Working for 8s". The commit swaps the row's item in the same render, so the
 widget's frame survives it
 ([widgets.md](./widgets.md#a-widget-draws-while-it-streams)). `Timeline`
 subscribes only to whether the text holds a widget fence, which flips once a
 reply.
 When the turn is running with neither text nor reasoning, `LiveTail` in
-`app/src/components/harness/timeline/Pending.tsx` shows three CSS bouncing dots
-beside a steady “Working…” status. The dots inherit the muted text colour and
-stay still under reduced motion; chat, lecture and Studio timelines share this
-indicator.
+`app/src/components/harness/timeline/Pending.tsx` shows a steady muted
+"Working for 8s" (`Working.tsx`, timed from the running run's start, or
+"Working" for a turn the agent started itself); chat, lecture and Studio
+timelines share it.
+
+**Only the live step shimmers.** A running fold's header, the tail's
+"Working for" and a waiting tool row (its spinner) are steady; the shimmer is
+on the streaming "Thinking" row and a running `oculus` row. Each shimmering
+label pauses through `useVisibleAnimation`
+(`app/src/hooks/ui/useVisibleAnimation.ts`, its rule `animationRuns` in
+`app/src/lib/ui/visibleAnimation.ts`): an IntersectionObserver on the label,
+rooted on its nearest scroller, `visibilitychange`, the reduced-motion query
+and `useTabActive` (a hidden pane is `visibility: hidden`, which an observer
+still reports as intersecting) set `--shimmer-state`, which `text-shimmer`
+reads as its `animation-play-state`. Only the play state changes, never a
+layer.
 
 The model picker keeps a memo boundary around its catalogue: the provider list
 and selection callbacks have stable identities, so composer draft keystrokes
@@ -973,7 +985,7 @@ carries its run's question (`asked`), which Retry sends again.
 
 | Run | Fold | Answer |
 | --- | --- | --- |
-| Working (the thread's last run, live) | "Working for 8s", shimmering, open; a running step stays unbundled; the tail's "Working…" defers to it | the latest committed reply, without Copy or Retry; none while text streams |
+| Working (the thread's last run, live) | "Working for 8s", steady, open; a running step stays unbundled; the tail's "Working for" defers to it | the latest committed reply, without Copy or Retry; none while text streams |
 | Completed | "Worked for 23s", closed | Copy and Retry |
 | Stopped | "You stopped after 23s", open | headed "Partial response", then the divider "Run interrupted · Stopped by you" |
 | Failed | "Failed after 23s", open | "Partial response", then the error or sign-in card |
