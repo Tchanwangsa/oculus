@@ -63,13 +63,17 @@ export function pendingFromPath(path: string): PendingAttachment {
 
 /** A picture a sent message carried, back as a pending one. Null when `path`
  *  is not an attachment path. */
-export function pendingFromKept(path: string, dataDir: string): PendingAttachment | null {
+export function pendingFromKept(
+  path: string,
+  dataDir: string,
+  src: (dataDir: string, path: string) => string = attachmentSrc,
+): PendingAttachment | null {
   const rel = attachmentPath(path);
   if (!rel) return null;
   return {
     id: nextId(),
     name: rel.slice(rel.lastIndexOf("/") + 1),
-    preview: attachmentSrc(dataDir, rel),
+    preview: src(dataDir, rel),
     source: { kind: "kept", path },
   };
 }
@@ -77,8 +81,12 @@ export function pendingFromKept(path: string, dataDir: string): PendingAttachmen
 /** Pictures already in `agents/attachments/` (handed back, or restored from
  *  the stash) as pending ones, sent again by the same path; a path that is
  *  not an attachment's is dropped. */
-export function keptAttachments(paths: readonly string[], dataDir: string): PendingAttachment[] {
-  return paths.flatMap((p) => pendingFromKept(p, dataDir) ?? []);
+export function keptAttachments(
+  paths: readonly string[],
+  dataDir: string,
+  src: (dataDir: string, path: string) => string = attachmentSrc,
+): PendingAttachment[] {
+  return paths.flatMap((p) => pendingFromKept(p, dataDir, src) ?? []);
 }
 
 export function releaseAttachment(a: PendingAttachment): void {

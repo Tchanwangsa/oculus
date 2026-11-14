@@ -42,19 +42,13 @@ describe("useStashStore", () => {
 
 describe("restoring a stashed picture", () => {
   test("comes back kept, and is sent again by the same path", async () => {
-    const globals = globalThis as { window?: unknown };
-    const before = globals.window;
-    globals.window = { __TAURI_INTERNALS__: { convertFileSrc: (p: string) => `asset://${p}` } };
-    try {
-      const kept = keptAttachments(["./attachments/1700-1.png", "courses/X/not-a-picture.png"], "/data");
-      expect(kept).toHaveLength(1);
-      expect(kept[0].source).toEqual({ kind: "kept", path: "./attachments/1700-1.png" });
-      expect(kept[0].preview).toBe("asset:///data/agents/attachments/1700-1.png");
-      // A kept picture is never written again: stashing or sending it reuses its path.
-      expect(await writeAttachment(kept[0])).toBe("./attachments/1700-1.png");
-    } finally {
-      globals.window = before;
-    }
+    const src = (dataDir: string, path: string) => `asset://${dataDir}/${path}`;
+    const kept = keptAttachments(["./attachments/1700-1.png", "courses/X/not-a-picture.png"], "/data", src);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].source).toEqual({ kind: "kept", path: "./attachments/1700-1.png" });
+    expect(kept[0].preview).toBe("asset:///data/agents/attachments/1700-1.png");
+    // A kept picture is never written again: stashing or sending it reuses its path.
+    expect(await writeAttachment(kept[0])).toBe("./attachments/1700-1.png");
   });
 });
 
