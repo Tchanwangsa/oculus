@@ -9,7 +9,7 @@ and release gate for the agent turn model rebuild.
 | Piece | Location |
 | --- | --- |
 | Fixtures, individual manifests and explicit known failures | `app/src-tauri/fixtures/harness/turn-model/` |
-| Replay runner, scratch guard and assertions | `app/src-tauri/src/harness/testkit/` |
+| Replay runner (`replay.rs`), its step-by-step runtime (`rig.rs`, `io.rs`), scratch guard and assertions | `app/src-tauri/src/harness/testkit/` |
 | Process transport substitution | `app/src-tauri/src/harness/transport.rs` |
 | Provider constructors and inbound runners | `app/src-tauri/src/harness/providers/claude/replay.rs`, `app/src-tauri/src/harness/providers/codex/replay.rs`, `app/src-tauri/src/harness/providers/opencode/replay.rs`, `app/src-tauri/src/harness/providers/antigravity/replay.rs` |
 | Shared ordered consumer and injected external effects | `app/src-tauri/src/harness/app/consumer.rs` |
@@ -21,7 +21,8 @@ and release gate for the agent turn model rebuild.
 `Scenario::recorded(name)` loads and validates a manifest and its raw JSON
 frames. `mutate(Mutation)` explicitly changes a recording for robustness
 checks; mutations are never described as captured provider behavior.
-`run(scenario)` creates a migrated scratch SQLite file, installs production
+`run(scenario)` drives a `Rig` (below) through the whole recording. The rig
+creates a migrated scratch SQLite file, installs production
 provider handles in the manager and starts the production consumer on its own
 thread, fed by a bus as in the app. It persists the send's run through the
 production `begin_run` on that bus (receipt `replay-send`) and then calls
@@ -61,6 +62,32 @@ rejects the live Oculus data directory and main checkout, and requires scratch
 containment. Tests exercise direct, escaped and symlinked forbidden paths
 without opening their target files. Scratch pools, Bun processes and temporary
 directories are closed or removed before the runner returns.
+
+## A test can act mid-turn
+
+`Rig` (`testkit/rig.rs`) is the runtime `run` uses, one step at a time:
+`start` (the scratch database, the consumer thread, the recording's bridge),
+`open` (the recording's request and the scenario's storage faults), `feed`
+and `resume` (inbound frames), `eof`, `close` and `finish` (the `Replay`).
+
+A **gate** pauses a transcript at a labelled frame. `Scenario::gate(label,
+pick)` labels the first frame `pick` matches; `rig.until(label)` feeds the
+recording up to that frame, leaves it unfed, and returns once the consumer
+has applied everything sent so far (`Rig::drain`: the feed answers when it
+finds the bus empty, with no sleep to tune). The test then does what a
+student or the app would do mid-turn, such as a second `rig.send` or a call
+on `rig.harness`, and `resume`s. Races are tested this way, never by timing.
+
+```rust
+let scenario = Scenario::recorded("codex-ls")
+    .gate("terminal", |f| f["method"] == "turn/completed");
+let mut rig = Rig::start(scenario);
+rig.open();
+rig.until("terminal"); // the turn is open here
+rig.resume();
+rig.close();
+let replay = rig.finish();
+```
 
 ## Manifests preserve evidence boundaries
 

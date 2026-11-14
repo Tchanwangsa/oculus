@@ -33,6 +33,8 @@ pub(super) struct Scenario {
     pub restart: bool,
     /// The run is a card's continuation, started by its `CardSettled`, not a send.
     pub continuation: bool,
+    /// Labelled frames a [`super::rig::Rig`] pauses before (`Rig::until`).
+    pub gates: Vec<(String, usize)>,
 }
 
 impl Scenario {
@@ -47,7 +49,20 @@ impl Scenario {
             load_race: false,
             restart: false,
             continuation: false,
+            gates: Vec::new(),
         }
+    }
+
+    /// Label the first frame `at` picks, so a test can pause the transcript
+    /// before it and act mid-turn.
+    pub fn gate(mut self, label: &str, at: impl Fn(&Value) -> bool) -> Self {
+        let index = self
+            .frames
+            .iter()
+            .position(at)
+            .unwrap_or_else(|| panic!("no frame for gate {label}"));
+        self.gates.push((label.into(), index));
+        self
     }
 
     pub fn mutate(mut self, mutation: Mutation) -> Self {
