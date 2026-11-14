@@ -20,7 +20,8 @@ import { commitTextEdit, labelTargetAt, stylePatchChanges } from '@/lib/canvas/l
 import { resizeBounds, resizeElements } from '@/lib/canvas/resize';
 import { placeImagesIn, type CanvasImageSource } from '@/lib/canvas/mediaPlacement';
 import { TouchViewportGesture } from '@/lib/canvas/touchViewport';
-import { VelocityTracker, glide, gliding } from '@/lib/canvas/momentum';
+import { VelocityTracker, eventTime, glide, gliding } from '@/lib/canvas/momentum';
+import { loadCamera, loadToolState, saveCamera, saveToolState } from '@/lib/canvas/viewState';
 import { applyCanvasTransaction, diffCanvasContent, hasCanvasChanges, sameValue, type CanvasTransaction } from '@/lib/canvas/collaboration';
 import { CAPTURE_LIFT_DELAY_MS, type CaptureHoldIndicator, copyRegionImage, rasterizeRegion, regionHandleAt, moveRegion, regionBounds, resizeRegion, type CanvasRegion } from '@/lib/canvas/region';
 import { asDataUrl } from '@/lib/canvas/importMedia';
@@ -35,7 +36,7 @@ import {
 import { elementsAtPage } from '@/lib/canvas/pageHits';
 import type { CanvasImportedImage } from '@/lib/canvas/importMedia';
 import {
-  adoptElementStyle, colorLabel, DEFAULT_DRAWING_STYLE, inspectorSections, inspectorTarget, inspectorValues, newElementStyle, patchDrawingStyle,
+  adoptElementStyle, colorLabel, inspectorSections, inspectorTarget, inspectorValues, newElementStyle, patchDrawingStyle,
   patchElementStyle, type DrawingStyle, type InspectorTarget, type StylePatch,
 } from '@/lib/canvas/style';
 
@@ -46,6 +47,8 @@ export interface CanvasInteractionOptions {
   onViewportChange?: (viewport: CanvasViewport) => void;
   /** Lifting the eraser after a completed erase returns to the tool chosen before it. */
   eraserAutoReturn?: boolean;
+  /** Names the drawing for this device's saved camera (`viewState.ts`): it opens where it was left. */
+  cameraKey?: string;
   /** `stroke` (the default) erases whole elements; `partial` cuts strokes where the eraser passes. */
   eraserMode?: EraserMode;
   /** The partial eraser's size (`ERASER_SIZES`, screen pixels); medium by default. */
@@ -120,6 +123,15 @@ function restoreLayerOrder(document: CanvasDocument, transaction: CanvasTransact
   return { ...document, elements };
 }
 
+/** What moved the camera, for the companion's diagnostics. */
+type CameraCause = 'restore' | 'pan' | 'two-finger' | 'glide' | 'wheel' | 'page' | 'fit' | 'zoom' | 'first-fit' | 'resize' | 'external' | 'cancel' | 'publish' | 'other';
+/** A single camera write of 150 screen pixels or a quarter's zoom is logged with its cause; pans and glides move in small steps. */
+function traceJump(from: CanvasViewport, to: CanvasViewport, cause: CameraCause, clamped: boolean) {
+  const dx = to.x - from.x, dy = to.y - from.y, zoom = to.zoom / from.zoom;
+  if (Math.hypot(dx, dy) < 150 && zoom < 1.25 && zoom > 0.8) return;
+  traceCanvas('camera.jump', { cause, clamped, dx: Math.round(dx), dy: Math.round(dy), fromZoom: Math.round(from.zoom * 1000) / 1000, toZoom: Math.round(to.zoom * 1000) / 1000 });
+}
+
 export function useCanvasInteraction(document: CanvasDocument, onChange: (document: CanvasDocument) => void, options: CanvasInteractionOptions = {}) {
   const root = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -130,11 +142,13 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   optionsRef.current = options;
   /** Documents this pane handed to `onChange`; one coming back is an echo, never a remote change. */
   const published = useRef(new WeakSet<CanvasDocument>());
-  const [tool, setTool] = useState<CanvasTool>('select');
+  const [resumed] = useState(loadToolState);
+  const [tool, setTool] = useState<CanvasTool>(resumed.tool);
   const previousTool = useRef<CanvasTool>('freedraw');
   // Safari cannot say whether a Pencil is paired; its first pen contact turns one finger into navigation.
   const penSeen = useRef(false);
-  const [style, setStyle] = useState<DrawingStyle>(DEFAULT_DRAWING_STYLE);
+  const [style, setStyle] = useState<DrawingStyle>(resumed.style);
+  useEffect(() => { saveToolState({ tool, style }); }, [tool, style]);
   const [grid, setGrid] = useState(true);
   const [selection, setSelection] = useState<string[]>([]);
   const [revision, setRevision] = useState(0);
@@ -157,6 +171,27 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   /** The camera samples of the pan in progress, and the frame of the glide a released pan leaves (0 when none). */
   const panVelocity = useRef(new VelocityTracker());
   const glideFrame = useRef(0);
+  /** The pending write of this device's saved camera; a pan or glide writes it once it pauses. */
+  const cameraSave = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const storeCamera = () => {
+    if (cameraSave.current) { clearTimeout(cameraSave.current); cameraSave.current = null; }
+    const key = optionsRef.current.cameraKey;
+    if (key) saveCamera(key, documentRef.current.viewport);
+  };
+  useEffect(() => {
+    // Safari can discard the page without unmounting it; the camera is written as it goes.
+    globalThis.addEventListener?.('pagehide', storeCamera);
+    return () => { globalThis.removeEventListener?.('pagehide', storeCamera); if (cameraSave.current) storeCamera(); };
+  }, []);
+  /** Two-finger navigation applies once a frame (`TouchViewportGesture.view`); the pending frame and its latest event's time. */
+  const navFrame = useRef(0), navTime = useRef(0);
+  /** Where and when the running glide started, for its diagnostics trace. */
+  const glideStats = useRef<{ start: number; from: CanvasViewport; source: string } | null>(null);
+  const traceGlideEnd = (reason: string) => {
+    const stats = glideStats.current, to = documentRef.current.viewport;
+    glideStats.current = null;
+    if (stats) traceCanvas('camera.glide-end', { reason, source: stats.source, durationMs: Math.round(performance.now() - stats.start), dx: Math.round(to.x - stats.from.x), dy: Math.round(to.y - stats.from.y) });
+  };
   const overrides = useRef(new Map<string, CanvasElement | null>());
   const marquee = useRef<Bounds | undefined>(undefined);
   /** What releasing the selection box now would select, and the bounds painted for the elements it would add. */
@@ -175,7 +210,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   const [historyError, setHistoryError] = useState<string | null>(null);
   const viewSave = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** A notebook opens fitted to its page width once, when its camera is still the untouched default. */
-  const fitted = useRef(false);
+  const fitted = useRef(false), restored = useRef(false);
   /** A pen whose press was refused off the page; its later moves must not start the stroke through pen recovery. */
   const refusedPointer = useRef<number | null>(null);
   /** The one flag every page behaviour keys off, read through `paintOptions` by the handlers. */
@@ -268,6 +303,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
         future.current = [];
       }
     }
+    traceJump(documentRef.current.viewport, next.viewport, 'publish', false);
     documentRef.current = next;
     emit(next);
     setRevision(value => value + 1);
@@ -316,21 +352,24 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   }, [choose, publish]);
 
   /** Moves the camera without a render, for every pointer sample of a pan. The one writer: a notebook's camera is clamped here. */
-  const setView = useCallback((requested: CanvasViewport) => {
+  const setView = useCallback((requested: CanvasViewport, cause: CameraCause = 'other') => {
     const viewport = clampView(requested);
+    traceJump(documentRef.current.viewport, viewport, cause, viewport !== requested);
     documentRef.current = { ...documentRef.current, viewport };
     optionsRef.current.onViewportChange?.(viewport);
+    if (optionsRef.current.cameraKey && !cameraSave.current) cameraSave.current = setTimeout(storeCamera, 400);
   }, []);
   /** Stops a glide where it is; returns whether one was running. */
-  const haltGlide = useCallback(() => {
+  const haltGlide = useCallback((cause = 'other') => {
     if (!glideFrame.current) return false;
     cancelAnimationFrame(glideFrame.current); glideFrame.current = 0;
+    traceGlideEnd(`halted:${cause}`);
     return true;
   }, []);
   /** Every other camera move ends a glide; this one saves or re-renders the camera itself. */
-  const updateViewport = useCallback((viewport: CanvasViewport, save = true) => {
-    haltGlide();
-    setView(viewport);
+  const updateViewport = useCallback((viewport: CanvasViewport, save = true, cause: CameraCause = 'other') => {
+    haltGlide(cause);
+    setView(viewport, cause);
     redraw();
     setRevision(value => value + 1);
     if (save && !optionsRef.current.onViewportChange) {
@@ -343,25 +382,33 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if (optionsRef.current.onViewportChange) setRevision(value => value + 1);
     else publish(documentRef.current);
   };
-  const stopGlide = () => { if (haltGlide()) settleView(); };
+  const stopGlide = (cause: string) => { if (haltGlide(cause)) settleView(); };
   /**
    * A touch or pen pan released while moving glides on, decelerating (`momentum.ts`), and settles once it stops; an axis
-   * the pages stop loses its speed so the glide ends at their edge. A mouse drag, or a release held still, settles at once.
+   * the pages stop loses its speed so the glide ends at their edge. A mouse drag, a cancelled contact (often a palm the
+   * system rejected) or a release held still settles at once. `time` is the release event's (`eventTime`).
    */
-  const endPan = (glides: boolean) => {
-    const released = glides ? panVelocity.current.release(performance.now()) : null;
+  const endPan = (glides: boolean, time: number, source: string) => {
+    const measured = panVelocity.current.release(time), released = glides ? measured : null;
+    const trace = panVelocity.current.lastRelease;
+    traceCanvas('camera.pan', {
+      source, glides, verdict: glides ? trace?.verdict ?? 'none' : 'not-allowed', travel: trace?.travel ?? 0, spanMs: trace?.spanMs ?? 0,
+      vx: released ? Math.round(released.x * 100) / 100 : 0, vy: released ? Math.round(released.y * 100) / 100 : 0,
+      handlingLagMs: Math.round(performance.now() - time), samples: trace?.samples ?? '',
+    });
     if (!released) { settleView(); return; }
     let velocity = released, last = performance.now();
+    glideStats.current = { start: last, from: documentRef.current.viewport, source };
     const step = (time: number) => {
       const { dx, dy, velocity: next } = glide(velocity, Math.max(0, time - last));
       last = time;
       const before = documentRef.current.viewport;
-      setView({ ...before, x: before.x + dx, y: before.y + dy });
+      setView({ ...before, x: before.x + dx, y: before.y + dy }, 'glide');
       const after = documentRef.current.viewport;
       velocity = { x: Math.abs(after.x - before.x - dx) > 0.01 ? 0 : next.x, y: Math.abs(after.y - before.y - dy) > 0.01 ? 0 : next.y };
       redraw();
       if (gliding(velocity)) glideFrame.current = requestAnimationFrame(step);
-      else { glideFrame.current = 0; settleView(); }
+      else { glideFrame.current = 0; traceGlideEnd(velocity.x || velocity.y ? 'rest' : 'pinned'); settleView(); }
     };
     glideFrame.current = requestAnimationFrame(step);
   };
@@ -376,7 +423,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     const base = { ...incoming, viewport: local.viewport };
     documentRef.current = base;
     // New paper (a page added or removed elsewhere) can leave the camera off the pages.
-    if (clampView(base.viewport) !== base.viewport) setView(base.viewport);
+    if (clampView(base.viewport) !== base.viewport) setView(base.viewport, 'external');
     const ids = new Set(base.elements.map(element => element.id)), had = new Set(local.elements.map(element => element.id));
     const gone = (id: string) => had.has(id) && !ids.has(id);
     const active = gesture.current;
@@ -412,17 +459,24 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     const resize = () => {
       const rect = container.getBoundingClientRect();
       const pixelRatio = window.devicePixelRatio || 1;
+      if (Math.round(rect.width) !== Math.round(size.current.width) || Math.round(rect.height) !== Math.round(size.current.height)) {
+        traceCanvas('canvas.resize', { fromWidth: Math.round(size.current.width), fromHeight: Math.round(size.current.height), width: Math.round(rect.width), height: Math.round(rect.height) });
+      }
       size.current = { width: rect.width, height: rect.height, pixelRatio };
       element.width = Math.round(rect.width * pixelRatio);
       element.height = Math.round(rect.height * pixelRatio);
+      // The first real size is when this device's saved camera comes back, which also stands in for a notebook's first fit.
+      const saved = !restored.current && rect.width > 0 && optionsRef.current.cameraKey ? loadCamera(optionsRef.current.cameraKey) : null;
+      if (rect.width > 0) restored.current = true;
+      if (saved) { fitted.current = true; setView(saved, 'restore'); setRevision(value => value + 1); }
       const paper = boundPaper(), { viewport } = documentRef.current;
       if (paper && !fitted.current && rect.width > 0) {
         fitted.current = true;
-        if (viewport.x === 0 && viewport.y === 0 && viewport.zoom === 1) { setView(pageView(paper, rect)); setRevision(value => value + 1); }
+        if (viewport.x === 0 && viewport.y === 0 && viewport.zoom === 1) { setView(pageView(paper, rect), 'first-fit'); setRevision(value => value + 1); }
       }
       // A notebook's saved camera, or one a resize has left off the pages, comes back onto them.
       const settled = documentRef.current.viewport;
-      if (rect.width > 0 && clampView(settled) !== settled) { setView(settled); setRevision(value => value + 1); }
+      if (rect.width > 0 && clampView(settled) !== settled) { setView(settled, 'resize'); setRevision(value => value + 1); }
       redraw();
     };
     const observer = new ResizeObserver(resize);
@@ -432,7 +486,8 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       observer.disconnect();
       cancelAnimationFrame(frame.current);
       frame.current = 0;
-      if (haltGlide() && !optionsRef.current.onViewportChange) emit(documentRef.current);
+      cancelAnimationFrame(navFrame.current); navFrame.current = 0;
+      if (haltGlide('unmount') && !optionsRef.current.onViewportChange) emit(documentRef.current);
       if (viewSave.current) { clearTimeout(viewSave.current); viewSave.current = null; emit(documentRef.current); }
     };
   }, [emit, haltGlide, redraw]);
@@ -465,8 +520,8 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       const viewport = documentRef.current.viewport;
       const rect = element.getBoundingClientRect();
       const screen = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-      if (event.ctrlKey || event.metaKey) updateViewport(zoomAt(viewport, screen, viewport.zoom * Math.exp(-event.deltaY * 0.01), zoomRange()));
-      else updateViewport({ ...viewport, x: viewport.x - event.deltaX, y: viewport.y - event.deltaY });
+      if (event.ctrlKey || event.metaKey) updateViewport(zoomAt(viewport, screen, viewport.zoom * Math.exp(-event.deltaY * 0.01), zoomRange()), true, 'wheel');
+      else updateViewport({ ...viewport, x: viewport.x - event.deltaX, y: viewport.y - event.deltaY }, true, 'wheel');
     };
     element.addEventListener('wheel', wheel, { passive: false });
     return () => element.removeEventListener('wheel', wheel);
@@ -677,12 +732,12 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     marqueePreview.current = { ids, boxes };
   };
   const pointerDown = (event: PointerEvent<HTMLCanvasElement>, recoveringContact = false) => {
-    traceCanvas('gesture.down', { tool, pointerId: event.pointerId, pointerType: event.pointerType, recoveringContact, gesture: gesture.current?.mode ?? 'none', penSeen: penSeen.current, touches: touchViewport.current.count });
+    traceCanvas('gesture.down', { tool, pointerId: event.pointerId, pointerType: event.pointerType, contactWidth: Math.round(event.width || 0), contactHeight: Math.round(event.height || 0), recoveringContact, gesture: gesture.current?.mode ?? 'none', penSeen: penSeen.current, touches: touchViewport.current.count });
     if (!recoveringContact && event.button !== 0 && event.button !== 1) return;
     if (!recoveringContact) refusedPointer.current = null;
     // A contact during a glide stops it; a finger then holds the page, so lifting it does nothing and dragging scrolls on.
     const caught = glideFrame.current !== 0;
-    stopGlide();
+    stopGlide(`${event.pointerType}-down`);
     if (event.pointerType === 'pen') {
       penSeen.current = true;
       // A fresh pen down proves the last contact ended even when WebKit dropped its up: keep that stroke's ink as its own stroke.
@@ -693,7 +748,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
         dropGesture();
       }
       // A palm or finger can land just before the Pencil; it must not claim the pen's stroke.
-      if (gesture.current?.pointerType === 'touch' || touchViewport.current.count) { dropGesture(); touchViewport.current.reset(); }
+      if (gesture.current?.pointerType === 'touch' || touchViewport.current.count) { dropGesture(); dropNavigation(); }
     }
     if (event.pointerType === 'touch' && !textDraft) {
       // Palm contacts are ignored while the pen owns a stroke.
@@ -702,7 +757,8 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       if (touchViewport.current.down(event.pointerId, coordinates(event).screen, documentRef.current.viewport)) {
         // A second finger turns the first finger's gesture into navigation, without committing its preview.
         event.preventDefault();
-        panVelocity.current.start(performance.now(), documentRef.current.viewport);
+        const center = touchViewport.current.center() ?? { x: documentRef.current.viewport.x, y: documentRef.current.viewport.y };
+        panVelocity.current.start(eventTime(event), { ...documentRef.current.viewport, ...center });
         dropGesture(); redraw(); return;
       }
     } else if (touchViewport.current.active) { event.preventDefault(); return; }
@@ -716,7 +772,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     const current = documentRef.current;
     const initial: Gesture = { mode: 'draw', start: point, screen, original: current, moved: false, pointerId: event.pointerId, pointerType: event.pointerType, shift: event.shiftKey };
     overrides.current.clear();
-    panVelocity.current.start(performance.now(), current.viewport);
+    panVelocity.current.start(eventTime(event), current.viewport);
     const region = regionRef.current;
     const inRegion = !!region && point.x >= region.bounds.x - 16 / current.viewport.zoom && point.x <= region.bounds.x + region.bounds.width + 16 / current.viewport.zoom && point.y >= region.bounds.y - 16 / current.viewport.zoom && point.y <= region.bounds.y + region.bounds.height + 16 / current.viewport.zoom;
     const outsideCrop = tool === 'crop' && region?.kind === 'crop' && regionHandleAt(region.bounds, point, current.viewport.zoom, event.pointerType) === undefined && (point.x < region.bounds.x || point.y < region.bounds.y || point.x > region.bounds.x + region.bounds.width || point.y > region.bounds.y + region.bounds.height);
@@ -798,10 +854,10 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     // can report pressure, so only `buttons` counts.
     if ((!gesture.current || gesture.current.pointerType === 'touch') && event.pointerType === 'pen' && (event.buttons & 1) !== 0 && !textDraft && refusedPointer.current !== event.pointerId) pointerDown(event, true);
     if (event.pointerType === 'touch') {
-      const viewport = touchViewport.current.move(event.pointerId, coordinates(event).screen, zoomRange());
+      const tracked = touchViewport.current.update(event.pointerId, coordinates(event).screen);
       if (touchViewport.current.active) {
         event.preventDefault();
-        if (viewport) { updateViewport(viewport, false); panVelocity.current.add(performance.now(), documentRef.current.viewport); }
+        if (tracked) { navTime.current = eventTime(event); if (!navFrame.current) navFrame.current = requestAnimationFrame(applyNavigation); }
         return;
       }
     }
@@ -849,8 +905,8 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     }
     if (active.mode === 'pan') {
       const viewport = active.original.viewport;
-      setView({ ...viewport, x: viewport.x + screen.x - active.screen.x, y: viewport.y + screen.y - active.screen.y });
-      panVelocity.current.add(performance.now(), documentRef.current.viewport);
+      setView({ ...viewport, x: viewport.x + screen.x - active.screen.x, y: viewport.y + screen.y - active.screen.y }, 'pan');
+      panVelocity.current.add(eventTime(event), documentRef.current.viewport);
     } else if (active.mode === 'draw' && active.id) {
       const element = overrides.current.get(active.id)!;
       let width = point.x - active.start.x, height = point.y - active.start.y;
@@ -911,15 +967,26 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     redraw();
   };
 
-  /** Ends a finger that is part of two-finger navigation; returns whether it was. */
-  const endTouch = (event: PointerEvent<HTMLCanvasElement>) => {
+  /** Moves the camera to where both fingers are now, and samples their midpoint for the release speed. */
+  const applyNavigation = () => {
+    navFrame.current = 0;
+    const viewport = touchViewport.current.view(zoomRange()), center = touchViewport.current.center();
+    if (!viewport || !center) return;
+    updateViewport(viewport, false, 'two-finger');
+    panVelocity.current.add(navTime.current, { x: center.x, y: center.y, zoom: documentRef.current.viewport.zoom });
+  };
+  const flushNavigation = () => { if (navFrame.current) { cancelAnimationFrame(navFrame.current); applyNavigation(); } };
+  const dropNavigation = () => { cancelAnimationFrame(navFrame.current); navFrame.current = 0; touchViewport.current.reset(); };
+  /** Ends a finger that is part of two-finger navigation; returns whether it was. A cancelled one never glides. */
+  const endTouch = (event: PointerEvent<HTMLCanvasElement>, cancelled = false) => {
     if (event.pointerType !== 'touch' || !touchViewport.current.has(event.pointerId)) return false;
+    flushNavigation();
     const navigating = touchViewport.current.active;
     touchViewport.current.up(event.pointerId, documentRef.current.viewport);
     if (!navigating) return false;
     event.preventDefault();
     releasePointer(event);
-    if (!touchViewport.current.count) endPan(true);
+    if (!touchViewport.current.count) endPan(!cancelled, eventTime(event), cancelled ? 'two-finger-cancel' : 'two-finger');
     return true;
   };
   const pointerUp = (event: PointerEvent<HTMLCanvasElement>) => {
@@ -949,7 +1016,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       } else marquee.current = regionRef.current?.bounds;
       redraw(); return;
     }
-    if (active.mode === 'pan') endPan(active.pointerType !== 'mouse');
+    if (active.mode === 'pan') endPan(active.pointerType !== 'mouse', eventTime(event), `${active.pointerType}-pan`);
     else if (active.mode === 'write' && !active.moved) {
       const target = writableAt(active.start);
       if (target) startWriting(active.start, target); else if (!offPage(active.start)) startText(active.start);
@@ -966,16 +1033,16 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   };
   /** Escape or a cancelled pointer: the preview is dropped and a pan returns to where it started. Never switches tools. */
   const cancelGesture = () => {
-    stopGlide();
-    touchViewport.current.reset();
+    stopGlide('cancel');
+    dropNavigation();
     const active = gesture.current;
-    if (active?.mode === 'pan') setView(active.original.viewport);
+    if (active?.mode === 'pan') setView(active.original.viewport, 'cancel');
     dropGesture(); marquee.current = regionRef.current?.bounds; redraw();
   };
   const pointerCancel = (event: PointerEvent<HTMLCanvasElement>) => {
     traceCanvas('gesture.cancel', { tool, pointerId: event.pointerId, gesture: gesture.current?.mode ?? 'none' });
     if (refusedPointer.current === event.pointerId) refusedPointer.current = null;
-    if (endTouch(event)) return;
+    if (endTouch(event, true)) return;
     // Only the contact that owns the gesture cancels it; a palm's cancel leaves the pen's stroke alone.
     if (gesture.current?.pointerId === event.pointerId) cancelGesture();
   };
@@ -1040,7 +1107,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   };
   const goToPage = (index: number) => {
     const paper = boundPaper();
-    if (paper) updateViewport(pageView(paper, size.current, index, documentRef.current.viewport.zoom));
+    if (paper) updateViewport(pageView(paper, size.current, index, documentRef.current.viewport.zoom), true, 'page');
   };
   /**
    * A notebook page operation as one undo step, through the same transaction as a stroke so it reaches shared devices,
@@ -1081,13 +1148,13 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   };
   const fit = () => {
     const paper = boundPaper();
-    if (paper) { updateViewport(pageView(paper, size.current, currentPageIndex())); return; }
+    if (paper) { updateViewport(pageView(paper, size.current, currentPageIndex()), true, 'fit'); return; }
     const bounds = selectionBounds(documentRef.current.elements);
-    if (!bounds) { updateViewport({ x: 0, y: 0, zoom: 1 }); return; }
+    if (!bounds) { updateViewport({ x: 0, y: 0, zoom: 1 }, true, 'fit'); return; }
     const zoom = Math.min(2, Math.max(CANVAS_ZOOM_LIMITS.min, Math.min((size.current.width - 160) / Math.max(bounds.width, 1), (size.current.height - 180) / Math.max(bounds.height, 1))));
-    updateViewport({ x: (size.current.width - bounds.width * zoom) / 2 - bounds.x * zoom, y: (size.current.height - bounds.height * zoom) / 2 - bounds.y * zoom, zoom });
+    updateViewport({ x: (size.current.width - bounds.width * zoom) / 2 - bounds.x * zoom, y: (size.current.height - bounds.height * zoom) / 2 - bounds.y * zoom, zoom }, true, 'fit');
   };
-  const zoomTo = (zoom: number) => updateViewport(zoomAt(documentRef.current.viewport, { x: size.current.width / 2, y: size.current.height / 2 }, zoom, zoomRange()));
+  const zoomTo = (zoom: number) => updateViewport(zoomAt(documentRef.current.viewport, { x: size.current.width / 2, y: size.current.height / 2 }, zoom, zoomRange()), true, 'zoom');
   const zoom = (factor: number) => zoomTo(documentRef.current.viewport.zoom * factor);
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest('input,textarea,[contenteditable=true]')) return;

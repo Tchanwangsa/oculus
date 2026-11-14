@@ -87,10 +87,10 @@ const hints: Record<string, string> = {
  * `onViewportChange` keeps pan and zoom with the host instead of saving them in the document. `kind="notebook"` binds the
  * document to its pages (`useCanvasInteraction`) and adds the page tools; a `canvas` is a whiteboard whatever it holds.
  */
-export function CanvasSurface({ document, onChange, onViewportChange, onPageChange, title, kind = 'canvas', suppressNativeGestures = false }: { document: CanvasDocument; onChange: (document: CanvasDocument) => void; onViewportChange?: (viewport: CanvasDocument['viewport']) => void; onPageChange?: (index: number) => void; title?: string; kind?: CanvasKind; suppressNativeGestures?: boolean }) {
+export function CanvasSurface({ document, onChange, onViewportChange, onPageChange, title, kind = 'canvas', suppressNativeGestures = false, cameraKey }: { document: CanvasDocument; onChange: (document: CanvasDocument) => void; onViewportChange?: (viewport: CanvasDocument['viewport']) => void; onPageChange?: (index: number) => void; title?: string; kind?: CanvasKind; suppressNativeGestures?: boolean; cameraKey?: string }) {
   const platform = useCanvasPlatform();
   const [toolPreferences, setToolPreferences] = useState(loadCanvasToolPreferences);
-  const editor = useCanvasInteraction(document, onChange, { onViewportChange, ...toolPreferences, kind });
+  const editor = useCanvasInteraction(document, onChange, { onViewportChange, ...toolPreferences, kind, cameraKey });
   const media = useCanvasMediaDrop(editor.root, editor.documentRef, editor.insertImages, editor.notebook);
   // Saved on this device only; collaborators never see them.
   const changeToolPreferences = (patch: Partial<CanvasToolPreferences>) => {

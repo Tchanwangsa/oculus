@@ -22,6 +22,7 @@ page.
 | Pointer gestures, history, keyboard commands and the notebook's page rules | `app/src/hooks/canvas/useCanvasInteraction.ts` |
 | Two-finger pan and pinch | `app/src/lib/canvas/touchViewport.ts` |
 | Pan momentum: release speed and glide | `app/src/lib/canvas/momentum.ts` |
+| What a reload resumes on this device: tool, drawing style, each drawing's camera | `app/src/lib/canvas/viewState.ts` |
 | Zoom ranges | `app/src/lib/canvas/zoom.ts` |
 | Content transactions (undo steps and shared edits) and rebasing | `app/src/lib/canvas/collaboration.ts`, `app/src/lib/canvas/clientReconciliation.ts` |
 | Device-local drawing preferences (the eraser's settings) | `app/src/lib/canvas/toolPreferences.ts` |
@@ -202,7 +203,14 @@ A notebook has a top-level `paper`: fixed-size pages stacked down the board.
   pages, and the next touch, wheel or camera button stops it where it is (a
   finger that stops it holds the page rather than drawing). The camera is saved
   once, when it comes to rest. Mouse drags stop dead, and the trackpad's wheel
-  brings its own momentum.
+  brings its own momentum. Only a real flick glides: the release speed is read
+  from the events' own timestamps over at least 30 ms (moves queued behind a
+  slow frame arrive in a burst), the pan must have travelled 24 px, and a
+  cancelled contact, often a palm the system rejected, never glides. Two
+  fingers move the camera once a frame from both latest positions (iPadOS
+  sends each finger in its own event, and a per-event update made the zoom
+  wobble), their speed is read from the fingers' midpoint on screen, and two
+  fingers that zoomed more than 10% over the gesture don't glide.
 - **The pen.** A stroke, shape or text that starts on the desk is refused, and
   pen recovery does not restart it as the pen crosses onto a page. A move or
   nudge is shortened so the selection's centre stays on a page. A duplicate
@@ -647,6 +655,14 @@ the file's initial view. With it, they go only to that callback and never
 through `onChange`, for a host that keeps its camera local. The desktop editor
 and the companion both pass one, so scrolling never marks a canvas unsaved; the
 camera reaches the file only inside the next real edit's document.
+
+A reload or reopen resumes on the same device (`viewState.ts`, localStorage):
+the last tool (Crop comes back as Select) and drawing style, and the camera of
+each of the 60 most recently viewed drawings, keyed by `cameraKey` — the
+file's id on the desktop, the share link on the companion. The camera is
+written 400 ms after it stops moving and on `pagehide`, and comes back at the
+first real size in place of a notebook's first fit, then clamped like any
+other camera. Damaged fields fall back to the defaults one by one.
 
 ## Images and PDF pages are saved inside the canvas
 

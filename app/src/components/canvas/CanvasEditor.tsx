@@ -127,7 +127,7 @@ export default function CanvasEditor({ file, kind = "canvas" }: { file: DbFile; 
       </div>}
       <div className="relative min-h-0 flex-1">
         {snapshot.recoveryError && <p role="status" className="absolute right-3 bottom-16 left-3 z-30 rounded-xl border border-border-subtle bg-card px-3 py-2 text-xs text-muted-foreground">{snapshot.recoveryError}</p>}
-        <div inert={blocked} className="h-full"><CanvasSurface document={parsed.document} title={openTitle} kind={kind} onPageChange={(index) => { pageInView.current = index; noteNotebookPage(file.id, index + 1); }} onViewportChange={keepCameraLocal} onChange={(document) => { const text = serializeCanvasDocument(document); lastDocument.current = { text, document }; session.update(text); }} /></div>
+        <div inert={blocked} className="h-full"><CanvasSurface document={parsed.document} title={openTitle} kind={kind} onPageChange={(index) => { pageInView.current = index; noteNotebookPage(file.id, index + 1); }} onViewportChange={keepCameraLocal} cameraKey={`file:${file.id}`} onChange={(document) => { const text = serializeCanvasDocument(document); lastDocument.current = { text, document }; session.update(text); }} /></div>
       </div>
     </div>
   );

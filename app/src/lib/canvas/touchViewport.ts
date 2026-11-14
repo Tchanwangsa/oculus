@@ -24,10 +24,26 @@ export class TouchViewportGesture {
     return this.active;
   }
 
-  /** The camera for this sample; `limits` bound the zoom, and the world point under the fingers' first midpoint stays under their midpoint. */
-  move(id: number, point: Point, limits?: ZoomLimits): CanvasViewport | null {
-    if (!this.contacts.has(id)) return null;
+  /** Records a finger's position; returns whether it is one of this gesture's contacts. */
+  update(id: number, point: Point) {
+    if (!this.contacts.has(id)) return false;
     this.contacts.set(id, point);
+    return true;
+  }
+
+  /** The navigating pair's midpoint in screen pixels: what the content follows, so a release's speed is read from it. */
+  center(): Point | null {
+    const base = this.baseline;
+    const a = base && this.contacts.get(base.ids[0]), b = base && this.contacts.get(base.ids[1]);
+    return a && b ? midpoint(a, b) : null;
+  }
+
+  /**
+   * The camera for the fingers' current positions; `limits` bound the zoom, and the world point under the fingers' first
+   * midpoint stays under their midpoint. iPadOS reports each finger in its own event, so a caller applies this once a frame
+   * rather than per event, or the zoom wobbles between one finger's update and the other's.
+   */
+  view(limits?: ZoomLimits): CanvasViewport | null {
     const base = this.baseline;
     if (!base) return null;
     const a = this.contacts.get(base.ids[0]), b = this.contacts.get(base.ids[1]);
@@ -39,6 +55,11 @@ export class TouchViewportGesture {
       x: center.x - (base.center.x - base.viewport.x) * zoom / base.viewport.zoom,
       y: center.y - (base.center.y - base.viewport.y) * zoom / base.viewport.zoom,
     };
+  }
+
+  /** `update` then `view`. */
+  move(id: number, point: Point, limits?: ZoomLimits): CanvasViewport | null {
+    return this.update(id, point) ? this.view(limits) : null;
   }
 
   up(id: number, viewport: CanvasViewport) {

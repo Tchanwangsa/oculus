@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { DECELERATION, MAX_SPEED, STOP_SPEED, VelocityTracker, glide, gliding } from '../../../src/lib/canvas/momentum';
+import { DECELERATION, MAX_SPEED, STOP_SPEED, VelocityTracker, eventTime, glide, gliding } from '../../../src/lib/canvas/momentum';
 
 /** A pan sampled every 16 ms from `from` ms, moving `step` pixels a sample, `count` samples long. */
 const pan = (count: number, step: { x: number; y: number }, zoom = 1, from = 0) => {
@@ -51,6 +51,35 @@ describe('release velocity', () => {
     tracker.start(0, { x: 5, y: 5, zoom: 1 });
     tracker.add(30, { x: 5, y: 5, zoom: 1 });
     expect(tracker.release(40)).toBeNull();
+  });
+});
+
+describe('false flicks', () => {
+  test('moves handled in a burst after a slow frame do not read as a violent flick', () => {
+    const tracker = new VelocityTracker();
+    tracker.start(0, { x: 0, y: 0, zoom: 1 });
+    tracker.add(200, { x: 0, y: 30, zoom: 1 });
+    tracker.add(200.4, { x: 0, y: 34, zoom: 1 });
+    expect(tracker.release(201)).toBeNull();
+  });
+  test('a tap or a resting hand that jitters as it lifts does not fling', () => {
+    const tracker = new VelocityTracker();
+    tracker.start(0, { x: 0, y: 0, zoom: 1 });
+    for (let index = 1; index <= 4; index++) tracker.add(index * 16, { x: 0, y: index * 4, zoom: 1 });
+    expect(tracker.release(70)).toBeNull();
+  });
+  test('two fingers that zoomed over the gesture do not glide, even if the last moment was a steady pan', () => {
+    const tracker = new VelocityTracker();
+    tracker.start(0, { x: 400, y: 400, zoom: 2 });
+    for (let index = 1; index <= 10; index++) tracker.add(index * 16, { x: 400, y: 400 - index * 30, zoom: index < 5 ? 2 + index * 0.1 : 2.4 });
+    expect(tracker.release(165)).toBeNull();
+    expect(tracker.lastRelease?.verdict).toBe('pinch');
+  });
+  test('a sample is timed by its event, unless the stamp is missing or on another clock', () => {
+    expect(eventTime({ timeStamp: 950 }, 1000)).toBe(950);
+    expect(eventTime({}, 1000)).toBe(1000);
+    expect(eventTime({ timeStamp: 0 }, 1000)).toBe(1000);
+    expect(eventTime({ timeStamp: 1_700_000_000_000 }, 1000)).toBe(1000);
   });
 });
 
