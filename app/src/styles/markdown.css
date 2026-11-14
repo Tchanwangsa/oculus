@@ -46,7 +46,9 @@
 .md-compact > :first-child {
   margin-block-start: 0;
 }
-.md-compact > :last-child {
+/* Not `:last-child`: a selection over inline maths appends its band layer to
+ * the reply (`openLayer`), and the last block would take its margin back. */
+.md-compact > :nth-last-child(1 of :not(.md-prose-bands, .md-math-bands)) {
   margin-block-end: 0;
 }
 
