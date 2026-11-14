@@ -51,7 +51,7 @@ test("a reload keeps what was written during its read and takes nothing twice", 
     revision: 7,
     items: [row(10, "user", "asked"), row(11, "assistant", "first answer"), row(13, "user", "asked again")],
     runs: [],
-    queued: [{ id: "q1", text: "waiting" }],
+    queued: [{ id: "41", text: "waiting", held: false }],
   });
   await loading;
 
@@ -59,7 +59,7 @@ test("a reload keeps what was written during its read and takes nothing twice", 
   // 13 (written after it, with a higher id); 14 came after the snapshot.
   expect(ids()).toEqual([10, 11, 13, 14]);
   const state = useHarnessStore.getState();
-  expect(state.queued[THREAD]).toEqual([{ id: "q1", text: "waiting" }]);
+  expect(state.queued[THREAD]).toEqual([{ id: "41", text: "waiting", held: false }]);
   expect(state.live[THREAD].running).toBe(true);
 });
 
@@ -79,6 +79,24 @@ test("an envelope the snapshot already holds changes no rows but still ends the 
   // A later one is new.
   apply(told(10, 12, { type: "assistant_message", text: "more" }));
   expect(ids()).toEqual([10, 11, 12]);
+});
+
+test("the queue is replaced whole, and a list the snapshot already holds is not put back", async () => {
+  const resolve = pendingLoad();
+  const loading = useHarnessStore.getState().load(THREAD);
+  const apply = useHarnessStore.getState().apply;
+  const waiting = (id: string, text: string) => ({ id, text, held: false });
+  // Told while the read is out: one message joined (in the snapshot), then went out (after it).
+  apply(told(4, null, { type: "queue", messages: [waiting("41", "first"), waiting("42", "second")] }));
+  apply(told(6, null, { type: "queue", messages: [waiting("42", "second")] }));
+  resolve({ revision: 5, items: [], runs: [], queued: [waiting("41", "first"), waiting("42", "second, edited")] });
+  await loading;
+  expect(useHarnessStore.getState().queued[THREAD]).toEqual([waiting("42", "second")]);
+
+  apply(told(5, null, { type: "queue", messages: [waiting("41", "first")] }));
+  expect(useHarnessStore.getState().queued[THREAD]).toEqual([waiting("42", "second")]);
+  apply(told(7, null, { type: "queue", messages: [] }));
+  expect(useHarnessStore.getState().queued[THREAD]).toEqual([]);
 });
 
 test("a failed read leaves an empty thread that the stream still fills", async () => {

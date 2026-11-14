@@ -165,6 +165,10 @@ another chat refused, a retried first message making one chat, a refusal
 recording nothing, a message sent while the provider rewinds, an edit's
 single commit, a delete heard twice, and the revision on every envelope
 against `load::read`.
+`testkit/queue.rs` checks queued runs: a message sent mid-turn through a
+real bridge waiting as a run and starting as the same run, the queue's
+commands, options riding the queue, Stop, a continuation's place in line, and
+every reader of `harness_runs` beside runs that never ran.
 `testkit/runs.rs` checks run identity: one run,
 attempt, binding and receipt per send on all four bridges, with every later
 row owned by them; a repeated receipt starting nothing; a failed intent

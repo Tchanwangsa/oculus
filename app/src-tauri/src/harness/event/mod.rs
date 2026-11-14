@@ -276,14 +276,12 @@ pub enum HarnessEvent {
     ThreadTitled {
         title: String,
     },
-    /// A message typed mid-turn, waiting in `Queue`; no row is written for it.
-    Queued {
-        id: String,
-        text: String,
-    },
-    /// Left the queue: cancelled, cleared, or sent (its `UserMessage` follows).
-    Unqueued {
-        id: String,
+    /// The student's messages waiting behind the thread's turn, whole and
+    /// in order, told again whenever the queue changes: one joined, was
+    /// edited, removed or moved, or went out (its `UserMessage` follows).
+    /// Each is a queued run (`store/queue.rs`); none has a timeline row.
+    Queue {
+        messages: Vec<super::store::QueuedMessage>,
     },
     /// The provider's handle for the turn just sent (Claude's message uuid,
     /// Codex's turn id), kept on the user row: a rewind names it, no CLI re-issues it.

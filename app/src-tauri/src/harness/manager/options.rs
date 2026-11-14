@@ -1,10 +1,13 @@
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::studio::StudioBrief;
 
 /// What a send asks for beyond the text. The model is persisted on the
 /// thread; a later send with a different one changes it from then on.
-#[derive(Deserialize, Clone, Default)]
+/// Serialized whole onto a run that waits its turn (`store/queue.rs`), so a
+/// field added here rides the queue and a restart with no further code; the
+/// `skip` fields are resolved again from the thread's row at each start.
+#[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SendOptions {
     pub model: Option<String>,
@@ -40,9 +43,6 @@ pub struct SendOptions {
     /// (`antigravity_rules::install`). `None` keeps the last ones written.
     #[serde(skip)]
     pub antigravity_rules: Option<Vec<String>>,
-    /// The caller's id for this send. A repeat of one already accepted starts
-    /// nothing; none gets a fresh one (`store::fresh_receipt`).
-    pub receipt: Option<String>,
     /// Set by the app, never the webview: this send is the follow-up of
     /// that card (`app/continuation.rs`), not something the student typed.
     #[serde(skip)]
@@ -56,6 +56,15 @@ pub struct SendOptions {
 pub enum ChatScope {
     General,
     Subject(i64),
+}
+
+impl Serialize for ChatScope {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            ChatScope::General => s.serialize_str("general"),
+            ChatScope::Subject(id) => s.serialize_i64(*id),
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for ChatScope {
@@ -102,7 +111,7 @@ impl SendOptions {
 /// `app/src/lib/studio/videos.ts` sends it. The brief reads the format from
 /// video.json's size, which is what renders use, so the TS `format` is not
 /// read here.
-#[derive(Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioSend {
     /// A folder under `<data>/studio/videos/`, made before the send.
@@ -180,6 +189,36 @@ mod tests {
         let mut o = opts(r#"{"model":"opus"}"#);
         o.scope_new_thread(Some(7)).unwrap();
         assert_eq!(o.subject_id, None);
+    }
+
+    /// What waits in the queue is this struct as JSON: everything the
+    /// webview sent comes back, and nothing the app resolves is stored.
+    #[test]
+    fn the_sendable_fields_survive_a_round_trip_and_the_resolved_ones_are_left_out() {
+        let sent = r#"{"model":"opus","reasoningEffort":"high","chatScope":"general","context":"the moment","at":42,"studio":{"slug":"limits","lengthSecs":90}}"#;
+        let mut o = opts(sent);
+        o.scope = Some("COMP1".into());
+        o.continuation = Some("12.0".into());
+        o.antigravity_rules = Some(vec!["command(ls)".into()]);
+        let stored = serde_json::to_value(&o).unwrap();
+        for resolved in [
+            "scope",
+            "lecture",
+            "studioBrief",
+            "antigravityRules",
+            "continuation",
+        ] {
+            assert!(stored.get(resolved).is_none(), "{resolved} was stored");
+        }
+        let back: SendOptions = serde_json::from_value(stored.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&back).unwrap(), stored);
+        assert_eq!(back.model.as_deref(), Some("opus"));
+        assert_eq!(back.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(back.chat_scope, Some(ChatScope::General));
+        assert_eq!(back.context.as_deref(), Some("the moment"));
+        assert_eq!(back.at, Some(42));
+        assert_eq!(back.studio.unwrap().length_secs, Some(90));
+        assert_eq!(serde_json::to_value(ChatScope::Subject(3)).unwrap(), 3);
     }
 
     #[test]

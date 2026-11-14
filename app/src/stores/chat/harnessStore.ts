@@ -63,7 +63,8 @@ interface HarnessState {
   subjects: Subject[];
   /** `subjects` has been read once; before that an empty list says nothing. */
   subjectsLoaded: boolean;
-  /** A mirror of Rust's queue, folded from `queued`/`unqueued` events. */
+  /** Each thread's waiting messages: a mirror of its queued runs, read
+   *  with its rows and replaced by every `queue` event. */
   queued: Record<number, QueuedMessage[]>;
   /** Threads where a rewind could not reach the agent. Never cleared: the
    *  agent's context still holds what left the screen. */
@@ -490,21 +491,9 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
             }),
           );
           break;
-        // `queued` is both "new" and "edited".
-        case "queued": {
-          if (rowsOnly) return s;
-          const list = s.queued[threadId] ?? [];
-          const msg = { id: event.id, text: event.text };
-          const next = list.some((q) => q.id === event.id)
-            ? list.map((q) => (q.id === event.id ? msg : q))
-            : [...list, msg];
-          return { queued: { ...s.queued, [threadId]: next } };
-        }
-        case "unqueued":
-          if (rowsOnly) return s;
-          return {
-            queued: { ...s.queued, [threadId]: (s.queued[threadId] ?? []).filter((q) => q.id !== event.id) },
-          };
+        // The whole list, as saved; one the snapshot already holds is skipped.
+        case "queue":
+          return stale ? s : { queued: { ...s.queued, [threadId]: event.messages } };
         case "rewound": {
           const drift = event.context || rowsOnly
             ? s.contextDrift

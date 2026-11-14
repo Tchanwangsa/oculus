@@ -36,9 +36,9 @@ type HarnessEvent =
   | { type: "usage"; input_tokens: number; output_tokens: number; context_tokens: number | null; context_window: number | null; cost_usd: number | null }
   | { type: "rate_limits"; windows: RateWindow[] }
   | { type: "thread_titled"; title: string }
-  /** Queued behind the running turn; an edit re-sends the same `id`. */
-  | { type: "queued"; id: string; text: string }
-  | { type: "unqueued"; id: string }
+  /** The student's messages waiting their turn, whole and in order, told
+   *  again whenever the queue changes. */
+  | { type: "queue"; messages: QueuedMessage[] }
   /** The provider's handle for a later rewind; the webview ignores it. */
   | { type: "turn_anchor"; anchor: string }
   /** Rows from `from_item_id` on are gone; `context` is whether the agent
@@ -145,10 +145,14 @@ type ItemKind =
   | "delivery_notice"
   | "compaction";
 
-/** Held in Rust's memory, not the database, until it goes out. */
+/** A message waiting its turn: a queued run in the database
+ *  (`harness/store/queue.rs`), so it survives a reload and a restart. */
 export interface QueuedMessage {
+  /** Its run's id. */
   id: string;
   text: string;
+  /** The queue is held: nothing goes out until the student resumes it. */
+  held: boolean;
 }
 
 export interface ErrorMeta {

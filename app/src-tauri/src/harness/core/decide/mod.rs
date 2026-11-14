@@ -4,6 +4,7 @@
 //! and the effects'.
 
 mod delete;
+mod queue;
 mod rewind;
 mod send;
 
@@ -76,5 +77,9 @@ pub(in crate::harness) fn decide(
             options,
         } => rewind::decide(state, command, *item_id, Some((text, options)), answer),
         Kind::DeleteThread => delete::decide(state),
+        Kind::EditQueued { run_id, text } => queue::edit(state, *run_id, text),
+        Kind::RemoveQueued { run_id } => queue::remove(state, *run_id),
+        Kind::ReorderQueued { order } => queue::reorder(state, order),
+        Kind::Stop => queue::stop(state),
     }
 }

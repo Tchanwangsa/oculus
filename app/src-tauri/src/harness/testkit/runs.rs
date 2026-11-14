@@ -117,6 +117,7 @@ pub(super) fn intent(thread_id: i64, receipt: &str, session: Option<&str>) -> st
         text: "question".into(),
         at: None,
         continuation: None,
+        queued: None,
     }
 }
 

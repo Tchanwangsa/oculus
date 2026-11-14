@@ -61,6 +61,7 @@ pub(super) fn decide(
             text: text.clone(),
             options: options.clone(),
             receipt: command.id.clone(),
+            queued: None,
         }),
         None => plan.text = Some(question.text.clone()),
     }
@@ -91,6 +92,7 @@ mod tests {
                 anchor: anchor.map(String::from),
             }),
             newest_anchor: Some("newest".into()),
+            waiting: 0,
         }
     }
 

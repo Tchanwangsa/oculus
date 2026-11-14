@@ -5,6 +5,7 @@
 mod apply;
 mod items;
 mod naming;
+pub mod queue;
 mod runs;
 pub mod threads;
 
@@ -14,6 +15,7 @@ mod tests;
 pub use apply::{apply, apply_event, Stored};
 pub use items::{newest_anchor, truncate, truncate_from, user_item, Question};
 pub use naming::{claim_naming, reconcile, save_rate_limits, NamingSeed, Reconciled};
+pub use queue::QueuedMessage;
 #[cfg(test)]
 pub use runs::begin_run;
 pub use runs::{

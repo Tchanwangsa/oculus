@@ -86,16 +86,21 @@ export function harnessLoad(threadId: number): Promise<HarnessSnapshot> {
 }
 
 export function harnessUnqueue(threadId: number, queueId: string): Promise<void> {
-  return invoke("harness_unqueue", { threadId, queueId });
+  return invoke("harness_unqueue", { commandId: commandId(), threadId, queueId });
 }
 
 export function harnessEditQueued(threadId: number, queueId: string, text: string): Promise<void> {
-  return invoke("harness_edit_queued", { threadId, queueId, text });
+  return invoke("harness_edit_queued", { commandId: commandId(), threadId, queueId, text });
+}
+
+/** Put the waiting messages in `order` (their ids), first to go out first. */
+export function harnessReorderQueued(threadId: number, order: string[]): Promise<void> {
+  return invoke("harness_reorder_queued", { commandId: commandId(), threadId, order });
 }
 
 /** Stop the turn and clear the queue; resolves to the dropped messages. */
 export function harnessInterrupt(threadId: number): Promise<string[]> {
-  return invoke<string[]>("harness_interrupt", { threadId });
+  return invoke<string[]>("harness_interrupt", { commandId: commandId(), threadId });
 }
 
 export function harnessDeleteThread(threadId: number): Promise<void> {

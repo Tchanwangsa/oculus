@@ -69,10 +69,19 @@ impl Consumer {
             (None, _) => return Err("a command names a thread".into()),
         };
         match decide(&state, command, None)? {
-            Decision::Commit(plan) => self
-                .commit(Some(command), command.thread_id, provider, plan, io)
-                .map(Accepted::Done)
-                .map_err(|failed| failed.error),
+            Decision::Commit(plan) => {
+                let outcome = self
+                    .commit(Some(command), command.thread_id, provider, plan, io)
+                    .map_err(|failed| failed.error)?;
+                if matches!(command.kind, Kind::Stop) {
+                    io.perform(Effect::Interrupt {
+                        thread_id: outcome.thread_id,
+                    });
+                }
+                // A message that joined an idle chat's queue goes out now.
+                self.promote(outcome.thread_id, provider, io);
+                Ok(Accepted::Done(outcome))
+            }
             Decision::Ask(Ask::Rewind(ask)) => {
                 // The chat is held while its provider is asked: a message
                 // sent meanwhile waits, and cannot be rewound away unseen.
@@ -168,10 +177,12 @@ impl Consumer {
         let committed = match committed {
             Ok(committed) => committed,
             Err(error) => {
-                // A send that could not be saved says so in the chat, and
-                // closes as a failed turn: an error row, then its terminal.
+                // A student's send that could not be saved says so in the
+                // chat, and closes as a failed turn: an error row, then its
+                // terminal. What the app starts itself is its caller's to
+                // report (`promote`).
                 let closed = match thread_id {
-                    Some(thread_id) if sends && error != store::NOT_CLAIMED => {
+                    Some(thread_id) if sends && command.is_some() => {
                         self.refuse(thread_id, provider, &error, io);
                         true
                     }
@@ -198,14 +209,20 @@ impl Consumer {
         io: &mut impl ConsumerIo,
     ) {
         match applied {
-            Applied::Began(Began {
-                provider,
-                run,
-                text,
-                options,
-                respawn,
-            }) => {
+            Applied::Began(began) => {
+                let Began {
+                    provider,
+                    run,
+                    text,
+                    options,
+                    waited,
+                    respawn,
+                } = *began;
                 self.queue.lock().unwrap().try_claim(thread_id);
+                // It left the queue before its question appears.
+                if waited {
+                    self.tell_queue(thread_id, provider, io);
+                }
                 // The question becomes an ordinary `UserMessage` now that its
                 // run is written (a continuation's, `Continued`, and its
                 // card's snapshot follows).
@@ -237,13 +254,11 @@ impl Consumer {
                     respawn,
                 })));
             }
-            Applied::Waiting { text, options } => {
-                let msg = self.queue.lock().unwrap().push(thread_id, &text, &options);
-                let queued = HarnessEvent::Queued {
-                    id: msg.id,
-                    text: msg.text,
-                };
-                self.event(thread_id, provider, From::App, queued, None, io);
+            Applied::Queue => self.tell_queue(thread_id, provider, io),
+            Applied::Cards(cards) => {
+                for card in cards {
+                    self.snapshot(thread_id, provider, &card, io);
+                }
             }
             Applied::Truncated { item_id, context } => {
                 let rewound = HarnessEvent::Rewound {
@@ -293,15 +308,30 @@ impl Consumer {
         self.event(thread_id, provider, From::App, finished, None, io);
     }
 
-    /// Write and send a run the app starts itself: a message that waited,
-    /// or a card's continuation. No receipt of the command kind: nobody
-    /// retries it, and the run's own receipt is fresh.
+    /// The student's waiting messages, told whole: the webview's list is a
+    /// mirror of the queued runs.
+    fn tell_queue(&mut self, thread_id: i64, provider: Provider, io: &mut impl ConsumerIo) {
+        let Some(pool) = self.pool.clone() else {
+            return;
+        };
+        match self.rt.block_on(store::queue::list(&pool, thread_id)) {
+            Ok(messages) => {
+                let queue = HarnessEvent::Queue { messages };
+                self.event(thread_id, provider, From::App, queue, None, io);
+            }
+            Err(e) => elog!("[oculus] harness thread {thread_id}: queue: {e}"),
+        }
+    }
+
+    /// Write and send a run the app starts itself: a message that waited
+    /// (`queued`, its run), or a card's continuation. No receipt of the
+    /// command kind: nobody retries it, and the run's own receipt is fresh.
     pub(super) fn begin(
         &mut self,
         thread_id: i64,
         provider: Provider,
-        text: String,
-        options: SendOptions,
+        (text, options): (String, SendOptions),
+        queued: Option<i64>,
         io: &mut impl ConsumerIo,
     ) -> Result<(), Failed> {
         let plan = Plan {
@@ -310,6 +340,7 @@ impl Consumer {
                 text,
                 options,
                 receipt: store::fresh_receipt(),
+                queued,
             }],
             text: None,
         };
@@ -317,28 +348,96 @@ impl Consumer {
             .map(|_| ())
     }
 
-    /// The thread's turn closed: the next message waiting behind it goes
-    /// out. A continuation whose card lost its claim (a rewind took the
-    /// card, Stop cancelled it) starts nothing and shows nothing, and the
-    /// thread passes to what waits behind it.
+    /// A card's continuation, or anything else the app queues itself,
+    /// joins the back of the thread's queue.
+    pub(super) fn enqueue(
+        &mut self,
+        thread_id: i64,
+        provider: Provider,
+        (text, options): (String, SendOptions),
+        io: &mut impl ConsumerIo,
+    ) -> Result<(), Failed> {
+        let plan = Plan {
+            changes: vec![Change::Enqueue {
+                provider,
+                text,
+                options,
+            }],
+            text: None,
+        };
+        self.commit(None, Some(thread_id), provider, plan, io)
+            .map(|_| ())
+    }
+
+    /// A turn of the thread's closed: once nothing else holds it, the next
+    /// waiting run goes out.
     pub(super) fn start_next(
         &mut self,
         thread_id: i64,
         provider: Provider,
         io: &mut impl ConsumerIo,
     ) {
-        let mut next = self.queue.lock().unwrap().next(thread_id);
-        while let Some((msg, options)) = next.take() {
-            // A continuation was never shown as queued.
-            if options.continuation.is_none() {
-                let unqueued = HarnessEvent::Unqueued { id: msg.id };
-                self.event(thread_id, provider, From::App, unqueued, None, io);
+        if self.queue.lock().unwrap().release(thread_id) {
+            self.promote(thread_id, provider, io);
+        }
+    }
+
+    /// Start the first waiting run that is not held, if the thread is free.
+    /// Read from the saved queue each time, so nothing a notification
+    /// missed is left behind. A continuation whose card lost its claim (a
+    /// rewind took the card) starts nothing and shows nothing, and a run
+    /// that cannot be written leaves the queue as failed with an error row;
+    /// the thread then passes to what waits behind it.
+    pub(super) fn promote(&mut self, thread_id: i64, provider: Provider, io: &mut impl ConsumerIo) {
+        loop {
+            if self.queue.lock().unwrap().is_busy(thread_id) {
+                return;
             }
-            match self.begin(thread_id, provider, msg.text, options, io) {
-                Ok(()) => return,
-                // A refused send closed its own turn, which came back here.
-                Err(failed) if failed.closed => return,
-                Err(_) => next = self.queue.lock().unwrap().next(thread_id),
+            let Some(pool) = self.pool.clone() else {
+                return;
+            };
+            let waiting = match self.rt.block_on(store::queue::next(&pool, thread_id)) {
+                Ok(Some(waiting)) => waiting,
+                Ok(None) => return,
+                Err(e) => {
+                    elog!("[oculus] harness thread {thread_id}: queue: {e}");
+                    return;
+                }
+            };
+            let run_id = waiting.run_id;
+            let send = (waiting.text, waiting.options);
+            let Err(refused) = self.begin(thread_id, provider, send, Some(run_id), io) else {
+                return;
+            };
+            let lost = refused.error == store::NOT_CLAIMED;
+            if !lost {
+                let error = format!(
+                    "Oculus could not start a waiting message: {}",
+                    refused.error
+                );
+                elog!("[oculus] harness thread {thread_id}: {error}");
+                self.event(
+                    thread_id,
+                    provider,
+                    From::App,
+                    HarnessEvent::error(error),
+                    None,
+                    io,
+                );
+            }
+            let close = Plan {
+                changes: vec![Change::CloseQueued {
+                    run_id,
+                    failed: !lost,
+                }],
+                text: None,
+            };
+            // A database that refuses this too is not asked again in a loop.
+            if self
+                .commit(None, Some(thread_id), provider, close, io)
+                .is_err()
+            {
+                return;
             }
         }
     }

@@ -1,5 +1,5 @@
 //! A thread's turns as Tauri commands: send, edit and resend, rewind, the
-//! queue behind a running turn, interrupt and delete. Each builds a
+//! queue behind a running turn, stop and delete. Each builds a
 //! [`Command`], hands it to the consumer and returns what was committed
 //! (`harness/core/`); none writes or calls a provider itself.
 
@@ -7,9 +7,7 @@ use tauri::State;
 
 use crate::harness::core::{load, Command, Kind, Outcome};
 use crate::harness::manager::validate_effort;
-use crate::harness::store;
-use crate::harness::{HarnessEvent, Provider, SendOptions};
-use crate::runtime::blocking::run as blocking;
+use crate::harness::{Provider, SendOptions};
 
 use super::{BusMsg, HarnessState};
 
@@ -30,7 +28,7 @@ impl HarnessState {
 
 /// Send a message; creates the thread when `thread_id` is null. Returns
 /// the thread id once the message is saved: its run goes out afterwards, and
-/// a message sent mid-turn waits in the [`Queue`](crate::harness::Queue).
+/// a message sent mid-turn waits as a queued run (`store/queue.rs`).
 /// `command_id` is the webview's id for this send; the same one again
 /// starts nothing and returns the same thread.
 #[tauri::command]
@@ -108,58 +106,74 @@ pub async fn harness_rewind(
     Ok(rewound.await?.text.unwrap_or_default())
 }
 
-/// A thread as a reload reads it: rows, runs and the revision that covers
-/// them in one read, then what waits behind its turn (the queue is only in
-/// memory).
+/// A thread as a reload reads it: rows, runs, what waits in its queue and
+/// the revision that covers them, in one read.
 #[tauri::command]
-pub async fn harness_load(
-    state: State<'_, HarnessState>,
-    thread_id: i64,
-) -> Result<load::Snapshot, String> {
+pub async fn harness_load(thread_id: i64) -> Result<load::Snapshot, String> {
     let pool = crate::db::store::open_pool().await?;
-    let mut snapshot = load::read(&pool, thread_id).await?;
-    snapshot.queued = state.queue.lock().unwrap().list(thread_id);
-    Ok(snapshot)
+    load::read(&pool, thread_id).await
+}
+
+/// A waiting message's id, as the webview holds it: its run's.
+fn queued_run(queue_id: &str) -> Result<i64, String> {
+    queue_id
+        .parse()
+        .map_err(|_| format!("no waiting message {queue_id}"))
 }
 
 /// Drop one message that has not gone out yet.
 #[tauri::command]
 pub async fn harness_unqueue(
     state: State<'_, HarnessState>,
+    command_id: String,
     thread_id: i64,
     queue_id: String,
 ) -> Result<(), String> {
-    if state.queue.lock().unwrap().remove(thread_id, &queue_id) {
-        let pool = crate::db::store::open_pool().await?;
-        let row = store::thread(&pool, thread_id).await?;
-        state.sink(thread_id, row.provider)(HarnessEvent::Unqueued { id: queue_id });
-    }
-    Ok(())
+    let run_id = queued_run(&queue_id)?;
+    let removed = state.command(Command {
+        id: command_id,
+        thread_id: Some(thread_id),
+        kind: Kind::RemoveQueued { run_id },
+    });
+    removed.await.map(|_| ())
 }
 
-/// Rewrite one that has not gone out yet; it comes back as a `queued`
-/// event under the same id, so the webview replaces it.
+/// Rewrite one that has not gone out yet; the queue is told again, whole.
 #[tauri::command]
 pub async fn harness_edit_queued(
     state: State<'_, HarnessState>,
+    command_id: String,
     thread_id: i64,
     queue_id: String,
     text: String,
 ) -> Result<(), String> {
-    let edited = state
-        .queue
-        .lock()
-        .unwrap()
-        .edit(thread_id, &queue_id, &text);
-    if let Some(msg) = edited {
-        let pool = crate::db::store::open_pool().await?;
-        let row = store::thread(&pool, thread_id).await?;
-        state.sink(thread_id, row.provider)(HarnessEvent::Queued {
-            id: msg.id,
-            text: msg.text,
-        });
-    }
-    Ok(())
+    let run_id = queued_run(&queue_id)?;
+    let edited = state.command(Command {
+        id: command_id,
+        thread_id: Some(thread_id),
+        kind: Kind::EditQueued { run_id, text },
+    });
+    edited.await.map(|_| ())
+}
+
+/// Put the waiting messages in `order`, first to go out first.
+#[tauri::command]
+pub async fn harness_reorder_queued(
+    state: State<'_, HarnessState>,
+    command_id: String,
+    thread_id: i64,
+    order: Vec<String>,
+) -> Result<(), String> {
+    let order = order
+        .iter()
+        .map(|id| queued_run(id))
+        .collect::<Result<Vec<_>, _>>()?;
+    let moved = state.command(Command {
+        id: command_id,
+        thread_id: Some(thread_id),
+        kind: Kind::ReorderQueued { order },
+    });
+    moved.await.map(|_| ())
 }
 
 /// Stop the running turn and drop whatever was waiting behind it,
@@ -168,26 +182,15 @@ pub async fn harness_edit_queued(
 #[tauri::command]
 pub async fn harness_interrupt(
     state: State<'_, HarnessState>,
+    command_id: String,
     thread_id: i64,
 ) -> Result<Vec<String>, String> {
-    let cleared = state.queue.lock().unwrap().clear(thread_id);
-    if !cleared.messages.is_empty() || !cleared.continuations.is_empty() {
-        let pool = crate::db::store::open_pool().await?;
-        let row = store::thread(&pool, thread_id).await?;
-        let sink = state.sink(thread_id, row.provider);
-        for m in &cleared.messages {
-            sink(HarnessEvent::Unqueued { id: m.id.clone() });
-        }
-        for card in &cleared.continuations {
-            if super::continuation::cancel(&pool, card, super::continuation::STOPPED).await? {
-                let proposal = crate::db::proposals::get(&pool, card).await?;
-                sink(HarnessEvent::Proposal { proposal });
-            }
-        }
-    }
-    let h = state.harness.clone();
-    blocking(move || h.interrupt(thread_id)).await?;
-    Ok(cleared.messages.into_iter().map(|m| m.text).collect())
+    let stopped = state.command(Command {
+        id: command_id,
+        thread_id: Some(thread_id),
+        kind: Kind::Stop,
+    });
+    Ok(stopped.await?.dropped)
 }
 
 #[tauri::command]

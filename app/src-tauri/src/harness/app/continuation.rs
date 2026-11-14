@@ -127,7 +127,7 @@ pub(in crate::harness) async fn started(
 
 /// A queued continuation that will not run, and why. False when it was not queued.
 pub(in crate::harness) async fn cancel(
-    pool: &SqlitePool,
+    db: impl sqlx::SqliteExecutor<'_>,
     card: &str,
     reason: &str,
 ) -> Result<bool, String> {
@@ -139,16 +139,17 @@ pub(in crate::harness) async fn cancel(
     .bind(item)
     .bind(block)
     .bind(reason)
-    .execute(pool)
+    .execute(db)
     .await
     .map_err(|e| e.to_string())?
     .rows_affected();
     Ok(n == 1)
 }
 
-/// Startup, after `proposal_jobs::reconcile`: the queue is only in memory, so
-/// a queued continuation is gone, and a job the app closed during never
-/// settled. Both cards say so instead of continuing later.
+/// Startup, after `proposal_jobs::reconcile`: the click that consented to a
+/// continuation was made in a session that is over, so one still waiting is
+/// not started later (`store::reconcile` cancels its run), and a job the app
+/// closed during never settled. Both cards say so.
 pub(in crate::harness) async fn reconcile(pool: &SqlitePool) -> Result<(), String> {
     for (sql, reason) in [
         (

@@ -647,12 +647,16 @@ impl Consumer {
                     continuation: Some(proposal.to_string()),
                     ..SendOptions::default()
                 };
-                let busy = self.queue.lock().unwrap().is_busy(thread_id);
-                if busy {
-                    self.queue.lock().unwrap().push(thread_id, &line, &opts);
-                    self.snapshot(thread_id, provider, proposal, io);
-                } else if let Err(failed) = self.begin(thread_id, provider, line, opts, io) {
-                    elog!("[oculus] card continuation {proposal}: {}", failed.error);
+                // Behind whatever is running or already waits; `promote`
+                // sends it at once when nothing is.
+                match self.enqueue(thread_id, provider, (line, opts), io) {
+                    Ok(()) => {
+                        self.snapshot(thread_id, provider, proposal, io);
+                        self.promote(thread_id, provider, io);
+                    }
+                    Err(failed) => {
+                        elog!("[oculus] card continuation {proposal}: {}", failed.error)
+                    }
                 }
             }
             Ok(None) => {}

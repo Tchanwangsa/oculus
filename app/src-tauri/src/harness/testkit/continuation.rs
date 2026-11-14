@@ -106,6 +106,7 @@ fn intent(thread: i64, card: &str, receipt: &str) -> store::SendIntent {
         text: "Sync finished — continuing".into(),
         at: None,
         continuation: Some(card.into()),
+        queued: None,
     }
 }
 
@@ -413,8 +414,18 @@ fn a_continuation_waits_behind_a_busy_thread_and_goes_out_once() {
     );
     assert!(io.started.is_empty(), "the running turn keeps the thread");
     assert!(
-        queue.lock().unwrap().list(thread).is_empty(),
+        rt.block_on(store::queue::list(&pool, thread))
+            .unwrap()
+            .is_empty(),
         "never shown as typed"
+    );
+    assert_eq!(
+        rt.block_on(count(
+            &pool,
+            "SELECT COUNT(*) FROM harness_runs WHERE execution_status = 'queued' AND origin = 'continuation'"
+        )),
+        1,
+        "it waits as a queued run, once"
     );
     let snapshot = io.events.iter().find(|e| e["type"] == "proposal").unwrap();
     assert_eq!(

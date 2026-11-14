@@ -21,6 +21,8 @@ pub(in crate::harness) enum Effect {
         command: String,
         ask: Box<RewindAsk>,
     },
+    /// Ask the thread's CLI to stop its turn.
+    Interrupt { thread_id: i64 },
     /// End the thread's session.
     Release { thread_id: i64, reason: Release },
 }
@@ -76,6 +78,13 @@ pub(in crate::harness) async fn run(rt: &Runtime, effect: Effect) {
                 command,
                 answer: Answer::Rewound { context },
             });
+        }
+        Effect::Interrupt { thread_id } => {
+            let harness = rt.harness.clone();
+            let asked = crate::runtime::blocking::run(move || harness.interrupt(thread_id)).await;
+            if let Err(e) = asked {
+                elog!("[oculus] harness thread {thread_id}: interrupt: {e}");
+            }
         }
         Effect::Release { thread_id, reason } => rt.harness.release(thread_id, reason),
     }

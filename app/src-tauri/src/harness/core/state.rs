@@ -23,6 +23,8 @@ pub(in crate::harness) struct State {
     pub question: Option<Question>,
     /// The newest question's anchor, which Claude needs to rewind past it.
     pub newest_anchor: Option<String>,
+    /// How many runs wait in the chat's queue.
+    pub waiting: i64,
 }
 
 /// Read everything `command`'s decider may ask. An `Err` is the command's
@@ -36,11 +38,16 @@ pub(in crate::harness) async fn read(
         Some(id) => Some(store::thread(pool, id).await?),
         None => None,
     };
+    let waiting = match command.thread_id {
+        Some(id) => store::queue::waiting(pool, id).await?,
+        None => 0,
+    };
     let mut state = State {
         thread,
         live,
         question: None,
         newest_anchor: None,
+        waiting,
     };
     if let (Some(thread_id), Kind::Rewind { item_id } | Kind::EditResend { item_id, .. }) =
         (command.thread_id, &command.kind)

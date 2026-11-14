@@ -113,6 +113,15 @@ pub async fn reconcile(pool: &SqlitePool) -> Result<Reconciled, String> {
     .await
     .map_err(|e| e.to_string())?
     .rows_affected();
+    // A continuation that was still waiting is not started by a later
+    // session: its card says the app closed (`continuation::reconcile`).
+    sqlx::query(
+        "UPDATE harness_runs SET execution_status = 'cancelled', queue_position = NULL
+          WHERE execution_status = 'queued' AND origin = 'continuation'",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
     // Their process is gone: what streamed is kept, and they end interrupted.
     super::runs::recover(&mut tx).await?;
     for sql in [

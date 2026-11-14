@@ -5,8 +5,9 @@ use super::super::commit::Change;
 use super::super::state::State;
 use super::{Decision, Plan};
 
-/// A message starts its run on an idle chat and waits behind a busy one. A
-/// send with no chat makes one first, in the same commit.
+/// A message starts its run on an idle chat and waits behind a busy one, or
+/// behind messages already waiting. A send with no chat makes one first, in
+/// the same commit.
 pub(super) fn decide(
     state: &State,
     command: &Command,
@@ -30,8 +31,9 @@ pub(super) fn decide(
             first_message: text.to_string(),
         }),
     }
-    changes.push(match state.live.busy {
-        true => Change::Wait {
+    changes.push(match state.live.busy || state.waiting > 0 {
+        true => Change::Enqueue {
+            provider,
             text: text.to_string(),
             options: options.clone(),
         },
@@ -40,6 +42,7 @@ pub(super) fn decide(
             text: text.to_string(),
             options: options.clone(),
             receipt: command.id.clone(),
+            queued: None,
         },
     });
     Ok(Decision::Commit(Plan {
@@ -72,6 +75,7 @@ mod tests {
             live: Live { busy },
             question: None,
             newest_anchor: None,
+            waiting: 0,
         }
     }
 
@@ -99,7 +103,12 @@ mod tests {
             [Change::Begin { receipt, text, .. }] if receipt == "c1" && text == "hello"
         ));
         let busy = changes(&state(Some(thread(Provider::Codex)), true), &send(Some(4)));
-        assert!(matches!(busy.as_slice(), [Change::Wait { text, .. }] if text == "hello"));
+        assert!(matches!(busy.as_slice(), [Change::Enqueue { text, .. }] if text == "hello"));
+        // An idle chat whose queue is not empty: the new message goes behind it.
+        let mut behind = state(Some(thread(Provider::Codex)), false);
+        behind.waiting = 2;
+        let queued = changes(&behind, &send(Some(4)));
+        assert!(matches!(queued.as_slice(), [Change::Enqueue { .. }]));
     }
 
     #[test]

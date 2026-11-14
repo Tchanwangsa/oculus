@@ -30,12 +30,32 @@ pub(in crate::harness) enum Change {
         /// The run receipt's id: the command's own for a send, a fresh one
         /// for a run the app starts.
         receipt: String,
+        /// The waiting run that starts, when the message waited.
+        queued: Option<i64>,
     },
-    /// A message that waits behind the running turn.
-    Wait {
+    /// A message, or a card's continuation, joins the back of the queue as
+    /// a waiting run (`store/queue.rs`).
+    Enqueue {
+        provider: Provider,
         text: String,
         options: SendOptions,
     },
+    EditQueued {
+        run_id: i64,
+        text: String,
+    },
+    /// A waiting run leaves the queue: cancelled, or `failed` when it could
+    /// not be started.
+    CloseQueued {
+        run_id: i64,
+        failed: bool,
+    },
+    ReorderQueued {
+        order: Vec<i64>,
+    },
+    /// Every waiting run is cancelled; a continuation's card says it was
+    /// stopped.
+    ClearQueue,
     /// The rows from `item_id` on leave the chat. `context` is whether the
     /// provider forgot them too.
     Truncate {
@@ -47,9 +67,15 @@ pub(in crate::harness) enum Change {
 
 /// What a change did, for the consumer to announce and act on.
 pub(in crate::harness) enum Applied {
-    Began(Began),
-    Waiting { text: String, options: SendOptions },
-    Truncated { item_id: i64, context: bool },
+    Began(Box<Began>),
+    /// The queue changed: the webview's list is told again.
+    Queue,
+    /// These cards' continuations were cancelled.
+    Cards(Vec<String>),
+    Truncated {
+        item_id: i64,
+        context: bool,
+    },
     Deleted,
 }
 
@@ -60,6 +86,8 @@ pub(in crate::harness) struct Began {
     /// The row's text: what the student typed, or a continuation's line.
     pub text: String,
     pub options: SendOptions,
+    /// The run waited in the queue before this.
+    pub waited: bool,
     /// The send changed the chat's model, which a CLI that fixes its model
     /// at spawn can only take as a new session.
     pub respawn: bool,
@@ -112,13 +140,60 @@ pub(in crate::harness) async fn run(
                 text,
                 options,
                 receipt,
+                queued,
             } => {
                 let thread_id = thread.ok_or("a send with no thread")?;
-                let began = begin(&mut tx, thread_id, provider, text, options, receipt).await?;
+                let send = (text, options, receipt, queued);
+                let began = begin(&mut tx, thread_id, provider, send).await?;
                 outcome.run = Some(began.run);
-                applied.push(Applied::Began(began));
+                applied.push(Applied::Began(Box::new(began)));
             }
-            Change::Wait { text, options } => applied.push(Applied::Waiting { text, options }),
+            Change::Enqueue {
+                provider,
+                text,
+                options,
+            } => {
+                let thread_id = thread.ok_or("a send with no thread")?;
+                let run_id =
+                    store::queue::enqueue(&mut tx, thread_id, provider, &text, &options).await?;
+                outcome.queued = Some(run_id);
+                applied.push(Applied::Queue);
+            }
+            Change::EditQueued { run_id, text } => {
+                let thread_id = thread.ok_or("a queue with no thread")?;
+                if store::queue::edit(&mut tx, thread_id, run_id, &text).await? {
+                    applied.push(Applied::Queue);
+                }
+            }
+            Change::CloseQueued { run_id, failed } => {
+                let thread_id = thread.ok_or("a queue with no thread")?;
+                let status = match failed {
+                    true => "failed",
+                    false => "cancelled",
+                };
+                if store::queue::close(&mut tx, thread_id, run_id, status).await? {
+                    applied.push(Applied::Queue);
+                }
+            }
+            Change::ReorderQueued { order } => {
+                let thread_id = thread.ok_or("a queue with no thread")?;
+                store::queue::reorder(&mut tx, thread_id, &order).await?;
+                applied.push(Applied::Queue);
+            }
+            Change::ClearQueue => {
+                let thread_id = thread.ok_or("a queue with no thread")?;
+                let cleared = store::queue::clear(&mut tx, thread_id).await?;
+                let mut stopped = Vec::new();
+                for card in cleared.cards {
+                    let reason = crate::harness::app::continuation::STOPPED;
+                    if crate::harness::app::continuation::cancel(&mut *tx, &card, reason).await? {
+                        stopped.push(card);
+                    }
+                }
+                outcome.dropped = cleared.texts;
+                applied.push(Applied::Queue);
+                applied.push(Applied::Cards(stopped));
+            }
             Change::Truncate { item_id, context } => {
                 let thread_id = thread.ok_or("a rewind with no thread")?;
                 store::truncate(&mut tx, thread_id, item_id).await?;
@@ -178,9 +253,7 @@ async fn begin(
     tx: &mut SqliteConnection,
     thread_id: i64,
     provider: Provider,
-    text: String,
-    options: SendOptions,
-    receipt: String,
+    (text, options, receipt, queued): (String, SendOptions, String, Option<i64>),
 ) -> Result<Began, String> {
     let row = sqlx::query("SELECT model, provider_session_id FROM harness_threads WHERE id = ?1")
         .bind(thread_id)
@@ -207,6 +280,7 @@ async fn begin(
         text,
         at: options.at,
         continuation: options.continuation.clone(),
+        queued,
     };
     let run = store::begin(&mut *tx, &intent).await?;
     Ok(Began {
@@ -214,6 +288,7 @@ async fn begin(
         run,
         text: intent.text,
         options,
+        waited: queued.is_some(),
         respawn,
     })
 }

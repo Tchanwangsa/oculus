@@ -15,7 +15,7 @@ test("deleting a thread releases retained streams and the global busy flag", () 
     threads: [{ id: 1 }, { id: 2 }] as HarnessThread[],
     items: { 1: [{ id: 10 }] as HarnessItem[], 2: survivingRows },
     live: { 1: { ...idle, running: true, toolOutput: { tool: "large streamed output" } }, 2: surviving },
-    holds: { 1: 3, 2: 1 }, queued: { 1: [{ id: "q1", text: "queued" }], 2: [] },
+    holds: { 1: 3, 2: 1 }, queued: { 1: [{ id: "q1", text: "queued", held: false }], 2: [] },
     contextDrift: { 1: true, 2: true },
   });
   expect(anyRunning(useHarnessStore.getState().live)).toBe(true);

@@ -41,6 +41,9 @@ pub struct SendIntent {
     /// a `continuation` row holding `text`, never a question, and the run's
     /// origin is `continuation`. `None` for a student send.
     pub continuation: Option<String>,
+    /// The waiting run this send starts (`queue.rs`): its row becomes the
+    /// run, instead of a new one. `None` for a send that never waited.
+    pub queued: Option<i64>,
 }
 
 /// [`begin`]'s refusal of a continuation its card no longer holds a claim
@@ -86,30 +89,13 @@ pub async fn begin(tx: &mut SqliteConnection, send: &SendIntent) -> Result<RunSt
             return Err(NOT_CLAIMED.into());
         }
     }
-    let bound: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM harness_bindings
-          WHERE thread_id = ?1 AND provider = ?2 AND native_session IS ?3
-          ORDER BY id DESC LIMIT 1",
+    let binding_id = binding_for(
+        &mut *tx,
+        send.thread_id,
+        send.provider,
+        send.native_session.as_deref(),
     )
-    .bind(send.thread_id)
-    .bind(send.provider.as_str())
-    .bind(&send.native_session)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(err)?;
-    let binding_id = match bound {
-        Some(id) => id,
-        None => sqlx::query(
-            "INSERT INTO harness_bindings (thread_id, provider, native_session) VALUES (?1, ?2, ?3)",
-        )
-        .bind(send.thread_id)
-        .bind(send.provider.as_str())
-        .bind(&send.native_session)
-        .execute(&mut *tx)
-        .await
-        .map_err(err)?
-        .last_insert_rowid(),
-    };
+    .await?;
     sqlx::query(
         "UPDATE harness_threads SET status = 'running', updated_at = datetime('now') WHERE id = ?1",
     )
@@ -145,21 +131,47 @@ pub async fn begin(tx: &mut SqliteConnection, send: &SendIntent) -> Result<RunSt
     .await
     .map_err(err)?
     .last_insert_rowid();
-    let run_id = sqlx::query(
-        "INSERT INTO harness_runs
-           (thread_id, ordinal, origin, initiating_item_id, binding_id, model, execution_status)
-         VALUES (?1, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM harness_runs WHERE thread_id = ?1),
-                 ?5, ?2, ?3, ?4, 'preparing')",
-    )
-    .bind(send.thread_id)
-    .bind(item_id)
-    .bind(binding_id)
-    .bind(&send.model)
-    .bind(origin)
-    .execute(&mut *tx)
-    .await
-    .map_err(err)?
-    .last_insert_rowid();
+    // The ordinal is the order turns ran in: a run that waited takes the
+    // next one now, not when it was queued.
+    const NEXT_ORDINAL: &str =
+        "(SELECT COALESCE(MAX(ordinal), 0) + 1 FROM harness_runs WHERE thread_id = ?1 AND ordinal > 0)";
+    let run_id = match send.queued {
+        Some(run_id) => {
+            let started = sqlx::query(&format!(
+                "UPDATE harness_runs
+                    SET ordinal = {NEXT_ORDINAL}, initiating_item_id = ?2, binding_id = ?3, model = ?4,
+                        execution_status = 'preparing', queue_position = NULL, queue_held = 0
+                  WHERE id = ?5 AND thread_id = ?1 AND execution_status = 'queued'"
+            ))
+            .bind(send.thread_id)
+            .bind(item_id)
+            .bind(binding_id)
+            .bind(&send.model)
+            .bind(run_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(err)?
+            .rows_affected();
+            if started == 0 {
+                return Err(format!("run {run_id} is no longer waiting"));
+            }
+            run_id
+        }
+        None => sqlx::query(&format!(
+            "INSERT INTO harness_runs
+               (thread_id, ordinal, origin, initiating_item_id, binding_id, model, execution_status)
+             VALUES (?1, {NEXT_ORDINAL}, ?5, ?2, ?3, ?4, 'preparing')"
+        ))
+        .bind(send.thread_id)
+        .bind(item_id)
+        .bind(binding_id)
+        .bind(&send.model)
+        .bind(origin)
+        .execute(&mut *tx)
+        .await
+        .map_err(err)?
+        .last_insert_rowid(),
+    };
     if let Some(card) = &send.continuation {
         super::super::app::continuation::started(&mut *tx, card, run_id).await?;
     }
@@ -208,6 +220,58 @@ pub async fn begin_run(pool: &SqlitePool, send: &SendIntent) -> Result<RunStart,
     let run = begin(&mut tx, send).await?;
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(run)
+}
+
+/// The thread's binding for the session `native_session`, made when it has
+/// none yet.
+async fn binding_for(
+    tx: &mut SqliteConnection,
+    thread_id: i64,
+    provider: Provider,
+    native_session: Option<&str>,
+) -> Result<i64, String> {
+    let err = |e: sqlx::Error| e.to_string();
+    let bound: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM harness_bindings
+          WHERE thread_id = ?1 AND provider = ?2 AND native_session IS ?3
+          ORDER BY id DESC LIMIT 1",
+    )
+    .bind(thread_id)
+    .bind(provider.as_str())
+    .bind(native_session)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(err)?;
+    match bound {
+        Some(id) => Ok(id),
+        None => sqlx::query(
+            "INSERT INTO harness_bindings (thread_id, provider, native_session) VALUES (?1, ?2, ?3)",
+        )
+        .bind(thread_id)
+        .bind(provider.as_str())
+        .bind(native_session)
+        .execute(&mut *tx)
+        .await
+        .map(|r| r.last_insert_rowid())
+        .map_err(err),
+    }
+}
+
+/// The binding of the session the thread would resume now. A waiting run
+/// holds it until it starts, when [`begin`] resolves it again.
+pub(super) async fn binding(
+    tx: &mut SqliteConnection,
+    thread_id: i64,
+    provider: Provider,
+) -> Result<i64, String> {
+    let session: Option<String> =
+        sqlx::query_scalar("SELECT provider_session_id FROM harness_threads WHERE id = ?1")
+            .bind(thread_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("no thread {thread_id}"))?;
+    binding_for(tx, thread_id, provider, session.as_deref()).await
 }
 
 /// The provider accepted the send. Conditional, since the turn may already

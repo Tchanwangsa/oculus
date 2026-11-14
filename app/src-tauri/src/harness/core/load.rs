@@ -6,7 +6,7 @@
 use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 
-use crate::harness::QueuedMessage;
+use crate::harness::store::{queue, QueuedMessage};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,7 +14,7 @@ pub struct Snapshot {
     pub revision: i64,
     pub items: Vec<Item>,
     pub runs: Vec<Run>,
-    /// The student's messages waiting behind the running turn.
+    /// The student's messages waiting their turn, in queue order.
     pub queued: Vec<QueuedMessage>,
 }
 
@@ -33,7 +33,9 @@ pub struct Item {
 }
 
 /// A `harness_runs` row, as `RunRow` in `app/src/lib/harness/runs.ts`. A run
-/// that never started reads its interval from its request.
+/// that never started reads its interval from its request. Only runs with a
+/// timeline row are listed: one that waits is in `queued`, and one that
+/// left the queue without starting has nothing to draw.
 #[derive(Serialize)]
 pub struct Run {
     pub id: i64,
@@ -77,7 +79,10 @@ pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String>
     let runs = sqlx::query(
         "SELECT id, execution_status, delivery_state, answer_item_id,
                 COALESCE(started_at, requested_at) AS started_at, ended_at
-           FROM harness_runs WHERE thread_id = ?1 ORDER BY id",
+           FROM harness_runs
+          WHERE thread_id = ?1 AND execution_status NOT IN ('queued', 'cancelled')
+            AND initiating_item_id IS NOT NULL
+          ORDER BY id",
     )
     .bind(thread_id)
     .fetch_all(&mut *tx)
@@ -93,11 +98,12 @@ pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String>
         ended_at: r.get("ended_at"),
     })
     .collect();
+    let queued = queue::list(&mut *tx, thread_id).await?;
     tx.commit().await.map_err(err)?;
     Ok(Snapshot {
         revision,
         items,
         runs,
-        queued: Vec::new(),
+        queued,
     })
 }

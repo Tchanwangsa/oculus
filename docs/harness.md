@@ -11,7 +11,8 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 
 | Piece | Location |
 | --- | --- |
-| Manager, queue, `run_once`, per-thread `instructions` | `app/src-tauri/src/harness/manager/` (`queue.rs`, `one_off.rs`, `instructions.rs`) |
+| Manager, which threads have a turn open, `run_once`, per-thread `instructions` | `app/src-tauri/src/harness/manager/` (`queue.rs`, `one_off.rs`, `instructions.rs`) |
+| Messages that wait their turn, as queued runs | `app/src-tauri/src/harness/store/queue.rs` |
 | Tauri commands (setup, models, turns, suggestions) | `app/src-tauri/src/harness/app/` |
 | The event enum, tool classification (`classify`) and answer selection | `app/src-tauri/src/harness/event/mod.rs`, `app/src-tauri/src/harness/event/classify.rs`, `app/src-tauri/src/harness/event/answer.rs` |
 | Bridges: Claude (`claude -p`), Codex (`app-server`), opencode (`serve`), Antigravity (`agy --print=`) | `app/src-tauri/src/harness/providers/claude/`, `app/src-tauri/src/harness/providers/codex/`, `app/src-tauri/src/harness/providers/opencode/`, `app/src-tauri/src/harness/providers/antigravity/` |
@@ -75,7 +76,7 @@ Settings row directs installation and updates to a terminal.
 
 Every bridge translates into `HarnessEvent` (session, user message, turn,
 unprompted turn, text/reasoning deltas, tool started/output/finished, usage,
-rate limits, error, exited). `ThreadTitled`, `Queued`/`Unqueued`, `Rewound` and
+rate limits, error, exited). `ThreadTitled`, `Queue`, `Rewound` and
 `TurnAnchor` and `Proposal` have no provider behind them but ride the same path so they are
 persisted the same way. `classify` in `event/classify.rs` is the one tool table.
 
@@ -907,11 +908,52 @@ marker as well as rows and queue, so removed turns cannot leave the sidebar busy
 
 ## One turn at a time
 
-A message sent mid-turn waits in `Queue` until the turn closes. Left to the
+A message sent mid-turn waits until the turn closes. Left to the
 CLIs, Claude leaves an idle gap between turns, Codex folds it into the running
-turn (the first answer can vanish), and opencode's v1 API has no queue. A
-queued message has no row, so it can be edited or removed; `harness_load`
-returns it with the thread's rows after a reload.
+turn (the first answer can vanish), and opencode's v1 API has no queue.
+
+**A waiting message is a run from the moment it is accepted**
+(`store/queue.rs`). The `Send` command on a busy chat, or on one whose queue
+is not empty, commits a `harness_runs` row in `queued` holding the text
+(`queued_text`), the send's options as one JSON value (`queued_options`:
+`SendOptions` serialized whole, so a field added to it rides the queue with
+no further code) and its place (`queue_position`). It has no timeline row
+and no real ordinal yet: its `ordinal` is a negative placeholder, since rows
+and ordinals are the order turns ran in. When its turn comes
+`store::begin` starts that same row: the question's row is written then, the
+run takes the thread's next ordinal, and the chat's model becomes the
+message's. So a message has one id from the keystroke to its answer, and a
+quit or a crash keeps it.
+
+- **The composer's list is a mirror.** After every commit that changes the
+  queue the consumer emits `Queue { messages }`, the student's waiting
+  messages whole and in order (id, text, `held`); the webview replaces its
+  list (`harnessStore.queued`), and `harness_load` returns the same list
+  with the rows. `EditQueued`, `RemoveQueued` (the run becomes `cancelled`)
+  and `ReorderQueued` are commands like any other
+  (`harness_edit_queued`, `harness_unqueue`, `harness_reorder_queued`); one
+  that names a message which has just gone out changes nothing and is no
+  error.
+- **First come, first served.** When a turn closes and nothing else holds
+  the thread, `Consumer::promote` reads the first waiting run that is not
+  held and starts it. It reads the saved queue each time rather than acting
+  on a notification, so nothing is skipped; the same call follows every
+  command, which is how a message that joined an idle chat's queue goes out
+  at once. A waiting run that cannot be written leaves the queue as `failed`
+  with an error row, and the next one is tried.
+- **Which threads have a turn open is the one thing kept in memory**
+  (`Queue` in `manager/queue.rs`: a count per thread). A send's run claims
+  its thread, a turn the provider starts itself holds it, and each is let go
+  by its `TurnFinished`. No turn survives a restart, so nothing there needs
+  to.
+- **Readers of `harness_runs` meet runs that never ran.** A `queued` or
+  `cancelled` run has no rows, no attempt and no end time. A reload lists
+  only runs with a timeline row (`core/load.rs`), a thread's `settled_at`
+  counts only runs that ended after running (`reads.ts`), previews and
+  naming go by rows, settlement and startup's repair touch only `preparing`
+  and `running`, and a rewind deletes the runs asked from the rows it
+  removes, so a waiting message stays (`testkit/queue.rs`,
+  `tests/lib/harness/reads.test.ts`).
 
 The queue drains only if every accepted message, and every turn the provider
 starts itself, gets exactly one `TurnFinished`: Claude's `expecting` flag
@@ -931,9 +973,10 @@ question. Recorded in
 outlives its turn) and `claude-background-agent-fast.ndjson` (it finishes
 inside it).
 
-**Stop** interrupts and hands queued text back to the composer
-(`harness_interrupt`); `restore` is `ChatPage`'s own state, since a store slot
-would type it into every Chat tab. Codex never completes an interrupted message, so the
+**Stop** is a command (`harness_interrupt`): its commit cancels every
+waiting run and hands the student's texts back for the composer, then an
+`Interrupt` effect asks the CLI to stop the turn. `restore` is `ChatPage`'s
+own state, since a store slot would type it into every Chat tab. Codex never completes an interrupted message, so the
 bridge commits the streamed text itself; Claude's closing `result` claims an
 error, so `terminal_reason: "aborted_streaming"` decides and its zeroed usage
 is skipped.
@@ -941,7 +984,8 @@ is skipped.
 ## One command path
 
 Everything the student does to a chat is a `Command` (`core/command.rs`):
-`Send`, `Rewind`, `EditResend`, `DeleteThread`. A Tauri command in
+`Send`, `Rewind`, `EditResend`, `DeleteThread`, `EditQueued`, `RemoveQueued`,
+`ReorderQueued`, `Stop`. A Tauri command in
 `app/turns.rs` only builds one, with the id the webview minted for it
 (`commandId` in `lib/harness/commands.ts`), puts it on the consumer's bus
 (`BusMsg::Command`) and awaits the result. The consumer takes it through
@@ -991,7 +1035,8 @@ that commit; the same id arriving while it waits is refused as still
 running.
 
 What the app does itself goes through the same commit with no receipt of
-this kind: a waiting message going out, and a card's continuation.
+this kind: a waiting run starting, and a card's continuation joining the
+queue.
 
 **Every envelope carries the thread's revision.** `store::apply_event`,
 `store::settle_run` and the commit each raise `harness_threads.revision` in
@@ -1215,7 +1260,7 @@ happens to be open when it arrives.
 and asks the thread's `Sinks` for that generation's sink
 (`app::sinks_for`). Each event the session reports reaches the bus as
 `BusMsg::Event { generation: Some(n), .. }`; an event the app makes itself
-(`Queued`, `Rewound`, a send that failed before its turn) carries `None`.
+(`Queue`, `Rewound`, a send that failed before its turn) carries `None`.
 The consumer keeps each thread's newest generation (`RunScope::admit`) and
 drops, with a log line, an event from an older one. That is what keeps a
 process the manager replaced from speaking into the run its successor is
@@ -1840,14 +1885,15 @@ update of its state: `continuation` becomes `{phase: "queued"}` only if the
 card has a `then`, has settled (discarded, applied, or its job complete or
 failed, not interrupted), has no claim yet, and its timeline row still exists.
 A second settle, a second view, or a rewind or thread delete past the card
-claims nothing. The claim then goes through `Queue` like a message: out at
-once on an idle thread, or behind the running turn, never listed in the
-composer's queue.
+claims nothing. The claim then joins the thread's queue like a message, as
+a queued run with origin `continuation`: out at
+once on an idle thread, or behind the running turn and whatever already
+waits, never listed in the composer's queue.
 
 When its turn comes `store::begin` turns the claim into the run in the same
 transaction (`phase: "started"`, `run_id`), or refuses with `NOT_CLAIMED` and
-writes nothing; the consumer then passes the thread to
-whatever waits next (`Consumer::start_next`). The run's origin is `continuation`, and its head row is a
+writes nothing; the consumer then cancels the waiting run and passes the
+thread to whatever waits next (`Consumer::promote`). The run's origin is `continuation`, and its head row is a
 `continuation` row holding the timeline's line ("Sync finished — continuing",
 meta `{proposal}`), announced as `Continued`, not `UserMessage`. The webview
 draws it as a small centred line, folds the run under it like a question's,
@@ -1856,8 +1902,10 @@ the card and its outcome, and quotes the agent's `then`; "Cards in this
 thread" follows as for any send. The thread's model comes from its row and
 the reasoning level from the live session, as the student last chose them.
 
-Stop drops a queued continuation and its card says so (`STOPPED`). The queue
-is only in memory, so startup marks a queued claim `skipped`, and a job the
+Stop cancels a waiting continuation in the same commit and its card says so
+(`STOPPED`). The click that consented to it belongs to the session it was
+made in, so startup marks a claim still waiting `skipped` and cancels its
+run, and a job the
 app closed during (`job.interrupted`) is `skipped` too: neither ever runs
 later, and the card shows the reason under its body (`CardFrame`'s `note`).
 

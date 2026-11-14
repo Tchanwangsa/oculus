@@ -17,7 +17,7 @@ use super::rig::Rig;
 use super::scenario::Scenario;
 
 /// The recording's frames as another turn of the same thread would send them.
-fn as_turn(frames: &[Value], from: &str, to: &str) -> Vec<Value> {
+pub(super) fn as_turn(frames: &[Value], from: &str, to: &str) -> Vec<Value> {
     frames
         .iter()
         .map(|f| serde_json::from_str(&f.to_string().replace(from, to)).unwrap())

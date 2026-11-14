@@ -14,7 +14,8 @@ pub(in crate::harness) struct Command {
 }
 
 pub(in crate::harness) enum Kind {
-    /// A message: a run that starts now on an idle chat, or waits its turn.
+    /// A message: a run that starts now on an idle chat, or waits its turn
+    /// in the chat's queue.
     Send {
         provider: Provider,
         text: String,
@@ -31,6 +32,21 @@ pub(in crate::harness) enum Kind {
         options: SendOptions,
     },
     DeleteThread,
+    /// Rewrite a message that still waits.
+    EditQueued {
+        run_id: i64,
+        text: String,
+    },
+    /// Take a waiting message out of the queue.
+    RemoveQueued {
+        run_id: i64,
+    },
+    /// Put the waiting messages in this order, first to go out first.
+    ReorderQueued {
+        order: Vec<i64>,
+    },
+    /// Stop the chat's turn, and take back everything waiting behind it.
+    Stop,
 }
 
 impl Kind {
@@ -41,6 +57,10 @@ impl Kind {
             Kind::Rewind { .. } => "rewind",
             Kind::EditResend { .. } => "edit_resend",
             Kind::DeleteThread => DELETE_THREAD,
+            Kind::EditQueued { .. } => "edit_queued",
+            Kind::RemoveQueued { .. } => "remove_queued",
+            Kind::ReorderQueued { .. } => "reorder_queued",
+            Kind::Stop => "stop",
         }
     }
 }
@@ -56,7 +76,13 @@ pub(in crate::harness) struct Outcome {
     /// The run a send started.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<RunStart>,
+    /// The waiting run a send on a busy chat became.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued: Option<i64>,
     /// A rewind's question, handed back to the composer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// The waiting messages a stop took back, for the composer.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropped: Vec<String>,
 }

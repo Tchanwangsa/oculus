@@ -13,7 +13,7 @@ use tokio::sync::oneshot::Receiver;
 use crate::harness::app::consumer::{consume, ConsumerIo};
 use crate::harness::app::{BusMsg, Envelope};
 use crate::harness::core::decide::Answer;
-use crate::harness::core::effect::Effect;
+use crate::harness::core::effect::{Effect, Start};
 use crate::harness::core::{load, Command, Kind, Outcome};
 use crate::harness::{jobs, store, HarnessEvent, Provider, Queue, Release, SendOptions};
 
@@ -21,21 +21,23 @@ use super::replay::run;
 use super::rig::Rig;
 use super::scenario::Scenario;
 
-type Result = std::result::Result<Outcome, String>;
+pub(super) type Result = std::result::Result<Outcome, String>;
 
 /// A consumer on a scratch database whose effects are answered by the test:
 /// a start sends nothing, and a rewind's answer arrives after whatever the
 /// script still holds, as a slow provider's would.
-struct Bench {
-    runtime: tokio::runtime::Runtime,
-    _dir: crate::test_support::Scratch,
-    pool: SqlitePool,
-    thread: i64,
-    queue: Arc<Mutex<Queue>>,
+pub(super) struct Bench {
+    pub(super) runtime: tokio::runtime::Runtime,
+    pub(super) _dir: crate::test_support::Scratch,
+    pub(super) pool: SqlitePool,
+    pub(super) thread: i64,
+    pub(super) queue: Arc<Mutex<Queue>>,
     /// Whether the provider says its context went back, per rewind asked.
-    rewinds: bool,
-    events: Vec<Value>,
-    effects: Vec<String>,
+    pub(super) rewinds: bool,
+    pub(super) events: Vec<Value>,
+    pub(super) effects: Vec<String>,
+    /// The runs it was asked to send, with their options.
+    pub(super) starts: Vec<Start>,
 }
 
 struct Io<'a> {
@@ -52,16 +54,21 @@ impl ConsumerIo for Io<'_> {
         self.bench.effects.push(match &effect {
             Effect::Start(start) => format!("start {}", start.text),
             Effect::Rewind { ask, .. } => format!("rewind {}", ask.anchor),
+            Effect::Interrupt { .. } => "interrupt".to_string(),
             Effect::Release { reason, .. } => format!("release {reason:?}"),
         });
-        if let Effect::Rewind { command, ask } = effect {
-            self.answers.lock().unwrap().push_back(BusMsg::Answer {
-                thread_id: ask.thread_id,
-                command,
-                answer: Answer::Rewound {
-                    context: self.bench.rewinds,
-                },
-            });
+        match effect {
+            Effect::Rewind { command, ask } => {
+                self.answers.lock().unwrap().push_back(BusMsg::Answer {
+                    thread_id: ask.thread_id,
+                    command,
+                    answer: Answer::Rewound {
+                        context: self.bench.rewinds,
+                    },
+                });
+            }
+            Effect::Start(start) => self.bench.starts.push(*start),
+            _ => {}
         }
     }
     fn emit(&mut self, envelope: Envelope) {
@@ -87,7 +94,7 @@ impl Iterator for Script {
 }
 
 impl Bench {
-    fn new(name: &str) -> Self {
+    pub(super) fn new(name: &str) -> Self {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let (dir, pool) = runtime.block_on(super::runs::scratch_pool(name));
         let thread = runtime
@@ -109,11 +116,12 @@ impl Bench {
             rewinds: true,
             events: Vec::new(),
             effects: Vec::new(),
+            starts: Vec::new(),
         }
     }
 
     /// One consumer over `script`, to its end.
-    fn play(&mut self, script: Vec<BusMsg>) {
+    pub(super) fn play(&mut self, script: Vec<BusMsg>) {
         let answers: Arc<Mutex<VecDeque<BusMsg>>> = Arc::default();
         let bus = Script {
             fixed: script.into(),
@@ -127,17 +135,17 @@ impl Bench {
         consume(bus, queue, &mut io);
     }
 
-    fn command(&self, id: &str, kind: Kind) -> (BusMsg, Receiver<Result>) {
+    pub(super) fn command(&self, id: &str, kind: Kind) -> (BusMsg, Receiver<Result>) {
         command(id, Some(self.thread), kind)
     }
 
-    fn send(&self, id: &str, text: &str) -> (BusMsg, Receiver<Result>) {
+    pub(super) fn send(&self, id: &str, text: &str) -> (BusMsg, Receiver<Result>) {
         self.command(id, send(text))
     }
 
     /// A whole turn: the question `text` under the command `id`, the
     /// session naming itself and the question's anchor, an answer, the end.
-    fn turn(&self, id: &str, text: &str, anchor: &str) -> Vec<BusMsg> {
+    pub(super) fn turn(&self, id: &str, text: &str, anchor: &str) -> Vec<BusMsg> {
         let said = HarnessEvent::AssistantMessage {
             text: format!("answer to {text}"),
             source: None,
@@ -159,7 +167,7 @@ impl Bench {
         ]
     }
 
-    fn session(&self, event: HarnessEvent) -> BusMsg {
+    pub(super) fn session(&self, event: HarnessEvent) -> BusMsg {
         BusMsg::Event {
             thread_id: self.thread,
             provider: Provider::Claude,
@@ -168,21 +176,21 @@ impl Bench {
         }
     }
 
-    fn app(&self, event: HarnessEvent) -> BusMsg {
+    pub(super) fn app(&self, event: HarnessEvent) -> BusMsg {
         BusMsg::app(self.thread, Provider::Claude, event)
     }
 
-    fn got(&self, answer: Receiver<Result>) -> Result {
+    pub(super) fn got(&self, answer: Receiver<Result>) -> Result {
         self.runtime.block_on(answer).unwrap()
     }
 
-    fn count(&self, sql: &str) -> i64 {
+    pub(super) fn count(&self, sql: &str) -> i64 {
         self.runtime
             .block_on(sqlx::query_scalar(sql).fetch_one(&self.pool))
             .unwrap()
     }
 
-    fn questions(&self) -> Vec<String> {
+    pub(super) fn questions(&self) -> Vec<String> {
         self.runtime
             .block_on(
                 sqlx::query_scalar(
@@ -193,7 +201,7 @@ impl Bench {
             .unwrap()
     }
 
-    fn kinds(&self) -> Vec<&str> {
+    pub(super) fn kinds(&self) -> Vec<&str> {
         self.events
             .iter()
             .map(|e| e["event"]["type"].as_str().unwrap())
@@ -201,7 +209,7 @@ impl Bench {
     }
 }
 
-fn command(id: &str, thread_id: Option<i64>, kind: Kind) -> (BusMsg, Receiver<Result>) {
+pub(super) fn command(id: &str, thread_id: Option<i64>, kind: Kind) -> (BusMsg, Receiver<Result>) {
     let (reply, answer) = tokio::sync::oneshot::channel();
     let command = Command {
         id: id.into(),
@@ -211,7 +219,7 @@ fn command(id: &str, thread_id: Option<i64>, kind: Kind) -> (BusMsg, Receiver<Re
     (BusMsg::Command { command, reply }, answer)
 }
 
-fn send(text: &str) -> Kind {
+pub(super) fn send(text: &str) -> Kind {
     Kind::Send {
         provider: Provider::Claude,
         text: text.into(),
@@ -219,7 +227,7 @@ fn send(text: &str) -> Kind {
     }
 }
 
-fn ended(status: &str) -> HarnessEvent {
+pub(super) fn ended(status: &str) -> HarnessEvent {
     HarnessEvent::TurnFinished {
         status: status.into(),
         turn: None,
@@ -316,12 +324,13 @@ fn a_message_sent_while_the_provider_rewinds_waits_and_survives_it() {
     bench.play(vec![rewind, typed]);
 
     assert_eq!(bench.got(rewound).unwrap().text.as_deref(), Some("second"));
-    assert!(bench.got(sent).unwrap().run.is_none(), "it waited");
+    let waited = bench.got(sent).unwrap();
+    assert!(waited.run.is_none() && waited.queued.is_some(), "it waited");
     assert_eq!(bench.effects, ["rewind anchor-2", "start meanwhile"]);
     assert_eq!(bench.questions(), ["first", "meanwhile"]);
     assert_eq!(
         bench.kinds(),
-        ["queued", "rewound", "unqueued", "user_message"],
+        ["queue", "rewound", "queue", "user_message"],
         "the rows went before the waiting message's question was written"
     );
     let rewound = &bench.events[1];
