@@ -41,6 +41,10 @@ type HarnessEvent =
   | { type: "queue"; messages: QueuedMessage[] }
   /** The student asked this run to stop; it ends on its own `turn_finished`. */
   | { type: "stop_requested"; run_id: number }
+  /** Fifteen seconds after the stop the run is still open: its CLI is not
+   *  answering, and Force stop is offered. `others` is how many other chats
+   *  have a run on the same server, which a force stop would end too. */
+  | { type: "stop_unresponsive"; run_id: number; others: number }
   /** The provider's handle for a later rewind; the webview ignores it. */
   | { type: "turn_anchor"; anchor: string }
   /** Rows from `from_item_id` on are gone; `context` is whether the agent
@@ -202,6 +206,12 @@ export interface HarnessRun {
   ended_ms: number | null;
   /** The student asked it to stop and its turn has not ended yet. */
   stopping?: boolean;
+  /** When they asked, epoch ms: a reload finds a stop that is overdue
+   *  (`stopOverdue`) without having heard `stop_unresponsive`. */
+  stop_requested_ms?: number | null;
+  /** Its CLI did not answer the stop (`stop_unresponsive`); `others` other
+   *  chats have a run on the same server. */
+  unresponsive?: { others: number };
 }
 
 export interface BridgeHealth {

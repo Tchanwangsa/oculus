@@ -24,6 +24,8 @@ pub(super) struct Io {
     pub scratch: PathBuf,
     pub outbound: Outbound,
     pub envelopes: Vec<Value>,
+    /// The same envelopes, for a test to read while the consumer runs.
+    pub told: Arc<Mutex<Vec<Value>>>,
     pub snapshots: Vec<Vec<Value>>,
     pub runtime: Option<Runtime>,
     pub epoch: std::time::Instant,
@@ -118,7 +120,9 @@ impl ConsumerIo for Io {
                 .unwrap()
                 .block_on(snapshot::items(&self.pool, envelope.thread_id)),
         );
-        self.envelopes.push(serde_json::to_value(envelope).unwrap());
+        let envelope = serde_json::to_value(envelope).unwrap();
+        self.told.lock().unwrap().push(envelope.clone());
+        self.envelopes.push(envelope);
     }
 }
 

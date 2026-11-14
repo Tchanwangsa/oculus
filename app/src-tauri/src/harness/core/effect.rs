@@ -23,6 +23,8 @@ pub(in crate::harness) enum Effect {
     },
     /// Ask the thread's CLI to stop the turn it has open.
     Interrupt { thread_id: i64 },
+    /// Kill what is answering the thread (`Harness::force_stop`).
+    ForceStop { thread_id: i64 },
     /// End the thread's session.
     Release { thread_id: i64, reason: Release },
 }
@@ -87,6 +89,7 @@ pub(in crate::harness) async fn run(rt: &Runtime, effect: Effect) {
                 elog!("[oculus] harness thread {thread_id}: interrupt: {e}");
             }
         }
+        Effect::ForceStop { thread_id } => rt.harness.force_stop(thread_id),
         Effect::Release { thread_id, reason } => rt.harness.release(thread_id, reason),
     }
 }

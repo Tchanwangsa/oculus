@@ -297,6 +297,26 @@ pub async fn unhold(tx: &mut SqliteConnection, thread_id: i64) -> Result<(), Str
     .map_err(|e| e.to_string())
 }
 
+/// How many other threads of `provider` have a run going out or being
+/// answered: the chats a force stop of a shared server would cut too.
+pub async fn others_open(
+    db: impl SqliteExecutor<'_>,
+    provider: Provider,
+    thread_id: i64,
+) -> Result<i64, String> {
+    sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT r.thread_id) FROM harness_runs r
+           JOIN harness_threads t ON t.id = r.thread_id
+          WHERE t.provider = ?1 AND r.thread_id != ?2
+            AND r.execution_status IN ('preparing', 'starting', 'running')",
+    )
+    .bind(provider.as_str())
+    .bind(thread_id)
+    .fetch_one(db)
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// The student asked this run to stop: a saved fact every later decision
 /// reads. False when the run is not open any more, which changes nothing.
 pub async fn request_stop(

@@ -49,6 +49,7 @@ pub(super) struct Rig {
     /// What the consumer's effects run against, for one the test runs.
     effects: Effects,
     kept: Arc<Mutex<Option<Vec<Effect>>>>,
+    told: Arc<Mutex<Vec<Value>>>,
     outbound: Outbound,
     bridge: Bridge,
     fed: Arc<AtomicBool>,
@@ -142,6 +143,7 @@ impl Rig {
             own_turns: running.own_turns,
             effects: running.effects,
             kept: running.kept,
+            told: running.told,
             outbound,
             bridge: running.bridge,
             fed: running.fed,
@@ -189,6 +191,7 @@ impl Rig {
         self.own_turns = running.own_turns;
         self.effects = running.effects;
         self.kept = running.kept;
+        self.told = running.told;
         self.bridge = running.bridge;
         self.fed = running.fed;
         self.clock = running.clock;
@@ -315,6 +318,33 @@ impl Rig {
             self.runtime.block_on(effect::run(&self.effects, effect));
         }
         self.drain();
+    }
+
+    /// Another chat of the same provider, with a recorded session of its
+    /// own for its first send: its thread, and the bridge the test feeds.
+    pub fn second_chat(&mut self) -> (i64, Bridge) {
+        let created = store::create_thread(&self.pool, self.provider, None, None, None, "Other");
+        let thread = self.runtime.block_on(created).unwrap();
+        let bridge = session(
+            &self.harness,
+            thread,
+            self.provider,
+            &self.outbound,
+            &self.scenario.fixture.native_session,
+            &self.scratch,
+        );
+        (thread, bridge)
+    }
+
+    /// What this runtime's consumer has told so far.
+    pub fn envelopes(&self) -> Vec<Value> {
+        self.told.lock().unwrap().clone()
+    }
+
+    /// Whether the thread's recorded process is still up: a replayed
+    /// process records its kill.
+    pub fn alive(&self) -> bool {
+        self.bridge.handle.is_alive()
     }
 
     /// A second recorded session for the thread, which the manager's next
@@ -482,6 +512,7 @@ struct Running {
     own_turns: Arc<Mutex<OwnTurns>>,
     effects: Effects,
     kept: Arc<Mutex<Option<Vec<Effect>>>>,
+    told: Arc<Mutex<Vec<Value>>>,
     bridge: Bridge,
     fed: Arc<AtomicBool>,
     clock: Arc<Clock>,
@@ -512,6 +543,7 @@ fn boot(
         pools: Pools::Given(pool.clone()),
     };
     let kept: Arc<Mutex<Option<Vec<Effect>>>> = Arc::default();
+    let told: Arc<Mutex<Vec<Value>>> = Arc::default();
     let fed = Arc::new(AtomicBool::new(false));
     let (drained, waiters) = std::sync::mpsc::channel();
     let clock = Clock::new();
@@ -523,6 +555,7 @@ fn boot(
             scratch: scratch.to_path_buf(),
             outbound: outbound.clone(),
             envelopes: Vec::new(),
+            told: told.clone(),
             snapshots: Vec::new(),
             runtime: None,
             epoch: std::time::Instant::now(),
@@ -559,6 +592,7 @@ fn boot(
         own_turns,
         effects,
         kept,
+        told,
         bridge,
         fed,
         clock,

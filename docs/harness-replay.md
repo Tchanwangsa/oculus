@@ -100,6 +100,11 @@ waits for the consumer to hear the result (`testkit/driver.rs`).
 The manager never spawns in a replay. A recorded session is registered as the
 thread's next spawn (`Harness::replay_spawn`) and opened by the send that
 would have started a process, on the sink of the generation minted for it.
+`rig.second_chat()` makes another thread of the same provider with a
+recorded session of its own, and `rig.envelopes()` reads what the consumer
+has told so far. Since the feed moves the clock to the consumer's next wake
+whenever the bus is idle, a `rig.drain()` after a stop is fifteen seconds
+later.
 `rig.next_session()` registers another and hands back the one it replaces,
 whose reader the test can go on feeding: a process the app no longer listens
 to. A replayed process records a kill, so `handle.is_alive()` says whether
@@ -179,6 +184,11 @@ against `load::read`.
 start step (the message back in its queue, held, on all four bridges) and
 after it took the run, sends returning at their commit and going out one
 at a time, and a start step that finds its run gone.
+`testkit/force.rs` checks a CLI that ignores Stop, with a second chat of
+the same provider (`Rig::second_chat`): on Claude the stuck chat is force
+stopped while the other streams to its end; on Codex both settle as
+interrupted and the other chat's waiting message is held. `testkit/pacing.rs`
+pins the fifteen seconds on a scripted clock.
 `testkit/stop.rs` checks Stop: through Codex, a stop that keeps the partial
 answer and the waiting message, and Resume starting that message as its own
 run; a stop for a run that just finished; a stop during a slow start on all

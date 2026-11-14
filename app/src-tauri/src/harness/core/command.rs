@@ -54,6 +54,11 @@ pub(in crate::harness) enum Kind {
     },
     /// Lift the hold on the queue: the waiting messages go out again.
     Resume,
+    /// Kill what is answering this run, for a CLI that ignored Stop. It
+    /// names the run, so it cannot reach a newer one.
+    ForceStop {
+        run_id: i64,
+    },
 }
 
 impl Kind {
@@ -69,6 +74,7 @@ impl Kind {
             Kind::ReorderQueued { .. } => "reorder_queued",
             Kind::Stop { .. } => "stop",
             Kind::Resume => "resume",
+            Kind::ForceStop { .. } => "force_stop",
         }
     }
 }

@@ -71,6 +71,7 @@ impl ConsumerIo for Io {
             Effect::Start(start) => format!("start {}", start.text),
             Effect::Rewind { ask, .. } => format!("rewind {}", ask.anchor),
             Effect::Interrupt { .. } => "interrupt".to_string(),
+            Effect::ForceStop { .. } => "force stop".to_string(),
             Effect::Release { reason, .. } => format!("release {reason:?}"),
         });
         match effect {

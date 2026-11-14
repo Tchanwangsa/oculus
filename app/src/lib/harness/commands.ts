@@ -106,6 +106,14 @@ export function harnessInterrupt(threadId: number, runId: number | null): Promis
   return invoke("harness_interrupt", { commandId: commandId(), threadId, runId });
 }
 
+/** Force stop: kill what is answering `runId`, for a CLI that ignored Stop
+ *  (`stop_unresponsive`). Where the bridge's `sharedProcess` capability is
+ *  true this ends every other chat's turn on that server too. A run that
+ *  has since ended is left alone. */
+export function harnessForceStop(threadId: number, runId: number): Promise<void> {
+  return invoke("harness_force_stop", { commandId: commandId(), threadId, runId });
+}
+
 /** Lift the hold on a thread's queue (after a stop, a failed turn or a
  *  restart): its waiting messages go out again, in order. */
 export function harnessResume(threadId: number): Promise<void> {

@@ -82,5 +82,6 @@ pub(in crate::harness) fn decide(
         Kind::ReorderQueued { order } => queue::reorder(state, order),
         Kind::Stop { run_id } => queue::stop(state, *run_id),
         Kind::Resume => queue::resume(state),
+        Kind::ForceStop { run_id } => queue::force_stop(state, *run_id),
     }
 }

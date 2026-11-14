@@ -289,6 +289,13 @@ pub enum HarnessEvent {
     StopRequested {
         run_id: i64,
     },
+    /// Fifteen seconds after a stop the run is still open: its CLI is not
+    /// answering. The student may force stop it, which ends `others` other
+    /// chats' turns too when one server answers them all.
+    StopUnresponsive {
+        run_id: i64,
+        others: i64,
+    },
     /// The provider's handle for the turn just sent (Claude's message uuid,
     /// Codex's turn id), kept on the user row: a rewind names it, no CLI re-issues it.
     TurnAnchor {

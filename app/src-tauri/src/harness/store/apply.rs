@@ -84,6 +84,7 @@ fn writes(ev: &HarnessEvent) -> bool {
             | HarnessEvent::ToolOutputDelta { .. }
             | HarnessEvent::Queue { .. }
             | HarnessEvent::StopRequested { .. }
+            | HarnessEvent::StopUnresponsive { .. }
             | HarnessEvent::Proposal { .. }
             | HarnessEvent::CardSettled { .. }
             | HarnessEvent::Rewound { .. }
@@ -399,6 +400,7 @@ async fn apply_rows(
         | HarnessEvent::ToolOutputDelta { .. }
         | HarnessEvent::Queue { .. }
         | HarnessEvent::StopRequested { .. }
+        | HarnessEvent::StopUnresponsive { .. }
         | HarnessEvent::Proposal { .. }
         | HarnessEvent::CardSettled { .. }
         | HarnessEvent::Rewound { .. }

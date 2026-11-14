@@ -28,13 +28,27 @@ export function runFromRow(row: RunRow): HarnessRun {
     answer_item_id: row.answer_item_id,
     started_ms: sqliteUtcToMs(row.started_at) ?? null,
     ended_ms: sqliteUtcToMs(row.ended_at) ?? null,
-    ...(row.stop_requested_at != null && row.ended_at == null ? { stopping: true } : {}),
+    ...(row.stop_requested_at != null && row.ended_at == null
+      ? { stopping: true, stop_requested_ms: sqliteUtcToMs(row.stop_requested_at) ?? null }
+      : {}),
   };
 }
 
 /** Whether a run has ended (settled by Rust, or closed by startup reconcile). */
 export const runEnded = (run: HarnessRun | undefined) =>
   !!run && (run.status === "completed" || run.status === "interrupted" || run.status === "failed");
+
+/** How long a stopped run may stay open before its CLI counts as not
+ *  responding; `STOP_PATIENCE` in `harness/app/consumer/mod.rs`. */
+export const STOP_PATIENCE_MS = 15_000;
+
+/** Whether a stop has gone unanswered: told by Rust (`unresponsive`), or,
+ *  for a run read from a snapshot, by the time since it was asked. */
+export function stopOverdue(run: HarnessRun | undefined, nowMs: number): boolean {
+  if (!run?.stopping) return false;
+  if (run.unresponsive) return true;
+  return run.stop_requested_ms != null && nowMs - run.stop_requested_ms >= STOP_PATIENCE_MS;
+}
 
 /** The thread's newest live run (going out, or being answered): the run a
  *  Stop names. Null with none. */

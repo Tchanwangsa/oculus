@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { liveRunId, runEnded, runFromRow, runningSince, type RunRow } from "@/lib/harness/runs";
+import { liveRunId, runEnded, runFromRow, runningSince, STOP_PATIENCE_MS, stopOverdue, type RunRow } from "@/lib/harness/runs";
 
 const row = (id: number, execution_status: string, more: Partial<RunRow> = {}): RunRow => ({
   id, execution_status, delivery_state: "unknown", answer_item_id: null, started_at: "2026-11-15 00:00:00", ended_at: null, ...more,
@@ -31,4 +31,14 @@ test("a status the timeline cannot draw reads as failed, never as running", () =
     expect(run.status).toBe("failed");
     expect(liveRunId({ 5: run })).toBe(null);
   }
+});
+
+test("a stop is overdue once Rust says so, or fifteen seconds after it was asked", () => {
+  const asked = runFromRow(row(6, "running", { stop_requested_at: "2026-11-15 00:00:30" }));
+  const at = asked.stop_requested_ms!;
+  expect(stopOverdue(asked, at + STOP_PATIENCE_MS - 1)).toBe(false);
+  expect(stopOverdue(asked, at + STOP_PATIENCE_MS)).toBe(true);
+  expect(stopOverdue({ ...asked, stop_requested_ms: null, unresponsive: { others: 1 } }, at)).toBe(true);
+  expect(stopOverdue(runFromRow(row(6, "running")), at + 60_000)).toBe(false);
+  expect(stopOverdue(undefined, at)).toBe(false);
 });

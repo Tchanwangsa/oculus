@@ -15,7 +15,7 @@ use crate::harness::{store, HarnessEvent, Provider, Release, SendOptions};
 use super::super::run_scope::From;
 use super::super::send::Sent;
 use super::super::Reply;
-use super::{Consumer, ConsumerIo};
+use super::{Consumer, ConsumerIo, Stopping, STOP_PATIENCE};
 
 /// A command that asked its provider something and commits on the answer.
 pub(super) struct Asking {
@@ -81,6 +81,15 @@ impl Consumer {
                     io.perform(Effect::Interrupt {
                         thread_id: outcome.thread_id,
                     });
+                }
+                // A force stop ends the session answering the run, while
+                // that run is still the chat's open one.
+                if let Kind::ForceStop { run_id } = &command.kind {
+                    if self.runs.open_run(outcome.thread_id) == Some(*run_id) {
+                        io.perform(Effect::ForceStop {
+                            thread_id: outcome.thread_id,
+                        });
+                    }
                 }
                 // Whatever the saved runs now imply: the new run's start, or
                 // a message that joined an idle chat's queue going out.
@@ -250,6 +259,13 @@ impl Consumer {
                 }
             }
             Applied::Stopping(run_id) => {
+                let stop = Stopping {
+                    thread_id,
+                    provider,
+                    due: io.now() + STOP_PATIENCE,
+                    told: false,
+                };
+                self.stops.insert(run_id, stop);
                 let stopping = HarnessEvent::StopRequested { run_id };
                 self.event(thread_id, provider, From::App, stopping, None, io);
             }
@@ -298,6 +314,23 @@ impl Consumer {
             turn: None,
         };
         self.event(thread_id, provider, From::App, finished, None, io);
+    }
+
+    /// Hold the thread's queue for a stop the student did not make through
+    /// a command of this thread's: a force stop that ended its session.
+    pub(super) fn hold_queue(
+        &mut self,
+        thread_id: i64,
+        provider: Provider,
+        io: &mut impl ConsumerIo,
+    ) {
+        let hold = Plan {
+            changes: vec![Change::HoldQueue],
+            text: None,
+        };
+        if let Err(e) = self.commit(None, Some(thread_id), provider, hold, io) {
+            elog!("[oculus] harness thread {thread_id}: hold: {e}");
+        }
     }
 
     /// The student's waiting messages, told whole: the webview's list is a
@@ -475,6 +508,9 @@ impl Consumer {
                 None
             }
             Sent::Withdrawn => Some("interrupted"),
+            // A start that died under a stop (a force stop killed the
+            // process it was waiting on) is the stop's doing, not a failure.
+            Sent::Failed(_) if self.stops.contains_key(&run_id) => Some("interrupted"),
             Sent::Failed(error) => {
                 self.event(
                     thread_id,

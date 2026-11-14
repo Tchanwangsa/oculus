@@ -69,6 +69,7 @@ pub(in crate::harness) fn consume(
         started: HashSet::new(),
         accepted: HashSet::new(),
         asked: HashSet::new(),
+        stops: HashMap::new(),
     };
     for msg in rx {
         consumer.handle(msg, io);
@@ -103,6 +104,8 @@ struct Consumer {
     accepted: HashSet<i64>,
     /// Runs whose provider was asked to stop.
     asked: HashSet<i64>,
+    /// Runs the student stopped that have not ended yet, by run.
+    stops: HashMap<i64, Stopping>,
 }
 
 impl Consumer {
@@ -153,9 +156,45 @@ impl Consumer {
         let due = self.drafts.due(now);
         self.store_drafts(due);
         self.retry(now, io);
-        let retries = self.parked.values().map(|parked| parked.due).min();
-        if let Some(at) = self.drafts.next_due().into_iter().chain(retries).min() {
+        self.unresponsive(now, io);
+        let retries = self.parked.values().map(|parked| parked.due);
+        let stops = self.stops.values().filter(|s| !s.told).map(|s| s.due);
+        let waiting = self.drafts.next_due().into_iter().chain(retries);
+        if let Some(at) = waiting.chain(stops).min() {
             io.wake_at(at);
+        }
+    }
+
+    /// Stops whose patience has run out with the run still open: the CLI
+    /// is not answering, which is told once. Nothing is settled here: a
+    /// turn that may still report is closed only by its own terminal, or
+    /// by the student's force stop.
+    fn unresponsive(&mut self, now: Instant, io: &mut impl ConsumerIo) {
+        let late: Vec<i64> = self
+            .stops
+            .iter()
+            .filter(|(_, stop)| !stop.told && stop.due <= now)
+            .map(|(run_id, _)| *run_id)
+            .collect();
+        for run_id in late {
+            let Some(stop) = self.stops.get_mut(&run_id) else {
+                continue;
+            };
+            stop.told = true;
+            let (thread_id, provider) = (stop.thread_id, stop.provider);
+            if self.runs.open_run(thread_id) != Some(run_id) {
+                continue;
+            }
+            let shared = crate::harness::providers::capabilities::of(provider).shared_process;
+            let others = match (&self.pool, shared) {
+                (Some(p), true) => self
+                    .rt
+                    .block_on(store::queue::others_open(p, provider, thread_id))
+                    .unwrap_or_default(),
+                _ => 0,
+            };
+            let event = HarnessEvent::StopUnresponsive { run_id, others };
+            self.event(thread_id, provider, From::App, event, None, io);
         }
     }
 
@@ -206,6 +245,11 @@ impl Consumer {
         reason: Release,
         io: &mut impl ConsumerIo,
     ) {
+        // A force stop is a stop: what waits behind the turn it cuts stays,
+        // held, whichever chat's click killed the process.
+        if reason == Release::Stopped {
+            self.hold_queue(thread_id, provider, io);
+        }
         let status = match reason {
             Release::Stopped | Release::Replaced => Some("interrupted"),
             Release::Exited => Some("failed"),
@@ -450,6 +494,7 @@ impl Consumer {
         self.started.remove(&run_id);
         self.accepted.remove(&run_id);
         self.asked.remove(&run_id);
+        self.stops.remove(&run_id);
         // Settlement removed the stored draft with the run.
         self.drafts.take(run_id);
         let mut out = Vec::new();
@@ -709,6 +754,20 @@ struct Stored {
     entity_id: Option<String>,
     terminal: Option<Terminal>,
 }
+
+/// A stop the student asked for, until its run ends.
+struct Stopping {
+    thread_id: i64,
+    provider: Provider,
+    /// When the CLI's silence becomes "not responding".
+    due: Instant,
+    /// `StopUnresponsive` went out.
+    told: bool,
+}
+
+/// How long a stopped run may stay open before its CLI is called
+/// unresponsive and the student is offered a force stop.
+pub(in crate::harness) const STOP_PATIENCE: Duration = Duration::from_secs(15);
 
 /// A run's terminal whose settle write failed, waiting for its next try.
 struct Parked {

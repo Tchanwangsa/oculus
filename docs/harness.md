@@ -1011,6 +1011,29 @@ streamed kept.
   writes the reason on its card: stopped, the turn before it failed, or the
   app closed.
 
+**A CLI that ignores Stop is told, then force stopped.** The consumer
+keeps each stop until its run ends. Fifteen seconds after the stop
+(`STOP_PATIENCE`, on the consumer's clock, by `ConsumerIo::wake_at`) a run
+that is still open is announced once as `StopUnresponsive { run_id, others
+}`. The clock settles nothing: the agent may still be working, so the run
+stays open until its terminal or the student's force stop. `others` is how
+many other chats have a run on the same server (`store::queue::others_open`;
+zero where the bridge's `shared_process` is false), for a button that says
+what it will cost. The webview keeps it on the run (`unresponsive`), and
+`stopOverdue` reads the same from a snapshot's `stop_requested_at` after a
+reload.
+
+`harness_force_stop` (the `ForceStop` command) names the run, so it cannot
+reach a newer one; it marks the run and holds the queue if no stop had, and
+the consumer performs `Harness::force_stop` while that run is still the
+chat's open one. Claude and Antigravity lose the chat's own process
+(`release(thread, Release::Stopped)`). Codex and opencode answer every chat
+from one server, so every thread on it is released as stopped first, each
+turn ending interrupted with its text kept and its queue held, and then the
+server is killed; the next send starts another. A start step still waiting
+on the killed process fails, which under a stop ends its run as interrupted
+rather than failed.
+
 Codex never completes an interrupted message, so the
 bridge commits the streamed text itself; Claude's closing `result` claims an
 error, so `terminal_reason: "aborted_streaming"` decides and its zeroed usage
@@ -1020,7 +1043,7 @@ is skipped.
 
 Everything the student does to a chat is a `Command` (`core/command.rs`):
 `Send`, `Rewind`, `EditResend`, `DeleteThread`, `EditQueued`, `RemoveQueued`,
-`ReorderQueued`, `Stop`, `Resume`. A Tauri command in
+`ReorderQueued`, `Stop`, `Resume`, `ForceStop`. A Tauri command in
 `app/turns.rs` only builds one, with the id the webview minted for it
 (`commandId` in `lib/harness/commands.ts`), puts it on the consumer's bus
 (`BusMsg::Command`) and awaits the result. The consumer takes it through
@@ -1055,7 +1078,7 @@ command and no provider event can come between a decision and its commit.
    nothing twice. A provider call is an effect (`core/effect.rs`,
    `ConsumerIo::perform`): `Start` sends a run (`app/send.rs`), `Rewind`
    asks a provider to forget a question, `Interrupt` asks it to stop,
-   `Release` ends a session. An effect runs off the consumer's thread, is
+   `ForceStop` kills what answers a chat, `Release` ends a session. An effect runs off the consumer's thread, is
    made from what was just saved and lives only in memory: after a restart
    nothing replays one, and startup's repair owns what was open.
 
@@ -1376,7 +1399,7 @@ next send resumes the thread by session id under a new generation.
 
 | Reason | Who releases | A turn the session left open |
 | --- | --- | --- |
-| `Stopped` | a stop that kills the process; no command in the app releases with it, since Stop interrupts the turn and keeps the session | interrupted |
+| `Stopped` | `Harness::force_stop`, for a turn whose CLI ignored Stop: the chat's own session, and on Codex and opencode every session of the server that is then killed | interrupted, and the thread's queue held |
 | `Replaced` | `ensure`, for a different reasoning level; the start step (`app/send.rs`), for a different model on Claude or Antigravity; an Antigravity rule allowed or revoked | interrupted |
 | `Exited` | `ensure`, finding the session dead | failed |
 | `Deleted` | the `DeleteThread` command's `Release` effect, after its commit; the consumer has already stopped hearing the session (`RunScope::silence`), so nothing it still says writes a row | forgotten with the thread's rows |

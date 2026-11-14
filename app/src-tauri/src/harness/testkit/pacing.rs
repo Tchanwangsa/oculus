@@ -10,6 +10,7 @@ use sqlx::SqlitePool;
 use crate::harness::app::consumer::{consume, ConsumerIo};
 use crate::harness::app::{BusMsg, Envelope};
 use crate::harness::core::effect::Effect;
+use crate::harness::core::{Command, Kind};
 use crate::harness::event::Source;
 use crate::harness::{jobs, store, HarnessEvent, OwnTurns, Provider};
 
@@ -46,6 +47,79 @@ impl ConsumerIo for Timed {
         self.told.push((kind.clone(), self.now()));
         self.seen.push((kind, draft(&self.runtime, &self.pool)));
     }
+}
+
+/// A CLI that says nothing after Stop: at fifteen seconds, and not before,
+/// the run is told as unresponsive, once. Nothing is settled by the clock.
+#[test]
+fn a_stop_the_cli_ignores_is_told_as_unresponsive_after_fifteen_seconds_once() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let (_dir, pool) = runtime.block_on(super::runs::scratch_pool("turn-stop-patience"));
+    let thread = runtime
+        .block_on(store::create_thread(
+            &pool,
+            Provider::Codex,
+            None,
+            None,
+            None,
+            "q",
+        ))
+        .unwrap();
+    let (send, _sent) = super::runs::send(thread, Provider::Codex, "c1");
+    let (reply, _stopped) = tokio::sync::oneshot::channel();
+    let stop = BusMsg::Command {
+        command: Command {
+            id: "c2".into(),
+            thread_id: Some(thread),
+            kind: Kind::Stop { run_id: None },
+        },
+        reply,
+    };
+    let script = vec![
+        (0, send),
+        (1_000, stop),
+        (15_999, BusMsg::Wake),
+        (16_000, BusMsg::Wake),
+        (40_000, BusMsg::Wake),
+    ];
+    let start = Instant::now();
+    let now = Arc::new(Mutex::new(start));
+    let clock = now.clone();
+    let bus = script.into_iter().map(move |(at, msg)| {
+        *clock.lock().unwrap() = start + Duration::from_millis(at);
+        msg
+    });
+    let mut io = Timed {
+        pool: pool.clone(),
+        now,
+        wakes: Vec::new(),
+        seen: Vec::new(),
+        told: Vec::new(),
+        runtime: tokio::runtime::Runtime::new().unwrap(),
+    };
+    consume(bus, Arc::new(Mutex::new(OwnTurns::default())), &mut io);
+
+    let at = |ms| start + Duration::from_millis(ms);
+    let told: Vec<_> = io
+        .told
+        .iter()
+        .map(|(kind, when)| (kind.as_str(), *when))
+        .collect();
+    assert_eq!(
+        told,
+        vec![
+            ("user_message", at(0)),
+            ("stop_requested", at(1_000)),
+            ("queue", at(1_000)),
+            ("stop_unresponsive", at(16_000)),
+        ]
+    );
+    assert!(io.wakes.contains(&at(16_000)), "asked to be woken for it");
+    let status: String = runtime
+        .block_on(sqlx::query_scalar("SELECT execution_status FROM harness_runs").fetch_one(&pool))
+        .unwrap();
+    assert_eq!(status, "starting", "the clock closes nothing");
+    runtime.block_on(pool.close());
 }
 
 fn draft(runtime: &tokio::runtime::Runtime, pool: &SqlitePool) -> Option<String> {

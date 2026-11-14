@@ -121,6 +121,8 @@ test("a stop marks its run as stopping, and a held queue does not keep the threa
   apply(told(4, null, { type: "turn_started" }));
   apply(told(4, null, { type: "stop_requested", run_id: 5 }));
   expect(useHarnessStore.getState().runs[THREAD][5].stopping).toBe(true);
+  apply(told(4, null, { type: "stop_unresponsive", run_id: 5, others: 2 }));
+  expect(useHarnessStore.getState().runs[THREAD][5].unresponsive).toEqual({ others: 2 });
   // The stop held the queue before the turn ended.
   apply(told(5, null, { type: "queue", messages: [{ id: "6", text: "waiting", held: true }] }));
   apply(told(6, null, { type: "turn_finished", status: "interrupted" }));

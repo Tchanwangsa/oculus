@@ -3,6 +3,7 @@ import type { PendingActions, QuestionActions } from "@/components/harness/timel
 import {
   harnessEditQueued,
   harnessEditResend,
+  harnessForceStop,
   harnessInterrupt,
   harnessResume,
   harnessRewind,
@@ -73,6 +74,11 @@ export function useThreadActions(opts: ThreadActionsOptions) {
     if (id == null) return;
     harnessInterrupt(id, liveRunId(store.getState().runs[id])).catch((e) => console.error("harness stop failed", e));
   }, [store]);
+  // Offered once a stop has gone unanswered (`stopOverdue`); it names the run.
+  const onForceStop = useCallback((runId: number) => {
+    const id = ref.current.threadId();
+    if (id != null) harnessForceStop(id, runId).catch((e) => console.error("harness force stop failed", e));
+  }, []);
   const onResume = useCallback(() => {
     const id = ref.current.threadId();
     if (id != null) harnessResume(id).catch((e) => console.error("harness resume failed", e));
@@ -142,5 +148,5 @@ export function useThreadActions(opts: ThreadActionsOptions) {
     [],
   );
 
-  return { send, onStop, onResume, onProvider, onModel, onReasoning, questions, pending };
+  return { send, onStop, onForceStop, onResume, onProvider, onModel, onReasoning, questions, pending };
 }

@@ -212,6 +212,25 @@ pub async fn harness_resume(
     resumed.await.map(|_| ())
 }
 
+/// Force stop: kill what is answering `run_id`, for a CLI that ignored
+/// Stop (`StopUnresponsive`). Claude and Antigravity lose that thread's
+/// process; Codex and opencode lose their server, which ends every other
+/// chat's turn on it too. A run that has since ended is left alone.
+#[tauri::command]
+pub async fn harness_force_stop(
+    state: State<'_, HarnessState>,
+    command_id: String,
+    thread_id: i64,
+    run_id: i64,
+) -> Result<(), String> {
+    let stopped = state.command(Command {
+        id: command_id,
+        thread_id: Some(thread_id),
+        kind: Kind::ForceStop { run_id },
+    });
+    stopped.await.map(|_| ())
+}
+
 #[tauri::command]
 pub async fn harness_delete_thread(
     state: State<'_, HarnessState>,

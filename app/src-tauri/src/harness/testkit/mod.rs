@@ -6,6 +6,7 @@ mod commands;
 mod continuation;
 mod driver;
 mod fixture;
+mod force;
 mod guard;
 mod identity;
 mod io;

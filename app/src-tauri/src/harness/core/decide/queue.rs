@@ -63,6 +63,26 @@ pub(super) fn stop(state: &State, run_id: Option<i64>) -> Result<Decision, Strin
     }))
 }
 
+/// Force stop is a stop that does not wait for the CLI: the run is marked
+/// and the queue held, if a stop had not done so already, and the consumer
+/// then ends the session. It names its run, and one that is over is left
+/// alone.
+pub(super) fn force_stop(state: &State, run_id: i64) -> Result<Decision, String> {
+    if state.thread.is_none() {
+        return Err("a stop names a thread".into());
+    }
+    let changes = match state.open.filter(|open| open.run_id == run_id) {
+        Some(open) if !open.stop_requested => {
+            vec![Change::RequestStop { run_id }, Change::HoldQueue]
+        }
+        _ => Vec::new(),
+    };
+    Ok(Decision::Commit(Plan {
+        changes,
+        text: None,
+    }))
+}
+
 /// Resume lifts the hold; the driver starts the first waiting message when
 /// nothing is open.
 pub(super) fn resume(state: &State) -> Result<Decision, String> {
@@ -130,6 +150,23 @@ mod tests {
             stop_requested: true,
         });
         assert!(changes(&stopping, Some(7)).is_empty());
+    }
+
+    #[test]
+    fn force_stop_marks_a_run_no_stop_reached_and_leaves_any_other_alone() {
+        let Ok(Decision::Commit(plan)) = force_stop(&state(Some(7), false), 7) else {
+            panic!("a force stop commits");
+        };
+        assert!(matches!(
+            plan.changes.as_slice(),
+            [Change::RequestStop { run_id: 7 }, Change::HoldQueue]
+        ));
+        for other in [state(Some(8), false), state(None, false)] {
+            let Ok(Decision::Commit(plan)) = force_stop(&other, 7) else {
+                panic!("a force stop commits");
+            };
+            assert!(plan.changes.is_empty());
+        }
     }
 
     #[test]

@@ -417,7 +417,12 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         }
         case "stop_requested": {
           const run = runs[event.run_id];
-          if (run && run.ended_ms == null) setRun({ ...run, stopping: true });
+          if (run && run.ended_ms == null) setRun({ ...run, stopping: true, stop_requested_ms: Date.now() });
+          break;
+        }
+        case "stop_unresponsive": {
+          const run = runs[event.run_id];
+          if (run && run.ended_ms == null) setRun({ ...run, stopping: true, unresponsive: { others: event.others } });
           break;
         }
         case "delivery_notice":
