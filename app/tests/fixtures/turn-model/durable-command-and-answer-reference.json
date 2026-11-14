@@ -8,7 +8,7 @@
       "itemId": 1,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794681138717856,
+      "sequence": 1794682002936021,
       "revision": 2,
       "event": {
         "type": "user_message",
@@ -21,7 +21,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794681138717857,
+      "sequence": 1794682002936022,
       "revision": 2,
       "event": {
         "type": "turn_started"
@@ -33,7 +33,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794681138717858,
+      "sequence": 1794682002936023,
       "revision": 3,
       "event": {
         "type": "turn_anchor",
@@ -46,7 +46,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794681138717859,
+      "sequence": 1794682002936024,
       "revision": 3,
       "event": {
         "type": "assistant_delta",
@@ -60,8 +60,8 @@
       "runId": 1,
       "attemptId": 1,
       "entityId": "weak:0",
-      "sequence": 1794681138717860,
-      "revision": 4,
+      "sequence": 1794682002936025,
+      "revision": 5,
       "event": {
         "type": "assistant_message",
         "text": "ok",
@@ -77,8 +77,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794681138717861,
-      "revision": 5,
+      "sequence": 1794682002936026,
+      "revision": 6,
       "event": {
         "type": "usage",
         "input_tokens": 5804,
@@ -94,16 +94,16 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794681138717862,
-      "revision": 7,
+      "sequence": 1794682002936027,
+      "revision": 8,
       "event": {
         "type": "run_settled",
         "answer_item_id": 2,
         "work_item_ids": [],
         "delivery": "delivered",
         "status": "completed",
-        "started_at": "2026-11-14 18:32:18",
-        "ended_at": "2026-11-14 18:32:18"
+        "started_at": "2026-11-14 18:46:42",
+        "ended_at": "2026-11-14 18:46:42"
       }
     },
     {
@@ -112,8 +112,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794681138717863,
-      "revision": 7,
+      "sequence": 1794682002936028,
+      "revision": 8,
       "event": {
         "type": "turn_finished",
         "status": "completed"
@@ -123,8 +123,8 @@
       "threadId": 1,
       "provider": "opencode",
       "itemId": null,
-      "sequence": 1794681138717864,
-      "revision": 7,
+      "sequence": 1794682002936029,
+      "revision": 8,
       "event": {
         "type": "exited",
         "code": null
@@ -139,7 +139,7 @@
       "ref_id": null,
       "content": "Replay request",
       "meta": null,
-      "created_at": "2026-11-14 18:32:18",
+      "created_at": "2026-11-14 18:46:42",
       "anchor": "msg_0add6684a001Pwh23P8S76aU5b",
       "run_id": 1,
       "attempt_id": null,
@@ -156,7 +156,7 @@
       "ref_id": null,
       "content": "ok",
       "meta": null,
-      "created_at": "2026-11-14 18:32:18",
+      "created_at": "2026-11-14 18:46:42",
       "anchor": null,
       "run_id": 1,
       "attempt_id": 1,
@@ -177,8 +177,8 @@
       "origin": "student",
       "delivery_state": "delivered",
       "answer_item_id": 2,
-      "started_at": "2026-11-14 18:32:18",
-      "ended_at": "2026-11-14 18:32:18"
+      "started_at": "2026-11-14 18:46:42",
+      "ended_at": "2026-11-14 18:46:42"
     }
   ]
 }

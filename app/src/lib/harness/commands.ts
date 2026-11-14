@@ -78,13 +78,16 @@ export function harnessRewind(threadId: number, itemId: number): Promise<string>
 }
 
 /** A thread as Rust read it in one transaction (`harness/core/load.rs`):
- *  its rows and runs, the revision that covers them, and what waits behind
- *  its turn. An envelope at or below `revision` tells of nothing new. */
+ *  its rows and runs, what waits behind its turn, the answer text its open
+ *  run has streamed so far, and the revision that covers them all. An
+ *  envelope at or below `revision` tells of no new row, and `draft` holds
+ *  every `assistant_delta` told below it. */
 export interface HarnessSnapshot {
   revision: number;
   items: HarnessItem[];
   runs: RunRow[];
   queued: QueuedMessage[];
+  draft?: { run_id: number; text: string } | null;
 }
 
 export function harnessLoad(threadId: number): Promise<HarnessSnapshot> {

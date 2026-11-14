@@ -148,6 +148,12 @@ impl RunScope {
             .map(|open| open.run_id)
     }
 
+    /// The run open on the thread, its terminal seen or not: the run whose
+    /// stream draft the thread holds.
+    pub fn draft_run(&self, thread_id: i64) -> Option<i64> {
+        self.open.get(&thread_id).map(|open| open.run_id)
+    }
+
     /// The provider is in a turn of its own on this thread.
     pub fn own_open(&self, thread_id: i64) -> bool {
         self.own.contains_key(&thread_id)

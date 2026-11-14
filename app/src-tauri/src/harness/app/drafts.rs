@@ -75,6 +75,28 @@ impl Drafts {
         Some(text)
     }
 
+    /// What `run`'s draft will hold once `item` is a row: [`Self::commit`]
+    /// without changing anything, for the write that lands with the row.
+    /// `None` for a run with no draft.
+    pub fn after_commit(&self, run: i64, item: Option<&str>) -> Option<String> {
+        let draft = self.runs.get(&run)?;
+        let left = draft
+            .parts
+            .iter()
+            .filter(|(id, _)| id.is_some() && id.as_deref() != item);
+        Some(left.map(|(_, text)| text.as_str()).collect())
+    }
+
+    /// `run`'s draft, if text arrived since its last write: stored now,
+    /// ahead of its interval, because something else of the thread's is
+    /// about to be written and a reload must find the draft no older.
+    pub fn flush(&mut self, run: i64, now: Instant) -> Option<String> {
+        let draft = self.runs.get_mut(&run).filter(|draft| draft.dirty)?;
+        draft.dirty = false;
+        draft.written = Some(now);
+        Some(draft.text())
+    }
+
     /// The drafts whose interval has passed, to store.
     pub fn due(&mut self, now: Instant) -> Vec<(i64, String)> {
         let mut out = Vec::new();
@@ -152,6 +174,32 @@ mod tests {
         assert_eq!(drafts.commit(1, Some("a"), now).as_deref(), Some("second"));
         assert_eq!(drafts.commit(1, Some("b"), now).as_deref(), Some(""));
         assert_eq!(drafts.commit(1, Some("b"), now), None, "no draft left");
+    }
+
+    #[test]
+    fn a_flush_writes_waiting_text_early_and_a_peek_changes_nothing() {
+        let mut drafts = Drafts::default();
+        let start = Instant::now();
+        drafts.push(1, Some("a"), "first", start);
+        assert_eq!(
+            drafts.flush(1, start),
+            None,
+            "nothing arrived since the write"
+        );
+        let soon = start + Duration::from_millis(10);
+        drafts.push(1, Some("b"), " second", soon);
+        assert_eq!(
+            drafts.after_commit(1, Some("a")).as_deref(),
+            Some(" second")
+        );
+        assert_eq!(drafts.after_commit(2, Some("a")), None, "no such draft");
+        assert_eq!(drafts.flush(1, soon).as_deref(), Some("first second"));
+        assert_eq!(drafts.flush(1, soon), None, "written once");
+        assert!(drafts.due(start + INTERVAL * 2).is_empty());
+        assert_eq!(
+            drafts.commit(1, Some("a"), soon).as_deref(),
+            Some(" second")
+        );
     }
 
     #[test]

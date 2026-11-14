@@ -17,6 +17,7 @@ mod pacing;
 mod projection;
 mod queue;
 mod recovery;
+mod reload;
 pub(in crate::harness) mod replay;
 mod rig;
 mod runs;

@@ -180,6 +180,11 @@ impl Consumer {
         io: &mut impl ConsumerIo,
     ) -> Result<Outcome, String> {
         let pool = self.pool.clone().ok_or("the database is not open")?;
+        // The commit raises the thread's revision: its stream draft goes
+        // first, so no delta told before it is left out of both.
+        if let Some(thread_id) = thread_id {
+            self.flush_draft(thread_id, io.now());
+        }
         let sends = plan
             .changes
             .iter()

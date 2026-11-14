@@ -1,7 +1,8 @@
-//! A chat as a reload reads it: its rows, its runs and the revision that
-//! covers both, from one read transaction. The webview drops any envelope
-//! at or below that revision, so a reload neither misses a change nor
-//! applies one twice.
+//! A chat as a reload reads it: its rows, its runs, the text its open run
+//! has streamed so far and the revision that covers them all, from one read
+//! transaction. The webview skips the rows of any envelope at or below that
+//! revision and the deltas of any below it, so a reload neither misses a
+//! change nor applies one twice.
 
 use serde::Serialize;
 use sqlx::{Row, SqlitePool};
@@ -16,6 +17,16 @@ pub struct Snapshot {
     pub runs: Vec<Run>,
     /// The student's messages waiting their turn, in queue order.
     pub queued: Vec<QueuedMessage>,
+    /// The answer text the open run has streamed and not committed as a row
+    /// yet. It holds every `assistant_delta` told below `revision`, and none
+    /// told at or above it.
+    pub draft: Option<Draft>,
+}
+
+#[derive(Serialize)]
+pub struct Draft {
+    pub run_id: i64,
+    pub text: String,
 }
 
 /// A `harness_items` row, as `HarnessItem` in `app/src/lib/harness/types.ts`.
@@ -102,11 +113,26 @@ pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String>
     })
     .collect();
     let queued = queue::list(&mut *tx, thread_id).await?;
+    let draft = sqlx::query(
+        "SELECT d.run_id, d.text FROM harness_stream_drafts d
+           JOIN harness_runs r ON r.id = d.run_id
+          WHERE r.thread_id = ?1 AND r.execution_status IN ('preparing', 'starting', 'running')
+          ORDER BY d.run_id DESC LIMIT 1",
+    )
+    .bind(thread_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(err)?
+    .map(|r| Draft {
+        run_id: r.get("run_id"),
+        text: r.get("text"),
+    });
     tx.commit().await.map_err(err)?;
     Ok(Snapshot {
         revision,
         items,
         runs,
         queued,
+        draft,
     })
 }

@@ -111,10 +111,18 @@ pub async fn harness_rewind(
     Ok(rewound.await?.text.unwrap_or_default())
 }
 
-/// A thread as a reload reads it: rows, runs, what waits in its queue and
-/// the revision that covers them, in one read.
+/// A thread as a reload reads it: rows, runs, what waits in its queue, the
+/// answer text streamed so far and the revision that covers them, in one
+/// read.
 #[tauri::command]
-pub async fn harness_load(thread_id: i64) -> Result<load::Snapshot, String> {
+pub async fn harness_load(
+    state: State<'_, HarnessState>,
+    thread_id: i64,
+) -> Result<load::Snapshot, String> {
+    // After startup's repair, so a run the last process left open is not
+    // read as still running. A repair that failed is its commands' error,
+    // not a reason to show an empty chat.
+    let _ = state.ready().await;
     let pool = crate::db::store::open_pool().await?;
     load::read(&pool, thread_id).await
 }

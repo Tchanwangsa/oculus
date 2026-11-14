@@ -1133,16 +1133,36 @@ this kind: a waiting run starting, and a card's continuation joining the
 queue.
 
 **Every envelope carries the thread's revision.** `store::apply_event`,
-`store::settle_run` and the commit each raise `harness_threads.revision` in
-the transaction that writes, and an envelope is stamped with the thread's
-revision as the consumer last wrote it, so everything an envelope tells of
-is saved at or below its number. `harness_load` (`core/load.rs`) reads a
-thread's rows, runs and revision in one read transaction. The webview's
-`load` keeps that revision per thread and `fold` skips the row and run
-changes of any envelope at or below it: an envelope that arrived while the
-read was out is folded onto the snapshot only if it is newer, and a rewind
-told twice cannot take rows written after it. The rest of an envelope (the
-running flag, the thread's status) is folded once, as it arrives.
+`store::settle_run`, a stream draft's write and the commit each raise
+`harness_threads.revision` in the transaction that writes, and an envelope
+is stamped with the thread's revision as the consumer last wrote it, so
+everything an envelope tells of is saved at or below its number.
+
+**A reload is one read.** `harness_load` (`core/load.rs`) waits for
+startup's repair, then reads a thread's rows, runs, waiting messages, the
+answer text its open run has streamed so far (`harness_stream_drafts`) and
+its revision in one read transaction. The webview's `load` keeps that
+revision per thread, and `fold` goes by it:
+
+- **Rows and runs:** the changes of any envelope at or below the snapshot's
+  revision are skipped. An envelope that arrived while the read was out is
+  folded onto the snapshot only if it is newer, and a rewind told twice
+  cannot take rows written after it. The rest of an envelope (the running
+  flag, the thread's status) is folded once, as it arrives.
+- **Streamed text:** the draft holds every `assistant_delta` told below the
+  snapshot's revision and none told at or above it, so the live tail is the
+  draft, then the deltas at or above it, up to the next row that takes the
+  text. The consumer keeps that exact: a delta's envelope goes out before
+  the draft write that includes it; text waiting for its 50 ms interval is
+  written early whenever anything else of the thread's is about to be
+  written (`Consumer::flush_draft`, before a row and before a commit); and
+  a message that becomes a row leaves the draft in the row's own
+  transaction (`store::apply_with_draft`). So a reload mid-answer shows the
+  text streamed so far, once (`testkit/reload.rs` reloads at every frame of
+  a recording on all four bridges).
+
+Reasoning and tool output that are still streaming are not saved; a reload
+shows them from the next delta on.
 
 ## Each send is a run
 
@@ -1235,7 +1255,8 @@ source again replaces its text.
 A row the store cannot write is never shown as written: the run gets one
 error row and a `storage_failure` gap, and later failed rows of that turn are
 dropped. Answer text that streams but is not yet a row is kept per run in
-`harness_stream_drafts`. `AssistantDelta` carries `item`, the provider's id
+`harness_stream_drafts`, for a restart and for a reload
+([One command path](#one-command-path)). `AssistantDelta` carries `item`, the provider's id
 for the message the text belongs to (Codex's item id, opencode's part id,
 Antigravity's `step-<index>`; none on Claude, whose stream names no block
 its committed message is known by; never serialized). `app/drafts.rs`
@@ -1244,9 +1265,10 @@ uncommitted text at most once per 50 ms, not once per delta: every chat's
 events wait behind the one consumer thread. A delta inside the interval
 waits; the consumer asks its bus for a `BusMsg::Wake` when the interval ends
 (`ConsumerIo::wake_at`, `app/wake.rs`), so it is written even if nothing
-else arrives. An `AssistantMessage` takes its own text out of the draft at
-once (and any text under no id), so a restart cannot bring a committed
-message back a second time.
+else arrives, and it is written early when a row or a commit of the same
+thread is about to land. An `AssistantMessage` takes its own text out of the draft in
+the transaction that writes its row (and any text under no id), so neither a
+restart nor a reload can bring a committed message back a second time.
 
 The settle is the one write that may not be lost: a run left `running`
 after its terminal would be relabelled as cut off by the next startup. When

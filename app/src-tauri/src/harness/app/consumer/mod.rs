@@ -199,36 +199,31 @@ impl Consumer {
     }
 
     /// Write each run's draft, whole; one with no text left is removed.
+    /// Each write raises its thread's revision.
     fn store_drafts(&mut self, drafts: Vec<(i64, String)>) {
         let Some(p) = &self.pool else { return };
         for (run_id, text) in drafts {
-            let stored = match text.is_empty() {
-                true => self.rt.block_on(store::clear_draft(p, run_id)),
-                false => self.rt.block_on(store::set_draft(p, run_id, &text)),
-            };
-            if let Err(e) = stored {
-                elog!("[oculus] harness draft {run_id}: {e}");
+            match self.rt.block_on(store::set_draft(p, run_id, &text)) {
+                Ok(Some((thread_id, revision))) => {
+                    self.revisions.insert(thread_id, revision);
+                }
+                Ok(None) => {}
+                Err(e) => elog!("[oculus] harness draft {run_id}: {e}"),
             }
         }
     }
 
-    /// Answer text that has streamed and is not a row yet survives a
-    /// restart (`store::recover`): gathered by message and written at most
-    /// once per interval (`drafts.rs`). A committed message leaves it at
-    /// once, so a restart cannot bring its text back a second time.
-    fn draft(&mut self, run_id: i64, ev: &HarnessEvent, now: Instant) {
-        let text = match ev {
-            HarnessEvent::AssistantDelta { text, item } => {
-                self.drafts.push(run_id, item.as_deref(), text, now)
-            }
-            HarnessEvent::AssistantMessage { source, .. } => {
-                let item = source.as_ref().map(|s| s.id.as_str());
-                self.drafts.commit(run_id, item, now)
-            }
-            _ => None,
-        };
-        if let Some(text) = text {
-            self.store_drafts(vec![(run_id, text)]);
+    /// Store the thread's stream draft now if text is waiting for its
+    /// interval: something else of the thread's is about to be written, and
+    /// a snapshot that holds that write must hold every delta told before
+    /// it (`core/load.rs`).
+    pub(super) fn flush_draft(&mut self, thread_id: i64, now: Instant) {
+        let waiting = self
+            .runs
+            .draft_run(thread_id)
+            .and_then(|run| self.drafts.flush(run, now).map(|text| (run, text)));
+        if let Some(draft) = waiting {
+            self.store_drafts(vec![draft]);
         }
     }
 
@@ -367,13 +362,44 @@ impl Consumer {
         self.runs.enter(thread_id, from, &ev);
         let tags = self.runs.tags(thread_id, terminal);
         let (pool, now) = (self.pool.clone(), io.now());
+        // Streamed text joins its run's draft after its own envelope is out
+        // (below), so the envelope's revision is the one before the write.
+        let streamed = match (&ev, tags.run_id) {
+            (HarnessEvent::AssistantDelta { text, item }, Some(run_id)) => {
+                Some((run_id, item.clone(), text.clone()))
+            }
+            _ => None,
+        };
         if let Some(p) = &pool {
             if thread_id > 0 {
+                if store::writes(&ev) {
+                    self.flush_draft(thread_id, now);
+                }
+                // A message that becomes a row leaves the draft in the same
+                // write, so a restart or a reload cannot find its text twice.
+                let committed = match (&ev, tags.run_id) {
+                    (HarnessEvent::AssistantMessage { source, .. }, Some(run_id)) => {
+                        let item = source.as_ref().map(|s| s.id.clone());
+                        let left = self.drafts.after_commit(run_id, item.as_deref());
+                        left.map(|left| (run_id, item, left))
+                    }
+                    _ => None,
+                };
+                let draft = committed
+                    .as_ref()
+                    .map(|(run, _, left)| (*run, left.as_str()));
                 let owner = self.runs.owner(thread_id, &ev, terminal);
-                match self
-                    .rt
-                    .block_on(store::apply_event(p, thread_id, &ev, owner.as_ref()))
-                {
+                let applied = self.rt.block_on(store::apply_with_draft(
+                    p,
+                    thread_id,
+                    &ev,
+                    owner.as_ref(),
+                    draft,
+                ));
+                if let (Ok(_), Some((run_id, item, _))) = (&applied, &committed) {
+                    self.drafts.commit(*run_id, item.as_deref(), now);
+                }
+                match applied {
                     Ok(stored) => {
                         if let Some(revision) = stored.revision {
                             self.revisions.insert(thread_id, revision);
@@ -449,12 +475,9 @@ impl Consumer {
                             return;
                         }
                     },
-                    (_, run_id, ..) => {
+                    _ => {
                         self.runs
                             .learn_session(&self.rt, p, thread_id, &ev, terminal);
-                        if let Some(run_id) = run_id {
-                            self.draft(run_id, &ev, now);
-                        }
                         Vec::new()
                     }
                 };
@@ -472,6 +495,13 @@ impl Consumer {
             terminal,
         };
         self.publish(stored, settled, io);
+        // Gathered by message and written at most once per interval
+        // (`drafts.rs`): what a restart keeps and a reload shows.
+        if let Some((run_id, item, text)) = streamed {
+            if let Some(draft) = self.drafts.push(run_id, item.as_deref(), &text, now) {
+                self.store_drafts(vec![(run_id, draft)]);
+            }
+        }
     }
 
     /// Close the run on its own terminal (`store::settle_run`) and say what

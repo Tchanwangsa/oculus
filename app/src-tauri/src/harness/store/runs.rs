@@ -529,29 +529,54 @@ pub async fn settle(
     }))
 }
 
-/// The answer text a run has streamed and not yet committed as a row, whole
-/// (`app/drafts.rs` gathers it): what a restart keeps.
-pub async fn set_draft(pool: &SqlitePool, run_id: i64, text: &str) -> Result<(), String> {
-    sqlx::query(
-        "INSERT INTO harness_stream_drafts (run_id, text) VALUES (?1, ?2)
-         ON CONFLICT(run_id) DO UPDATE SET text = excluded.text",
-    )
-    .bind(run_id)
-    .bind(text)
-    .execute(pool)
-    .await
-    .map(|_| ())
-    .map_err(|e| e.to_string())
-}
-
-/// The streamed text became a row: nothing is left to recover.
-pub async fn clear_draft(pool: &SqlitePool, run_id: i64) -> Result<(), String> {
-    sqlx::query("DELETE FROM harness_stream_drafts WHERE run_id = ?1")
+/// Write the answer text a run has streamed and not yet committed as a row,
+/// whole (`app/drafts.rs` gathers it): what a restart keeps and a reload
+/// shows. Empty text removes the draft: everything streamed became rows.
+/// The thread's revision is raised with it, so an envelope told before the
+/// write is known to be inside the draft a later snapshot reads.
+pub(super) async fn write_draft(
+    tx: &mut SqliteConnection,
+    run_id: i64,
+    text: &str,
+) -> Result<(), String> {
+    let written = match text.is_empty() {
+        true => sqlx::query("DELETE FROM harness_stream_drafts WHERE run_id = ?1").bind(run_id),
+        false => sqlx::query(
+            "INSERT INTO harness_stream_drafts (run_id, text) VALUES (?1, ?2)
+             ON CONFLICT(run_id) DO UPDATE SET text = excluded.text",
+        )
         .bind(run_id)
-        .execute(pool)
+        .bind(text),
+    };
+    written
+        .execute(&mut *tx)
         .await
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+/// [`write_draft`] as a transaction of its own. Returns the run's thread
+/// and its raised revision; `None` when the run is gone.
+pub async fn set_draft(
+    pool: &SqlitePool,
+    run_id: i64,
+    text: &str,
+) -> Result<Option<(i64, i64)>, String> {
+    let err = |e: sqlx::Error| e.to_string();
+    let mut tx = pool.begin().await.map_err(err)?;
+    let thread: Option<i64> =
+        sqlx::query_scalar("SELECT thread_id FROM harness_runs WHERE id = ?1")
+            .bind(run_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(err)?;
+    let Some(thread_id) = thread else {
+        return Ok(None);
+    };
+    write_draft(&mut tx, run_id, text).await?;
+    let revision = super::threads::raise_revision(&mut tx, thread_id).await?;
+    tx.commit().await.map_err(err)?;
+    Ok(Some((thread_id, revision)))
 }
 
 pub const APP_CLOSED: &str = "Oculus closed before this reply finished. What arrived is kept.";

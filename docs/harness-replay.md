@@ -184,6 +184,10 @@ against `load::read`.
 start step (the message back in its queue, held, on all four bridges) and
 after it took the run, sends returning at their commit and going out one
 at a time, and a start step that finds its run gone.
+`testkit/reload.rs` reloads (`core::load::read`) after every frame of a
+recording on all four bridges and folds the remaining envelopes as the
+webview does: the streamed text equals what a view that never reloaded
+shows, and every row is there once.
 `testkit/force.rs` checks a CLI that ignores Stop, with a second chat of
 the same provider (`Rig::second_chat`): on Claude the stuck chat is force
 stopped while the other streams to its end; on Codex both settle as

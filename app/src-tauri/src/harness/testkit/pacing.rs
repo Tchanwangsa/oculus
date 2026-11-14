@@ -197,7 +197,7 @@ fn streamed_text_reaches_the_draft_once_per_interval_and_leaves_with_its_message
     assert_eq!(
         drafts,
         vec![
-            Some("He"),        // the first delta is written at once
+            None,              // the first delta is told, then written at once
             Some("He"),        // 10 ms later: held
             Some("He"),        // 20 ms: held, another message's text
             Some("Hello and"), // the wake at 60 ms wrote both; 61 ms is held

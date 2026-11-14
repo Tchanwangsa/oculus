@@ -60,6 +60,20 @@ pub async fn apply_event(
     ev: &HarnessEvent,
     owner: Option<&Owner>,
 ) -> Result<Stored, String> {
+    apply_with_draft(pool, thread_id, ev, owner, None).await
+}
+
+/// [`apply_event`], writing a run's stream draft in the same transaction:
+/// a message that becomes a row leaves the draft as the row lands, so no
+/// snapshot holds its text twice, or not at all. `draft` is the run and
+/// what is left of its draft.
+pub async fn apply_with_draft(
+    pool: &SqlitePool,
+    thread_id: i64,
+    ev: &HarnessEvent,
+    owner: Option<&Owner>,
+    draft: Option<(i64, &str)>,
+) -> Result<Stored, String> {
     if !writes(ev) {
         return Ok(Stored::default());
     }
@@ -67,6 +81,9 @@ pub async fn apply_event(
     let mut stored = apply_rows(&mut tx, thread_id, ev, owner).await?;
     if stored.inserted {
         stored.entity = owner.map(|o| o.entity.clone());
+    }
+    if let Some((run_id, text)) = draft {
+        super::runs::write_draft(&mut tx, run_id, text).await?;
     }
     stored.revision = Some(super::threads::raise_revision(&mut tx, thread_id).await?);
     tx.commit().await.map_err(|e| e.to_string())?;
@@ -76,7 +93,7 @@ pub async fn apply_event(
 /// Whether an event changes a table. A streamed delta is only gathered
 /// into its run's draft (`app/drafts.rs`), and the rest are the consumer's
 /// own announcements of rows already written.
-fn writes(ev: &HarnessEvent) -> bool {
+pub fn writes(ev: &HarnessEvent) -> bool {
     !matches!(
         ev,
         HarnessEvent::AssistantDelta { .. }

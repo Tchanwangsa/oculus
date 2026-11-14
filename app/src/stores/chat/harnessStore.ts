@@ -6,6 +6,7 @@ import {
   parseItemMeta,
   getHarnessThreads,
   harnessLoad,
+  liveRunId,
   runFromRow,
   type HarnessEnvelope,
   type HarnessItem,
@@ -117,6 +118,8 @@ const loading = new Map<number, HarnessEnvelope[]>();
 const loaded = new Map<number, number>();
 /** Folded into `live` only; re-folding them after a read would repeat text. */
 const LIVE_ONLY = new Set(["assistant_delta", "thinking_delta", "tool_output_delta"]);
+/** Events after which the streamed answer text is a row, or over. */
+const TAKES_STREAM = new Set(["assistant_message", "tool_started", "turn_finished"]);
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 function buffer(threadId: number): PendingDeltas {
@@ -217,6 +220,28 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
     }));
     // Only what the snapshot does not hold yet: `fold` skips the rest by revision.
     for (const env of during) get().fold(env, true);
+    if (!snapshot) return;
+    // The streaming answer is the snapshot's draft, then every delta told at
+    // or above its revision (the draft holds the ones below), up to the
+    // next row that takes the text. Deltas that arrived during the read
+    // were folded as they came, so the tail is rebuilt, not appended.
+    get().flushLive();
+    let streaming = snapshot.draft?.text ?? "";
+    for (const env of during) {
+      const fresh = env.revision == null || env.revision >= snapshot.revision;
+      const newer = env.revision == null || env.revision > snapshot.revision;
+      if (env.event.type === "assistant_delta") streaming += fresh ? env.event.text : "";
+      else if (newer && TAKES_STREAM.has(env.event.type)) streaming = "";
+    }
+    // A run the snapshot shows going out or being answered is a turn in
+    // flight, whatever this view had heard of it.
+    const answering = liveRunId(runs) != null;
+    set((s) => {
+      const prev = s.live[id];
+      if (!prev && !streaming && !answering) return s;
+      const base = prev ?? IDLE;
+      return { live: { ...s.live, [id]: { ...base, running: base.running || answering, streaming } } };
+    });
   },
 
   // Agents share no model ids or levels, so a switch replaces both.
@@ -307,8 +332,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
       if (env.sequence <= lastSequence) return;
       lastSequence = env.sequence;
     }
-    const during = loading.get(env.threadId);
-    if (during && !LIVE_ONLY.has(env.event.type)) during.push(env);
+    loading.get(env.threadId)?.push(env);
     get().fold(env);
   },
 
@@ -332,6 +356,8 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
 
     switch (event.type) {
       case "assistant_delta":
+        // One told below the snapshot's revision is already in its draft.
+        if (at != null && env.revision != null && env.revision < at) return;
         buffer(threadId).streaming += event.text;
         return;
       case "thinking_delta":

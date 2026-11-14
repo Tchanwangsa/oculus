@@ -130,3 +130,51 @@ test("a stop marks its run as stopping, and a held queue does not keep the threa
   expect(state.live[THREAD].running).toBe(false);
   expect(state.queued[THREAD]).toEqual([{ id: "6", text: "waiting", held: true }]);
 });
+
+test("a reload mid-answer shows the text streamed so far, once, and goes on from there", async () => {
+  const resolve = pendingLoad();
+  const loading = useHarnessStore.getState().load(THREAD);
+  const apply = useHarnessStore.getState().apply;
+  const delta = (revision: number, text: string) => told(revision, null, { type: "assistant_delta", text });
+  // Told while the read is out. The draft, written at revision 5, holds the first.
+  apply(delta(4, "Hel"));
+  apply(delta(5, "lo"));
+  resolve({
+    revision: 5,
+    items: [row(10, "user", "asked")],
+    runs: [{ id: 5, execution_status: "running", delivery_state: "unknown", answer_item_id: null, started_at: "2026-11-15 00:00:00", ended_at: null }],
+    queued: [],
+    draft: { run_id: 5, text: "Hel" },
+  });
+  await loading;
+  const live = () => {
+    useHarnessStore.getState().flushLive();
+    return useHarnessStore.getState().live[THREAD];
+  };
+  expect(live().streaming).toBe("Hello");
+  expect(live().running).toBe(true);
+
+  apply(delta(5, " there"));
+  // One the draft already held, delivered late, adds nothing.
+  apply(delta(4, "Hel"));
+  expect(live().streaming).toBe("Hello there");
+
+  apply(told(6, 11, { type: "assistant_message", text: "Hello there" }));
+  expect(live().streaming).toBe("");
+  expect(ids()).toEqual([10, 11]);
+});
+
+test("a message that became a row during the read leaves no streamed copy of itself", async () => {
+  const resolve = pendingLoad();
+  const loading = useHarnessStore.getState().load(THREAD);
+  const apply = useHarnessStore.getState().apply;
+  apply(told(4, null, { type: "assistant_delta", text: "Done" }));
+  apply(told(6, 11, { type: "assistant_message", text: "Done." }));
+  apply(told(6, null, { type: "assistant_delta", text: "Next" }));
+  // Read before the message landed: its text was still the draft.
+  resolve({ revision: 5, items: [row(10, "user", "asked")], runs: [], queued: [], draft: { run_id: 5, text: "Done" } });
+  await loading;
+  useHarnessStore.getState().flushLive();
+  expect(useHarnessStore.getState().live[THREAD].streaming).toBe("Next");
+  expect(ids()).toEqual([10, 11]);
+});
