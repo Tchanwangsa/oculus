@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { threadStatus, type ThreadStatusInputs } from "@/lib/harness";
+import { threadStatus, threadUnread, type ThreadStatusInputs } from "@/lib/harness";
 
 const quiet: ThreadStatusInputs = { running: false, failed: false, unread: false, approval: false, input: false };
 
@@ -27,5 +27,22 @@ describe("threadStatus", () => {
 
   test("a failure outranks an unread finish", () => {
     expect(threadStatus({ ...quiet, failed: true, unread: true })).toBe("failed");
+  });
+});
+
+describe("threadUnread", () => {
+  test("a run that ended after the last look is unread", () => {
+    expect(threadUnread({ settled_at: "2026-11-15 10:00:05", viewed_at: "2026-11-15T10:00:01.000Z" })).toBe(true);
+  });
+  test("a look after the run's end reads it, even in the same second", () => {
+    expect(threadUnread({ settled_at: "2026-11-15 10:00:05", viewed_at: "2026-11-15T10:00:05.300Z" })).toBe(false);
+    expect(threadUnread({ settled_at: "2026-11-15 10:00:05", viewed_at: "2026-11-15 10:00:05" })).toBe(false);
+  });
+  test("no run ended: nothing to read", () => {
+    expect(threadUnread({ settled_at: null, viewed_at: null })).toBe(false);
+    expect(threadUnread({})).toBe(false);
+  });
+  test("never viewed, with a run ended: unread", () => {
+    expect(threadUnread({ settled_at: "2026-11-15 10:00:05", viewed_at: null })).toBe(true);
   });
 });

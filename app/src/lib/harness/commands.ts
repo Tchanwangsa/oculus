@@ -80,6 +80,12 @@ export function harnessDeleteThread(threadId: number): Promise<void> {
   return invoke("harness_delete_thread", { threadId });
 }
 
+/** The thread is on screen: stamps `viewed_at` (never `updated_at`) and
+ *  returns it; null when the thread is gone. */
+export async function harnessThreadViewed(threadId: number): Promise<string | null> {
+  return invoke("harness_thread_viewed", { threadId });
+}
+
 /** Read through `useBridgeHealth`. `recheck` drops Rust's cached lookups
  *  (a login shell per provider) — Settings' Recheck button only. */
 export function harnessHealth(recheck = false): Promise<BridgeHealth[]> {

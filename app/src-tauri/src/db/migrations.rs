@@ -934,6 +934,12 @@ INSERT OR IGNORE INTO task_tags (name, color, position) VALUES
             sql: include_str!("../harness/store/runs.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 55,
+            description: "when the student last had each chat thread on screen",
+            sql: include_str!("../harness/store/viewed.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -971,6 +977,40 @@ mod tests {
             .collect();
         assert_eq!(checksum, "5b74e95b4722a907975ca2d3987acc2450993baeb45734c2b327c92821c54bf18243b1ff91d7225967de9ec955470809",
             "SQL comments and whitespace are part of an applied migration's identity");
+    }
+
+    /// 55 adds `viewed_at`, stamping threads that already exist as seen
+    /// without touching the `updated_at` that orders the list.
+    #[tokio::test]
+    async fn existing_threads_count_as_viewed() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let (before, after): (Vec<_>, Vec<_>) = super::all()
+            .into_iter()
+            .partition(|migration| migration.version < 55);
+        for migration in before {
+            sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO harness_threads (provider, status, updated_at)
+             VALUES ('claude', 'idle', '2026-01-01 00:00:00')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for migration in after {
+            sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+        }
+        let (viewed, updated): (Option<String>, String) =
+            sqlx::query_as("SELECT viewed_at, updated_at FROM harness_threads")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(viewed.is_some());
+        assert_eq!(updated, "2026-01-01 00:00:00");
     }
 
     /// 43 drops the reading copy's job selection and nothing beside it, and a

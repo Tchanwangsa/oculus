@@ -1,3 +1,5 @@
+import { sqliteUtcToMs } from "@/lib/format/format";
+
 /** A thread's status as the sidebar pill and the announcer name it. */
 export type ThreadStatus = "approval" | "input" | "working" | "failed" | "done";
 
@@ -35,3 +37,12 @@ export const THREAD_STATUS_LABEL: Record<ThreadStatus, string> = {
   failed: "Failed",
   done: "Done",
 };
+
+/** A run ended after the student last had the thread on screen. A thread
+ *  never viewed is unread once any run has ended. */
+export function threadUnread(t: { viewed_at?: string | null; settled_at?: string | null }): boolean {
+  const settled = sqliteUtcToMs(t.settled_at ?? null);
+  if (settled == null) return false;
+  const viewed = sqliteUtcToMs(t.viewed_at ?? null);
+  return viewed == null || settled > viewed;
+}

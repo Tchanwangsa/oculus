@@ -6,7 +6,7 @@ mod apply;
 mod items;
 mod naming;
 mod runs;
-mod threads;
+pub mod threads;
 
 #[cfg(test)]
 mod tests;

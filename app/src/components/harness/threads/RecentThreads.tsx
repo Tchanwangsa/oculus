@@ -1,11 +1,12 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import { CircleNotch, VideoCamera } from "@phosphor-icons/react";
+import { VideoCamera } from "@phosphor-icons/react";
 import { ProviderMark } from "@/components/icons/ProviderMark";
 import { Badge } from "@/components/ui/badge";
 import type { Subject } from "@/lib/db";
 import { displayCode, displayName, sqliteUtcToMs } from "@/lib/format/format";
 import { chatHref, getThreadPreviews, PROVIDERS, type HarnessThread } from "@/lib/harness";
 import { relativeTime } from "@/lib/activity/recents";
+import { StatusPill, threadRowStatus } from "./StatusPill";
 
 /** Rows shown; the nav column lists every thread. */
 const SHOWN = 3;
@@ -80,6 +81,7 @@ function Row({
   onOpen: (id: number) => void;
 }) {
   const ms = sqliteUtcToMs(t.updated_at);
+  const status = threadRowStatus(t, running);
   return (
     // The pad keeps the hover pill off the hairlines.
     <div className="py-1">
@@ -112,8 +114,8 @@ function Row({
                 />
               )}
             </span>
-            {running ? (
-              <CircleNotch size={12} className="shrink-0 animate-spin text-muted-foreground" aria-label="Running" />
+            {status ? (
+              <StatusPill status={status} />
             ) : (
               ms != null && (
                 <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{relativeTime(ms)}</span>

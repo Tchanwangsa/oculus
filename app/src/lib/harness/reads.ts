@@ -3,10 +3,13 @@ import type { Provider } from "./providers";
 import { runFromRow, type RunRow } from "./runs";
 import type { HarnessItem, HarnessRun, HarnessThread, RateWindow } from "./types";
 
+/** A thread's `settled_at`: when its latest run ended. */
+const SETTLED_AT = "(SELECT MAX(r.ended_at) FROM harness_runs r WHERE r.thread_id = t.id) AS settled_at";
+
 export async function getHarnessThreads(limit = 100): Promise<HarnessThread[]> {
   const db = await getDb();
   return db.select<HarnessThread[]>(
-    `SELECT * FROM harness_threads ORDER BY updated_at DESC, id DESC LIMIT $1`,
+    `SELECT t.*, ${SETTLED_AT} FROM harness_threads t ORDER BY t.updated_at DESC, t.id DESC LIMIT $1`,
     [limit],
   );
 }
@@ -16,8 +19,8 @@ export async function getHarnessThreads(limit = 100): Promise<HarnessThread[]> {
 export async function getLectureThreads(lectureId: string, limit = 100): Promise<HarnessThread[]> {
   const db = await getDb();
   return db.select<HarnessThread[]>(
-    `SELECT * FROM harness_threads WHERE lecture_id = $1
-      ORDER BY updated_at DESC, id DESC LIMIT $2`,
+    `SELECT t.*, ${SETTLED_AT} FROM harness_threads t WHERE t.lecture_id = $1
+      ORDER BY t.updated_at DESC, t.id DESC LIMIT $2`,
     [lectureId, limit],
   );
 }

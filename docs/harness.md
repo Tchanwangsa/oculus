@@ -830,6 +830,22 @@ the name lands.
   mark, title, a chip naming its subject or General, age, and the last reply
   flattened to one muted line (`getThreadPreviews`, one read for the list).
   The list has its own scroller, since a thread's follows its bottom.
+- **Each listed thread shows one status** (`StatusPill` in `threads/`, from
+  `threadStatus` in `app/src/lib/harness/threadStatus.ts`), first match
+  wins: Approval (warning), Input (brand), Working (a brand spinner), Failed
+  (destructive: the thread's last run failed, until its next one), Done
+  (success: unread). Approval and Input are not raised yet. The pill sits at
+  a thread row's right and folds with the label; folded, the provider mark's
+  corner dot takes its tone. The recent list shows it in place of the age.
+- **Unread** is `settled_at > viewed_at`. `settled_at` is read with the list
+  (the latest `harness_runs.ended_at`) and set on `turn_finished`; `viewed_at`
+  (migration 55) is written by `harness_thread_viewed`
+  (`app/src-tauri/src/harness/store/threads.rs`), to the millisecond, never
+  touching `updated_at`, which orders the list. `useThreadViewed`, run by
+  `Timeline`, sends it whenever its thread is unread while the view's tab is
+  in front and the window visible — so a run settling on screen is read at
+  once, and one that settled in another tab when the student comes back.
+  Threads from before the migration count as seen.
 
 Deleting a thread drops its retained live output, view holds and context-drift
 marker as well as rows and queue, so removed turns cannot leave the sidebar busy.

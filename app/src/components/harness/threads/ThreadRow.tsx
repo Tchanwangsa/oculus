@@ -1,4 +1,4 @@
-import { CircleNotch, Trash, VideoCamera } from "@phosphor-icons/react";
+import { Trash, VideoCamera } from "@phosphor-icons/react";
 import { ProviderMark } from "@/components/icons/ProviderMark";
 import {
   SIDE_NAV_FOLDS,
@@ -9,9 +9,11 @@ import {
 import { chatHref, type HarnessThread } from "@/lib/harness";
 import { cn } from "@/lib/utils";
 import { ConfirmDelete } from "./parts";
+import { STATUS_LOOK, StatusPill, threadRowStatus } from "./StatusPill";
 
-/** A thread as a nav row: its provider's mark is the icon a fold leaves, and a
- *  running thread marks that icon's corner while folded. */
+/** A thread as a nav row: its provider's mark is the icon a fold leaves. Its
+ *  status (Working, Failed, Done…) is a pill at the right, and a dot in that
+ *  status's tone on the icon's corner while folded. */
 export function ThreadRow({
   thread: t,
   active,
@@ -31,6 +33,7 @@ export function ThreadRow({
   onDelete: (id: number) => void;
 }) {
   const title = t.title?.trim() || "Untitled";
+  const status = threadRowStatus(t, running);
   return (
     <div
       className={cn(
@@ -58,9 +61,8 @@ export function ThreadRow({
         )}
       </button>
       <div className={cn("flex shrink-0 items-center pr-1.5 pl-1", SIDE_NAV_FOLDS)}>
-        {running ? (
-          <CircleNotch size={12} className="animate-spin text-muted-foreground" aria-label="Running" />
-        ) : confirming ? (
+        {status && <StatusPill status={status} className="mr-1" />}
+        {status === "working" ? null : confirming ? (
           <ConfirmDelete
             label="Yes"
             onConfirm={() => {
@@ -80,10 +82,13 @@ export function ThreadRow({
           </button>
         )}
       </div>
-      {running && (
+      {status && (
         <span
           aria-hidden
-          className="absolute top-1 left-5 size-1.5 rounded-full bg-brand opacity-0 transition-opacity will-change-[opacity] duration-150 group-data-[collapsed=true]/nav:opacity-100"
+          className={cn(
+            "absolute top-1 left-5 size-1.5 rounded-full opacity-0 transition-opacity will-change-[opacity] duration-150 group-data-[collapsed=true]/nav:opacity-100",
+            STATUS_LOOK[status].dot,
+          )}
         />
       )}
     </div>

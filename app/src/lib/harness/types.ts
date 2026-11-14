@@ -116,6 +116,10 @@ export interface HarnessThread {
   usage: string | null;
   created_at: string;
   updated_at: string;
+  /** When the student last had it on screen (`harness_thread_viewed`). */
+  viewed_at?: string | null;
+  /** When its latest run ended: `MAX(harness_runs.ended_at)`, read, never stored. */
+  settled_at?: string | null;
 }
 
 /** `interrupted` is an empty marker where a turn was stopped. */

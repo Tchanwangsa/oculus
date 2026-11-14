@@ -16,6 +16,7 @@ import { useRowVisibility } from "./useRowVisibility";
 import { RetainedRow } from "./RetainedRow";
 import { AssistantSend } from "@/components/markdown/openui/assistant";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
+import { useThreadViewed } from "@/hooks/agents/useThreadViewed";
 
 /** A ```widget fence opening in streamed text. */
 const WIDGET_FENCE = /(^|\n)[ \t]*(`{3,}|~{3,})[ \t]*widget\b/;
@@ -90,6 +91,8 @@ export const Timeline = memo(function Timeline({
     for (let i = items.length - 1; i >= 0; i--) if (items[i].kind === "permission") return items[i].id;
     return undefined;
   }, [items]);
+  // Every view of a thread (a Chat tab, the lecture dock) draws it here.
+  useThreadViewed(threadId);
   const { start, rootRef, sentinelRef } = useRowWindow(rows, threadId);
   useRowVisibility(rootRef, threadId);
   const shown = start ? rows.slice(start) : rows;

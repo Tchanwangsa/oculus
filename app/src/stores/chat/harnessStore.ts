@@ -516,7 +516,10 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           if (event.status === "interrupted") push(rowFrom(env, "interrupted", ""));
           const more = (s.queued[threadId]?.length ?? 0) > 0;
           live = { ...IDLE, running: more };
-          touchThread({ status: event.status === "failed" ? "error" : more ? "running" : "idle" });
+          touchThread({
+            status: event.status === "failed" ? "error" : more ? "running" : "idle",
+            settled_at: new Date().toISOString(),
+          });
           break;
         }
         case "thread_titled":

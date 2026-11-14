@@ -135,6 +135,28 @@ pub async fn set_model(pool: &SqlitePool, id: i64, model: Option<&str>) -> Resul
         .map_err(|e| e.to_string())
 }
 
+/// Stamps the moment the student had the thread on screen, to the
+/// millisecond so it follows a run's `ended_at` in the same second. Never
+/// `updated_at`, which orders the thread list. None when the thread is gone.
+pub async fn mark_viewed(pool: &SqlitePool, id: i64) -> Result<Option<String>, String> {
+    sqlx::query_scalar(
+        "UPDATE harness_threads SET viewed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = ?1 RETURNING viewed_at",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// The thread is on screen in the front tab of a visible window: a run that
+/// ended before now is read. Returns the stored `viewed_at`.
+#[tauri::command]
+pub async fn harness_thread_viewed(thread_id: i64) -> Result<Option<String>, String> {
+    let pool = crate::db::store::open_pool().await?;
+    mark_viewed(&pool, thread_id).await
+}
+
 /// Explicit dependent deletes, children first: a connection may lack `foreign_keys`.
 pub async fn delete_thread(pool: &SqlitePool, id: i64) -> Result<(), String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
@@ -161,6 +183,37 @@ pub async fn delete_thread(pool: &SqlitePool, id: i64) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn viewing_stamps_viewed_at_and_leaves_updated_at() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for migration in crate::db::migrations::all() {
+            sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+        }
+        let id = create_thread(&pool, Provider::Claude, None, None, None, "hi")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE harness_threads SET updated_at = '2026-01-01 00:00:00'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let viewed = mark_viewed(&pool, id).await.unwrap().unwrap();
+        // ISO with milliseconds: `2026-11-15T03:04:05.678Z`.
+        assert_eq!(viewed.len(), 24, "{viewed}");
+        let (stored, updated): (Option<String>, String) =
+            sqlx::query_as("SELECT viewed_at, updated_at FROM harness_threads WHERE id = ?1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored.as_deref(), Some(viewed.as_str()));
+        assert_eq!(updated, "2026-01-01 00:00:00");
+        assert_eq!(mark_viewed(&pool, id + 1).await.unwrap(), None);
+    }
 
     #[test]
     fn titles_are_the_first_line_clipped() {

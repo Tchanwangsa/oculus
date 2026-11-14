@@ -210,7 +210,7 @@ export const ThreadList = memo(function ThreadList({
                   </button>
                   {/* Folded, the rows' spinners are hidden, so the header shows one. */}
                   {busy && !open ? (
-                    <CircleNotch size={11} className="animate-spin text-muted-foreground group-hover/head:hidden" />
+                    <CircleNotch size={11} className="animate-spin text-brand group-hover/head:hidden" />
                   ) : (
                     <span className="text-[10px] tabular-nums text-muted-foreground opacity-60 group-hover/head:hidden">
                       {g.items.length}
