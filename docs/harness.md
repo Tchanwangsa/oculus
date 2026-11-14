@@ -1352,7 +1352,7 @@ rule rather than carrying separate versions of it.
 
 ## Subject scope and `@`
 
-**A subject, or General** (`SubjectSelect.tsx`), locked after the first
+**A subject, or General** (`SubjectPicker.tsx`), locked after the first
 message because every CLI binds appended instructions at session start. It is
 not a sandbox; it appends the course folder and `agents/memories/<CODE>/`.
 

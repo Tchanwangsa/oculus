@@ -11,10 +11,9 @@ import type { Subject } from "@/lib/db";
 import { cn } from "@/lib/utils";
 
 /**
- * The subject a download is saved to, by course code: the composer's
- * `SubjectSelect` without its General entry, since an Oculus save always
- * names a subject. Lists this term's subjects plus the chosen one, or every
- * subject when none is current.
+ * The subject a download is saved to, by course code, with no General entry,
+ * since an Oculus save always names a subject. Lists this term's subjects plus
+ * the chosen one, or every subject when none is current.
  */
 export function DownloadSubjectSelect({
   subjects,

@@ -5,12 +5,13 @@ import { MentionMenu } from "@/components/harness/mentions/MentionMenu";
 import { useMentionMenu } from "@/components/harness/mentions/useMentionMenu";
 import { ModelPicker } from "@/components/harness/composer/ModelPicker";
 import { UsageMeter } from "@/components/harness/composer/UsageMeter";
-import { SubjectSelect } from "@/components/harness/composer/SubjectSelect";
+import { SubjectPicker } from "@/components/harness/composer/SubjectPicker";
 import { ThreadBanners } from "@/components/harness/composer/ThreadBanners";
 import { type Subject } from "@/lib/db";
 import {
   defaultSelection,
   providerLabel,
+  scopeSubject,
   type Provider,
   type RateWindow,
   type ThreadUsage,
@@ -72,7 +73,9 @@ export function Composer({
   subjects: Subject[];
   /** null is the general thread — the whole library. */
   subjectId: number | null;
-  onSubject: (id: number | null) => void;
+  /** Given where the box picks its own scope (a chip above it, Studio's New
+   *  video); Chat's new thread picks it in the headline instead. */
+  onSubject?: (id: number | null) => void;
   subjectLocked: boolean;
   running: boolean;
   usage: ThreadUsage | null;
@@ -158,14 +161,14 @@ export function Composer({
 
   return (
     <div ref={wrapRef} className="flex flex-col gap-1.5">
-      {(!subjectLocked || leading) && (
+      {((!subjectLocked && onSubject) || leading) && (
         <div className="flex items-center gap-1.5 px-0.5">
-          {!subjectLocked && (
-            <SubjectSelect
+          {!subjectLocked && onSubject && (
+            <SubjectPicker
+              variant="chip"
               subjects={subjects}
-              value={subjectId}
-              onChange={onSubject}
-              className="h-6 max-w-[200px] rounded-full border-border/70 bg-card px-2 text-[11px] text-muted-foreground shadow-none hover:bg-accent hover:text-foreground"
+              value={subjectId ?? "general"}
+              onChange={(scope) => onSubject(scopeSubject(scope))}
             />
           )}
           {leading}
