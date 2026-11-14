@@ -49,6 +49,11 @@ test("an unscoped box says why it will not send, over any caller's hint", () => 
   expect(render(false, "Ask for a change")).toContain('aria-placeholder="Ask for a change"');
 });
 
+test("an empty box names its two menus unless the caller gives its own hint", () => {
+  expect(render(false)).toContain('aria-placeholder="Ask anything. @ files, / skills"');
+  expect(render(false, "Ask for a change")).not.toContain("Ask anything.");
+});
+
 test("a box with no onSubject shows no subject chip: Chat's headline picks it", () => {
   expect(render(true)).not.toContain('aria-label="Subject:');
 });

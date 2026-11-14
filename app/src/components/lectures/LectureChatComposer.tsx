@@ -70,6 +70,9 @@ function MomentChip({
   );
 }
 
+/** The dock's empty box keeps its lecture framing and names the two menus. */
+const LECTURE_PLACEHOLDER = "Ask about this lecture. @ files, / skills";
+
 /**
  * The dock's composer — a sibling of `components/harness/composer/Composer.tsx`, not a
  * variant: the lecture fixes the subject and the agent already has the
@@ -231,7 +234,7 @@ export function LectureChatComposer({
               void send();
             }
           }}
-          placeholder={running ? "Working…" : "Ask about this lecture"}
+          placeholder={running ? "Working…" : LECTURE_PLACEHOLDER}
         />
         {dictation.busy ? <DictationBar dictation={dictation} /> : <div className="flex items-center gap-1">
           <ModelPicker

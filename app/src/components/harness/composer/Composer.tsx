@@ -28,6 +28,9 @@ import { useDictation } from "@/components/harness/dictation/useDictation";
 import { DictationBar, DictationMic, DictationFeedback } from "@/components/harness/dictation/DictationControls";
 import { cn } from "@/lib/utils";
 
+/** The empty box's hint, naming its two menus. */
+export const COMPOSER_PLACEHOLDER = "Ask anything. @ files, / skills";
+
 /**
  * The chat box: text, then model picker / usage / send+stop. Enter sends,
  * Shift+Enter breaks. While a turn runs a send waits as a queued run
@@ -267,7 +270,7 @@ export function Composer({
                 ? "Working… your next message waits its turn"
                 : unscoped
                   ? UNSCOPED_PLACEHOLDER
-                  : (placeholder ?? "What would you like to work on?")
+                  : (placeholder ?? COMPOSER_PLACEHOLDER)
             }
           />
         </div>

@@ -1863,6 +1863,13 @@ every bridge as text (Claude one-offs and every `agy` launch also run with
 `--disable-slash-commands`). The brief (`HARNESS.template.md`) tells the agent
 what the line means.
 
+## The empty box
+
+**The placeholder names both menus**: "Ask anything. @ files, / skills"
+(`COMPOSER_PLACEHOLDER`), "Ask about this lecture. @ files, / skills" in the
+lecture dock. A running turn's own hint and the unscoped one win; Studio's
+New video and thread column pass their own.
+
 ## Attachments are files in `agents/attachments/`
 
 The page and lecture dock share `SendControls` for send/queue/stop controls
