@@ -6,13 +6,12 @@
 //! heard no more.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
 
 use sqlx::SqlitePool;
 use tokio::runtime::Runtime;
 
 use crate::harness::event::TurnId;
-use crate::harness::{store, Generation, HarnessEvent, Queue};
+use crate::harness::{store, Generation, HarnessEvent};
 
 /// Who sent an event.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -82,8 +81,8 @@ pub(super) enum Terminal {
     Run,
     /// A turn the provider started itself.
     Own,
-    /// No turn, only the thread's claim: a send that failed before its run
-    /// was written.
+    /// No turn and no run: the app closing a send that failed before its
+    /// run was written.
     Claim,
     /// Nothing this thread has open: another turn's end, or a repeat.
     Stray,
@@ -141,6 +140,19 @@ impl RunScope {
         session.ended = session.ended.max(generation);
     }
 
+    /// The run open on the thread, unless its terminal was already seen.
+    pub fn open_run(&self, thread_id: i64) -> Option<i64> {
+        self.open
+            .get(&thread_id)
+            .filter(|open| !open.settling)
+            .map(|open| open.run_id)
+    }
+
+    /// The provider is in a turn of its own on this thread.
+    pub fn own_open(&self, thread_id: i64) -> bool {
+        self.own.contains_key(&thread_id)
+    }
+
     /// The thread is gone: its newest session is heard no more either.
     pub fn silence(&mut self, thread_id: i64) {
         if let Some(session) = self.sessions.get_mut(&thread_id) {
@@ -175,13 +187,7 @@ impl RunScope {
     }
 
     /// What a `TurnFinished` naming `turn` ends on this thread.
-    pub fn terminal(
-        &self,
-        thread_id: i64,
-        from: From,
-        turn: Option<&TurnId>,
-        queue: &Mutex<Queue>,
-    ) -> Terminal {
+    pub fn terminal(&self, thread_id: i64, from: From, turn: Option<&TurnId>) -> Terminal {
         let own = self.own.get(&thread_id);
         let open = match self.open.get(&thread_id) {
             // Already ending: nothing but a turn of the provider's own can
@@ -205,7 +211,9 @@ impl RunScope {
                 (_, Some(_)) if matches!(from, From::Ended(_)) => Terminal::Own,
                 (Some(_), _) => Terminal::Run,
                 (None, Some(_)) => Terminal::Own,
-                (None, None) if queue.lock().unwrap().is_busy(thread_id) => Terminal::Claim,
+                // The consumer's own, closing a send whose commit wrote
+                // nothing: there is no run to settle, only a turn to end.
+                (None, None) if from == From::App => Terminal::Claim,
                 (None, None) => Terminal::Stray,
             };
         };
@@ -403,24 +411,26 @@ mod tests {
 
     #[test]
     fn a_bound_run_is_ended_only_by_its_own_turn_of_its_own_session() {
-        let queue = Mutex::new(Queue::default());
         let mut scope = RunScope::default();
         assert!(scope.admit(1, 4, &ended("a")));
         open_run(&mut scope, 1);
         scope.bind(1, 4, "b".into());
-        let ends = |scope: &RunScope, from, turn: &str| {
-            scope.terminal(1, from, Some(&turn.to_string()), &queue)
-        };
+        let ends =
+            |scope: &RunScope, from, turn: &str| scope.terminal(1, from, Some(&turn.to_string()));
         assert_eq!(ends(&scope, From::Session(4), "a"), Terminal::Stray);
         assert_eq!(ends(&scope, From::Session(3), "b"), Terminal::Stray);
         assert_eq!(ends(&scope, From::Session(4), "b"), Terminal::Run);
         // The app's own terminal names no turn: the send failed.
-        assert_eq!(scope.terminal(1, From::App, None, &queue), Terminal::Run);
+        assert_eq!(scope.terminal(1, From::App, None), Terminal::Run);
+        // With nothing open the app's terminal only ends a turn; a session's
+        // that names none ends nothing.
+        scope.close(1);
+        assert_eq!(scope.terminal(1, From::App, None), Terminal::Claim);
+        assert_eq!(scope.terminal(1, From::Session(4), None), Terminal::Stray);
     }
 
     #[test]
     fn a_run_bound_to_no_turn_is_not_ended_by_a_turn_already_over() {
-        let queue = Mutex::new(Queue::default());
         let mut scope = RunScope::default();
         assert!(scope.admit(1, 4, &ended("a")));
         scope.finished(1, From::Session(4), Some(&"a".to_string()), Terminal::Stray);
@@ -428,12 +438,12 @@ mod tests {
         let a = "a".to_string();
         let b = "b".to_string();
         assert_eq!(
-            scope.terminal(1, From::Session(4), Some(&a), &queue),
+            scope.terminal(1, From::Session(4), Some(&a)),
             Terminal::Stray,
             "a repeat of the last turn's end"
         );
         assert_eq!(
-            scope.terminal(1, From::Session(4), Some(&b), &queue),
+            scope.terminal(1, From::Session(4), Some(&b)),
             Terminal::Run,
             "the bridge never named the send's turn, so its session's next end is it"
         );

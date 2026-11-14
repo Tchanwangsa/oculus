@@ -58,7 +58,7 @@ pub async fn harness_antigravity_allow(
             row.provider.label()
         ));
     }
-    if state.queue.lock().unwrap().is_busy(thread_id) {
+    if state.busy(&pool, thread_id).await? {
         return Err("stop the current turn before allowing something new".into());
     }
     let mut rules = antigravity_rules::stored(&pool).await?;
@@ -93,7 +93,7 @@ pub async fn harness_antigravity_revoke(
     blocking(move || antigravity_rules::install(&crate::library::paths::data_dir(), Some(written)))
         .await?;
     for id in state.harness.live_threads(Provider::Antigravity) {
-        if !state.queue.lock().unwrap().is_busy(id) {
+        if !state.busy(&pool, id).await? {
             state.harness.release(id, Release::Replaced);
         }
     }

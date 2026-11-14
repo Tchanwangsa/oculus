@@ -7,7 +7,8 @@ use super::{Decision, Plan};
 
 /// A message starts its run on an idle chat and waits behind a busy one, or
 /// behind messages already waiting. A send with no chat makes one first, in
-/// the same commit.
+/// the same commit. A message from the student also lifts a hold on the
+/// queue: it joins the back, and the held messages go out ahead of it.
 pub(super) fn decide(
     state: &State,
     command: &Command,
@@ -31,7 +32,10 @@ pub(super) fn decide(
             first_message: text.to_string(),
         }),
     }
-    changes.push(match state.live.busy || state.waiting > 0 {
+    if state.held > 0 {
+        changes.push(Change::Unhold);
+    }
+    changes.push(match state.busy() || state.waiting > 0 {
         true => Change::Enqueue {
             provider,
             text: text.to_string(),
@@ -72,10 +76,12 @@ mod tests {
     fn state(thread: Option<ThreadRow>, busy: bool) -> State {
         State {
             thread,
-            live: Live { busy },
+            live: Live::default(),
             question: None,
             newest_anchor: None,
             waiting: 0,
+            held: 0,
+            open: busy,
         }
     }
 
@@ -109,6 +115,18 @@ mod tests {
         behind.waiting = 2;
         let queued = changes(&behind, &send(Some(4)));
         assert!(matches!(queued.as_slice(), [Change::Enqueue { .. }]));
+        // Held messages are released by the student's next one, which goes last.
+        behind.held = 2;
+        let released = changes(&behind, &send(Some(4)));
+        assert!(matches!(
+            released.as_slice(),
+            [Change::Unhold, Change::Enqueue { .. }]
+        ));
+        // Whatever the app holds the chat for makes a message wait too.
+        let mut held = state(Some(thread(Provider::Codex)), false);
+        held.live.held = true;
+        let waits = changes(&held, &send(Some(4)));
+        assert!(matches!(waits.as_slice(), [Change::Enqueue { .. }]));
     }
 
     #[test]

@@ -89,6 +89,14 @@ message. `rig.read_only(true)` makes every write fail, as a full disk would
 student or the app would do mid-turn, such as a second `rig.send` or a call
 on `rig.harness`, and `resume`s. Races are tested this way, never by timing.
 
+The gap between a commit and its provider call is held open the same way.
+`rig.hold_effects()` keeps the consumer's effects back instead of running
+them, so a send returns with its run saved as `starting` and nothing sent;
+the test then acts in the gap (a second send, a delete, `Rig::restart`,
+`store::claim_start` as the start step would) and `rig.run_effects()` runs
+what was kept through the production executor (`core::effect::run`) and
+waits for the consumer to hear the result (`testkit/driver.rs`).
+
 The manager never spawns in a replay. A recorded session is registered as the
 thread's next spawn (`Harness::replay_spawn`) and opened by the send that
 would have started a process, on the sink of the generation minted for it.
@@ -159,12 +167,18 @@ its successor's run, a send racing a turn Claude starts itself, a
 reasoning-level change leaving two processes, a killed process's last words
 after the next question started, a process dying before or during its
 answer).
-`testkit/commands.rs` checks the command path on a scripted bus (`Bench`,
-whose effects the test answers): one result per command id, an id from
+`testkit/commands.rs` checks the command path on a scripted bus (`Bench`:
+one consumer on a scratch database for the whole test, whose effects the
+test answers; a start sends nothing, so its run stays `starting` until the
+script ends its turn): one result per command id, an id from
 another chat refused, a retried first message making one chat, a refusal
 recording nothing, a message sent while the provider rewinds, an edit's
 single commit, a delete heard twice, and the revision on every envelope
 against `load::read`.
+`testkit/driver.rs` checks the driver through the rig: a crash before the
+start step (the message back in its queue, held, on all four bridges) and
+after it took the run, sends returning at their commit and going out one
+at a time, and a start step that finds its run gone.
 `testkit/queue.rs` checks queued runs: a message sent mid-turn through a
 real bridge waiting as a run and starting as the same run, the queue's
 commands, options riding the queue, Stop, a continuation's place in line, and

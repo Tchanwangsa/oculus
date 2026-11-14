@@ -31,7 +31,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use serde::Serialize;
 
 use crate::harness::event::TurnId;
-use crate::harness::{Generation, Harness, HarnessEvent, Provider, Queue, Release, Sink, Sinks};
+use crate::harness::{Generation, Harness, HarnessEvent, OwnTurns, Provider, Release, Sink, Sinks};
 
 /// What the webview gets on `harness-event`, plus the row id when the
 /// event became a row. Account-scoped events arrive with `threadId` 0,
@@ -100,6 +100,13 @@ pub(in crate::harness) enum BusMsg {
         generation: Generation,
         reason: Release,
     },
+    /// A run's start step is over (`send::start`).
+    Sent {
+        thread_id: i64,
+        provider: Provider,
+        run_id: i64,
+        outcome: send::Sent,
+    },
     /// The time the consumer asked to be woken at has come
     /// (`ConsumerIo::wake_at`): work that was waiting on it is due.
     Wake,
@@ -126,8 +133,8 @@ pub(in crate::harness) type Reply =
 pub struct HarnessState {
     pub harness: Arc<Harness>,
     bus: Bus,
-    /// Which threads have a turn open, and what is waiting behind each.
-    queue: Arc<Mutex<Queue>>,
+    /// Which threads are in a turn their CLI started itself.
+    own_turns: Arc<Mutex<OwnTurns>>,
     /// Startup's repair, which every thread command waits for.
     startup: Arc<startup::Startup>,
 }
@@ -195,6 +202,20 @@ pub(in crate::harness) fn sinks_for(
 impl HarnessState {
     fn sink(&self, thread_id: i64, provider: Provider) -> Sink {
         sink_for(&self.bus, thread_id, provider)
+    }
+
+    /// A turn has the thread: a run going out or being answered, or a turn
+    /// its CLI started itself.
+    pub(in crate::harness) async fn busy(
+        &self,
+        pool: &sqlx::SqlitePool,
+        thread_id: i64,
+    ) -> Result<bool, String> {
+        if self.own_turns.lock().unwrap().is_held(thread_id) {
+            return Ok(true);
+        }
+        let open = crate::harness::store::queue::open(pool, thread_id).await?;
+        Ok(open.is_some())
     }
 
     /// Returns once startup's repair has run (`startup.rs`). A command that

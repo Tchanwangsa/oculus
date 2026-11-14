@@ -35,8 +35,8 @@ fn listed(bench: &Bench) -> Vec<String> {
 
 /// The newest `queue` event's texts: what the webview's list shows.
 fn told(bench: &Bench) -> Vec<String> {
-    let queue = bench
-        .events
+    let events = bench.events();
+    let queue = events
         .iter()
         .rev()
         .find(|e| e["event"]["type"] == "queue")
@@ -186,9 +186,9 @@ fn waiting_messages_are_edited_reordered_and_removed_and_go_out_in_queue_order()
 
     // The turn ends: the head of the queue starts, as run number two.
     bench.play(vec![bench.app(ended("completed"))]);
-    assert_eq!(bench.effects, ["start first", "start fourth"]);
+    assert_eq!(bench.effects(), ["start first", "start fourth"]);
     let started = runs(&bench).into_iter().find(|r| r.0 == fourth).unwrap();
-    assert_eq!((started.1.as_str(), started.2), ("preparing", 2));
+    assert_eq!((started.1.as_str(), started.2), ("starting", 2));
     assert!(started.3.is_some(), "its question row is written now");
     assert_eq!(bench.questions(), ["first", "fourth"]);
     assert_eq!(told(&bench), ["third, edited"]);
@@ -200,7 +200,7 @@ fn waiting_messages_are_edited_reordered_and_removed_and_go_out_in_queue_order()
     assert!(bench.got(changed).is_ok() && bench.got(dropped).is_ok());
     assert_eq!(bench.questions(), ["first", "fourth"]);
     let still = runs(&bench).into_iter().find(|r| r.0 == fourth).unwrap();
-    assert_eq!(still.1, "preparing");
+    assert_eq!(still.1, "starting");
 }
 
 /// What the composer chose for a message rides the queue with it: the
@@ -220,7 +220,8 @@ fn a_waiting_message_keeps_the_options_it_was_sent_with() {
     };
     let (second, _) = bench.command("c2", kind);
     bench.play(vec![first, second, bench.app(ended("completed"))]);
-    let start = bench.starts.last().unwrap();
+    let starts = bench.starts();
+    let start = starts.last().unwrap();
     assert_eq!(start.text, "second");
     assert_eq!(start.options.model.as_deref(), Some("gpt-other"));
     assert_eq!(start.options.reasoning_effort.as_deref(), Some("high"));
@@ -264,11 +265,11 @@ fn stop_takes_back_the_queue_and_cancels_a_waiting_continuation() {
     bench.play(vec![first, typed, settled, stop]);
 
     assert_eq!(bench.got(stopped).unwrap().dropped, ["typed"]);
-    assert_eq!(bench.effects, ["start first", "interrupt"]);
+    assert_eq!(bench.effects(), ["start first", "interrupt"]);
     assert!(listed(&bench).is_empty());
     assert!(told(&bench).is_empty());
     let waiting: Vec<_> = runs(&bench).into_iter().map(|r| r.1).collect();
-    assert_eq!(waiting, ["preparing", "cancelled", "cancelled"]);
+    assert_eq!(waiting, ["starting", "cancelled", "cancelled"]);
     let state = bench
         .runtime
         .block_on(crate::db::proposals::get(&bench.pool, &card))
@@ -278,8 +279,8 @@ fn stop_takes_back_the_queue_and_cancels_a_waiting_continuation() {
         state["continuation"],
         json!({"phase": "skipped", "reason": STOPPED})
     );
-    let snapshot = bench
-        .events
+    let events = bench.events();
+    let snapshot = events
         .iter()
         .rev()
         .find(|e| e["event"]["type"] == "proposal");
@@ -290,7 +291,7 @@ fn stop_takes_back_the_queue_and_cancels_a_waiting_continuation() {
     );
     // The turn's end starts nothing.
     bench.play(vec![bench.app(ended("interrupted"))]);
-    assert_eq!(bench.effects, ["start first", "interrupt"]);
+    assert_eq!(bench.effects(), ["start first", "interrupt"]);
 }
 
 /// A continuation waits in the same queue, in order, and is never listed
@@ -314,7 +315,7 @@ fn a_continuation_waits_its_turn_between_the_students_messages() {
         bench.play(vec![bench.app(ended("completed"))]);
     }
     assert_eq!(
-        bench.effects,
+        bench.effects(),
         [
             "start first",
             "start before",
@@ -324,7 +325,7 @@ fn a_continuation_waits_its_turn_between_the_students_messages() {
         "first come, first served"
     );
     assert_eq!(
-        bench.starts[2].options.continuation.as_deref(),
+        bench.starts()[2].options.continuation.as_deref(),
         Some(card.as_str())
     );
     let origins: Vec<String> = bench
@@ -358,6 +359,12 @@ fn readers_of_runs_tell_a_waiting_run_from_one_that_ran() {
     bench.play(script);
     let waiting = bench.got(waiting).unwrap().queued.unwrap();
     let removed = bench.got(removed).unwrap().queued.unwrap();
+    // The second message reached its provider, as its start step records.
+    let sent = bench.starts()[1].run;
+    assert!(bench
+        .runtime
+        .block_on(store::claim_start(&bench.pool, &sent))
+        .unwrap());
     let (remove, _) = bench.command("c5", Kind::RemoveQueued { run_id: removed });
     bench.play(vec![remove]);
 
@@ -397,7 +404,7 @@ fn readers_of_runs_tell_a_waiting_run_from_one_that_ran() {
         .iter()
         .map(|r| r.execution_status.as_str())
         .collect();
-    assert_eq!(drawn, ["completed", "preparing"]);
+    assert_eq!(drawn, ["completed", "running"]);
     let queued: Vec<_> = snapshot.queued.iter().map(|m| m.text.as_str()).collect();
     assert_eq!(queued, ["waits"], "not the removed one, nor the card's");
 

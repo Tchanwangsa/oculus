@@ -5,12 +5,15 @@
 
 use crate::harness::core::commit::{self, Applied, Began, Change, Receipt};
 use crate::harness::core::decide::{decide, Answer, Ask, Decision, Plan};
-use crate::harness::core::effect::{Effect, Start};
+use crate::harness::core::driver::{self, Calls, Step};
+use crate::harness::core::effect::Effect;
 use crate::harness::core::state::{self, Live};
 use crate::harness::core::{receipts, Command, Kind, Outcome};
+use crate::harness::store::queue::Waiting;
 use crate::harness::{store, HarnessEvent, Provider, Release, SendOptions};
 
 use super::super::run_scope::From;
+use super::super::send::Sent;
 use super::super::Reply;
 use super::{Consumer, ConsumerIo};
 
@@ -70,22 +73,21 @@ impl Consumer {
         };
         match decide(&state, command, None)? {
             Decision::Commit(plan) => {
-                let outcome = self
-                    .commit(Some(command), command.thread_id, provider, plan, io)
-                    .map_err(|failed| failed.error)?;
+                let outcome = self.commit(Some(command), command.thread_id, provider, plan, io)?;
                 if matches!(command.kind, Kind::Stop) {
                     io.perform(Effect::Interrupt {
                         thread_id: outcome.thread_id,
                     });
                 }
-                // A message that joined an idle chat's queue goes out now.
-                self.promote(outcome.thread_id, provider, io);
+                // Whatever the saved runs now imply: the new run's start, or
+                // a message that joined an idle chat's queue going out.
+                self.drive(outcome.thread_id, provider, io);
                 Ok(Accepted::Done(outcome))
             }
             Decision::Ask(Ask::Rewind(ask)) => {
-                // The chat is held while its provider is asked: a message
-                // sent meanwhile waits, and cannot be rewound away unseen.
-                self.queue.lock().unwrap().try_claim(ask.thread_id);
+                // The chat is held while its provider is asked (`held`): a
+                // message sent meanwhile waits, and cannot be rewound away
+                // unseen.
                 io.perform(Effect::Rewind {
                     command: command.id.clone(),
                     ask,
@@ -112,17 +114,10 @@ impl Consumer {
             return;
         };
         let decided = self.resume(&asking, answer, io);
-        // The hold taken to ask passes to whatever waited meanwhile, unless
-        // an edit's run now has it, or a failed send's closing turn already
-        // let it go.
-        let held = match &decided {
-            Ok(outcome) => outcome.run.is_none(),
-            Err(failed) => !failed.closed,
-        };
-        let _ = asking.reply.send(decided.map_err(|failed| failed.error));
-        if held {
-            self.start_next(thread_id, asking.provider, io);
-        }
+        let _ = asking.reply.send(decided);
+        // The chat is no longer held for the ask: an edit's run starts, or
+        // whatever waited meanwhile does.
+        self.drive(thread_id, asking.provider, io);
     }
 
     fn resume(
@@ -130,7 +125,7 @@ impl Consumer {
         asking: &Asking,
         answer: Answer,
         io: &mut impl ConsumerIo,
-    ) -> Result<Outcome, Failed> {
+    ) -> Result<Outcome, String> {
         let pool = self.pool.clone().ok_or("the database is not open")?;
         let command = &asking.command;
         let live = self.live(command.thread_id);
@@ -146,8 +141,17 @@ impl Consumer {
     /// What only this process knows about a chat, for its deciders.
     fn live(&self, thread_id: Option<i64>) -> Live {
         Live {
-            busy: thread_id.is_some_and(|id| self.queue.lock().unwrap().is_busy(id)),
+            held: thread_id.is_some_and(|id| self.held(id)),
         }
+    }
+
+    /// Something no row shows holds the chat: a turn its CLI started
+    /// itself, a rewind waiting on the provider, or a settle that has not
+    /// landed.
+    fn held(&self, thread_id: i64) -> bool {
+        self.runs.own_open(thread_id)
+            || self.asking.contains_key(&thread_id)
+            || self.parked.contains_key(&thread_id)
     }
 
     /// Save a plan for the chat `thread_id` (`None` when the plan makes
@@ -161,7 +165,7 @@ impl Consumer {
         provider: Provider,
         plan: Plan,
         io: &mut impl ConsumerIo,
-    ) -> Result<Outcome, Failed> {
+    ) -> Result<Outcome, String> {
         let pool = self.pool.clone().ok_or("the database is not open")?;
         let sends = plan
             .changes
@@ -181,14 +185,10 @@ impl Consumer {
                 // chat, and closes as a failed turn: an error row, then its
                 // terminal. What the app starts itself is its caller's to
                 // report (`promote`).
-                let closed = match thread_id {
-                    Some(thread_id) if sends && command.is_some() => {
-                        self.refuse(thread_id, provider, &error, io);
-                        true
-                    }
-                    _ => false,
-                };
-                return Err(Failed { error, closed });
+                if let (Some(thread_id), true) = (thread_id, sends && command.is_some()) {
+                    self.refuse(thread_id, provider, &error, io);
+                }
+                return Err(error);
             }
         };
         let thread_id = committed.outcome.thread_id;
@@ -214,45 +214,30 @@ impl Consumer {
                     provider,
                     run,
                     text,
-                    options,
+                    at,
+                    continuation,
                     waited,
-                    respawn,
                 } = *began;
-                self.queue.lock().unwrap().try_claim(thread_id);
                 // It left the queue before its question appears.
                 if waited {
                     self.tell_queue(thread_id, provider, io);
                 }
                 // The question becomes an ordinary `UserMessage` now that its
                 // run is written (a continuation's, `Continued`, and its
-                // card's snapshot follows).
-                let (event, card) = match &options.continuation {
-                    Some(proposal) => (
-                        HarnessEvent::Continued {
-                            text: text.clone(),
-                            proposal: proposal.clone(),
-                            run: Some(run),
-                        },
-                        Some(proposal.clone()),
-                    ),
-                    None => (
-                        HarnessEvent::UserMessage {
-                            text: text.clone(),
-                            at: options.at,
-                            run: Some(run),
-                        },
-                        None,
-                    ),
+                // card's snapshot follows). The driver sends it.
+                let event = match &continuation {
+                    Some(proposal) => HarnessEvent::Continued {
+                        text,
+                        proposal: proposal.clone(),
+                        run: Some(run),
+                    },
+                    None => HarnessEvent::UserMessage {
+                        text,
+                        at,
+                        run: Some(run),
+                    },
                 };
-                self.event(thread_id, provider, From::App, event, card, io);
-                io.perform(Effect::Start(Box::new(Start {
-                    thread_id,
-                    provider,
-                    run,
-                    text,
-                    options,
-                    respawn,
-                })));
+                self.event(thread_id, provider, From::App, event, continuation, io);
             }
             Applied::Queue => self.tell_queue(thread_id, provider, io),
             Applied::Cards(cards) => {
@@ -274,7 +259,7 @@ impl Consumer {
                 self.runs.silence(thread_id);
                 self.parked.remove(&thread_id);
                 self.revisions.remove(&thread_id);
-                self.queue.lock().unwrap().forget(thread_id);
+                self.own_turns.lock().unwrap().forget(thread_id);
                 io.perform(Effect::Release {
                     thread_id,
                     reason: Release::Deleted,
@@ -284,7 +269,7 @@ impl Consumer {
     }
 
     /// A send that wrote nothing: the chat gets an error row and a failed
-    /// turn's end, which also lets go whatever the send had claimed.
+    /// turn's end, which marks the thread failed.
     fn refuse(
         &mut self,
         thread_id: i64,
@@ -292,7 +277,6 @@ impl Consumer {
         error: &str,
         io: &mut impl ConsumerIo,
     ) {
-        self.queue.lock().unwrap().try_claim(thread_id);
         self.event(
             thread_id,
             provider,
@@ -333,7 +317,7 @@ impl Consumer {
         (text, options): (String, SendOptions),
         queued: Option<i64>,
         io: &mut impl ConsumerIo,
-    ) -> Result<(), Failed> {
+    ) -> Result<(), String> {
         let plan = Plan {
             changes: vec![Change::Begin {
                 provider,
@@ -356,7 +340,7 @@ impl Consumer {
         provider: Provider,
         (text, options): (String, SendOptions),
         io: &mut impl ConsumerIo,
-    ) -> Result<(), Failed> {
+    ) -> Result<(), String> {
         let plan = Plan {
             changes: vec![Change::Enqueue {
                 provider,
@@ -369,53 +353,111 @@ impl Consumer {
             .map(|_| ())
     }
 
-    /// A turn of the thread's closed: once nothing else holds it, the next
-    /// waiting run goes out.
-    pub(super) fn start_next(
-        &mut self,
-        thread_id: i64,
-        provider: Provider,
-        io: &mut impl ConsumerIo,
-    ) {
-        if self.queue.lock().unwrap().release(thread_id) {
-            self.promote(thread_id, provider, io);
-        }
-    }
-
-    /// Start the first waiting run that is not held, if the thread is free.
-    /// Read from the saved queue each time, so nothing a notification
-    /// missed is left behind. A continuation whose card lost its claim (a
-    /// rewind took the card) starts nothing and shows nothing, and a run
-    /// that cannot be written leaves the queue as failed with an error row;
-    /// the thread then passes to what waits behind it.
-    pub(super) fn promote(&mut self, thread_id: i64, provider: Provider, io: &mut impl ConsumerIo) {
+    /// Take the steps the chat's saved runs imply (`core::driver`): hand a
+    /// `starting` run to its start step, or, with nothing open, start the
+    /// first waiting run that is not held. Called after every commit, every
+    /// turn's end and every effect's report; it reads the rows each time, so
+    /// calling it when nothing changed does nothing.
+    pub(super) fn drive(&mut self, thread_id: i64, provider: Provider, io: &mut impl ConsumerIo) {
         loop {
-            if self.queue.lock().unwrap().is_busy(thread_id) {
-                return;
-            }
             let Some(pool) = self.pool.clone() else {
                 return;
             };
-            let waiting = match self.rt.block_on(store::queue::next(&pool, thread_id)) {
-                Ok(Some(waiting)) => waiting,
-                Ok(None) => return,
+            let saved = match self.rt.block_on(driver::read(&pool, thread_id)) {
+                Ok(saved) => saved,
                 Err(e) => {
-                    elog!("[oculus] harness thread {thread_id}: queue: {e}");
+                    elog!("[oculus] harness thread {thread_id}: driver: {e}");
                     return;
                 }
             };
-            let run_id = waiting.run_id;
-            let send = (waiting.text, waiting.options);
-            let Err(refused) = self.begin(thread_id, provider, send, Some(run_id), io) else {
-                return;
+            let started = saved
+                .open
+                .as_ref()
+                .is_some_and(|open| self.started.contains(&open.run.run_id));
+            let calls = Calls {
+                started,
+                held: self.held(thread_id),
             };
-            let lost = refused.error == store::NOT_CLAIMED;
-            if !lost {
-                let error = format!(
-                    "Oculus could not start a waiting message: {}",
-                    refused.error
-                );
-                elog!("[oculus] harness thread {thread_id}: {error}");
+            match driver::step(thread_id, provider, saved, calls) {
+                Step::Start(start) => {
+                    self.started.insert(start.run.run_id);
+                    io.perform(Effect::Start(start));
+                    return;
+                }
+                Step::Promote(waiting) => {
+                    if !self.promote(thread_id, provider, *waiting, io) {
+                        return;
+                    }
+                }
+                Step::Wait => return,
+            }
+        }
+    }
+
+    /// A waiting run's turn has come: it becomes `starting`. A continuation
+    /// whose card lost its claim (a rewind took the card) starts nothing and
+    /// shows nothing, and a run that cannot be written leaves the queue as
+    /// failed with an error row; either way the driver looks again. False
+    /// when the queue could not be changed at all, which ends the round.
+    fn promote(
+        &mut self,
+        thread_id: i64,
+        provider: Provider,
+        waiting: Waiting,
+        io: &mut impl ConsumerIo,
+    ) -> bool {
+        let run_id = waiting.run_id;
+        let send = (waiting.text, waiting.options);
+        let Err(refused) = self.begin(thread_id, provider, send, Some(run_id), io) else {
+            return true;
+        };
+        let lost = refused == store::NOT_CLAIMED;
+        if !lost {
+            let error = format!("Oculus could not start a waiting message: {}", refused);
+            elog!("[oculus] harness thread {thread_id}: {error}");
+            self.event(
+                thread_id,
+                provider,
+                From::App,
+                HarnessEvent::error(error),
+                None,
+                io,
+            );
+        }
+        let close = Plan {
+            changes: vec![Change::CloseQueued {
+                run_id,
+                failed: !lost,
+            }],
+            text: None,
+        };
+        // A database that refuses this too is not asked again in a loop.
+        self.commit(None, Some(thread_id), provider, close, io)
+            .is_ok()
+    }
+
+    /// A run's start step reported. Accepted: the provider's turn will say
+    /// the rest. Withdrawn: the run was stopped before the provider heard
+    /// of it, so it ends here, interrupted. Failed: the failure is the
+    /// run's, an error row and a failed end. Each closes only the run it
+    /// names, and only while that run is still the chat's open one.
+    pub(super) fn sent(
+        &mut self,
+        thread_id: i64,
+        provider: Provider,
+        run_id: i64,
+        outcome: Sent,
+        io: &mut impl ConsumerIo,
+    ) {
+        let open = self.runs.open_run(thread_id) == Some(run_id);
+        let status = match outcome {
+            Sent::Accepted => None,
+            _ if !open => {
+                elog!("[oculus] harness run {run_id}: its start ended ({outcome:?}) after the run did");
+                None
+            }
+            Sent::Withdrawn => Some("interrupted"),
+            Sent::Failed(error) => {
                 self.event(
                     thread_id,
                     provider,
@@ -424,45 +466,19 @@ impl Consumer {
                     None,
                     io,
                 );
+                Some("failed")
             }
-            let close = Plan {
-                changes: vec![Change::CloseQueued {
-                    run_id,
-                    failed: !lost,
-                }],
-                text: None,
-            };
-            // A database that refuses this too is not asked again in a loop.
-            if self
-                .commit(None, Some(thread_id), provider, close, io)
-                .is_err()
-            {
-                return;
+        };
+        match status {
+            Some(status) => {
+                let finished = HarnessEvent::TurnFinished {
+                    status: status.into(),
+                    turn: None,
+                };
+                self.event(thread_id, provider, From::App, finished, None, io);
             }
+            None => self.drive(thread_id, provider, io),
         }
-    }
-}
-
-/// A commit that saved nothing.
-pub(super) struct Failed {
-    pub error: String,
-    /// The failure was told as a failed turn's end, which let go of
-    /// whatever held the chat.
-    pub closed: bool,
-}
-
-impl std::convert::From<String> for Failed {
-    fn from(error: String) -> Self {
-        Failed {
-            error,
-            closed: false,
-        }
-    }
-}
-
-impl std::convert::From<&str> for Failed {
-    fn from(error: &str) -> Self {
-        Failed::from(error.to_string())
     }
 }
 

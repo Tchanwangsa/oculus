@@ -11,7 +11,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 
 | Piece | Location |
 | --- | --- |
-| Manager, which threads have a turn open, `run_once`, per-thread `instructions` | `app/src-tauri/src/harness/manager/` (`queue.rs`, `one_off.rs`, `instructions.rs`) |
+| Manager, which threads are in a turn their CLI started (`OwnTurns`), `run_once`, per-thread `instructions` | `app/src-tauri/src/harness/manager/` (`queue.rs`, `one_off.rs`, `instructions.rs`) |
 | Messages that wait their turn, as queued runs | `app/src-tauri/src/harness/store/queue.rs` |
 | Tauri commands (setup, models, turns, suggestions) | `app/src-tauri/src/harness/app/` |
 | The event enum, tool classification (`classify`) and answer selection | `app/src-tauri/src/harness/event/mod.rs`, `app/src-tauri/src/harness/event/classify.rs`, `app/src-tauri/src/harness/event/answer.rs` |
@@ -22,7 +22,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Hidden native processes, Windows job ownership and npm shim resolution | `app/src-tauri/src/runtime/platform/` |
 | Process pipes, JSON lines and terminal turn failures shared by the bridges | `app/src-tauri/src/harness/child.rs` |
 | Thread and timeline rows | `app/src-tauri/src/harness/store/` |
-| The command path: commands and their deciders, the one commit, receipts, effects, the snapshot a reload reads | `app/src-tauri/src/harness/core/` (`command.rs`, `decide/`, `commit.rs`, `receipts.rs`, `effect.rs`, `state.rs`, `load.rs`), `app/src-tauri/src/harness/app/consumer/commands.rs`, `app/src-tauri/src/harness/store/commands.sql` |
+| The command path: commands and their deciders, the one commit, receipts, the driver and its effects, the snapshot a reload reads | `app/src-tauri/src/harness/core/` (`command.rs`, `decide/`, `commit.rs`, `receipts.rs`, `driver.rs`, `effect.rs`, `state.rs`, `load.rs`), `app/src-tauri/src/harness/app/consumer/commands.rs`, `app/src-tauri/src/harness/store/commands.sql` |
 | Runs, attempts, provider bindings and send receipts; which run owns each event | `app/src-tauri/src/harness/store/runs.rs`, `app/src-tauri/src/harness/store/runs.sql`, `app/src-tauri/src/harness/app/run_scope.rs` |
 | Session generations and `release`, turn ids, the ordered consumer with its stream drafts and settle retries, the startup gate | `app/src-tauri/src/harness/manager/sinks.rs`, `app/src-tauri/src/harness/manager/release.rs`, `app/src-tauri/src/harness/event/turn.rs`, `app/src-tauri/src/harness/app/consumer/`, `app/src-tauri/src/harness/app/drafts.rs`, `app/src-tauri/src/harness/app/wake.rs`, `app/src-tauri/src/harness/app/startup.rs` |
 | The brief appended to each prompt; `AGENTS.md`; skills | `app/src-tauri/templates/HARNESS.template.md`, `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/skills/`, `app/src-tauri/src/agents/mod.rs` |
@@ -107,7 +107,10 @@ display policy: no thinking flags or summary setting, with
 - **Nothing survives a restart as running.** `harness::store::reconcile` runs
   at startup: threads left `running` go `idle`, and tool rows whose `meta.ok`
   is still null are closed as failed with "the session ended before this
-  finished" — otherwise the row draws as running forever.
+  finished" — otherwise the row draws as running forever. A run still
+  `starting` was never handed to its provider, so its message goes back to
+  the head of its queue, held (`store::queue::requeue_unsent`); a run the
+  start step had taken is interrupted with what streamed kept.
 - **The repair comes before the first command.** It is one gate,
   `app/startup.rs` (`Startup::ready`): proposal jobs left running, queued
   card continuations, then `store::reconcile`. `lifecycle::reconcile` starts
@@ -935,17 +938,19 @@ quit or a crash keeps it.
   that names a message which has just gone out changes nothing and is no
   error.
 - **First come, first served.** When a turn closes and nothing else holds
-  the thread, `Consumer::promote` reads the first waiting run that is not
-  held and starts it. It reads the saved queue each time rather than acting
-  on a notification, so nothing is skipped; the same call follows every
-  command, which is how a message that joined an idle chat's queue goes out
-  at once. A waiting run that cannot be written leaves the queue as `failed`
-  with an error row, and the next one is tried.
-- **Which threads have a turn open is the one thing kept in memory**
-  (`Queue` in `manager/queue.rs`: a count per thread). A send's run claims
-  its thread, a turn the provider starts itself holds it, and each is let go
-  by its `TurnFinished`. No turn survives a restart, so nothing there needs
-  to.
+  the thread, the driver starts the first waiting run that is not held
+  ([One command path](#one-command-path)). A message that joined an idle
+  chat's queue goes out the same way, at once, and a student's new message
+  lifts a hold on the queue and goes out behind the held ones. A waiting
+  run that cannot be written leaves the queue as `failed` with an error
+  row, and the next one is tried.
+- **What holds a chat is saved, with one exception.** A run in `starting`
+  or `running` is the turn that has the chat; deciders and the driver read
+  it from the rows (`store::queue::open`). A turn the CLI starts itself has
+  no run, so it is counted in memory (`OwnTurns` in `manager/queue.rs`,
+  beside `RunScope`'s own record) until its `TurnFinished`, kept apart from
+  the student's hold on the queue so that resuming cannot release a message
+  into a live turn. No turn survives a restart, so nothing there needs to.
 - **Readers of `harness_runs` meet runs that never ran.** A `queued` or
   `cancelled` run has no rows, no attempt and no end time. A reload lists
   only runs with a timeline row (`core/load.rs`), a thread's `settled_at`
@@ -964,7 +969,7 @@ Claude runs `Agent` (and a backgrounded Bash) in the background, and when one
 finishes the CLI starts a turn on its own. The bridge drops the subagent's
 lines (tagged `parent_tool_use_id`), keeps the tool row running until the
 task's `task_notification`, and announces the CLI's turn with
-`UnpromptedTurn`: a row ("Continued after … finished") and a `Queue::hold`,
+`UnpromptedTurn`: a row ("Continued after … finished") and an `OwnTurns::hold`,
 so a message typed meanwhile waits. `expecting` is what tells the two apart —
 set by `send`, consumed when a turn opens. The turn gets no anchor, since its
 question is the CLI's synthetic notification row; rewinds name the student's
@@ -1008,29 +1013,51 @@ command and no provider event can come between a decision and its commit.
    the run's rows through `store::begin`, a truncate, a delete), raises
    `harness_threads.revision`, stores the result on the receipt and
    commits. All of it lands or none of it does.
-4. **Tell and call.** Only then does the consumer announce what changed
-   (`UserMessage`, `Rewound`) and hand each provider call to an effect
-   (`core/effect.rs`, `ConsumerIo::perform`): `Start` sends a written run
-   (`app/send.rs`), `Rewind` asks a provider to forget a question,
+4. **Tell and drive.** Only then does the consumer announce what changed
+   (`UserMessage`, `Queue`, `Rewound`) and call the driver
+   (`Consumer::drive`, `core/driver.rs`). The driver reads the chat's saved
+   runs and takes the one step they imply: a `starting` run that has not
+   been handed over goes to its start step; with nothing open and nothing
+   holding the chat, the first waiting run that is not held becomes
+   `starting`. It runs after every commit, every turn's end and every
+   effect's report, and goes by the rows each time, never by a
+   notification: a waiting run cannot be skipped, and asking twice starts
+   nothing twice. A provider call is an effect (`core/effect.rs`,
+   `ConsumerIo::perform`): `Start` sends a run (`app/send.rs`), `Rewind`
+   asks a provider to forget a question, `Interrupt` asks it to stop,
    `Release` ends a session. An effect runs off the consumer's thread, is
    made from what was just saved and lives only in memory: after a restart
    nothing replays one, and startup's repair owns what was open.
 
+**The start step takes its run before it calls.** `send::start` reads the
+thread's row, builds the brief and the prompt (`send::prompt`), then
+`store::claim_start` moves the run from `starting` to `running` in one
+conditional write, only while nobody asked it to stop, and only then calls
+the CLI. A run that was stopped, rewound away or deleted while the step
+prepared is not sent. The step reports on the bus (`BusMsg::Sent`):
+accepted, withdrawn (the consumer ends the run as interrupted, since no
+turn exists that could report) or failed (the consumer writes the error row
+and ends the run as failed). Each closes only the run it names, and only
+while that is still the chat's open run. So `starting` means exactly "the
+provider has not heard this", which is what lets startup put such a message
+back in its queue instead of calling it cut off.
+
 `harness_send` therefore returns once the message is saved, not once the
 CLI has accepted it, which can take a minute. A send that fails in its
-effect (no binary, signed out, a spawn that dies) closes its run the way a
-provider failure does: an error row, then a failed `TurnFinished` from the
-app, which settles the run. A send whose commit fails wrote nothing; the
-chat gets the error row and the same failed turn's end.
+start step (no binary, signed out, a spawn that dies) closes its run the
+way a provider failure does: an error row, then a failed `TurnFinished`
+from the app, which settles the run. A send whose commit fails wrote
+nothing; the chat gets the error row and a failed turn's end with no run.
 
 **A command that needs the provider's answer first is decided twice.**
 Rewind and edit-and-resend ask the provider to forget the question before
 the rows go, and the rows' fate depends on the answer. The decider returns
 `Decision::Ask`; the consumer holds the chat (a message sent meanwhile
-waits its turn, so it cannot be among the rows the rewind takes), performs
+waits its turn, so it cannot be among the rows the rewind takes; the hold
+is the parked command itself), performs
 the `Rewind` effect and parks the command with its reply. The answer comes
 back on the bus (`BusMsg::Answer`), the command is decided again with it,
-committed, and the hold passes to whatever waited. Its receipt is written by
+committed, and the driver starts the edit's run or whatever waited. Its receipt is written by
 that commit; the same id arriving while it waits is refused as still
 running.
 
@@ -1056,7 +1083,7 @@ A student send is written before the provider hears of it. The `Send`
 command's commit runs `store::begin` on the consumer, so
 every row already queued for the thread is written first and the question's
 id comes after them. It inserts, in the commit's transaction, the question's row, a
-`harness_runs` row (origin `student`, the next per-thread ordinal), its first
+`harness_runs` row in `starting` (origin `student`, the next per-thread ordinal, the send's text and options as its start step will read them), its first
 `harness_attempts` row, the `harness_bindings` row for the provider session it
 resumes, and a `harness_command_receipts` row keyed by the command's id (a
 fresh id for a run the app starts itself): the record of a started run,
@@ -1292,7 +1319,7 @@ reaches the consumer as `BusMsg::Bound` and `RunScope::bind` records
 | the open run's turn | the run settles (`Terminal::Run`) |
 | a turn the provider started itself (`UnpromptedTurn`, then its `TurnStarted`) | that turn ends; its rows were unowned and the run, if one is open, is untouched (`Own`) |
 | any other turn: a repeat, or one the server ran itself | logged and ignored; nothing settles and no queued message is let go (`Stray`) |
-| no turn, from the app (the start step in `app/send.rs`, or the consumer, closing a send that failed) | the open run settles; with none open, the thread's claim is released (`Claim`) |
+| no turn, from the app (the consumer closing a run whose start step failed or was withdrawn, or a send whose commit wrote nothing) | the open run settles; with none open, only the turn ends and the thread is marked failed (`Claim`) |
 
 A replaced session's terminal is still heard when it names the turn the open
 run is bound to. A run whose bridge never named its turn (a `turn/start`
@@ -1892,8 +1919,8 @@ waits, never listed in the composer's queue.
 
 When its turn comes `store::begin` turns the claim into the run in the same
 transaction (`phase: "started"`, `run_id`), or refuses with `NOT_CLAIMED` and
-writes nothing; the consumer then cancels the waiting run and passes the
-thread to whatever waits next (`Consumer::promote`). The run's origin is `continuation`, and its head row is a
+writes nothing; the consumer then cancels the waiting run and the driver
+passes the thread to whatever waits next (`Consumer::promote`). The run's origin is `continuation`, and its head row is a
 `continuation` row holding the timeline's line ("Sync finished — continuing",
 meta `{proposal}`), announced as `Continued`, not `UserMessage`. The webview
 draws it as a small centred line, folds the run under it like a question's,
@@ -1904,8 +1931,8 @@ the reasoning level from the live session, as the student last chose them.
 
 Stop cancels a waiting continuation in the same commit and its card says so
 (`STOPPED`). The click that consented to it belongs to the session it was
-made in, so startup marks a claim still waiting `skipped` and cancels its
-run, and a job the
+made in, so startup marks a claim still waiting, or written and never
+sent, `skipped` and cancels its run, and a job the
 app closed during (`job.interrupted`) is `skipped` too: neither ever runs
 later, and the card shows the reason under its body (`CardFrame`'s `note`).
 

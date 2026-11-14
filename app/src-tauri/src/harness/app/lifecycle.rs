@@ -4,7 +4,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::harness::core::effect::{self, Effect, Pools, Runtime};
 use crate::harness::{jobs, opencode, store};
-use crate::harness::{Harness, HarnessEvent, Provider, Queue};
+use crate::harness::{Harness, HarnessEvent, OwnTurns, Provider};
 
 use super::consumer::ConsumerIo;
 use super::wake::{Alarm, Wakeful};
@@ -17,13 +17,13 @@ pub fn init(app: &AppHandle) -> HarnessState {
     let (tx, rx) = mpsc::channel::<BusMsg>();
     let handle = app.clone();
     let harness = Arc::new(Harness::new(crate::library::paths::data_dir()));
-    let queue: Arc<Mutex<Queue>> = Arc::new(Mutex::new(Queue::default()));
+    let own_turns: Arc<Mutex<OwnTurns>> = Arc::default();
     // Thread-less events use the same routing as thread events, on id 0.
     harness.set_codex_account_sink(sink_for(&tx, 0, Provider::Codex));
     harness.set_opencode_default_sink(sink_for(&tx, 0, Provider::Opencode));
     // The naming turn's answer comes back in as an event like any other,
     // so it is written and forwarded by this same loop.
-    let (namer, bus, queued) = (harness.clone(), tx.clone(), queue.clone());
+    let (namer, bus, held) = (harness.clone(), tx.clone(), own_turns.clone());
     std::thread::spawn(move || {
         let alarm = Alarm::default();
         let wakeful = Wakeful {
@@ -36,12 +36,12 @@ pub fn init(app: &AppHandle) -> HarnessState {
             bus,
             alarm,
         };
-        super::consumer::consume(wakeful, queued, &mut io);
+        super::consumer::consume(wakeful, held, &mut io);
     });
     HarnessState {
         harness,
         bus: tx,
-        queue,
+        own_turns,
         startup: Arc::default(),
     }
 }

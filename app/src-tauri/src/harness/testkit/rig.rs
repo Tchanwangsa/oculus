@@ -18,10 +18,10 @@ use tokio::runtime::Runtime;
 use crate::harness::app::consumer::consume;
 use crate::harness::app::startup::Startup;
 use crate::harness::app::BusMsg;
-use crate::harness::core::effect::{Pools, Runtime as Effects};
+use crate::harness::core::effect::{self, Effect, Pools, Runtime as Effects};
 use crate::harness::core::{Command, Kind, Outcome};
 use crate::harness::{
-    jobs, store, Harness, HarnessEvent, Provider, Queue, SendOptions, Sink, Sinks,
+    jobs, store, Harness, HarnessEvent, OwnTurns, Provider, SendOptions, Sink, Sinks,
 };
 
 use super::io::{Clock, Feed, Io};
@@ -45,7 +45,10 @@ pub(super) struct Rig {
     pub sink: Sink,
     /// Where the thread's sessions report, as in the app.
     pub sinks: Arc<dyn Sinks>,
-    pub queue: Arc<Mutex<Queue>>,
+    pub own_turns: Arc<Mutex<OwnTurns>>,
+    /// What the consumer's effects run against, for one the test runs.
+    effects: Effects,
+    kept: Arc<Mutex<Option<Vec<Effect>>>>,
     outbound: Outbound,
     bridge: Bridge,
     fed: Arc<AtomicBool>,
@@ -136,7 +139,9 @@ impl Rig {
             bus: running.bus,
             sink: running.sink,
             sinks: running.sinks,
-            queue: running.queue,
+            own_turns: running.own_turns,
+            effects: running.effects,
+            kept: running.kept,
             outbound,
             bridge: running.bridge,
             fed: running.fed,
@@ -181,7 +186,9 @@ impl Rig {
         self.bus = running.bus;
         self.sink = running.sink;
         self.sinks = running.sinks;
-        self.queue = running.queue;
+        self.own_turns = running.own_turns;
+        self.effects = running.effects;
+        self.kept = running.kept;
         self.bridge = running.bridge;
         self.fed = running.fed;
         self.clock = running.clock;
@@ -279,6 +286,35 @@ impl Rig {
         self.runtime
             .block_on(answer)
             .map_err(|_| "the consumer has stopped".to_string())?
+    }
+
+    /// A turn has the thread: a run going out or being answered, or a turn
+    /// its CLI started itself.
+    pub fn busy(&self) -> bool {
+        let open = store::queue::open(&self.pool, self.thread);
+        self.runtime.block_on(open).unwrap().is_some()
+            || self.own_turns.lock().unwrap().is_held(self.thread)
+    }
+
+    /// From now on the consumer's effects wait for [`Self::run_effects`]:
+    /// the gap between a commit and its provider call, held open.
+    pub fn hold_effects(&self) {
+        self.kept.lock().unwrap().get_or_insert_with(Vec::new);
+    }
+
+    /// The effects kept back so far, without running them.
+    pub fn kept_effects(&self) -> Vec<Effect> {
+        let mut kept = self.kept.lock().unwrap();
+        kept.as_mut().map(std::mem::take).unwrap_or_default()
+    }
+
+    /// Run the effects kept back so far, as the app would have, and wait
+    /// for the consumer to hear how they went.
+    pub fn run_effects(&self) {
+        for effect in self.kept_effects() {
+            self.runtime.block_on(effect::run(&self.effects, effect));
+        }
+        self.drain();
     }
 
     /// A second recorded session for the thread, which the manager's next
@@ -406,7 +442,7 @@ impl Rig {
             )
             .unwrap();
         let ledger = runtime.block_on(snapshot::ledger(pool, thread));
-        let busy = self.queue.lock().unwrap().is_busy(thread);
+        let busy = self.busy();
         runtime.block_on(pool.close());
         let reopened_pool = runtime
             .block_on(crate::db::store::pool(&assert_scratch(
@@ -443,7 +479,9 @@ struct Running {
     bus: Sender<BusMsg>,
     sink: Sink,
     sinks: Arc<dyn Sinks>,
-    queue: Arc<Mutex<Queue>>,
+    own_turns: Arc<Mutex<OwnTurns>>,
+    effects: Effects,
+    kept: Arc<Mutex<Option<Vec<Effect>>>>,
     bridge: Bridge,
     fed: Arc<AtomicBool>,
     clock: Arc<Clock>,
@@ -467,12 +505,18 @@ fn boot(
     let (bus, rx) = std::sync::mpsc::channel::<BusMsg>();
     let sink = crate::harness::app::sink_for(&bus, thread, provider);
     let sinks = crate::harness::app::sinks_for(&bus, thread, provider);
-    let queue = Arc::new(Mutex::new(Queue::default()));
+    let own_turns: Arc<Mutex<OwnTurns>> = Arc::default();
+    let effects = Effects {
+        harness: harness.clone(),
+        bus: bus.clone(),
+        pools: Pools::Given(pool.clone()),
+    };
+    let kept: Arc<Mutex<Option<Vec<Effect>>>> = Arc::default();
     let fed = Arc::new(AtomicBool::new(false));
     let (drained, waiters) = std::sync::mpsc::channel();
     let clock = Clock::new();
     let consumer = {
-        let (queue, fed, clock) = (queue.clone(), fed.clone(), clock.clone());
+        let (held, fed, clock) = (own_turns.clone(), fed.clone(), clock.clone());
         let mut io = Io {
             pool: pool.clone(),
             database: database.to_path_buf(),
@@ -482,12 +526,9 @@ fn boot(
             snapshots: Vec::new(),
             runtime: None,
             epoch: std::time::Instant::now(),
-            effects: Effects {
-                harness: harness.clone(),
-                bus: bus.clone(),
-                pools: Pools::Given(pool.clone()),
-            },
+            effects: effects.clone(),
             continued: Vec::new(),
+            kept: kept.clone(),
             clock: clock.clone(),
         };
         std::thread::spawn(move || {
@@ -498,7 +539,7 @@ fn boot(
                 drained: waiters,
                 clock,
             };
-            consume(feed, queue, &mut io);
+            consume(feed, held, &mut io);
             io
         })
     };
@@ -515,7 +556,9 @@ fn boot(
         bus,
         sink,
         sinks,
-        queue,
+        own_turns,
+        effects,
+        kept,
         bridge,
         fed,
         clock,

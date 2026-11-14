@@ -11,7 +11,7 @@ use sqlx::SqlitePool;
 use crate::harness::app::consumer::{consume, ConsumerIo};
 use crate::harness::app::{BusMsg, Envelope};
 use crate::harness::core::effect::Effect;
-use crate::harness::{jobs, store, HarnessEvent, Provider, Queue, Release, SendOptions};
+use crate::harness::{jobs, store, HarnessEvent, OwnTurns, Provider, Release, SendOptions};
 
 use super::rig::Rig;
 use super::scenario::Scenario;
@@ -59,10 +59,7 @@ fn a_second_turn_completed_does_not_close_the_next_run() {
     rig.feed(&ended);
     rig.drain();
     assert_eq!(status_of(&rig, second.run_id), "running");
-    assert!(
-        rig.queue.lock().unwrap().is_busy(rig.thread),
-        "nothing queued behind the run is let go"
-    );
+    assert!(rig.busy(), "nothing queued behind the run is let go");
 
     for frame in as_turn(&frames, FIRST, "second-turn") {
         rig.feed(&frame);
@@ -195,10 +192,7 @@ fn a_killed_processs_late_terminal_reaches_no_run() {
     rig.until("answer");
     rig.harness.release(rig.thread, Release::Stopped);
     rig.drain();
-    assert!(
-        !rig.queue.lock().unwrap().is_busy(rig.thread),
-        "the stopped run let go of the thread"
-    );
+    assert!(!rig.busy(), "the stopped run let go of the thread");
 
     let mut killed = rig.next_session();
     let second = rig.send("second").unwrap();
@@ -336,7 +330,7 @@ fn a_send_racing_a_turn_the_cli_starts_is_settled_by_its_own_turn() {
         from_session(thread, 1, said("Here is the answer.")),
         from_session(thread, 1, ended("1")),
     ];
-    let queue = Arc::new(Mutex::new(Queue::default()));
+    let queue = Arc::new(Mutex::new(OwnTurns::default()));
     let mut io = Recorder {
         pool: pool.clone(),
         events: Vec::new(),
@@ -364,7 +358,11 @@ fn a_send_racing_a_turn_the_cli_starts_is_settled_by_its_own_turn() {
         .collect();
     assert_eq!(settled.len(), 1);
     assert!(
-        !queue.lock().unwrap().is_busy(thread),
+        !queue.lock().unwrap().is_held(thread)
+            && runtime
+                .block_on(store::queue::open(&pool, thread))
+                .unwrap()
+                .is_none(),
         "both turns let go of the thread"
     );
     runtime.block_on(pool.close());
@@ -404,7 +402,7 @@ fn one_run(
         },
     ];
     messages.extend(bus(thread));
-    let queue = Arc::new(Mutex::new(Queue::default()));
+    let queue = Arc::new(Mutex::new(OwnTurns::default()));
     let mut io = Recorder {
         pool: pool.clone(),
         events: Vec::new(),
@@ -412,7 +410,8 @@ fn one_run(
     consume(messages, queue.clone(), &mut io);
     let ledger = runtime.block_on(super::snapshot::ledger(&pool, thread));
     let items = runtime.block_on(super::snapshot::items(&pool, thread));
-    let busy = queue.lock().unwrap().is_busy(thread);
+    let open = runtime.block_on(store::queue::open(&pool, thread));
+    let busy = queue.lock().unwrap().is_held(thread) || open.unwrap().is_some();
     runtime.block_on(pool.close());
     (ledger, items, io.events, busy)
 }
@@ -494,7 +493,7 @@ fn a_release_closes_the_open_turn_by_its_reason() {
             from_session(thread, 1, said("late")),
         ]
     });
-    assert_eq!(ledger["runs"][0]["execution_status"], "preparing");
+    assert_eq!(ledger["runs"][0]["execution_status"], "starting");
     assert!(busy);
     assert!(!events.iter().any(|e| e["event"]["type"] == "turn_finished"));
 }

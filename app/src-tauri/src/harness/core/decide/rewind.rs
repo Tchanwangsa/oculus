@@ -22,7 +22,7 @@ pub(super) fn decide(
     let context = match answer {
         Some(Answer::Rewound { context }) => context,
         None => {
-            if state.live.busy {
+            if state.busy() {
                 return Err(match resend {
                     Some(_) => "stop the current turn before editing a question",
                     None => "stop the current turn before rewinding",
@@ -86,13 +86,15 @@ mod tests {
                 subject_code: None,
                 lecture: None,
             }),
-            live: Live { busy },
+            live: Live { held: busy },
             question: Some(Question {
                 text: "the question".into(),
                 anchor: anchor.map(String::from),
             }),
             newest_anchor: Some("newest".into()),
             waiting: 0,
+            held: 0,
+            open: false,
         }
     }
 

@@ -1,51 +1,40 @@
 use std::collections::HashMap;
 
-/// Which threads have a turn open.
+/// Threads in a turn their CLI started itself
+/// ([`UnpromptedTurn`](crate::harness::HarnessEvent::UnpromptedTurn)).
 ///
 /// The CLIs mishandle a message sent mid-turn (`claude` silently chains a
 /// second turn; `codex` folds it into the running one), so one turn per
-/// thread runs and the rest wait as queued runs in the database
-/// (`store/queue.rs`). A turn the provider starts itself
-/// ([`UnpromptedTurn`](crate::harness::HarnessEvent::UnpromptedTurn)) holds
-/// the thread the same way. Nothing here survives a restart, and nothing
-/// needs to: no turn does either.
+/// thread runs and the rest wait as queued runs (`store/queue.rs`). A run's
+/// own turn is a row, which is what holds the thread; a turn the CLI starts
+/// has no run and no row, so it is counted here until its `TurnFinished`.
+/// Kept apart from the student's hold on the queue (`queue_held`), so
+/// resuming the queue cannot release a message into a live turn. Nothing
+/// here survives a restart, and nothing needs to: no turn does either.
 #[derive(Default)]
-pub struct Queue {
-    /// Turns holding each thread. Each is released by its `TurnFinished`:
-    /// every bridge emits exactly one per message it accepts and per turn
-    /// the provider starts itself. Two at once is a send racing such a turn.
+pub struct OwnTurns {
     open: HashMap<i64, u32>,
 }
 
-impl Queue {
-    /// Take the thread for a send. False when a turn already has it.
-    pub fn try_claim(&mut self, thread_id: i64) -> bool {
-        let open = self.open.entry(thread_id).or_default();
-        if *open > 0 {
-            return false;
-        }
-        *open = 1;
-        true
-    }
-
-    /// The provider started a turn of its own: the thread is held until its
-    /// `TurnFinished`, whatever else holds it.
+impl OwnTurns {
+    /// The provider started a turn of its own on this thread.
     pub fn hold(&mut self, thread_id: i64) {
         *self.open.entry(thread_id).or_default() += 1;
     }
 
-    /// A turn ended. True once no other turn holds the thread, which is
-    /// when the next waiting run may start.
-    pub fn release(&mut self, thread_id: i64) -> bool {
-        let open = self.open.entry(thread_id).or_default();
-        *open = open.saturating_sub(1);
-        *open == 0
+    /// One of them ended.
+    pub fn release(&mut self, thread_id: i64) {
+        if let Some(open) = self.open.get_mut(&thread_id) {
+            *open = open.saturating_sub(1);
+            if *open == 0 {
+                self.open.remove(&thread_id);
+            }
+        }
     }
 
-    /// A turn is open on this thread. Anything that rewrites the thread's
-    /// rows has to wait for it.
-    pub fn is_busy(&self, thread_id: i64) -> bool {
-        self.open.get(&thread_id).is_some_and(|open| *open > 0)
+    /// A turn of the provider's own is open on this thread.
+    pub fn is_held(&self, thread_id: i64) -> bool {
+        self.open.contains_key(&thread_id)
     }
 
     pub fn forget(&mut self, thread_id: i64) {
@@ -58,46 +47,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_thread_runs_one_turn_at_a_time() {
-        let mut q = Queue::default();
-        assert!(q.try_claim(1), "an idle thread is taken by the first send");
-        assert!(!q.try_claim(1), "and not by the second");
-        // Another thread is not held up by this one.
-        assert!(q.try_claim(2));
-        assert!(q.release(1), "its turn ended");
-        assert!(q.try_claim(1), "and the thread is free again");
+    fn a_turn_the_provider_starts_holds_its_thread_until_it_ends() {
+        let mut turns = OwnTurns::default();
+        assert!(!turns.is_held(3));
+        turns.hold(3);
+        assert!(turns.is_held(3));
+        assert!(!turns.is_held(4), "another thread is not held up by it");
+        turns.release(3);
+        assert!(!turns.is_held(3));
+        turns.release(3);
+        assert!(!turns.is_held(3), "a repeated end holds nothing");
     }
 
     #[test]
-    fn a_turn_the_provider_starts_holds_an_idle_thread() {
-        let mut q = Queue::default();
-        q.hold(3);
-        assert!(q.is_busy(3));
-        assert!(
-            !q.try_claim(3),
-            "a send waits behind the provider's own turn"
-        );
-        assert!(q.release(3));
-        assert!(!q.is_busy(3));
-    }
-
-    #[test]
-    fn a_hold_racing_a_claim_releases_after_both_turns() {
-        let mut q = Queue::default();
-        assert!(q.try_claim(4));
-        q.hold(4);
-        assert!(!q.release(4), "one turn still holds the thread");
-        assert!(!q.try_claim(4));
-        assert!(q.release(4));
-        assert!(q.try_claim(4));
-    }
-
-    #[test]
-    fn a_forgotten_thread_is_free() {
-        let mut q = Queue::default();
-        q.hold(5);
-        q.forget(5);
-        assert!(!q.is_busy(5));
-        assert!(q.release(5), "a late end of a forgotten turn holds nothing");
+    fn two_turns_hold_until_both_end_and_a_forgotten_thread_is_free() {
+        let mut turns = OwnTurns::default();
+        turns.hold(5);
+        turns.hold(5);
+        turns.release(5);
+        assert!(turns.is_held(5));
+        turns.forget(5);
+        assert!(!turns.is_held(5));
     }
 }

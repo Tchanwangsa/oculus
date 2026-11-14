@@ -32,6 +32,9 @@ pub(super) struct Io {
     pub effects: effect::Runtime,
     /// The cards whose continuation the consumer started.
     pub continued: Vec<String>,
+    /// Effects kept back for the test to run when it chooses
+    /// (`Rig::hold_effects`); `None` runs each as it is asked for.
+    pub kept: Arc<Mutex<Option<Vec<Effect>>>>,
     pub clock: Arc<Clock>,
 }
 
@@ -92,13 +95,18 @@ impl ConsumerIo for Io {
     fn name(&mut self, _: i64, _: Provider, _: Vec<jobs::JobSelection>, _: store::NamingSeed) {
         self.outbound.exchange(json!({"operation":"thread naming"}));
     }
-    /// An effect runs at once, on the consumer's thread: the recorded
-    /// session answers inline, so the turn is open when the command returns.
+    /// An effect runs at once, on the consumer's thread, unless the test
+    /// keeps them back: the recorded session answers inline, so the turn is
+    /// open when the command returns.
     /// Its writes to the provider are checked like any other, so a start the
     /// recording did not make fails the replay.
     fn perform(&mut self, effect: Effect) {
         if let Effect::Start(start) = &effect {
             self.continued.extend(start.options.continuation.clone());
+        }
+        if let Some(kept) = self.kept.lock().unwrap().as_mut() {
+            kept.push(effect);
+            return;
         }
         let runtime = self.runtime.as_ref().unwrap();
         runtime.block_on(effect::run(&self.effects, effect));

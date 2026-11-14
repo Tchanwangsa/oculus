@@ -8,7 +8,7 @@
       "itemId": 1,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794679309878231,
+      "sequence": 1794680159456342,
       "revision": 2,
       "event": {
         "type": "user_message",
@@ -21,7 +21,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794679309878232,
+      "sequence": 1794680159456343,
       "revision": 3,
       "event": {
         "type": "session_started",
@@ -36,7 +36,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794679309878233,
+      "sequence": 1794680159456344,
       "revision": 3,
       "event": {
         "type": "turn_started"
@@ -48,7 +48,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794679309878234,
+      "sequence": 1794680159456345,
       "revision": 3,
       "event": {
         "type": "assistant_delta",
@@ -61,7 +61,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794679309878235,
+      "sequence": 1794680159456346,
       "revision": 3,
       "event": {
         "type": "assistant_delta",
@@ -74,7 +74,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794679309878236,
+      "sequence": 1794680159456347,
       "revision": 3,
       "event": {
         "type": "assistant_delta",
@@ -87,7 +87,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794679309878237,
+      "sequence": 1794680159456348,
       "revision": 3,
       "event": {
         "type": "assistant_delta",
@@ -100,7 +100,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794679309878238,
+      "sequence": 1794680159456349,
       "revision": 3,
       "event": {
         "type": "assistant_delta",
@@ -113,7 +113,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794679309878239,
+      "sequence": 1794680159456350,
       "revision": 3,
       "event": {
         "type": "assistant_delta",
@@ -126,7 +126,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794679309878240,
+      "sequence": 1794680159456351,
       "revision": 3,
       "event": {
         "type": "assistant_delta",
@@ -140,7 +140,7 @@
       "runId": 1,
       "attemptId": 1,
       "entityId": "weak:0",
-      "sequence": 1794679309878241,
+      "sequence": 1794680159456352,
       "revision": 4,
       "event": {
         "type": "assistant_message",
@@ -157,7 +157,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794679309878242,
+      "sequence": 1794680159456353,
       "revision": 6,
       "event": {
         "type": "run_settled",
@@ -165,8 +165,8 @@
         "work_item_ids": [],
         "delivery": "incomplete",
         "status": "interrupted",
-        "started_at": "2026-11-14 18:01:49",
-        "ended_at": "2026-11-14 18:01:49"
+        "started_at": "2026-11-14 18:15:59",
+        "ended_at": "2026-11-14 18:15:59"
       }
     },
     {
@@ -176,7 +176,7 @@
       "runId": 1,
       "attemptId": 1,
       "entityId": "weak:1",
-      "sequence": 1794679309878243,
+      "sequence": 1794680159456354,
       "revision": 6,
       "event": {
         "type": "turn_finished",
@@ -187,7 +187,7 @@
       "threadId": 1,
       "provider": "claude",
       "itemId": null,
-      "sequence": 1794679309878244,
+      "sequence": 1794680159456355,
       "revision": 6,
       "event": {
         "type": "exited",
@@ -203,7 +203,7 @@
       "ref_id": null,
       "content": "Replay request",
       "meta": null,
-      "created_at": "2026-11-14 18:01:49",
+      "created_at": "2026-11-14 18:15:59",
       "anchor": null,
       "run_id": 1,
       "attempt_id": null,
@@ -220,7 +220,7 @@
       "ref_id": null,
       "content": "1. Start studying.\n9. Use the Feynman Technique: explain concepts",
       "meta": null,
-      "created_at": "2026-11-14 18:01:49",
+      "created_at": "2026-11-14 18:15:59",
       "anchor": null,
       "run_id": 1,
       "attempt_id": 1,
@@ -237,7 +237,7 @@
       "ref_id": null,
       "content": null,
       "meta": null,
-      "created_at": "2026-11-14 18:01:49",
+      "created_at": "2026-11-14 18:15:59",
       "anchor": null,
       "run_id": 1,
       "attempt_id": 1,
@@ -258,8 +258,8 @@
       "origin": "student",
       "delivery_state": "incomplete",
       "answer_item_id": 2,
-      "started_at": "2026-11-14 18:01:49",
-      "ended_at": "2026-11-14 18:01:49"
+      "started_at": "2026-11-14 18:15:59",
+      "ended_at": "2026-11-14 18:15:59"
     }
   ]
 }

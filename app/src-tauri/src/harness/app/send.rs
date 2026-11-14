@@ -1,4 +1,5 @@
-//! The start step: a run that is already written goes out to its provider.
+//! The driver's start step: a run that is already written goes out to its
+//! provider.
 //! The thread row decides model, subject and lecture, its link decides the
 //! Studio video, then the send runs on a blocking thread.
 
@@ -7,26 +8,45 @@ use sqlx::SqlitePool;
 use crate::harness::antigravity_rules;
 use crate::harness::core::effect::{Runtime, Start};
 use crate::harness::store;
-use crate::harness::{HarnessEvent, LectureBrief, Provider, Release, SendOptions, StudioBrief};
+use crate::harness::{LectureBrief, Provider, Release, SendOptions, StudioBrief};
 use crate::runtime::blocking::run as blocking;
 
 use super::proposal_context::{self, Cards};
-use super::{sink_for, sinks_for};
+use super::{sinks_for, BusMsg};
 
-/// Send a run the consumer has written. A failure still closes the turn (an
-/// error row, then `TurnFinished`), which settles the run as failed, so
-/// nothing waiting behind it is stranded.
+/// Send a run the consumer has written as `starting`, and tell the
+/// consumer how it went (`BusMsg::Sent`): accepted by the provider,
+/// withdrawn because the run was stopped or is gone before the provider
+/// heard of it, or failed, which the consumer commits as the run's failure
+/// so nothing waiting behind it is stranded.
 pub(in crate::harness) async fn start(rt: &Runtime, start: Start) {
-    let (thread_id, provider) = (start.thread_id, start.provider);
-    if let Err(e) = send(rt, start).await {
-        elog!("[oculus] harness send: {e}");
-        let sink = sink_for(&rt.bus, thread_id, provider);
-        sink(HarnessEvent::error(e));
-        sink(HarnessEvent::TurnFinished {
-            status: "failed".into(),
-            turn: None,
-        });
-    }
+    let (thread_id, provider, run_id) = (start.thread_id, start.provider, start.run.run_id);
+    let outcome = match send(rt, start).await {
+        Ok(true) => Sent::Accepted,
+        Ok(false) => Sent::Withdrawn,
+        Err(e) => {
+            elog!("[oculus] harness send: {e}");
+            Sent::Failed(e)
+        }
+    };
+    let _ = rt.bus.send(BusMsg::Sent {
+        thread_id,
+        provider,
+        run_id,
+        outcome,
+    });
+}
+
+/// How a run's start step ended.
+#[derive(Debug)]
+pub(in crate::harness) enum Sent {
+    /// The provider has the message; its turn will report.
+    Accepted,
+    /// The run was no longer `starting`, or was asked to stop: the provider
+    /// was not called.
+    Withdrawn,
+    /// The send failed, before or at the provider.
+    Failed(String),
 }
 
 /// The lecture section of a thread's brief, read off its row on every
@@ -61,7 +81,8 @@ pub(super) async fn studio_brief(pool: &SqlitePool, thread_id: i64) -> Option<St
     ))
 }
 
-async fn send(rt: &Runtime, start: Start) -> Result<(), String> {
+/// False when the run was not this start's to send any more.
+async fn send(rt: &Runtime, start: Start) -> Result<bool, String> {
     let Start {
         thread_id,
         provider,
@@ -112,12 +133,18 @@ async fn send(rt: &Runtime, start: Start) -> Result<(), String> {
         opts.context.as_deref(),
     )
     .await?;
+    // The last check before the provider hears of it: a run stopped while
+    // this step prepared, or one a rewind or a delete took, is not sent.
+    if !store::claim_start(&pool, &run).await? {
+        return Ok(false);
+    }
     let (h, sinks) = (rt.harness.clone(), sinks_for(&rt.bus, thread_id, provider));
     blocking(move || h.send(thread_id, provider, resume.as_deref(), &opts, &text, &sinks)).await?;
     if let Err(e) = store::mark_sent(&pool, &run).await {
         elog!("[oculus] harness run {}: {e}", run.run_id);
     }
-    proposal_context::accepted(&pool, cards).await
+    proposal_context::accepted(&pool, cards).await?;
+    Ok(true)
 }
 
 /// What the provider is sent for a run, and the one place its text is

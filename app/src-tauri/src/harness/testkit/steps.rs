@@ -17,7 +17,7 @@ fn a_gate_holds_the_turn_open_until_the_transcript_resumes() {
         )
         .unwrap();
     assert_eq!(status, "running", "paused mid-turn");
-    assert!(rig.queue.lock().unwrap().is_busy(rig.thread));
+    assert!(rig.busy());
 
     rig.resume();
     rig.close();

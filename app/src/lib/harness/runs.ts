@@ -13,7 +13,10 @@ export interface RunRow {
   ended_at: string | null;
 }
 
-const STATUSES = new Set<RunStatus>(["preparing", "running", "completed", "interrupted", "failed"]);
+/** The statuses of a run with a timeline row. `starting` is saved and not
+ *  yet handed to its provider (`preparing` in rows from before it); a run
+ *  that only waits, or was cancelled, is never loaded as a run. */
+const STATUSES = new Set<RunStatus>(["preparing", "starting", "running", "completed", "interrupted", "failed"]);
 
 export function runFromRow(row: RunRow): HarnessRun {
   const status = STATUSES.has(row.execution_status as RunStatus) ? (row.execution_status as RunStatus) : "failed";
@@ -31,12 +34,13 @@ export function runFromRow(row: RunRow): HarnessRun {
 export const runEnded = (run: HarnessRun | undefined) =>
   !!run && (run.status === "completed" || run.status === "interrupted" || run.status === "failed");
 
-/** When the thread's newest running run started; null with none (a turn the
- *  agent started itself has no run). */
+/** When the thread's newest live run (going out, or being answered) started;
+ *  null with none (a turn the agent started itself has no run). */
 export function runningSince(runs: Record<number, HarnessRun> | undefined): number | null {
   let latest: HarnessRun | null = null;
   for (const run of Object.values(runs ?? {})) {
-    if (run.status === "running" && (!latest || run.id > latest.id)) latest = run;
+    const live = run.status === "running" || run.status === "starting";
+    if (live && (!latest || run.id > latest.id)) latest = run;
   }
   return latest?.started_ms ?? null;
 }

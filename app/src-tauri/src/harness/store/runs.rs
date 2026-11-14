@@ -44,6 +44,9 @@ pub struct SendIntent {
     /// The waiting run this send starts (`queue.rs`): its row becomes the
     /// run, instead of a new one. `None` for a send that never waited.
     pub queued: Option<i64>,
+    /// The send's options as the run keeps them (`queue::stored`), which is
+    /// what its start step reads; `None` keeps what a waiting run holds.
+    pub options: Option<String>,
 }
 
 /// [`begin`]'s refusal of a continuation its card no longer holds a claim
@@ -140,7 +143,8 @@ pub async fn begin(tx: &mut SqliteConnection, send: &SendIntent) -> Result<RunSt
             let started = sqlx::query(&format!(
                 "UPDATE harness_runs
                     SET ordinal = {NEXT_ORDINAL}, initiating_item_id = ?2, binding_id = ?3, model = ?4,
-                        execution_status = 'preparing', queue_position = NULL, queue_held = 0
+                        execution_status = 'starting', queue_position = NULL, queue_held = 0,
+                        queued_text = ?6, queued_options = COALESCE(?7, queued_options)
                   WHERE id = ?5 AND thread_id = ?1 AND execution_status = 'queued'"
             ))
             .bind(send.thread_id)
@@ -148,6 +152,8 @@ pub async fn begin(tx: &mut SqliteConnection, send: &SendIntent) -> Result<RunSt
             .bind(binding_id)
             .bind(&send.model)
             .bind(run_id)
+            .bind(&send.text)
+            .bind(&send.options)
             .execute(&mut *tx)
             .await
             .map_err(err)?
@@ -159,14 +165,17 @@ pub async fn begin(tx: &mut SqliteConnection, send: &SendIntent) -> Result<RunSt
         }
         None => sqlx::query(&format!(
             "INSERT INTO harness_runs
-               (thread_id, ordinal, origin, initiating_item_id, binding_id, model, execution_status)
-             VALUES (?1, {NEXT_ORDINAL}, ?5, ?2, ?3, ?4, 'preparing')"
+               (thread_id, ordinal, origin, initiating_item_id, binding_id, model, execution_status,
+                queued_text, queued_options)
+             VALUES (?1, {NEXT_ORDINAL}, ?5, ?2, ?3, ?4, 'starting', ?6, ?7)"
         ))
         .bind(send.thread_id)
         .bind(item_id)
         .bind(binding_id)
         .bind(&send.model)
         .bind(origin)
+        .bind(&send.text)
+        .bind(&send.options)
         .execute(&mut *tx)
         .await
         .map_err(err)?
@@ -176,7 +185,7 @@ pub async fn begin(tx: &mut SqliteConnection, send: &SendIntent) -> Result<RunSt
         super::super::app::continuation::started(&mut *tx, card, run_id).await?;
     }
     let attempt_id = sqlx::query(
-        "INSERT INTO harness_attempts (run_id, ordinal, reason, status) VALUES (?1, 1, 'initial', 'preparing')",
+        "INSERT INTO harness_attempts (run_id, ordinal, reason, status) VALUES (?1, 1, 'initial', 'starting')",
     )
     .bind(run_id)
     .execute(&mut *tx)
@@ -274,18 +283,36 @@ pub(super) async fn binding(
     binding_for(tx, thread_id, provider, session.as_deref()).await
 }
 
-/// The provider accepted the send. Conditional, since the turn may already
-/// have finished on the consumer by the time the write returns.
+/// The start step takes the run for its provider call: `starting` becomes
+/// `running`, once, and only while nobody asked it to stop. False means
+/// the call must not be made: the run was stopped, settled or deleted in
+/// the meantime, or another start already has it.
+pub async fn claim_start(pool: &SqlitePool, run: &RunStart) -> Result<bool, String> {
+    let claimed = sqlx::query(
+        "UPDATE harness_runs SET execution_status = 'running'
+          WHERE id = ?1 AND execution_status = 'starting' AND stop_requested_at IS NULL",
+    )
+    .bind(run.run_id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .rows_affected();
+    Ok(claimed == 1)
+}
+
+/// The provider accepted the send: the run's clock starts. Conditional,
+/// since the turn may already have finished on the consumer by the time
+/// the write returns.
 pub async fn mark_sent(pool: &SqlitePool, run: &RunStart) -> Result<(), String> {
     for (sql, id) in [
         (
-            "UPDATE harness_runs SET execution_status = 'running', started_at = datetime('now')
-              WHERE id = ?1 AND execution_status = 'preparing'",
+            "UPDATE harness_runs SET started_at = datetime('now')
+              WHERE id = ?1 AND execution_status = 'running' AND started_at IS NULL",
             run.run_id,
         ),
         (
             "UPDATE harness_attempts SET status = 'running', started_at = datetime('now')
-              WHERE id = ?1 AND status = 'preparing'",
+              WHERE id = ?1 AND status IN ('preparing', 'starting')",
             run.attempt_id,
         ),
     ] {
@@ -338,7 +365,7 @@ pub async fn settle(
     let mut tx = pool.begin().await.map_err(err)?;
     let closed = sqlx::query(
         "UPDATE harness_runs SET execution_status = ?2, ended_at = datetime('now')
-          WHERE id = ?1 AND execution_status IN ('preparing', 'running')",
+          WHERE id = ?1 AND execution_status IN ('preparing', 'starting', 'running')",
     )
     .bind(run_id)
     .bind(status)
@@ -351,7 +378,7 @@ pub async fn settle(
     }
     sqlx::query(
         "UPDATE harness_attempts SET status = ?2, ended_at = datetime('now')
-          WHERE id = ?1 AND status IN ('preparing', 'running')",
+          WHERE id = ?1 AND status IN ('preparing', 'starting', 'running')",
     )
     .bind(attempt_id)
     .bind(status)
@@ -468,7 +495,7 @@ pub async fn settle(
         .execute(&mut *tx)
         .await
         .map_err(err)?;
-    // A run that never left `preparing` has no start; its request time stands in.
+    // A run the provider never accepted has no start; its request time stands in.
     let (started_at, ended_at): (Option<String>, Option<String>) = sqlx::query_as(
         "SELECT COALESCE(started_at, requested_at), ended_at FROM harness_runs WHERE id = ?1",
     )

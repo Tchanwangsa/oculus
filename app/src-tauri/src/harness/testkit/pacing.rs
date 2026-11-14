@@ -11,7 +11,7 @@ use crate::harness::app::consumer::{consume, ConsumerIo};
 use crate::harness::app::{BusMsg, Envelope};
 use crate::harness::core::effect::Effect;
 use crate::harness::event::Source;
-use crate::harness::{jobs, store, HarnessEvent, Provider, Queue};
+use crate::harness::{jobs, store, HarnessEvent, OwnTurns, Provider};
 
 /// A consumer whose clock the test sets before each message, recording what
 /// the draft table held as each envelope went out.
@@ -112,7 +112,7 @@ fn streamed_text_reaches_the_draft_once_per_interval_and_leaves_with_its_message
         told: Vec::new(),
         runtime: tokio::runtime::Runtime::new().unwrap(),
     };
-    consume(bus, Arc::new(Mutex::new(Queue::default())), &mut io);
+    consume(bus, Arc::new(Mutex::new(OwnTurns::default())), &mut io);
 
     let drafts: Vec<_> = io
         .seen
@@ -203,7 +203,7 @@ fn a_failed_settle_is_retried_at_growing_intervals_until_it_lands() {
         pragmas.block_on(sqlx::query(pragma).execute(&db)).unwrap();
         msg
     });
-    let queue = Arc::new(Mutex::new(Queue::default()));
+    let queue = Arc::new(Mutex::new(OwnTurns::default()));
     let mut io = Timed {
         pool: pool.clone(),
         now,
@@ -239,6 +239,6 @@ fn a_failed_settle_is_retried_at_growing_intervals_until_it_lands() {
         .block_on(sqlx::query_scalar("SELECT execution_status FROM harness_runs").fetch_one(&pool))
         .unwrap();
     assert_eq!(status, "completed");
-    assert!(!queue.lock().unwrap().is_busy(thread));
+    assert!(!queue.lock().unwrap().is_held(thread));
     runtime.block_on(pool.close());
 }

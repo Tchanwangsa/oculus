@@ -4,7 +4,7 @@
 
 mod commands;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -14,7 +14,7 @@ use tokio::runtime::Runtime;
 use crate::harness::core::effect::Effect;
 use crate::harness::event::{GapCause, Source};
 use crate::harness::{
-    jobs, store, Generation, HarnessEvent, Provider, Queue, Release, SendOptions,
+    jobs, store, Generation, HarnessEvent, OwnTurns, Provider, Release, SendOptions,
 };
 
 use super::drafts::Drafts;
@@ -52,13 +52,13 @@ pub(in crate::harness) trait ConsumerIo {
 
 pub(in crate::harness) fn consume(
     rx: impl IntoIterator<Item = BusMsg>,
-    queue: Arc<Mutex<Queue>>,
+    own_turns: Arc<Mutex<OwnTurns>>,
     io: &mut impl ConsumerIo,
 ) {
     let mut consumer = Consumer {
         rt: tokio::runtime::Runtime::new().expect("tokio runtime"),
         pool: None,
-        queue,
+        own_turns,
         clock: ThoughtClock::default(),
         runs: RunScope::default(),
         drafts: Drafts::default(),
@@ -66,6 +66,7 @@ pub(in crate::harness) fn consume(
         sequence: first_sequence(),
         revisions: HashMap::new(),
         asking: HashMap::new(),
+        started: HashSet::new(),
     };
     for msg in rx {
         consumer.handle(msg, io);
@@ -80,7 +81,9 @@ pub(in crate::harness) fn consume(
 struct Consumer {
     rt: Runtime,
     pool: Option<SqlitePool>,
-    queue: Arc<Mutex<Queue>>,
+    /// Threads in a turn their CLI started itself, shared with the app's
+    /// commands that must not act mid-turn.
+    own_turns: Arc<Mutex<OwnTurns>>,
     clock: ThoughtClock,
     runs: RunScope,
     drafts: Drafts,
@@ -92,6 +95,8 @@ struct Consumer {
     /// Commands waiting on a provider's answer before they can commit, by
     /// thread (`commands.rs`).
     asking: HashMap<i64, commands::Asking>,
+    /// Runs already handed to their start step (`drive`), until they settle.
+    started: HashSet<i64>,
 }
 
 impl Consumer {
@@ -126,6 +131,12 @@ impl Consumer {
                 generation,
                 reason,
             } => self.end_session(thread_id, provider, generation, reason, io),
+            BusMsg::Sent {
+                thread_id,
+                provider,
+                run_id,
+                outcome,
+            } => self.sent(thread_id, provider, run_id, outcome, io),
             BusMsg::Wake => {}
         }
     }
@@ -278,14 +289,12 @@ impl Consumer {
         // Whose turn a terminal ends. One for a turn this thread does not
         // have open (another turn's, or a repeated `result`) settles nothing
         // and must not release a queued message.
-        let terminal =
-            match &ev {
-                HarnessEvent::TurnFinished { turn, .. } if thread_id > 0 => Some(
-                    self.runs
-                        .terminal(thread_id, from, turn.as_ref(), &self.queue),
-                ),
-                _ => None,
-            };
+        let terminal = match &ev {
+            HarnessEvent::TurnFinished { turn, .. } if thread_id > 0 => {
+                Some(self.runs.terminal(thread_id, from, turn.as_ref()))
+            }
+            _ => None,
+        };
         if terminal == Some(Terminal::Stray) {
             if let (From::Session(generation), HarnessEvent::TurnFinished { turn, .. }) =
                 (from, &ev)
@@ -432,6 +441,7 @@ impl Consumer {
             self.revisions.insert(thread_id, settlement.revision);
         }
         self.runs.close(thread_id);
+        self.started.remove(&run_id);
         // Settlement removed the stored draft with the run.
         self.drafts.take(run_id);
         let mut out = Vec::new();
@@ -548,7 +558,7 @@ impl Consumer {
         // A turn the provider started itself holds the thread like a
         // send, so a message typed meanwhile waits its own turn.
         if thread_id > 0 && matches!(&ev, HarnessEvent::UnpromptedTurn { .. }) {
-            self.queue.lock().unwrap().hold(thread_id);
+            self.own_turns.lock().unwrap().hold(thread_id);
         }
         let closed = match (terminal, &ev) {
             (Some(was), HarnessEvent::TurnFinished { turn, .. }) => Some((was, turn.clone())),
@@ -577,7 +587,10 @@ impl Consumer {
         // A closed turn lets the next waiting message go.
         if let Some((was, turn)) = closed {
             self.runs.finished(thread_id, from, turn.as_ref(), was);
-            self.start_next(thread_id, provider, io);
+            if was == Terminal::Own {
+                self.own_turns.lock().unwrap().release(thread_id);
+            }
+            self.drive(thread_id, provider, io);
         }
         // A settled card with a follow-up claims its one continuation: it
         // goes out now on an idle thread, or waits its turn like a message.
@@ -647,16 +660,14 @@ impl Consumer {
                     continuation: Some(proposal.to_string()),
                     ..SendOptions::default()
                 };
-                // Behind whatever is running or already waits; `promote`
+                // Behind whatever is running or already waits; the driver
                 // sends it at once when nothing is.
                 match self.enqueue(thread_id, provider, (line, opts), io) {
                     Ok(()) => {
                         self.snapshot(thread_id, provider, proposal, io);
-                        self.promote(thread_id, provider, io);
+                        self.drive(thread_id, provider, io);
                     }
-                    Err(failed) => {
-                        elog!("[oculus] card continuation {proposal}: {}", failed.error)
-                    }
+                    Err(e) => elog!("[oculus] card continuation {proposal}: {e}"),
                 }
             }
             Ok(None) => {}

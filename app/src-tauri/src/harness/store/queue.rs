@@ -11,6 +11,8 @@ use sqlx::{Row, SqliteConnection, SqliteExecutor};
 use crate::harness::event::Provider;
 use crate::harness::SendOptions;
 
+use super::runs::RunStart;
+
 /// A student's waiting message, as the composer lists it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -29,32 +31,39 @@ pub struct Waiting {
     pub options: SendOptions,
 }
 
-/// What a waiting run keeps of its send: the options as the webview sent
-/// them, whole, and the card a continuation belongs to, which the app sets
-/// and the options never serialize.
+/// What a run keeps of its send: the options as the webview sent them,
+/// whole, the card a continuation belongs to (which the app sets and the
+/// options never serialize), and whether the send changed the chat's model.
 #[derive(Serialize, Deserialize, Default)]
 struct Stored {
     send: SendOptions,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     continuation: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    respawn: bool,
 }
 
-fn stored(options: &SendOptions) -> Result<String, String> {
+/// `options` as a run stores them. `respawn` is set once the run starts:
+/// its send changed the chat's model, which a CLI that fixes its model at
+/// spawn can only take as a new session.
+pub fn stored(options: &SendOptions, respawn: bool) -> Result<String, String> {
     serde_json::to_string(&Stored {
         send: options.clone(),
         continuation: options.continuation.clone(),
+        respawn,
     })
     .map_err(|e| e.to_string())
 }
 
-fn restored(json: Option<String>) -> SendOptions {
+fn restored(json: Option<String>) -> (SendOptions, bool) {
     let stored: Stored = json
         .and_then(|json| serde_json::from_str(&json).ok())
         .unwrap_or_default();
-    SendOptions {
+    let options = SendOptions {
         continuation: stored.continuation,
         ..stored.send
-    }
+    };
+    (options, stored.respawn)
 }
 
 /// Add a message to the back of the thread's queue. Its ordinal is a
@@ -86,7 +95,7 @@ pub async fn enqueue(
     .bind(origin)
     .bind(binding_id)
     .bind(text)
-    .bind(stored(options)?)
+    .bind(stored(options, false)?)
     .execute(&mut *tx)
     .await
     .map_err(err)?
@@ -137,14 +146,62 @@ pub async fn next(db: impl SqliteExecutor<'_>, thread_id: i64) -> Result<Option<
         text: r
             .get::<Option<String>, _>("queued_text")
             .unwrap_or_default(),
-        options: restored(r.get("queued_options")),
+        options: restored(r.get("queued_options")).0,
     }))
 }
 
-/// How many runs wait in the thread's queue, held or not.
-pub async fn waiting(db: impl SqliteExecutor<'_>, thread_id: i64) -> Result<i64, String> {
-    sqlx::query_scalar(
-        "SELECT COUNT(*) FROM harness_runs WHERE thread_id = ?1 AND execution_status = 'queued'",
+/// The thread's open run: the one going out or being answered.
+pub struct Open {
+    pub run: RunStart,
+    /// `starting` until the start step has taken it for its provider call.
+    pub starting: bool,
+    /// The row's text: the student's words, or a continuation's line.
+    pub text: String,
+    pub options: SendOptions,
+    pub respawn: bool,
+}
+
+/// A thread runs one turn at a time, so at most one run is open.
+pub async fn open(db: impl SqliteExecutor<'_>, thread_id: i64) -> Result<Option<Open>, String> {
+    let row = sqlx::query(
+        "SELECT id, active_attempt_id, binding_id, initiating_item_id, execution_status,
+                queued_text, queued_options
+           FROM harness_runs
+          WHERE thread_id = ?1 AND execution_status IN ('preparing', 'starting', 'running')
+          ORDER BY id DESC LIMIT 1",
+    )
+    .bind(thread_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(row.map(|r| {
+        let (options, respawn) = restored(r.get("queued_options"));
+        Open {
+            run: RunStart {
+                run_id: r.get("id"),
+                attempt_id: r
+                    .get::<Option<i64>, _>("active_attempt_id")
+                    .unwrap_or_default(),
+                binding_id: r.get("binding_id"),
+                item_id: r
+                    .get::<Option<i64>, _>("initiating_item_id")
+                    .unwrap_or_default(),
+            },
+            starting: r.get::<String, _>("execution_status") == "starting",
+            text: r
+                .get::<Option<String>, _>("queued_text")
+                .unwrap_or_default(),
+            options,
+            respawn,
+        }
+    }))
+}
+
+/// How many runs wait in the thread's queue, and how many of them are held.
+pub async fn waiting(db: impl SqliteExecutor<'_>, thread_id: i64) -> Result<(i64, i64), String> {
+    sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(SUM(queue_held != 0), 0) FROM harness_runs
+          WHERE thread_id = ?1 AND execution_status = 'queued'",
     )
     .bind(thread_id)
     .fetch_one(db)
@@ -224,6 +281,19 @@ pub async fn reorder(
     Ok(())
 }
 
+/// Lift the hold on the thread's queue.
+pub async fn unhold(tx: &mut SqliteConnection, thread_id: i64) -> Result<(), String> {
+    sqlx::query(
+        "UPDATE harness_runs SET queue_held = 0
+          WHERE thread_id = ?1 AND execution_status = 'queued' AND queue_held != 0",
+    )
+    .bind(thread_id)
+    .execute(&mut *tx)
+    .await
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
 /// What [`clear`] took out of the queue.
 #[derive(Default, Debug)]
 pub struct Cleared {
@@ -246,7 +316,7 @@ pub async fn clear(tx: &mut SqliteConnection, thread_id: i64) -> Result<Cleared,
     .map_err(err)?;
     let mut cleared = Cleared::default();
     for row in &rows {
-        match restored(row.get("queued_options")).continuation {
+        match restored(row.get("queued_options")).0.continuation {
             Some(card) => cleared.cards.push(card),
             None => cleared.texts.push(
                 row.get::<Option<String>, _>("queued_text")
@@ -263,4 +333,60 @@ pub async fn clear(tx: &mut SqliteConnection, thread_id: i64) -> Result<Cleared,
     .await
     .map_err(err)?;
     Ok(cleared)
+}
+
+/// Startup: a run still `starting` was written and never handed to its
+/// provider, so nothing of it was sent. A student's message goes back to
+/// the head of the queue, held, without its question row (it takes a new
+/// one when it starts); a continuation's click belongs to the session that
+/// is over, so its run is cancelled and its card says the app closed.
+pub(super) async fn requeue_unsent(tx: &mut SqliteConnection, skipped: &str) -> Result<(), String> {
+    let err = |e: sqlx::Error| e.to_string();
+    const UNSENT: &str = "SELECT id FROM harness_runs WHERE execution_status = 'starting'";
+    sqlx::query(&format!(
+        "UPDATE chat_proposals
+            SET state = json_set(state, '$.continuation', json_object('phase', 'skipped', 'reason', ?1))
+          WHERE json_extract(state, '$.continuation.phase') = 'started'
+            AND json_extract(state, '$.continuation.run_id') IN ({UNSENT} AND origin = 'continuation')"
+    ))
+    .bind(skipped)
+    .execute(&mut *tx)
+    .await
+    .map_err(err)?;
+    for sql in [
+        "DELETE FROM harness_items WHERE id IN
+           (SELECT initiating_item_id FROM harness_runs WHERE execution_status = 'starting')",
+        "DELETE FROM harness_attempts WHERE run_id IN
+           (SELECT id FROM harness_runs WHERE execution_status = 'starting')",
+        "DELETE FROM harness_command_receipts WHERE run_id IN
+           (SELECT id FROM harness_runs WHERE execution_status = 'starting')",
+        "UPDATE harness_runs SET execution_status = 'cancelled', initiating_item_id = NULL, active_attempt_id = NULL
+          WHERE execution_status = 'starting' AND origin = 'continuation'",
+    ] {
+        sqlx::query(sql).execute(&mut *tx).await.map_err(err)?;
+    }
+    let unsent: Vec<i64> = sqlx::query_scalar(&format!("{UNSENT} ORDER BY id DESC"))
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(err)?;
+    // One at a time: each takes the placeholder ordinal and the head of the
+    // queue as the rows stand after the one before it.
+    for run_id in unsent {
+        sqlx::query(
+            "UPDATE harness_runs
+                SET execution_status = 'queued', queue_held = 1, initiating_item_id = NULL,
+                    active_attempt_id = NULL,
+                    ordinal = (SELECT MIN(0, COALESCE(MIN(o.ordinal), 0)) - 1 FROM harness_runs o
+                                WHERE o.thread_id = harness_runs.thread_id),
+                    queue_position = (SELECT COALESCE(MIN(q.queue_position), 1) - 1 FROM harness_runs q
+                                       WHERE q.thread_id = harness_runs.thread_id
+                                         AND q.execution_status = 'queued')
+              WHERE id = ?1",
+        )
+        .bind(run_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(err)?;
+    }
+    Ok(())
 }

@@ -10,9 +10,10 @@ use super::command::{Command, Kind};
 /// What only the running app knows about a chat.
 #[derive(Clone, Copy, Default)]
 pub(in crate::harness) struct Live {
-    /// A turn holds the chat: a run that is going out or being answered, a
-    /// turn the CLI started itself, or a rewind waiting on the provider.
-    pub busy: bool,
+    /// Something no row shows holds the chat: a turn the CLI started
+    /// itself, a rewind waiting on the provider, or a settle that has not
+    /// landed yet.
+    pub held: bool,
 }
 
 pub(in crate::harness) struct State {
@@ -23,8 +24,20 @@ pub(in crate::harness) struct State {
     pub question: Option<Question>,
     /// The newest question's anchor, which Claude needs to rewind past it.
     pub newest_anchor: Option<String>,
-    /// How many runs wait in the chat's queue.
+    /// How many runs wait in the chat's queue, and how many of those are
+    /// held.
     pub waiting: i64,
+    pub held: i64,
+    /// A run is going out or being answered.
+    pub open: bool,
+}
+
+impl State {
+    /// A turn has the chat: a message sent now waits, and nothing may
+    /// rewrite the chat's rows.
+    pub fn busy(&self) -> bool {
+        self.open || self.live.held
+    }
 }
 
 /// Read everything `command`'s decider may ask. An `Err` is the command's
@@ -38,9 +51,12 @@ pub(in crate::harness) async fn read(
         Some(id) => Some(store::thread(pool, id).await?),
         None => None,
     };
-    let waiting = match command.thread_id {
-        Some(id) => store::queue::waiting(pool, id).await?,
-        None => 0,
+    let ((waiting, held), open) = match command.thread_id {
+        Some(id) => (
+            store::queue::waiting(pool, id).await?,
+            store::queue::open(pool, id).await?.is_some(),
+        ),
+        None => ((0, 0), false),
     };
     let mut state = State {
         thread,
@@ -48,6 +64,8 @@ pub(in crate::harness) async fn read(
         question: None,
         newest_anchor: None,
         waiting,
+        held,
+        open,
     };
     if let (Some(thread_id), Kind::Rewind { item_id } | Kind::EditResend { item_id, .. }) =
         (command.thread_id, &command.kind)

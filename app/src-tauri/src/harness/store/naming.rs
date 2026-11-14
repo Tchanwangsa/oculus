@@ -113,6 +113,9 @@ pub async fn reconcile(pool: &SqlitePool) -> Result<Reconciled, String> {
     .await
     .map_err(|e| e.to_string())?
     .rows_affected();
+    // A run written and never sent goes back to its queue.
+    super::queue::requeue_unsent(&mut tx, crate::harness::app::continuation::SKIPPED_QUEUED)
+        .await?;
     // A continuation that was still waiting is not started by a later
     // session: its card says the app closed (`continuation::reconcile`).
     sqlx::query(

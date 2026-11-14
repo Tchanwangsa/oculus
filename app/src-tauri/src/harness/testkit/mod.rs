@@ -4,6 +4,7 @@
 mod assertions;
 mod commands;
 mod continuation;
+mod driver;
 mod fixture;
 mod guard;
 mod identity;

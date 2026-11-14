@@ -9,7 +9,7 @@ use crate::harness::app::consumer::{consume, ConsumerIo};
 use crate::harness::app::{BusMsg, Envelope};
 use crate::harness::core::effect::Effect;
 use crate::harness::core::{Command, Kind, Outcome};
-use crate::harness::{jobs, store, HarnessEvent, Provider, Queue, SendOptions};
+use crate::harness::{jobs, store, HarnessEvent, OwnTurns, Provider, SendOptions};
 
 use super::guard::{assert_scratch, scratch};
 use super::replay::run;
@@ -118,6 +118,7 @@ pub(super) fn intent(thread_id: i64, receipt: &str, session: Option<&str>) -> st
         at: None,
         continuation: None,
         queued: None,
+        options: None,
     }
 }
 
@@ -258,6 +259,8 @@ async fn a_restart_interrupts_runs_left_open() {
     let open = store::begin_run(&pool, &intent(thread, "a", None))
         .await
         .unwrap();
+    // As the start step leaves it once the provider has the message.
+    assert!(store::claim_start(&pool, &open).await.unwrap());
     store::mark_sent(&pool, &open).await.unwrap();
     crate::harness::app::startup::Startup::default()
         .ready(|| async { Ok(pool.clone()) })
@@ -321,7 +324,7 @@ fn a_stray_row_on_the_bus_is_written_before_the_next_question() {
         pool: pool.clone(),
         rows: Vec::new(),
     };
-    let queue = Arc::new(Mutex::new(Queue::default()));
+    let queue = Arc::new(Mutex::new(OwnTurns::default()));
     std::thread::scope(|s| {
         s.spawn(|| consume(bus, queue, &mut io));
     });

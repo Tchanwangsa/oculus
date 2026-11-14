@@ -27,6 +27,7 @@ pub(in crate::harness) enum Effect {
     Release { thread_id: i64, reason: Release },
 }
 
+#[derive(Clone)]
 pub(in crate::harness) struct Start {
     pub thread_id: i64,
     pub provider: Provider,

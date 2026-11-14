@@ -30,15 +30,12 @@ fn a_settle_that_fails_twice_then_lands_leaves_the_run_completed_after_a_restart
     // The first try failed with the terminal; each wake since is a retry.
     rig.await_wakes(woken + 2);
     assert_eq!(status(&rig), "running");
-    assert!(
-        rig.queue.lock().unwrap().is_busy(rig.thread),
-        "the chat's next message waits for the settle"
-    );
+    assert!(rig.busy(), "the chat's next message waits for the settle");
 
     rig.read_only(false);
     rig.drain();
     assert_eq!(status(&rig), "completed");
-    assert!(!rig.queue.lock().unwrap().is_busy(rig.thread));
+    assert!(!rig.busy());
 
     rig.close();
     let rig = rig.restart();

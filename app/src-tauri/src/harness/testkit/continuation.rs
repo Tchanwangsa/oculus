@@ -2,18 +2,14 @@
 //! a rewind, a restart or a Stop, queued behind a busy thread, and replayed
 //! through each bridge to its answer.
 
-use std::sync::{Arc, Mutex};
-
 use serde_json::{json, Value};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
 
-use crate::harness::app::consumer::{consume, ConsumerIo};
 use crate::harness::app::continuation::{self, SKIPPED_JOB, SKIPPED_QUEUED, STOPPED};
-use crate::harness::app::{BusMsg, Envelope};
-use crate::harness::core::effect::{Effect, Start};
-use crate::harness::{jobs, store, HarnessEvent, Provider, Queue};
+use crate::harness::{store, HarnessEvent, Provider};
 
+use super::commands::{ended, Bench};
 use super::guard::{assert_scratch, scratch};
 use super::replay::run;
 use super::scenario::Scenario;
@@ -107,6 +103,7 @@ fn intent(thread: i64, card: &str, receipt: &str) -> store::SendIntent {
         at: None,
         continuation: Some(card.into()),
         queued: None,
+        options: None,
     }
 }
 
@@ -361,94 +358,58 @@ async fn a_restart_or_a_stop_never_continues_and_the_card_says_why() {
     pool.close().await;
 }
 
-/// Records the runs the consumer started and its envelopes; nothing is sent.
-struct Recorder {
-    pool: SqlitePool,
-    started: Vec<Start>,
-    events: Vec<Value>,
-}
-
-impl ConsumerIo for Recorder {
-    fn open_pool(&mut self, _: &tokio::runtime::Runtime) -> Option<SqlitePool> {
-        Some(self.pool.clone())
-    }
-    fn name(&mut self, _: i64, _: Provider, _: Vec<jobs::JobSelection>, _: store::NamingSeed) {}
-    fn perform(&mut self, effect: Effect) {
-        if let Effect::Start(start) = effect {
-            self.started.push(*start);
-        }
-    }
-    fn emit(&mut self, envelope: Envelope) {
-        self.events
-            .push(serde_json::to_value(envelope.event).unwrap());
-    }
-}
-
-fn settled(thread: i64, card: &str) -> BusMsg {
-    BusMsg::app(
-        thread,
-        Provider::Codex,
-        HarnessEvent::CardSettled {
-            proposal: card.into(),
-        },
-    )
-}
-
 #[test]
 fn a_continuation_waits_behind_a_busy_thread_and_goes_out_once() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let (_dir, pool, thread) = rt.block_on(scratch_pool("continue-queue"));
-    let card = rt.block_on(seed_card(&pool, thread));
-    let queue = Arc::new(Mutex::new(Queue::default()));
-    assert!(queue.lock().unwrap().try_claim(thread), "a turn is running");
-    let mut io = Recorder {
-        pool: pool.clone(),
-        started: Vec::new(),
-        events: Vec::new(),
+    let mut bench = Bench::new("continue-queue");
+    let (pool, thread) = (bench.pool.clone(), bench.thread);
+    let settled = |bench: &Bench, card: &str| {
+        bench.app(HarnessEvent::CardSettled {
+            proposal: card.into(),
+        })
     };
-
-    consume(
-        vec![settled(thread, &card), settled(thread, &card)],
-        queue.clone(),
-        &mut io,
+    let seed = |bench: &Bench| bench.runtime.block_on(seed_card(&pool, thread));
+    let card = seed(&bench);
+    // A turn is running when the card settles, in two views.
+    let (first, _) = bench.send("c1", "first");
+    bench.play(vec![first, settled(&bench, &card), settled(&bench, &card)]);
+    assert_eq!(
+        bench.effects(),
+        ["start first"],
+        "the running turn keeps the thread"
     );
-    assert!(io.started.is_empty(), "the running turn keeps the thread");
     assert!(
-        rt.block_on(store::queue::list(&pool, thread))
+        bench
+            .runtime
+            .block_on(store::queue::list(&pool, thread))
             .unwrap()
             .is_empty(),
         "never shown as typed"
     );
     assert_eq!(
-        rt.block_on(count(
-            &pool,
+        bench.count(
             "SELECT COUNT(*) FROM harness_runs WHERE execution_status = 'queued' AND origin = 'continuation'"
-        )),
+        ),
         1,
         "it waits as a queued run, once"
     );
-    let snapshot = io.events.iter().find(|e| e["type"] == "proposal").unwrap();
+    let events = bench.events();
+    let snapshot = events
+        .iter()
+        .find(|e| e["event"]["type"] == "proposal")
+        .unwrap();
     assert_eq!(
-        snapshot["proposal"]["state"]["continuation"]["phase"],
+        snapshot["event"]["proposal"]["state"]["continuation"]["phase"],
         "queued"
     );
 
-    let finished = |status: &str| {
-        BusMsg::app(
-            thread,
-            Provider::Codex,
-            HarnessEvent::TurnFinished {
-                status: status.into(),
-                turn: None,
-            },
-        )
-    };
-    consume(vec![finished("completed")], queue.clone(), &mut io);
-    assert_eq!(io.started.len(), 1, "one continuation, after the turn");
-    let start = &io.started[0];
+    bench.play(vec![bench.app(ended("completed"))]);
+    let starts = bench.starts();
+    assert_eq!(starts.len(), 2, "one continuation, after the turn");
+    let start = &starts[1];
     assert_eq!(start.text, "Sync finished — continuing");
     assert_eq!(start.options.continuation.as_deref(), Some(card.as_str()));
-    let origin: String = rt
+    let origin: String = bench
+        .runtime
         .block_on(
             sqlx::query_scalar("SELECT origin FROM harness_runs WHERE id = ?1")
                 .bind(start.run.run_id)
@@ -460,27 +421,31 @@ fn a_continuation_waits_behind_a_busy_thread_and_goes_out_once() {
         "its run was written before the send"
     );
     assert_eq!(
-        rt.block_on(state(&pool, &card))["continuation"]["phase"],
+        bench.runtime.block_on(state(&pool, &card))["continuation"]["phase"],
         "started"
     );
 
     // A continuation whose claim is gone by its turn starts nothing and
     // hands the thread on.
-    let stopped = rt.block_on(seed_card(&pool, thread));
-    consume(vec![settled(thread, &stopped)], queue.clone(), &mut io);
-    assert!(rt
+    let stopped = seed(&bench);
+    bench.play(vec![settled(&bench, &stopped)]);
+    assert!(bench
+        .runtime
         .block_on(continuation::cancel(&pool, &stopped, STOPPED))
         .unwrap());
-    consume(vec![finished("completed")], queue.clone(), &mut io);
-    assert_eq!(io.started.len(), 1, "the cancelled card started nothing");
-    assert!(!queue.lock().unwrap().is_busy(thread));
+    bench.play(vec![bench.app(ended("completed"))]);
+    assert_eq!(
+        bench.starts().len(),
+        2,
+        "the cancelled card started nothing"
+    );
+    assert!(!bench.open());
 
     // On an idle thread it goes out at once.
-    let idle = rt.block_on(seed_card(&pool, thread));
-    consume(vec![settled(thread, &idle)], queue.clone(), &mut io);
-    assert_eq!(io.started.len(), 2);
-    assert!(queue.lock().unwrap().is_busy(thread));
-    rt.block_on(pool.close());
+    let idle = seed(&bench);
+    bench.play(vec![settled(&bench, &idle)]);
+    assert_eq!(bench.starts().len(), 3);
+    assert!(bench.open());
 }
 
 #[test]

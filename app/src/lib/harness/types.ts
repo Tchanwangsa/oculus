@@ -186,7 +186,7 @@ export interface HarnessItem {
 }
 
 /** `harness_runs.execution_status`. */
-export type RunStatus = "preparing" | "running" | "completed" | "interrupted" | "failed";
+export type RunStatus = "preparing" | "starting" | "running" | "completed" | "interrupted" | "failed";
 
 /** What the timeline needs of a `harness_runs` row: how it ended, its answer
  *  and its stored wall-clock interval. */

@@ -56,6 +56,8 @@ pub(in crate::harness) enum Change {
     /// Every waiting run is cancelled; a continuation's card says it was
     /// stopped.
     ClearQueue,
+    /// The queue's hold is lifted: its runs may start again.
+    Unhold,
     /// The rows from `item_id` on leave the chat. `context` is whether the
     /// provider forgot them too.
     Truncate {
@@ -79,18 +81,19 @@ pub(in crate::harness) enum Applied {
     Deleted,
 }
 
-/// A run written and ready to be sent.
+/// A run written as `starting`: its row is in the timeline, and the driver
+/// will hand it to its start step.
 pub(in crate::harness) struct Began {
     pub provider: Provider,
     pub run: RunStart,
     /// The row's text: what the student typed, or a continuation's line.
     pub text: String,
-    pub options: SendOptions,
+    /// The playhead's second, for a message from the lecture dock.
+    pub at: Option<i64>,
+    /// The card this run continues.
+    pub continuation: Option<String>,
     /// The run waited in the queue before this.
     pub waited: bool,
-    /// The send changed the chat's model, which a CLI that fixes its model
-    /// at spawn can only take as a new session.
-    pub respawn: bool,
 }
 
 pub(in crate::harness) struct Committed {
@@ -194,6 +197,11 @@ pub(in crate::harness) async fn run(
                 applied.push(Applied::Queue);
                 applied.push(Applied::Cards(stopped));
             }
+            Change::Unhold => {
+                let thread_id = thread.ok_or("a queue with no thread")?;
+                store::queue::unhold(&mut tx, thread_id).await?;
+                applied.push(Applied::Queue);
+            }
             Change::Truncate { item_id, context } => {
                 let thread_id = thread.ok_or("a rewind with no thread")?;
                 store::truncate(&mut tx, thread_id, item_id).await?;
@@ -271,6 +279,7 @@ async fn begin(
             .await
             .map_err(|e| e.to_string())?;
     }
+    // The send's options stay on the run: its start step reads them there.
     let intent = SendIntent {
         thread_id,
         provider,
@@ -281,14 +290,15 @@ async fn begin(
         at: options.at,
         continuation: options.continuation.clone(),
         queued,
+        options: Some(store::queue::stored(&options, respawn)?),
     };
     let run = store::begin(&mut *tx, &intent).await?;
     Ok(Began {
         provider,
         run,
         text: intent.text,
-        options,
+        at: options.at,
+        continuation: options.continuation,
         waited: queued.is_some(),
-        respawn,
     })
 }

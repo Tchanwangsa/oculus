@@ -3,8 +3,10 @@
 //! provider is asked, and every envelope says the revision its change was
 //! saved at.
 
-use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 
 use serde_json::Value;
 use sqlx::SqlitePool;
@@ -15,43 +17,57 @@ use crate::harness::app::{BusMsg, Envelope};
 use crate::harness::core::decide::Answer;
 use crate::harness::core::effect::{Effect, Start};
 use crate::harness::core::{load, Command, Kind, Outcome};
-use crate::harness::{jobs, store, HarnessEvent, Provider, Queue, Release, SendOptions};
+use crate::harness::{jobs, store, HarnessEvent, Provider, Release, SendOptions};
 
+use super::io::{Clock, Feed};
 use super::replay::run;
 use super::rig::Rig;
 use super::scenario::Scenario;
 
 pub(super) type Result = std::result::Result<Outcome, String>;
 
-/// A consumer on a scratch database whose effects are answered by the test:
-/// a start sends nothing, and a rewind's answer arrives after whatever the
-/// script still holds, as a slow provider's would.
+/// A consumer on a scratch database, alive across the test's scripts, whose
+/// effects are answered by the test: a start sends nothing and reports
+/// nothing, so its run stays `starting` until the script ends its turn, and
+/// a rewind's answer arrives after whatever the script still holds, as a
+/// slow provider's would.
 pub(super) struct Bench {
     pub(super) runtime: tokio::runtime::Runtime,
-    pub(super) _dir: crate::test_support::Scratch,
+    _dir: crate::test_support::Scratch,
     pub(super) pool: SqlitePool,
     pub(super) thread: i64,
-    pub(super) queue: Arc<Mutex<Queue>>,
+    bus: Sender<BusMsg>,
+    record: Arc<Mutex<Record>>,
     /// Whether the provider says its context went back, per rewind asked.
-    pub(super) rewinds: bool,
-    pub(super) events: Vec<Value>,
-    pub(super) effects: Vec<String>,
-    /// The runs it was asked to send, with their options.
-    pub(super) starts: Vec<Start>,
+    rewinds: Arc<AtomicBool>,
+    fed: Arc<AtomicBool>,
+    drained: Sender<Sender<()>>,
+    consumer: Option<JoinHandle<()>>,
 }
 
-struct Io<'a> {
-    bench: &'a mut Bench,
-    answers: Arc<Mutex<VecDeque<BusMsg>>>,
+/// What the consumer told and asked for.
+#[derive(Default)]
+struct Record {
+    events: Vec<Value>,
+    effects: Vec<String>,
+    starts: Vec<Start>,
 }
 
-impl ConsumerIo for Io<'_> {
+struct Io {
+    pool: SqlitePool,
+    bus: Sender<BusMsg>,
+    record: Arc<Mutex<Record>>,
+    rewinds: Arc<AtomicBool>,
+}
+
+impl ConsumerIo for Io {
     fn open_pool(&mut self, _: &tokio::runtime::Runtime) -> Option<SqlitePool> {
-        Some(self.bench.pool.clone())
+        Some(self.pool.clone())
     }
     fn name(&mut self, _: i64, _: Provider, _: Vec<jobs::JobSelection>, _: store::NamingSeed) {}
     fn perform(&mut self, effect: Effect) {
-        self.bench.effects.push(match &effect {
+        let mut record = self.record.lock().unwrap();
+        record.effects.push(match &effect {
             Effect::Start(start) => format!("start {}", start.text),
             Effect::Rewind { ask, .. } => format!("rewind {}", ask.anchor),
             Effect::Interrupt { .. } => "interrupt".to_string(),
@@ -59,37 +75,31 @@ impl ConsumerIo for Io<'_> {
         });
         match effect {
             Effect::Rewind { command, ask } => {
-                self.answers.lock().unwrap().push_back(BusMsg::Answer {
+                let answer = Answer::Rewound {
+                    context: self.rewinds.load(Ordering::SeqCst),
+                };
+                let _ = self.bus.send(BusMsg::Answer {
                     thread_id: ask.thread_id,
                     command,
-                    answer: Answer::Rewound {
-                        context: self.bench.rewinds,
-                    },
+                    answer,
                 });
             }
-            Effect::Start(start) => self.bench.starts.push(*start),
+            Effect::Start(start) => record.starts.push(*start),
             _ => {}
         }
     }
     fn emit(&mut self, envelope: Envelope) {
-        self.bench
-            .events
-            .push(serde_json::to_value(envelope).unwrap());
+        let mut record = self.record.lock().unwrap();
+        record.events.push(serde_json::to_value(envelope).unwrap());
     }
 }
 
-/// The script, then the answers its effects produced.
-struct Script {
-    fixed: VecDeque<BusMsg>,
-    answers: Arc<Mutex<VecDeque<BusMsg>>>,
-}
-
-impl Iterator for Script {
-    type Item = BusMsg;
-    fn next(&mut self) -> Option<BusMsg> {
-        self.fixed
-            .pop_front()
-            .or_else(|| self.answers.lock().unwrap().pop_front())
+impl Drop for Bench {
+    fn drop(&mut self) {
+        self.fed.store(true, Ordering::SeqCst);
+        if let Some(consumer) = self.consumer.take() {
+            let _ = consumer.join();
+        }
     }
 }
 
@@ -107,32 +117,80 @@ impl Bench {
                 "q",
             ))
             .unwrap();
+        let (bus, rx) = std::sync::mpsc::channel();
+        let (drained, waiters) = std::sync::mpsc::channel();
+        let record: Arc<Mutex<Record>> = Arc::default();
+        let rewinds = Arc::new(AtomicBool::new(true));
+        let fed = Arc::new(AtomicBool::new(false));
+        let mut io = Io {
+            pool: pool.clone(),
+            bus: bus.clone(),
+            record: record.clone(),
+            rewinds: rewinds.clone(),
+        };
+        let feed = Feed {
+            rx,
+            fed: fed.clone(),
+            drained: waiters,
+            clock: Clock::new(),
+        };
+        let consumer = std::thread::spawn(move || consume(feed, Arc::default(), &mut io));
         Bench {
             runtime,
             _dir: dir,
             pool,
             thread,
-            queue: Arc::default(),
-            rewinds: true,
-            events: Vec::new(),
-            effects: Vec::new(),
-            starts: Vec::new(),
+            bus,
+            record,
+            rewinds,
+            fed,
+            drained,
+            consumer: Some(consumer),
         }
     }
 
-    /// One consumer over `script`, to its end.
+    /// Put `script` on the bus and wait until the consumer has applied it,
+    /// and every answer its effects produced.
     pub(super) fn play(&mut self, script: Vec<BusMsg>) {
-        let answers: Arc<Mutex<VecDeque<BusMsg>>> = Arc::default();
-        let bus = Script {
-            fixed: script.into(),
-            answers: answers.clone(),
-        };
-        let queue = self.queue.clone();
-        let mut io = Io {
-            bench: self,
-            answers,
-        };
-        consume(bus, queue, &mut io);
+        for message in script {
+            self.bus.send(message).unwrap();
+        }
+        let (done, waiting) = std::sync::mpsc::channel();
+        self.drained.send(done).unwrap();
+        waiting
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the consumer caught up");
+    }
+
+    /// Whether the provider will say its context went back with a rewind.
+    pub(super) fn rewinds(&self, context: bool) {
+        self.rewinds.store(context, Ordering::SeqCst);
+    }
+
+    /// The envelopes told so far.
+    pub(super) fn events(&self) -> Vec<Value> {
+        self.record.lock().unwrap().events.clone()
+    }
+
+    /// The effects asked for so far, by name.
+    pub(super) fn effects(&self) -> Vec<String> {
+        self.record.lock().unwrap().effects.clone()
+    }
+
+    /// The runs handed to the start step so far.
+    pub(super) fn starts(&self) -> Vec<Start> {
+        self.record.lock().unwrap().starts.clone()
+    }
+
+    /// Forget what was told and asked for.
+    pub(super) fn clear(&self) {
+        *self.record.lock().unwrap() = Record::default();
+    }
+
+    /// A run of the thread's is going out or being answered.
+    pub(super) fn open(&self) -> bool {
+        let open = store::queue::open(&self.pool, self.thread);
+        self.runtime.block_on(open).unwrap().is_some()
     }
 
     pub(super) fn command(&self, id: &str, kind: Kind) -> (BusMsg, Receiver<Result>) {
@@ -201,10 +259,10 @@ impl Bench {
             .unwrap()
     }
 
-    pub(super) fn kinds(&self) -> Vec<&str> {
-        self.events
+    pub(super) fn kinds(&self) -> Vec<String> {
+        self.events()
             .iter()
-            .map(|e| e["event"]["type"].as_str().unwrap())
+            .map(|e| e["event"]["type"].as_str().unwrap().to_string())
             .collect()
     }
 }
@@ -279,7 +337,7 @@ fn a_command_id_from_another_chat_is_refused() {
     let refused = bench.got(refused).unwrap_err();
     assert!(refused.contains("another thread"), "{refused}");
     assert_eq!(bench.count("SELECT COUNT(*) FROM harness_runs"), 1);
-    assert_eq!(bench.effects, ["start hello"]);
+    assert_eq!(bench.effects(), ["start hello"]);
 }
 
 /// The receipt is read before the thread is made, so a retried first
@@ -295,7 +353,7 @@ fn a_repeated_first_message_makes_one_chat() {
     assert_eq!(bench.got(repeated).unwrap(), made);
     assert_eq!(bench.count("SELECT COUNT(*) FROM harness_threads"), 2);
     assert_eq!(bench.count("SELECT COUNT(*) FROM harness_runs"), 1);
-    assert_eq!(bench.effects, ["start hello"], "sent once");
+    assert_eq!(bench.effects(), ["start hello"], "sent once");
     let receipt: (i64, String) = bench
         .runtime
         .block_on(
@@ -317,8 +375,7 @@ fn a_message_sent_while_the_provider_rewinds_waits_and_survives_it() {
     assert_eq!(bench.questions(), ["first", "second"]);
     let second: i64 = bench.count("SELECT MAX(id) FROM harness_items WHERE kind = 'user'");
 
-    bench.events.clear();
-    bench.effects.clear();
+    bench.clear();
     let (rewind, rewound) = bench.command("c3", Kind::Rewind { item_id: second });
     let (typed, sent) = bench.send("c4", "meanwhile");
     bench.play(vec![rewind, typed]);
@@ -326,14 +383,14 @@ fn a_message_sent_while_the_provider_rewinds_waits_and_survives_it() {
     assert_eq!(bench.got(rewound).unwrap().text.as_deref(), Some("second"));
     let waited = bench.got(sent).unwrap();
     assert!(waited.run.is_none() && waited.queued.is_some(), "it waited");
-    assert_eq!(bench.effects, ["rewind anchor-2", "start meanwhile"]);
+    assert_eq!(bench.effects(), ["rewind anchor-2", "start meanwhile"]);
     assert_eq!(bench.questions(), ["first", "meanwhile"]);
     assert_eq!(
         bench.kinds(),
         ["queue", "rewound", "queue", "user_message"],
         "the rows went before the waiting message's question was written"
     );
-    let rewound = &bench.events[1];
+    let rewound = &bench.events()[1];
     assert_eq!(rewound["event"]["context"], true);
     assert_eq!(rewound["event"]["from_item_id"], second);
 }
@@ -362,8 +419,9 @@ fn a_rewind_on_a_busy_chat_is_refused_and_its_id_stays_free() {
     assert_eq!(bench.got(rewound).unwrap().text.as_deref(), Some("first"));
     assert!(bench.questions().is_empty());
     // The question had no anchor, so the provider was never asked.
-    assert_eq!(bench.effects, ["start first"]);
-    let rewound = bench.events.last().unwrap();
+    assert_eq!(bench.effects(), ["start first"]);
+    let events = bench.events();
+    let rewound = events.last().unwrap();
     assert_eq!(rewound["event"]["type"], "rewound");
     assert_eq!(rewound["event"]["context"], false);
 }
@@ -373,11 +431,10 @@ fn a_rewind_on_a_busy_chat_is_refused_and_its_id_stays_free() {
 #[test]
 fn an_edit_rewinds_and_sends_in_one_commit() {
     let mut bench = Bench::new("command-edit");
-    bench.rewinds = false;
+    bench.rewinds(false);
     bench.play(bench.turn("c1", "first", "anchor-1"));
     let question: i64 = bench.count("SELECT MAX(id) FROM harness_items WHERE kind = 'user'");
-    bench.events.clear();
-    bench.effects.clear();
+    bench.clear();
 
     let edit = || Kind::EditResend {
         item_id: question,
@@ -395,14 +452,14 @@ fn an_edit_rewinds_and_sends_in_one_commit() {
         Some(run),
         "a retry sends nothing"
     );
-    assert_eq!(bench.effects, ["rewind anchor-1", "start again"]);
+    assert_eq!(bench.effects(), ["rewind anchor-1", "start again"]);
     assert_eq!(bench.questions(), ["again"]);
     assert_eq!(bench.kinds(), ["rewound", "user_message"]);
-    assert_eq!(bench.events[0]["event"]["context"], false);
+    assert_eq!(bench.events()[0]["event"]["context"], false);
     assert_eq!(bench.count("SELECT COUNT(*) FROM harness_runs"), 1);
     let receipt: i64 = bench.count("SELECT run_id FROM harness_command_receipts WHERE id = 'c2'");
     assert_eq!(receipt, run.run_id, "the run's receipt is the command's id");
-    assert!(bench.queue.lock().unwrap().is_busy(bench.thread));
+    assert!(bench.open(), "the edit's run has the chat");
 }
 
 /// Deleting is a command too: its receipt outlives the rows, and whatever
@@ -423,7 +480,7 @@ fn deleting_a_chat_twice_under_one_id_answers_the_same_and_its_session_is_heard_
     let deleted = bench.got(deleted).unwrap();
     assert_eq!(deleted.thread_id, bench.thread);
     assert_eq!(bench.got(repeated).unwrap(), deleted);
-    assert_eq!(bench.effects, ["start first", "release Deleted"]);
+    assert_eq!(bench.effects(), ["start first", "release Deleted"]);
     for table in ["harness_threads", "harness_items", "harness_runs"] {
         assert_eq!(
             bench.count(&format!("SELECT COUNT(*) FROM {table}")),
@@ -436,7 +493,7 @@ fn deleting_a_chat_twice_under_one_id_answers_the_same_and_its_session_is_heard_
         .block_on(sqlx::query_scalar("SELECT id FROM harness_receipts").fetch_all(&bench.pool))
         .unwrap();
     assert_eq!(receipts, ["c2"], "the thread's other receipts went with it");
-    assert!(!bench.queue.lock().unwrap().is_busy(bench.thread));
+    assert!(!bench.open());
     // `Release::Deleted` reaching the consumer afterwards changes nothing.
     let released = BusMsg::Released {
         thread_id: bench.thread,
