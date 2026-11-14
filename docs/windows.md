@@ -135,6 +135,14 @@ browser into a shell input also transfers native controller focus. See
 [shell.md](./shell.md#the-shell-owns-tabs-side-panels-and-every-window-shortcut)
 for keyboard ownership.
 
+The download code has explicit WebView2 branches for pathless-failure
+correlation (`app/src-tauri/src/shell/browser/downloads/correlate.rs`),
+controller focus for the Save dialog (`browser_focus_app` in
+`app/src-tauri/src/shell/browser/commands.rs`), and removal of Downloads-folder
+collision numbers (`app/src-tauri/src/shell/browser/downloads/name.rs`).
+Their rules, and the platform boundary for parked pages and webviews without
+handlers, are in [viewers.md](./viewers.md#downloads-wait-for-a-destination-while-their-bytes-arrive).
+
 ## Release validation includes a packaged installation
 
 Cross-check the code from macOS with LLVM tools on PATH:

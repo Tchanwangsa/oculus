@@ -34,7 +34,7 @@ transcript, and a web page.
 | The on-device speech helper | `app/src-tauri/speech/main.swift`, `app/scripts/build-speech.mjs`, `app/src-tauri/src/transcribe/engines/apple.rs` |
 | Local Whisper: the engine, its model files | `app/src-tauri/src/transcribe/engines/whisper.rs`, `app/src-tauri/src/transcribe/engines/whisper_models/`, `app/scripts/build-whisper.mjs` |
 | Native light/dark preference for browser pages | `app/src-tauri/src/shell/native_layer/page_theme.rs`, `app/src/lib/ui/themes/apply.ts` |
-| In-app browser | `app/src/pages/tools/BrowserPage.tsx`, `app/src/hooks/shell/useBrowserTabs.ts`, `app/src/lib/browser/history/`, `app/src-tauri/src/shell/browser/` |
+| In-app browser, downloads and their Save dialog | `app/src/pages/tools/BrowserPage.tsx`, `app/src/hooks/shell/useBrowserTabs.ts`, `app/src/lib/browser/history/`, `app/src-tauri/src/shell/browser/`, `app/src-tauri/src/shell/browser/downloads/`, `app/src/lib/browser/downloads/`, `app/src/hooks/shell/useBrowserDownloads.ts`, `app/src/stores/shell/browserDownloadsStore.ts`, `app/src/stores/shell/browserPrefsStore.ts`, `app/src/pages/tools/browser/downloads/` |
 
 ## One markdown renderer serves every surface
 
@@ -1003,25 +1003,27 @@ without a dark theme retain their own colours.
   Page navigations change the URL in
   Rust only, never the route. What a page knows about itself (history, find,
   zoom) is pushed as events, because `with_webview` returns nothing.
-- **A page is hidden only while its tab is backgrounded** (`useTabActive`).
+- **An open tab's page is hidden only while its tab is backgrounded** (`useTabActive`).
   Popovers and the address suggestions (`AddressSuggestions`, a portal) draw
   over the live page. Hiding throttles a page's timers, and `browser_place`
   focuses it, so nothing else hides or re-places it.
-- **Closing a tab ends its page at once** (`teardown.rs`). On macOS the
-  page stops loading, its media pauses and leaves fullscreen and
-  picture-in-picture, and WebKit's `_close` closes it in the WebContent
-  process before `close()` drops the view; on Windows dropping the view
-  calls WebView2's `Close()`. Nothing keeps the WKWebView alive after
-  that, because every macOS `with_webview` goes through `shell::wk::with_view`
+- **Closing a tab ends its page unless a download still needs it**
+  ([below](#downloads-wait-for-a-destination-while-their-bytes-arrive)).
+  Destruction (`teardown.rs`) stops loading on macOS, pauses media and leaves
+  fullscreen and picture-in-picture, then calls WebKit's `_close` in the
+  WebContent process before `close()` drops the view. On Windows dropping
+  the view calls WebView2's `Close()`. Every macOS `with_webview` goes through
+  `shell::wk::with_view` so no retain keeps the destroyed page alive
   ([architecture.md](./architecture.md#the-main-window-holds-one-webview-per-browser-tab)).
 - **A tab backgrounded for 15 minutes loses its page, not its tab**
   (`discard.rs`), as in Safari or Chrome's Memory Saver. "Backgrounded" is
   Rust's own record: no pane or side panel has placed it since it was last
   hidden or opened. One thread checks every minute, and on macOS a
   memory-pressure dispatch source (warning or critical) discards every
-  backgrounded tab at once. A page playing media or capturing the camera or
-  microphone is kept (WebView2 reports audio only). The page goes through
-  the same teardown as closing; the tab stays in `browser-state` with its
+  eligible backgrounded tab at once. A page playing media or capturing the
+  camera or microphone is kept (WebView2 reports audio only), as is a page
+  with an unfinished download ([below](#downloads-wait-for-a-destination-while-their-bytes-arrive)).
+  The page goes through the same teardown as closing; the tab stays in `browser-state` with its
   URL, title and zoom, so the strip and `useBrowserTabs` see no change.
   `browser_place` on a discarded tab makes a new page at that URL the way a
   new tab's is made (seeded cookies, theme, user agent, init scripts), off
@@ -1052,3 +1054,120 @@ without a dark theme retain their own colours.
   `target=_blank` links and call IPC pages cannot reach, so only ⌘-clicks got
   through. A `_blank` link reaches `on_new_window` and opens as a tab; the
   app's own links go through `AppLayout`'s capture-phase handler.
+
+### Downloads wait for a destination while their bytes arrive
+
+Every accepted browser download goes to
+`downloads/.incoming/<pid>-<id>/<name>` in the data directory, never the user's
+Downloads folder (`app/src-tauri/src/shell/browser/downloads/stage.rs`). The
+hook must name its destination synchronously and WebKit starts writing at
+once, so the Save dialog asks while bytes arrive. Delivery waits for both the
+last byte and a choice, whichever comes second (`Downloads`):
+
+- **In Oculus** imports into a subject's uploads through `import_files` in
+  `app/src-tauri/src/library/files/uploads.rs`, the same path as picked
+  uploads. `useBrowserDownloads` calls `recordUploads` in
+  `app/src/lib/files/uploads.ts` through `createSavedRecorder` in
+  `app/src/lib/browser/downloads/recordSaved.ts`: it claims each
+  download once, skips an existing `files` row (including after a frontend
+  reload), and starts the parse for pipeline files whose import has no
+  conversion error. An Office conversion failure still leaves the upload
+  saved, with its warning.
+- **On this Mac/PC** opens the native save panel, initially in Downloads with
+  the safe name suggested.
+  `app/src-tauri/src/shell/browser/downloads/deliver.rs` moves the file,
+  copying via a partial sibling across volumes; replacement is allowed only
+  at the exact path the panel confirmed. A delivery failure keeps the staged bytes for another choice.
+- **Discard** deletes the staged bytes. During receipt it marks the download
+  discarded and deletes only at `Finished`; it cannot cancel the transfer.
+
+Every save needs an explicit choice: `useBrowserPrefsStore` remembers only
+the preselected destination and subject. A Canvas course URL in the credited
+tab preselects that course's subject ahead of the remembered one
+(`app/src/lib/browser/downloads/subjectGuess.ts`), checking the institution's
+Canvas host when known. `app/src-tauri/src/shell/browser/downloads/sweep.rs`
+clears staging at startup except folders whose PID belongs to another live
+process; the list itself lasts only for the app session.
+
+- **WebKit downloads unshowable types, `<a download>` actions and
+  `Content-Disposition: attachment` responses in any frame**, plus its
+  Download Image, Download Linked File and Download Video context-menu items.
+  A plain displayable PDF stays in its page; WebKit can ignore a cross-origin `download` attribute. Playing media
+  is not a download. The vendored wry supplies attachment response policy,
+  the private macOS context-menu delegate hook, accepted paths on completion
+  and unnumbered suggested names. It also leaves the default download handler
+  unset: on macOS the app's own and sign-in webviews download nothing. Without
+  handlers Windows retains WebView2's engine defaults. The patch inventory is
+  `app/src-tauri/vendor/wry/VENDORED.md`; its dependency check is in
+  [development.md](./development.md#wry-is-vendored-at-the-version-tauri-resolves).
+- **`Finished` matches by staged path**, never URL order
+  (`app/src-tauri/src/shell/browser/downloads/correlate.rs`), so two downloads
+  of one URL may finish in either order. WebKit reports an accepted path on
+  success and failure; a pathless failure is a refusal or an orphan from a cross-origin download redirect, and is ignored. WebView2
+  reports the path only on success, so its pathless failure is matched by
+  URL hash within its page. Ambiguous groups wait until every member ends,
+  then fail together if any failed. A pathless success logs that the vendored
+  wry is not in effect and uses that same group matching.
+- **A tab that has shown no page when its download starts closes**, with or
+  without an opener. Its download is credited to the opener if one exists,
+  otherwise to the closed tab. `useBrowserTabs` returns a strip
+  tab Rust closes while in front to the tab it was opened from, if still open.
+- **A closed tab's page lives until all its downloads report `Finished`**:
+  the event only arrives from a live page.
+  `app/src-tauri/src/shell/browser/layout.rs` parks it hidden;
+  `app/src-tauri/src/shell/browser/teardown.rs` also silences its media on
+  macOS. Parked pages take no page commands. Never call
+  `Webview::url()` on a page: before a navigation commits it has no URL and
+  that call panics. Use the browser's tab state or event payload instead.
+- **The download URL is a credential.** Download records retain only its hash
+  and host, never the URL; the download payload sends the host, and logs use
+  the origin only, including the opening-tab and restoring-tab lines. This
+  is the download-record contract; `browser-state` still carries tab navigation
+  URLs. A `blob:` supplies its page's host and a `data:` supplies none.
+- **Streaming manifests are refused before staging**, with a `refused` row:
+  `.m3u8`, `.m3u` and `.mpd`, case-insensitive (the name rules below).
+  Download Video can save a playlist instead of the video, and its segment
+  URLs can be signed.
+- **Names keep the engine's suggested final component**, including ordinary
+  spaces and Unicode (`app/src-tauri/src/shell/browser/downloads/name.rs`).
+  Controls are dropped, separators and Windows-invalid characters become
+  underscores, edge dots and whitespace are trimmed, device names gain an underscore, and an empty name becomes
+  `download`. Long names are cut on a UTF-8 boundary with a short extension
+  preserved, leaving room for upload numbering and an Office file's `.pdf`.
+  WebView2's proposal also has a Downloads-folder collision counter removed
+  only when the unnumbered file really exists there; WebKit's name reaches
+  the hook without that numbering.
+- **Progress is bytes received, not a percentage**: the hook exposes no total
+  size or mid-flight cancel handle. Receipt is measured from the staged file
+  every 500 ms. There is no Retry: the hook often sees a redirected, expiring
+  URL, and a POST or revoked blob cannot be repeated from it. A transfer
+  failure exposes only a success flag, so the row says it failed and asks the
+  student to start it again from the page; partial bytes are deleted.
+
+`app/src/lib/browser/downloads/prompt.ts` owns when to ask. A download in a
+tab in front (main pane or open side panel) opens the dialog; a background
+download waits in the toolbar list. Switching tabs or dismissing the dialog leaves the download waiting,
+without discarding or asking again automatically. A download-only tab closing
+under its own dialog leaves it open; a popup's arrival allows up to three
+seconds for the opener to return to the front. A save that could not land
+returns to `ready` with its reason and asks again under the same foreground
+rule (also when its tab has closed).
+
+`DownloadsButton` appears after the first download this session and stays
+after clearing the list. Its one dot is brand-coloured while a choice waits,
+otherwise destructive-coloured for an unseen failed or refused download;
+opening the list acknowledges problems. A waiting row opens the dialog.
+
+`useBrowserDownloads`, mounted once in `AppLayout`, mirrors the whole list
+from `browser-downloads` into `useBrowserDownloadsStore`. States are `receiving`,
+`ready`, `delivering`, `saved`, `discarded`, `failed` and `refused`;
+`app/src-tauri/src/shell/browser/downloads/mod.rs` defines the field-level
+wire types. `browser_downloads` supplies the mount snapshot;
+`browser_download_choose` records a choice, `browser_download_save_panel`
+returns a confirmed path or cancellation, `browser_download_reveal` and
+`browser_download_open` act on a saved file, and `browser_download_clear`
+removes a settled row without deleting its saved file
+(`app/src-tauri/src/shell/browser/downloads/commands.rs`).
+The dialog calls `browser_focus_app` in the browser's `commands` module on
+Windows because DOM focus cannot take the keyboard from a WebView2 page;
+it is a no-op elsewhere.

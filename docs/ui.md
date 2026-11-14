@@ -324,10 +324,11 @@ themes are opt-in and keep the same structure.
   stay with the page.
 - **View preferences use `useStoredState`**, with readers that own defaults and validation; `useStoredSet` keeps collapsed group keys. Storage failures leave the live view usable.
 - **No toasts, no bottom progress bars** — background jobs surface in the
-  sidebar only, as a spinner or dot on their rail item
-  ([shell.md](./shell.md#the-sidebar-is-an-icon-rail)). No placeholder UI,
-  section-header icons or filler; stat cards only where the figures are the
-  point (Home's Activity).
+  sidebar, as a spinner or dot on their rail item
+  ([shell.md](./shell.md#the-sidebar-is-an-icon-rail)); browser downloads use
+  their [toolbar list and Save dialog](./viewers.md#downloads-wait-for-a-destination-while-their-bytes-arrive).
+  No placeholder UI, section-header icons or filler; stat cards only where
+  the figures are the point (Home's Activity).
 - Slugs display through `humanizeSlug`, Canvas codes through `displayCode`
   ("MULT20015", not "MULT20015_2026_SM2"), both in `app/src/lib/format/format.ts`.
 

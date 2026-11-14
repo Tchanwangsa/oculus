@@ -330,7 +330,7 @@ uses the shared profile folder described in [windows.md](./windows.md). Inside:
 - `courses/<code>/…` — scraped files in Canvas's layout, with the parser's
   `.md`, `.pages.json` and `<stem>_images/` siblings and the embedder's
   `.emb.json`. Four subfolders are the student's own, never written by a sync:
-  `uploads/` (copied in by `import_uploads`), `documents/` (notes written in
+  `uploads/` (copied in by `import_files`), `documents/` (notes written in
   the app by `create_document`, with pasted images in `documents/assets/`),
   `canvases/` and `notebooks/` (versioned drawing documents; [drawing-canvas.md](./drawing-canvas.md)),
   all in `app/src-tauri/src/library/files/`. Rename and delete commands are scoped
@@ -341,6 +341,7 @@ uses the shared profile folder described in [windows.md](./windows.md). Inside:
   `source2.mp4`) and `transcript.vtt`, plus regenerable `frames/` and
   `outline.md` from the chapter jobs. Which source is the slides is measured,
   not assumed — see [chapters.md](./chapters.md).
+- `downloads/.incoming/` — browser download staging ([viewers.md](./viewers.md#downloads-wait-for-a-destination-while-their-bytes-arrive)).
 - `agents/` — the docs, skills and memory layer a coding agent reads and
   writes ([cli.md](./cli.md#oculus-docs-writes-the-agents-folder)); the
   working directory and only writable root of every chat thread, with raw

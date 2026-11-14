@@ -268,6 +268,8 @@ while Ctrl+Shift+Z is Redo.
   tab only while that stand-in is active. Every
   "Open in Canvas"/"Open in Ed" icon is the one `OpenOriginal`
   (`app/src/components/files/OpenOriginal.tsx`) and opens the same way.
+  Download-only tabs, return to the opening tab, and downloads that outlive
+  their tabs follow the [browser lifecycle rules](./viewers.md#downloads-wait-for-a-destination-while-their-bytes-arrive).
 - **A new tab lands on `/new`**, not Home: a search field, a browser door, a
   chat door and the Recent trail.
 - **Recent is a still list** (`recentTabsStore`): a visit lands only after the

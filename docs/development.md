@@ -13,6 +13,7 @@ and stable Rust, plus the MSVC toolchain, Windows SDK and WebView2.
 | Cargo CLI build, target paths and host detection | `app/scripts/runtime.mjs`, `app/scripts/build-cli.mjs` |
 | Shared cached native download and installation | `app/scripts/native-binary.mjs` |
 | The dev wrapper, preflight and cross-shell test runner | `app/scripts/dev.mjs`, `app/scripts/predev.mjs`, `app/scripts/test.mjs` |
+| Vendored browser engine bindings | `app/src-tauri/vendor/wry/`, `app/src-tauri/vendor/wry/VENDORED.md`, `app/src-tauri/Cargo.toml` |
 | The app and CLI dev profile | `[profile.dev]` in `app/src-tauri/Cargo.toml` |
 | Keeps the dev CLI current through a session | `app/scripts/watch-cli.mjs` |
 | Native binary fetcher (ffmpeg) | `app/scripts/fetch-ffmpeg.mjs` |
@@ -59,6 +60,16 @@ bun run math          # build the maths wasm into app/math-core/pkg/
 bun run canvas        # build the drawing geometry wasm into app/canvas-core/pkg/
 bun run widget-kit    # build the chat widgets' kit into app/dist/widget-kit/ (docs/widgets.md)
 ```
+
+## wry is vendored at the version Tauri resolves
+
+wry lives at `app/src-tauri/vendor/wry`, patched in through `[patch.crates-io]`
+in `app/src-tauri/Cargo.toml`. Its version must equal the one
+`tauri-runtime-wry` resolves or cargo silently ignores the patch:
+`cargo tree -i wry` from the Tauri crate must print the vendored path.
+`app/src-tauri/vendor/wry/VENDORED.md` lists the changes to carry across when
+updating it; the [browser download rules](./viewers.md#downloads-wait-for-a-destination-while-their-bytes-arrive)
+depend on them.
 
 ## `predev` is the whole preflight, and it is idempotent
 
