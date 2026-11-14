@@ -1,10 +1,18 @@
 import { memo, useMemo } from "react";
-import { ArrowClockwise } from "@phosphor-icons/react";
+import {
+  ArrowBendDownRight,
+  ArrowClockwise,
+  ArrowsInSimple,
+  ClockCounterClockwise,
+  StopCircle,
+  WarningCircle,
+} from "@phosphor-icons/react";
 import { fmtClock, sqliteUtcToMs } from "@/lib/format/format";
 import { messageAt, unpromptedAfter, type HarnessItem } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { Action, Assistant, CopyAction, MessageActions } from "./MessageActions";
 import { QuestionBubble } from "./QuestionBubble";
+import { SystemDivider } from "./SystemDivider";
 import type { QuestionActions } from "./types";
 import type { ReplyRole } from "./rows";
 import { mayHoldWidget } from "@/components/markdown/openui/remarkWidgets";
@@ -114,20 +122,18 @@ export const ArtifactRow = memo(function ArtifactRow({ item }: { item: HarnessIt
 
 /** Where a turn was stopped. */
 export const Stopped = memo(function Stopped() {
-  return (
-    <div className="py-1 text-center text-[11px] text-muted-foreground">You stopped the response</div>
-  );
+  return <SystemDivider icon={StopCircle} label="Run interrupted" detail="Stopped by you" />;
 });
 
 /** A run whose answer, or part of it, never arrived (Rust's `DeliveryNotice`).
  *  Nothing is resent; the student can ask again. */
 export const DeliveryNotice = memo(function DeliveryNotice({ item }: { item: HarnessItem }) {
-  return <div className="py-1 text-center text-[11px] text-muted-foreground">{item.content}</div>;
+  return <SystemDivider icon={WarningCircle} label={item.content ?? ""} />;
 });
 
 /** The agent compacted its context here; its summary is not shown as a reply. */
 export const Compacted = memo(function Compacted() {
-  return <div className="py-1 text-center text-[11px] text-muted-foreground">Context compacted</div>;
+  return <SystemDivider icon={ArrowsInSimple} label="Context compacted" />;
 });
 
 /** Where the agent went on without a message: a background task finished. */
@@ -136,16 +142,14 @@ export const Unprompted = memo(function Unprompted({ item }: { item: HarnessItem
   const list =
     names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
   return (
-    <div className="py-1 text-center text-[11px] text-muted-foreground">
-      {list ? `Continued after ${list} finished` : "Continued on its own"}
-    </div>
+    <SystemDivider icon={ArrowBendDownRight} label={list ? `Continued after ${list} finished` : "Continued on its own"} />
   );
 });
 
 /** Heads a card's continuation run: Oculus's line about the card that
  *  settled, never drawn as the student's message. */
 export const Continued = memo(function Continued({ item }: { item: HarnessItem }) {
-  return <div className="py-1 text-center text-[11px] text-muted-foreground">{item.content}</div>;
+  return <SystemDivider icon={ArrowBendDownRight} label={item.content ?? ""} />;
 });
 
 /** A rewind that took rows off the screen but not out of the agent's context
@@ -153,9 +157,5 @@ export const Continued = memo(function Continued({ item }: { item: HarnessItem }
 export const ContextDrift = memo(function ContextDrift({ threadId }: { threadId: number }) {
   const drifted = useHarnessStore((s) => s.contextDrift[threadId] ?? false);
   if (!drifted) return null;
-  return (
-    <div className="py-1 text-center text-[11px] text-muted-foreground">
-      The agent still remembers what was removed here
-    </div>
-  );
+  return <SystemDivider icon={ClockCounterClockwise} label="The agent still remembers what was removed here" />;
 });

@@ -964,9 +964,17 @@ carries its run's question (`asked`), which Retry sends again.
 | --- | --- | --- |
 | Working (the thread's last run, live) | "Working for 8s", shimmering, open; a running step stays unbundled; the tail's "Working…" defers to it | the latest committed reply, without Copy or Retry; none while text streams |
 | Completed | "Worked for 23s", closed | Copy and Retry |
-| Stopped | "You stopped after 23s", open | headed "Partial response", then "You stopped the response" |
+| Stopped | "You stopped after 23s", open | headed "Partial response", then the divider "Run interrupted · Stopped by you" |
 | Failed | "Failed after 23s", open | "Partial response", then the error or sign-in card |
 | Ended with no stored interval | "Work details" | as its status says |
+
+Lifecycle lines — the stop, "Context compacted", a continuation ("Continued
+after “X” finished", a card's continuation), a delivery notice and a rewind's
+context drift — draw through one `SystemDivider`
+(`app/src/components/harness/timeline/SystemDivider.tsx`): a hairline either
+side of a centred Phosphor glyph and label, an optional "· detail", a neutral
+or `danger` tone, and an optional pill action with a tooltip. Its text wraps
+rather than truncating, so a long notice reads in a narrow dock.
 
 The duration is the run's stored wall-clock interval (`harness_runs`, read by
 `getHarnessRuns` beside the rows on load; until `RunSettled`, the clock
