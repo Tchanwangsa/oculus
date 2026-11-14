@@ -1,5 +1,6 @@
 import type { JobChain, JobSelection } from "@/lib/db";
 import type { PickerProvider, Provider } from "@/lib/harness";
+import { PROVIDER_IDS } from "@/lib/harness/providers";
 
 /** An agent's models draw on one usage limit, so a second model of the same
  *  agent cannot take over once the first has run out. opencode is the
@@ -61,4 +62,10 @@ export function modelLabel(
 ): string {
   const p = providers.find((x) => x.id === provider);
   return p?.models.find((m) => m.id === model)?.label ?? model;
+}
+
+/** The agent tab a picker with no entry opens on: the job's default agent,
+ *  else, for a job that is off by default, the first agent offered. */
+export function startingProvider(defaults: JobChain, offered: PickerProvider[]): Provider {
+  return defaults[0]?.provider ?? offered[0]?.id ?? PROVIDER_IDS[0];
 }

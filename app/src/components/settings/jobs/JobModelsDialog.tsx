@@ -14,7 +14,7 @@ import { DEFAULT_JOB_MODELS, type JobChain, type JobId, type JobSelection } from
 import type { PickerProvider, Provider } from "@/lib/harness";
 import { ChainPicker } from "./ChainPicker";
 import { ChainList } from "./ChainList";
-import { providersFor, withEntry, withoutEntry } from "./chain";
+import { providersFor, startingProvider, withEntry, withoutEntry } from "./chain";
 
 /** Edits apply as they are made, through the same save as the job's row, so
  *  there is nothing to confirm or cancel. A `perAgent` job lists a model per
@@ -47,7 +47,7 @@ export function JobModelsDialog({
   const [added, setAdded] = useState<number | null>(null);
   // Agents the chain doesn't hold yet; the one just added still counts as free.
   const addable = providersFor(offered, chain, added ?? -1);
-  const addProvider = addable[0]?.id ?? DEFAULT_JOB_MODELS[job][0].provider;
+  const addProvider = addable[0]?.id ?? startingProvider(DEFAULT_JOB_MODELS[job], offered);
   const addPick = (pick: JobSelection) => {
     const at = added ?? chain.length;
     // A pick already in the chain moves there (`withEntry`), so find it again.

@@ -6,7 +6,7 @@ import { DEFAULT_JOB_MODELS, type JobChain, type JobId } from "@/lib/db";
 import { reasoningLabel, type PickerProvider, type Provider } from "@/lib/harness";
 import { ChainPicker } from "./ChainPicker";
 import { JobAttention } from "./JobAttention";
-import { agentLabel, modelLabel, withEntry } from "./chain";
+import { agentLabel, modelLabel, startingProvider, withEntry } from "./chain";
 
 /** One job: what it does, what the audit found, and its first model, with
  *  the fallbacks one click away in `JobModelsDialog`. A `perAgent` job's
@@ -72,7 +72,7 @@ export function JobRow({
         <ChainPicker
           providers={offered}
           entry={chain[0] ?? null}
-          fallbackProvider={DEFAULT_JOB_MODELS[job][0].provider}
+          fallbackProvider={startingProvider(DEFAULT_JOB_MODELS[job], offered)}
           onPick={(pick) => onChange((c) => withEntry(c, 0, pick))}
           onView={onView}
           align="end"
