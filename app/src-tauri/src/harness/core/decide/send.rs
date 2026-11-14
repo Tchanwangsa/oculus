@@ -57,7 +57,7 @@ pub(super) fn decide(
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::state::Live;
+    use super::super::super::state::{Live, OpenRun};
     use super::*;
     use crate::harness::core::Kind;
     use crate::harness::store::ThreadRow;
@@ -81,7 +81,10 @@ mod tests {
             newest_anchor: None,
             waiting: 0,
             held: 0,
-            open: busy,
+            open: busy.then_some(OpenRun {
+                run_id: 9,
+                stop_requested: false,
+            }),
         }
     }
 

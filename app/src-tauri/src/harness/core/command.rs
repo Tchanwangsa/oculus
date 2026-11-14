@@ -45,8 +45,15 @@ pub(in crate::harness) enum Kind {
     ReorderQueued {
         order: Vec<i64>,
     },
-    /// Stop the chat's turn, and take back everything waiting behind it.
-    Stop,
+    /// Stop a run and hold what waits behind it. `run_id` names the run
+    /// the student saw running: one that has since finished is left alone,
+    /// and so is whatever came after it. `None` stops whatever turn the
+    /// chat has open, a turn its CLI started itself included.
+    Stop {
+        run_id: Option<i64>,
+    },
+    /// Lift the hold on the queue: the waiting messages go out again.
+    Resume,
 }
 
 impl Kind {
@@ -60,7 +67,8 @@ impl Kind {
             Kind::EditQueued { .. } => "edit_queued",
             Kind::RemoveQueued { .. } => "remove_queued",
             Kind::ReorderQueued { .. } => "reorder_queued",
-            Kind::Stop => "stop",
+            Kind::Stop { .. } => "stop",
+            Kind::Resume => "resume",
         }
     }
 }
@@ -82,7 +90,7 @@ pub(in crate::harness) struct Outcome {
     /// A rewind's question, handed back to the composer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
-    /// The waiting messages a stop took back, for the composer.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dropped: Vec<String>,
+    /// The run a stop reached.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped: Option<i64>,
 }

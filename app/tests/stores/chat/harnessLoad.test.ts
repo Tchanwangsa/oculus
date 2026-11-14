@@ -106,3 +106,25 @@ test("a failed read leaves an empty thread that the stream still fills", async (
   useHarnessStore.getState().apply(told(3, 11, { type: "assistant_message", text: "answer" }));
   expect(ids()).toEqual([11]);
 });
+
+test("a stop marks its run as stopping, and a held queue does not keep the thread working", async () => {
+  const resolve = pendingLoad();
+  const loading = useHarnessStore.getState().load(THREAD);
+  resolve({
+    revision: 3,
+    items: [row(10, "user", "asked")],
+    runs: [{ id: 5, execution_status: "running", delivery_state: "unknown", answer_item_id: null, started_at: "2026-11-15 00:00:00", ended_at: null }],
+    queued: [{ id: "6", text: "waiting", held: false }],
+  });
+  await loading;
+  const apply = useHarnessStore.getState().apply;
+  apply(told(4, null, { type: "turn_started" }));
+  apply(told(4, null, { type: "stop_requested", run_id: 5 }));
+  expect(useHarnessStore.getState().runs[THREAD][5].stopping).toBe(true);
+  // The stop held the queue before the turn ended.
+  apply(told(5, null, { type: "queue", messages: [{ id: "6", text: "waiting", held: true }] }));
+  apply(told(6, null, { type: "turn_finished", status: "interrupted" }));
+  const state = useHarnessStore.getState();
+  expect(state.live[THREAD].running).toBe(false);
+  expect(state.queued[THREAD]).toEqual([{ id: "6", text: "waiting", held: true }]);
+});

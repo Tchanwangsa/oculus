@@ -80,6 +80,7 @@ pub(in crate::harness) fn decide(
         Kind::EditQueued { run_id, text } => queue::edit(state, *run_id, text),
         Kind::RemoveQueued { run_id } => queue::remove(state, *run_id),
         Kind::ReorderQueued { order } => queue::reorder(state, order),
-        Kind::Stop => queue::stop(state),
+        Kind::Stop { run_id } => queue::stop(state, *run_id),
+        Kind::Resume => queue::resume(state),
     }
 }

@@ -11,6 +11,7 @@ export interface RunRow {
   answer_item_id: number | null;
   started_at: string | null;
   ended_at: string | null;
+  stop_requested_at?: string | null;
 }
 
 /** The statuses of a run with a timeline row. `starting` is saved and not
@@ -27,12 +28,24 @@ export function runFromRow(row: RunRow): HarnessRun {
     answer_item_id: row.answer_item_id,
     started_ms: sqliteUtcToMs(row.started_at) ?? null,
     ended_ms: sqliteUtcToMs(row.ended_at) ?? null,
+    ...(row.stop_requested_at != null && row.ended_at == null ? { stopping: true } : {}),
   };
 }
 
 /** Whether a run has ended (settled by Rust, or closed by startup reconcile). */
 export const runEnded = (run: HarnessRun | undefined) =>
   !!run && (run.status === "completed" || run.status === "interrupted" || run.status === "failed");
+
+/** The thread's newest live run (going out, or being answered): the run a
+ *  Stop names. Null with none. */
+export function liveRunId(runs: Record<number, HarnessRun> | undefined): number | null {
+  let latest: number | null = null;
+  for (const run of Object.values(runs ?? {})) {
+    const live = run.status === "running" || run.status === "starting" || run.status === "preparing";
+    if (live && (latest == null || run.id > latest)) latest = run.id;
+  }
+  return latest;
+}
 
 /** When the thread's newest live run (going out, or being answered) started;
  *  null with none (a turn the agent started itself has no run). */

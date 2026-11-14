@@ -179,9 +179,15 @@ against `load::read`.
 start step (the message back in its queue, held, on all four bridges) and
 after it took the run, sends returning at their commit and going out one
 at a time, and a start step that finds its run gone.
+`testkit/stop.rs` checks Stop: through Codex, a stop that keeps the partial
+answer and the waiting message, and Resume starting that message as its own
+run; a stop for a run that just finished; a stop during a slow start on all
+four bridges; a failed turn and a failed sign-in holding the queue; a stop
+and Resume around a turn the CLI started; and a waiting message held at
+startup that resumes with the options it was queued with.
 `testkit/queue.rs` checks queued runs: a message sent mid-turn through a
 real bridge waiting as a run and starting as the same run, the queue's
-commands, options riding the queue, Stop, a continuation's place in line, and
+commands, options riding the queue, a continuation's place in line, and
 every reader of `harness_runs` beside runs that never ran.
 `testkit/runs.rs` checks run identity: one run,
 attempt, binding and receipt per send on all four bridges, with every later

@@ -14,6 +14,8 @@ pub(in crate::harness) struct Live {
     /// itself, a rewind waiting on the provider, or a settle that has not
     /// landed yet.
     pub held: bool,
+    /// The CLI is in a turn it started itself, which no run stands for.
+    pub own_turn: bool,
 }
 
 pub(in crate::harness) struct State {
@@ -28,15 +30,23 @@ pub(in crate::harness) struct State {
     /// held.
     pub waiting: i64,
     pub held: i64,
-    /// A run is going out or being answered.
-    pub open: bool,
+    /// The run going out or being answered.
+    pub open: Option<OpenRun>,
+}
+
+/// What a decider needs of the chat's open run.
+#[derive(Clone, Copy)]
+pub(in crate::harness) struct OpenRun {
+    pub run_id: i64,
+    /// The student already asked it to stop.
+    pub stop_requested: bool,
 }
 
 impl State {
     /// A turn has the chat: a message sent now waits, and nothing may
     /// rewrite the chat's rows.
     pub fn busy(&self) -> bool {
-        self.open || self.live.held
+        self.open.is_some() || self.live.held
     }
 }
 
@@ -54,9 +64,12 @@ pub(in crate::harness) async fn read(
     let ((waiting, held), open) = match command.thread_id {
         Some(id) => (
             store::queue::waiting(pool, id).await?,
-            store::queue::open(pool, id).await?.is_some(),
+            store::queue::open(pool, id).await?.map(|open| OpenRun {
+                run_id: open.run.run_id,
+                stop_requested: open.stop_requested,
+            }),
         ),
-        None => ((0, 0), false),
+        None => ((0, 0), None),
     };
     let mut state = State {
         thread,

@@ -176,21 +176,40 @@ pub async fn harness_reorder_queued(
     moved.await.map(|_| ())
 }
 
-/// Stop the running turn and drop whatever was waiting behind it,
-/// handing the dropped texts back to the composer. A card's continuation
-/// waiting there is cancelled too, and its card says so.
+/// Stop a run and hold what waits behind it. `run_id` is the run the
+/// student saw running (null for a turn the CLI started itself, or when the
+/// webview knows none): Stop for a run that has since finished touches
+/// nothing. The turn ends when its CLI says so; waiting messages stay in
+/// the queue, held, until [`harness_resume`] or the next message.
 #[tauri::command]
 pub async fn harness_interrupt(
     state: State<'_, HarnessState>,
     command_id: String,
     thread_id: i64,
-) -> Result<Vec<String>, String> {
+    run_id: Option<i64>,
+) -> Result<(), String> {
     let stopped = state.command(Command {
         id: command_id,
         thread_id: Some(thread_id),
-        kind: Kind::Stop,
+        kind: Kind::Stop { run_id },
     });
-    Ok(stopped.await?.dropped)
+    stopped.await.map(|_| ())
+}
+
+/// Lift the hold a stop, a failed turn or a restart put on the thread's
+/// queue: its waiting messages go out again, in order.
+#[tauri::command]
+pub async fn harness_resume(
+    state: State<'_, HarnessState>,
+    command_id: String,
+    thread_id: i64,
+) -> Result<(), String> {
+    let resumed = state.command(Command {
+        id: command_id,
+        thread_id: Some(thread_id),
+        kind: Kind::Resume,
+    });
+    resumed.await.map(|_| ())
 }
 
 #[tauri::command]

@@ -46,8 +46,10 @@ export function LiveTail({
   );
 }
 
-/** Messages queued while the agent works — held in memory by Rust (`Queue` in
- *  `app/src-tauri/src/harness/mod.rs`), editable or removable until sent. */
+/** Messages waiting their turn: queued runs Rust saves
+ *  (`harness/store/queue.rs`), editable or removable until sent. After a
+ *  stop or a failed turn they stay listed, held, and go out on Resume or
+ *  with the next message. */
 export function Pending({ threadId, actions }: { threadId: number; actions: PendingActions }) {
   const queued = useHarnessStore((s) => s.queued[threadId]);
   if (!queued?.length) return null;

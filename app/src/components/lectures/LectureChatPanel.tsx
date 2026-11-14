@@ -60,7 +60,7 @@ export const LectureChatPanel = memo(function LectureChatPanel({
   /** This lecture's threads, for the history popover and the title. */
   const [threads, setThreads] = useState<HarnessThread[]>([]);
   const [moment, setMoment] = useState(true);
-  /** Words a stop handed back. Local, not the store's thread-less `restore`,
+  /** Words a rewind handed back. Local, not the store's thread-less `restore`,
    *  which would drop them into the Chat page's composer. */
   const [restore, setRestore] = useState<{ text: string; n: number } | null>(null);
 

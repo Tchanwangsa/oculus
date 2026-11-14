@@ -86,7 +86,10 @@ mod tests {
                 subject_code: None,
                 lecture: None,
             }),
-            live: Live { held: busy },
+            live: Live {
+                held: busy,
+                own_turn: false,
+            },
             question: Some(Question {
                 text: "the question".into(),
                 anchor: anchor.map(String::from),
@@ -94,7 +97,7 @@ mod tests {
             newest_anchor: Some("newest".into()),
             waiting: 0,
             held: 0,
-            open: false,
+            open: None,
         }
     }
 

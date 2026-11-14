@@ -4,7 +4,9 @@ import {
   harnessEditQueued,
   harnessEditResend,
   harnessInterrupt,
+  harnessResume,
   harnessRewind,
+  liveRunId,
   harnessSend,
   harnessUnqueue,
   type Provider,
@@ -19,7 +21,7 @@ interface ThreadActionsOptions {
   /** The composer's selection: the open thread's, else the session's. */
   provider: Provider;
   model: string | null;
-  /** Words a stop or a rewind handed back, for the composer. */
+  /** Words a rewind handed back, for the composer. */
   onRestore: (text: string) => void;
   /** A send created a thread; the store's list is already reloaded. */
   onCreated: (id: number) => void | Promise<void>;
@@ -64,15 +66,16 @@ export function useThreadActions(opts: ThreadActionsOptions) {
     [store],
   );
 
-  // Stop cuts the turn and drops the queue; queued text returns to the composer.
+  // Stop names the run on screen and holds the queue: waiting messages stay
+  // listed, and go out again on Resume or with the next message.
   const onStop = useCallback(() => {
     const id = ref.current.threadId();
     if (id == null) return;
-    harnessInterrupt(id)
-      .then((dropped) => {
-        if (dropped.length) ref.current.onRestore(dropped.join("\n\n"));
-      })
-      .catch(() => {});
+    harnessInterrupt(id, liveRunId(store.getState().runs[id])).catch((e) => console.error("harness stop failed", e));
+  }, [store]);
+  const onResume = useCallback(() => {
+    const id = ref.current.threadId();
+    if (id != null) harnessResume(id).catch((e) => console.error("harness resume failed", e));
   }, []);
 
   const onProvider = useCallback((p: Provider) => store.getState().setProvider(p), [store]);
@@ -139,5 +142,5 @@ export function useThreadActions(opts: ThreadActionsOptions) {
     [],
   );
 
-  return { send, onStop, onProvider, onModel, onReasoning, questions, pending };
+  return { send, onStop, onResume, onProvider, onModel, onReasoning, questions, pending };
 }

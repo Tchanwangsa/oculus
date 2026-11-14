@@ -29,8 +29,9 @@ import { cn } from "@/lib/utils";
 
 /**
  * The chat box: text, then model picker / usage / send+stop. Enter sends,
- * Shift+Enter breaks. While a turn runs a send is queued by Rust (`Queue` in
- * `app/src-tauri/src/harness/mod.rs`); Stop hands the queue back as `restore`.
+ * Shift+Enter breaks. While a turn runs a send waits as a queued run
+ * (`harness/store/queue.rs`); Stop holds that queue. A rewind hands its
+ * question back as `restore`.
  * Scope is chosen above the box, only while the thread is new; a new Chat
  * thread chooses it in the headline (`DraftHero`) and, while it has none,
  * the box is `unscoped`: it keeps collecting but will not send. `@` mentions

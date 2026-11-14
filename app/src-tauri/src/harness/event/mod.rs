@@ -283,6 +283,12 @@ pub enum HarnessEvent {
     Queue {
         messages: Vec<super::store::QueuedMessage>,
     },
+    /// The student asked this run to stop. Saved on the run
+    /// (`stop_requested_at`); the run itself ends only on its turn's own
+    /// terminal.
+    StopRequested {
+        run_id: i64,
+    },
     /// The provider's handle for the turn just sent (Claude's message uuid,
     /// Codex's turn id), kept on the user row: a rewind names it, no CLI re-issues it.
     TurnAnchor {

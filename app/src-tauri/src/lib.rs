@@ -369,6 +369,7 @@ pub fn run() {
             harness::app::turns::harness_edit_queued,
             harness::app::turns::harness_reorder_queued,
             harness::app::turns::harness_interrupt,
+            harness::app::turns::harness_resume,
             harness::app::turns::harness_delete_thread,
             harness::store::threads::harness_thread_viewed,
             harness::app::suggest::document_suggest,

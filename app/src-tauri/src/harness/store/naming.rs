@@ -125,6 +125,12 @@ pub async fn reconcile(pool: &SqlitePool) -> Result<Reconciled, String> {
     .execute(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;
+    // Nothing starts a turn at launch: what still waits is held until the
+    // student resumes it or sends again.
+    sqlx::query("UPDATE harness_runs SET queue_held = 1 WHERE execution_status = 'queued'")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
     // Their process is gone: what streamed is kept, and they end interrupted.
     super::runs::recover(&mut tx).await?;
     for sql in [

@@ -98,9 +98,18 @@ export function harnessReorderQueued(threadId: number, order: string[]): Promise
   return invoke("harness_reorder_queued", { commandId: commandId(), threadId, order });
 }
 
-/** Stop the turn and clear the queue; resolves to the dropped messages. */
-export function harnessInterrupt(threadId: number): Promise<string[]> {
-  return invoke<string[]>("harness_interrupt", { commandId: commandId(), threadId });
+/** Stop a run and hold what waits behind it. `runId` is the run on screen
+ *  (`liveRunId`); null stops whatever turn is open, one the agent started
+ *  itself included. Stop for a run that already finished touches nothing.
+ *  The turn ends when its CLI says so (`turn_finished`). */
+export function harnessInterrupt(threadId: number, runId: number | null): Promise<void> {
+  return invoke("harness_interrupt", { commandId: commandId(), threadId, runId });
+}
+
+/** Lift the hold on a thread's queue (after a stop, a failed turn or a
+ *  restart): its waiting messages go out again, in order. */
+export function harnessResume(threadId: number): Promise<void> {
+  return invoke("harness_resume", { commandId: commandId(), threadId });
 }
 
 export function harnessDeleteThread(threadId: number): Promise<void> {

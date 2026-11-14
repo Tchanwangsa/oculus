@@ -74,7 +74,10 @@ impl Consumer {
         match decide(&state, command, None)? {
             Decision::Commit(plan) => {
                 let outcome = self.commit(Some(command), command.thread_id, provider, plan, io)?;
-                if matches!(command.kind, Kind::Stop) {
+                // A turn the CLI started itself has no run for the driver to
+                // read a stop from: it is asked directly.
+                let own_turn = self.runs.own_open(outcome.thread_id);
+                if let (Kind::Stop { run_id: None }, true) = (&command.kind, own_turn) {
                     io.perform(Effect::Interrupt {
                         thread_id: outcome.thread_id,
                     });
@@ -142,6 +145,7 @@ impl Consumer {
     fn live(&self, thread_id: Option<i64>) -> Live {
         Live {
             held: thread_id.is_some_and(|id| self.held(id)),
+            own_turn: thread_id.is_some_and(|id| self.runs.own_open(id)),
         }
     }
 
@@ -244,6 +248,10 @@ impl Consumer {
                 for card in cards {
                     self.snapshot(thread_id, provider, &card, io);
                 }
+            }
+            Applied::Stopping(run_id) => {
+                let stopping = HarnessEvent::StopRequested { run_id };
+                self.event(thread_id, provider, From::App, stopping, None, io);
             }
             Applied::Truncated { item_id, context } => {
                 let rewound = HarnessEvent::Rewound {
@@ -354,8 +362,9 @@ impl Consumer {
     }
 
     /// Take the steps the chat's saved runs imply (`core::driver`): hand a
-    /// `starting` run to its start step, or, with nothing open, start the
-    /// first waiting run that is not held. Called after every commit, every
+    /// `starting` run to its start step, ask the provider to stop a run the
+    /// student stopped, or, with nothing open, start the first waiting run
+    /// that is not held. Called after every commit, every
     /// turn's end and every effect's report; it reads the rows each time, so
     /// calling it when nothing changed does nothing.
     pub(super) fn drive(&mut self, thread_id: i64, provider: Provider, io: &mut impl ConsumerIo) {
@@ -370,18 +379,22 @@ impl Consumer {
                     return;
                 }
             };
-            let started = saved
-                .open
-                .as_ref()
-                .is_some_and(|open| self.started.contains(&open.run.run_id));
+            let open = saved.open.as_ref().map(|open| open.run.run_id);
             let calls = Calls {
-                started,
+                started: open.is_some_and(|run| self.started.contains(&run)),
+                accepted: open.is_some_and(|run| self.accepted.contains(&run)),
+                asked: open.is_some_and(|run| self.asked.contains(&run)),
                 held: self.held(thread_id),
             };
             match driver::step(thread_id, provider, saved, calls) {
                 Step::Start(start) => {
                     self.started.insert(start.run.run_id);
                     io.perform(Effect::Start(start));
+                    return;
+                }
+                Step::Interrupt(run_id) => {
+                    self.asked.insert(run_id);
+                    io.perform(Effect::Interrupt { thread_id });
                     return;
                 }
                 Step::Promote(waiting) => {
@@ -451,7 +464,12 @@ impl Consumer {
     ) {
         let open = self.runs.open_run(thread_id) == Some(run_id);
         let status = match outcome {
-            Sent::Accepted => None,
+            Sent::Accepted => {
+                if open {
+                    self.accepted.insert(run_id);
+                }
+                None
+            }
             _ if !open => {
                 elog!("[oculus] harness run {run_id}: its start ended ({outcome:?}) after the run did");
                 None

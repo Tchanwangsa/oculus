@@ -39,6 +39,8 @@ type HarnessEvent =
   /** The student's messages waiting their turn, whole and in order, told
    *  again whenever the queue changes. */
   | { type: "queue"; messages: QueuedMessage[] }
+  /** The student asked this run to stop; it ends on its own `turn_finished`. */
+  | { type: "stop_requested"; run_id: number }
   /** The provider's handle for a later rewind; the webview ignores it. */
   | { type: "turn_anchor"; anchor: string }
   /** Rows from `from_item_id` on are gone; `context` is whether the agent
@@ -198,6 +200,8 @@ export interface HarnessRun {
   /** Epoch ms; null when unknown. */
   started_ms: number | null;
   ended_ms: number | null;
+  /** The student asked it to stop and its turn has not ended yet. */
+  stopping?: boolean;
 }
 
 export interface BridgeHealth {

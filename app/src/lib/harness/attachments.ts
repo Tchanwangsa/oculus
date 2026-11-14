@@ -16,7 +16,7 @@ export interface PendingAttachment {
   source:
     | { kind: "bytes"; file: File }
     | { kind: "path"; path: string }
-    /** Already in `agents/attachments/`, handed back by a stop or a rewind;
+    /** Already in `agents/attachments/`, handed back by a rewind;
      *  `path` is the message's own spelling and is sent as it is. */
     | { kind: "kept"; path: string };
 }

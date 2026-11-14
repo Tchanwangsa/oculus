@@ -33,6 +33,10 @@ pub(in crate::harness) async fn read(pool: &SqlitePool, thread_id: i64) -> Resul
 pub(in crate::harness) struct Calls {
     /// The open run was already handed to its start step.
     pub started: bool,
+    /// Its start step reported that the provider has the message.
+    pub accepted: bool,
+    /// The provider was already asked to stop it.
+    pub asked: bool,
     /// Something no row shows holds the chat: a turn the CLI started
     /// itself, a rewind waiting on the provider, a settle that has not
     /// landed.
@@ -42,6 +46,11 @@ pub(in crate::harness) struct Calls {
 pub(in crate::harness) enum Step {
     /// Hand the `starting` run to its start step.
     Start(Box<Start>),
+    /// The open run is marked as stopped and its provider has not been
+    /// asked yet. Asked only once the provider has the turn: an interrupt
+    /// that lands before the turn exists stops nothing, and on Claude
+    /// would mark the next turn interrupted instead.
+    Interrupt(i64),
     /// Nothing is open: the first waiting run starts.
     Promote(Box<Waiting>),
     /// Nothing to do until a row changes.
@@ -63,6 +72,11 @@ pub(in crate::harness) fn step(
             options: open.options,
             respawn: open.respawn,
         })),
+        (Some(open), _)
+            if !open.starting && open.stop_requested && calls.accepted && !calls.asked =>
+        {
+            Step::Interrupt(open.run.run_id)
+        }
         (Some(_), _) => Step::Wait,
         (None, Some(next)) if !calls.held => Step::Promote(Box::new(next)),
         (None, _) => Step::Wait,
@@ -76,6 +90,10 @@ mod tests {
     use crate::harness::SendOptions;
 
     fn open(starting: bool) -> Option<Open> {
+        stopped(starting, false)
+    }
+
+    fn stopped(starting: bool, stop_requested: bool) -> Option<Open> {
         Some(Open {
             run: RunStart {
                 run_id: 7,
@@ -84,6 +102,7 @@ mod tests {
                 item_id: 3,
             },
             starting,
+            stop_requested,
             text: "asked".into(),
             options: SendOptions::default(),
             respawn: false,
@@ -99,7 +118,11 @@ mod tests {
     }
 
     fn calls(started: bool, held: bool) -> Calls {
-        Calls { started, held }
+        Calls {
+            started,
+            held,
+            ..Calls::default()
+        }
     }
 
     fn take(open: Option<Open>, next: Option<Waiting>, calls: Calls) -> Step {
@@ -127,6 +150,30 @@ mod tests {
         ));
         assert!(matches!(take(None, next(), calls(false, true)), Step::Wait));
         assert!(matches!(take(None, None, calls(false, false)), Step::Wait));
+    }
+
+    #[test]
+    fn a_stopped_run_is_interrupted_once_and_only_after_its_provider_has_the_turn() {
+        let accepted = |accepted, asked| Calls {
+            started: true,
+            accepted,
+            asked,
+            held: false,
+        };
+        let step = |calls| take(stopped(false, true), next(), calls);
+        assert!(matches!(step(accepted(false, false)), Step::Wait));
+        assert!(matches!(step(accepted(true, false)), Step::Interrupt(7)));
+        assert!(matches!(step(accepted(true, true)), Step::Wait));
+        // A run stopped before its start step took it is that step's to
+        // withdraw: it still gets the run, and its claim is refused.
+        assert!(matches!(
+            take(stopped(true, true), next(), calls(false, false)),
+            Step::Start(_)
+        ));
+        assert!(matches!(
+            take(stopped(true, true), next(), calls(true, false)),
+            Step::Wait
+        ));
     }
 
     #[test]

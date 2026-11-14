@@ -5,7 +5,6 @@
 
 use serde_json::{json, Value};
 
-use crate::harness::app::continuation::STOPPED;
 use crate::harness::core::{load, Command, Kind};
 use crate::harness::{store, HarnessEvent, Provider, SendOptions};
 
@@ -246,52 +245,6 @@ fn a_waiting_message_keeps_the_options_it_was_sent_with() {
         serde_json::from_str::<Value>(&at.unwrap()).unwrap()["at"],
         42
     );
-}
-
-/// Stop takes back what waits: the student's words return to the composer,
-/// and a card's continuation waiting there is cancelled and says so.
-#[test]
-fn stop_takes_back_the_queue_and_cancels_a_waiting_continuation() {
-    let mut bench = Bench::new("queue-stop");
-    let card = bench
-        .runtime
-        .block_on(super::continuation::seed_card(&bench.pool, bench.thread));
-    let (first, _) = bench.send("c1", "first");
-    let (typed, _) = bench.send("c2", "typed");
-    let settled = bench.app(HarnessEvent::CardSettled {
-        proposal: card.clone(),
-    });
-    let (stop, stopped) = bench.command("c3", Kind::Stop);
-    bench.play(vec![first, typed, settled, stop]);
-
-    assert_eq!(bench.got(stopped).unwrap().dropped, ["typed"]);
-    assert_eq!(bench.effects(), ["start first", "interrupt"]);
-    assert!(listed(&bench).is_empty());
-    assert!(told(&bench).is_empty());
-    let waiting: Vec<_> = runs(&bench).into_iter().map(|r| r.1).collect();
-    assert_eq!(waiting, ["starting", "cancelled", "cancelled"]);
-    let state = bench
-        .runtime
-        .block_on(crate::db::proposals::get(&bench.pool, &card))
-        .unwrap()
-        .state;
-    assert_eq!(
-        state["continuation"],
-        json!({"phase": "skipped", "reason": STOPPED})
-    );
-    let events = bench.events();
-    let snapshot = events
-        .iter()
-        .rev()
-        .find(|e| e["event"]["type"] == "proposal");
-    assert_eq!(
-        snapshot.unwrap()["event"]["proposal"]["state"]["continuation"]["phase"],
-        "skipped",
-        "the card's views are told"
-    );
-    // The turn's end starts nothing.
-    bench.play(vec![bench.app(ended("interrupted"))]);
-    assert_eq!(bench.effects(), ["start first", "interrupt"]);
 }
 
 /// A continuation waits in the same queue, in order, and is never listed

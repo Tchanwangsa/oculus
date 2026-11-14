@@ -978,10 +978,40 @@ question. Recorded in
 outlives its turn) and `claude-background-agent-fast.ndjson` (it finishes
 inside it).
 
-**Stop** is a command (`harness_interrupt`): its commit cancels every
-waiting run and hands the student's texts back for the composer, then an
-`Interrupt` effect asks the CLI to stop the turn. `restore` is `ChatPage`'s
-own state, since a store slot would type it into every Chat tab. Codex never completes an interrupted message, so the
+**Stop is a saved fact.** `harness_interrupt` takes the run the student saw
+running (`liveRunId` in the webview; null for a turn the CLI started
+itself). The `Stop` command's commit stamps `stop_requested_at` on that run
+and holds the queue; `StopRequested { run_id }` tells every view. It closes
+nothing: the run ends only when its own turn's terminal arrives, with what
+streamed kept.
+
+- **It names a run.** When that run has already finished, or the next
+  message is already being answered, the stop touches nothing, not even
+  the queue. A second stop of a run already stopping changes nothing.
+- **The driver asks the provider.** A run that is marked, taken by its
+  start step and accepted by its provider (`Sent::Accepted`) gets one
+  `Interrupt` effect (`driver::Step::Interrupt`). Before the provider has
+  the turn there is nothing to interrupt (and Claude would mark the next
+  turn interrupted), so the driver waits for the start step's report. A
+  run stopped while still `starting` is never sent: the start step's
+  `claim_start` refuses a marked run, reports it withdrawn and the consumer
+  ends it as interrupted.
+- **The queue is held, not handed back.** `store::queue::hold` sets
+  `queue_held` on the student's waiting messages; they stay listed in the
+  composer (`held: true`), editable and removable, and nothing goes out. A
+  run that ends `failed` holds the queue the same way, inside its settle,
+  so a signed-out or broken provider does not burn through what waits.
+  Startup holds whatever still waits, so nothing starts a turn at launch.
+- **Three things lift a hold:** `Resume` (`harness_resume`), the student's
+  next message, which joins the back of the queue so the held ones go out
+  first, and removing the messages. An idle chat with held messages is not
+  busy: it can be rewound (they stay) or deleted (they go).
+- **A continuation is never held**, since the student could not see it
+  wait. Whatever holds the queue cancels a waiting continuation's run and
+  writes the reason on its card: stopped, the turn before it failed, or the
+  app closed.
+
+Codex never completes an interrupted message, so the
 bridge commits the streamed text itself; Claude's closing `result` claims an
 error, so `terminal_reason: "aborted_streaming"` decides and its zeroed usage
 is skipped.
@@ -990,7 +1020,7 @@ is skipped.
 
 Everything the student does to a chat is a `Command` (`core/command.rs`):
 `Send`, `Rewind`, `EditResend`, `DeleteThread`, `EditQueued`, `RemoveQueued`,
-`ReorderQueued`, `Stop`. A Tauri command in
+`ReorderQueued`, `Stop`, `Resume`. A Tauri command in
 `app/turns.rs` only builds one, with the id the webview minted for it
 (`commandId` in `lib/harness/commands.ts`), puts it on the consumer's bus
 (`BusMsg::Command`) and awaits the result. The consumer takes it through
@@ -1148,7 +1178,8 @@ is stored, so it cannot release a queued message twice. Settlement:
    `commentary`; stores `answer_item_id` on the run.
 4. Judges `delivery_state`: `delivered` (completed, an answer, no unresolved
    gap), `not_applicable` (compaction only), else `incomplete`.
-5. For a completed run that is `incomplete` with no error row, writes one
+5. For a failed run, holds the thread's queue ([Stop](#one-turn-at-a-time)).
+6. For a completed run that is `incomplete` with no error row, writes one
    `delivery_notice` row: "The agent finished, but its answer did not reach
    Oculus." (no answer) or "Some earlier reply text did not reach Oculus.
    This reply may be incomplete." (a gap). A stop or failure already has its
@@ -1930,7 +1961,8 @@ thread" follows as for any send. The thread's model comes from its row and
 the reasoning level from the live session, as the student last chose them.
 
 Stop cancels a waiting continuation in the same commit and its card says so
-(`STOPPED`). The click that consented to it belongs to the session it was
+(`STOPPED`), and a failed turn does the same from its settle
+(`FAILED_BEFORE`). The click that consented to it belongs to the session it was
 made in, so startup marks a claim still waiting, or written and never
 sent, `skipped` and cancels its run, and a job the
 app closed during (`job.interrupted`) is `skipped` too: neither ever runs

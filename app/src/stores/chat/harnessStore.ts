@@ -415,6 +415,11 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           );
           break;
         }
+        case "stop_requested": {
+          const run = runs[event.run_id];
+          if (run && run.ended_ms == null) setRun({ ...run, stopping: true });
+          break;
+        }
         case "delivery_notice":
           push(rowFrom(env, "delivery_notice", event.text));
           break;
@@ -524,9 +529,10 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           return rowsOnly ? s : { rateLimits: { ...s.rateLimits, [env.provider]: event.windows } };
         case "turn_finished": {
           // The bridge has committed the live tail. Stay running if a queued
-          // message is about to go out, so the spinner does not blink.
+          // message is about to go out, so the spinner does not blink; a
+          // held one is not (a stop or a failed turn holds the queue).
           if (event.status === "interrupted") push(rowFrom(env, "interrupted", ""));
-          const more = (s.queued[threadId]?.length ?? 0) > 0;
+          const more = (s.queued[threadId] ?? []).some((q) => !q.held);
           live = { ...IDLE, running: more };
           touchThread({
             status: event.status === "failed" ? "error" : more ? "running" : "idle",

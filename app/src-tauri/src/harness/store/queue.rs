@@ -155,6 +155,8 @@ pub struct Open {
     pub run: RunStart,
     /// `starting` until the start step has taken it for its provider call.
     pub starting: bool,
+    /// The student asked it to stop (`stop_requested_at`).
+    pub stop_requested: bool,
     /// The row's text: the student's words, or a continuation's line.
     pub text: String,
     pub options: SendOptions,
@@ -165,7 +167,7 @@ pub struct Open {
 pub async fn open(db: impl SqliteExecutor<'_>, thread_id: i64) -> Result<Option<Open>, String> {
     let row = sqlx::query(
         "SELECT id, active_attempt_id, binding_id, initiating_item_id, execution_status,
-                queued_text, queued_options
+                queued_text, queued_options, stop_requested_at IS NOT NULL AS stop_requested
            FROM harness_runs
           WHERE thread_id = ?1 AND execution_status IN ('preparing', 'starting', 'running')
           ORDER BY id DESC LIMIT 1",
@@ -188,6 +190,7 @@ pub async fn open(db: impl SqliteExecutor<'_>, thread_id: i64) -> Result<Option<
                     .unwrap_or_default(),
             },
             starting: r.get::<String, _>("execution_status") == "starting",
+            stop_requested: r.get::<i64, _>("stop_requested") != 0,
             text: r
                 .get::<Option<String>, _>("queued_text")
                 .unwrap_or_default(),
@@ -294,45 +297,59 @@ pub async fn unhold(tx: &mut SqliteConnection, thread_id: i64) -> Result<(), Str
     .map_err(|e| e.to_string())
 }
 
-/// What [`clear`] took out of the queue.
-#[derive(Default, Debug)]
-pub struct Cleared {
-    /// The student's messages, in order, for the composer.
-    pub texts: Vec<String>,
-    /// Cards whose continuation was waiting.
-    pub cards: Vec<String>,
+/// The student asked this run to stop: a saved fact every later decision
+/// reads. False when the run is not open any more, which changes nothing.
+pub async fn request_stop(
+    tx: &mut SqliteConnection,
+    thread_id: i64,
+    run_id: i64,
+) -> Result<bool, String> {
+    sqlx::query(
+        "UPDATE harness_runs SET stop_requested_at = COALESCE(stop_requested_at, datetime('now'))
+          WHERE id = ?1 AND thread_id = ?2
+            AND execution_status IN ('preparing', 'starting', 'running')",
+    )
+    .bind(run_id)
+    .bind(thread_id)
+    .execute(&mut *tx)
+    .await
+    .map(|r| r.rows_affected() == 1)
+    .map_err(|e| e.to_string())
 }
 
-/// Empty the thread's queue: every waiting run is cancelled.
-pub async fn clear(tx: &mut SqliteConnection, thread_id: i64) -> Result<Cleared, String> {
+/// Hold the thread's queue: the student's waiting messages stay, in order,
+/// and none goes out until the hold is lifted. A card's continuation is
+/// never held, since the student could not see it wait: its run is
+/// cancelled, and the cards whose claim was still open are returned for
+/// `reason` to be written on them (`continuation::cancel`).
+pub async fn hold(tx: &mut SqliteConnection, thread_id: i64) -> Result<Vec<String>, String> {
     let err = |e: sqlx::Error| e.to_string();
     let rows = sqlx::query(
-        "SELECT queued_text, queued_options FROM harness_runs
-          WHERE thread_id = ?1 AND execution_status = 'queued' ORDER BY queue_position, id",
+        "SELECT queued_options FROM harness_runs
+          WHERE thread_id = ?1 AND execution_status = 'queued' AND origin = 'continuation'
+          ORDER BY queue_position, id",
     )
     .bind(thread_id)
     .fetch_all(&mut *tx)
     .await
     .map_err(err)?;
-    let mut cleared = Cleared::default();
-    for row in &rows {
-        match restored(row.get("queued_options")).0.continuation {
-            Some(card) => cleared.cards.push(card),
-            None => cleared.texts.push(
-                row.get::<Option<String>, _>("queued_text")
-                    .unwrap_or_default(),
-            ),
-        }
-    }
-    sqlx::query(
+    let cards = rows
+        .iter()
+        .filter_map(|row| restored(row.get("queued_options")).0.continuation)
+        .collect();
+    for sql in [
         "UPDATE harness_runs SET execution_status = 'cancelled', queue_position = NULL, queue_held = 0
+          WHERE thread_id = ?1 AND execution_status = 'queued' AND origin = 'continuation'",
+        "UPDATE harness_runs SET queue_held = 1
           WHERE thread_id = ?1 AND execution_status = 'queued'",
-    )
-    .bind(thread_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(err)?;
-    Ok(cleared)
+    ] {
+        sqlx::query(sql)
+            .bind(thread_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(err)?;
+    }
+    Ok(cards)
 }
 
 /// Startup: a run still `starting` was written and never handed to its

@@ -44,6 +44,8 @@ pub struct Run {
     pub answer_item_id: Option<i64>,
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
+    /// When the student asked it to stop, if they did.
+    pub stop_requested_at: Option<String>,
 }
 
 pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String> {
@@ -78,7 +80,7 @@ pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String>
     .collect();
     let runs = sqlx::query(
         "SELECT id, execution_status, delivery_state, answer_item_id,
-                COALESCE(started_at, requested_at) AS started_at, ended_at
+                COALESCE(started_at, requested_at) AS started_at, ended_at, stop_requested_at
            FROM harness_runs
           WHERE thread_id = ?1 AND execution_status NOT IN ('queued', 'cancelled')
             AND initiating_item_id IS NOT NULL
@@ -96,6 +98,7 @@ pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String>
         answer_item_id: r.get("answer_item_id"),
         started_at: r.get("started_at"),
         ended_at: r.get("ended_at"),
+        stop_requested_at: r.get("stop_requested_at"),
     })
     .collect();
     let queued = queue::list(&mut *tx, thread_id).await?;

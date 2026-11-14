@@ -123,7 +123,7 @@ export function LectureChatComposer({
   /** Whether the next message carries the moment. */
   moment: boolean;
   onMoment: (on: boolean) => void;
-  /** Words a stop handed back. Watched by `n`: the same text twice is still
+  /** Words a rewind handed back. Watched by `n`: the same text twice is still
    *  two restores. */
   restore?: { text: string; n: number } | null;
   onProvider: (p: Provider) => void;

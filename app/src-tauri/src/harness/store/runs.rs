@@ -329,6 +329,9 @@ pub async fn mark_sent(pool: &SqlitePool, run: &RunStart) -> Result<(), String> 
 pub struct Settlement {
     /// The thread's revision with the settlement written.
     pub revision: i64,
+    /// The run failed, which held the thread's queue; the cards whose
+    /// waiting continuation that cancelled.
+    pub held: Option<Vec<String>>,
     pub answer_item_id: Option<i64>,
     /// Earlier replies of the attempt, now work.
     pub work_item_ids: Vec<i64>,
@@ -503,10 +506,19 @@ pub async fn settle(
     .fetch_one(&mut *tx)
     .await
     .map_err(err)?;
+    // A failing provider does not burn through what waits behind it.
+    let held = match status {
+        "failed" => {
+            let reason = crate::harness::app::continuation::FAILED_BEFORE;
+            Some(crate::harness::app::continuation::hold_queue(&mut tx, thread_id, reason).await?)
+        }
+        _ => None,
+    };
     let revision = super::threads::raise_revision(&mut tx, thread_id).await?;
     tx.commit().await.map_err(err)?;
     Ok(Some(Settlement {
         revision,
+        held,
         answer_item_id: answer,
         work_item_ids: work,
         delivery,

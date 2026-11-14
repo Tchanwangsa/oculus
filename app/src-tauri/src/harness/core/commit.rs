@@ -53,9 +53,14 @@ pub(in crate::harness) enum Change {
     ReorderQueued {
         order: Vec<i64>,
     },
-    /// Every waiting run is cancelled; a continuation's card says it was
-    /// stopped.
-    ClearQueue,
+    /// The run is marked as asked to stop.
+    RequestStop {
+        run_id: i64,
+    },
+    /// The queue is held: the student's waiting messages stay and none
+    /// goes out; a waiting continuation is cancelled and its card says it
+    /// was stopped.
+    HoldQueue,
     /// The queue's hold is lifted: its runs may start again.
     Unhold,
     /// The rows from `item_id` on leave the chat. `context` is whether the
@@ -74,6 +79,8 @@ pub(in crate::harness) enum Applied {
     Queue,
     /// These cards' continuations were cancelled.
     Cards(Vec<String>),
+    /// This run was asked to stop.
+    Stopping(i64),
     Truncated {
         item_id: i64,
         context: bool,
@@ -183,17 +190,19 @@ pub(in crate::harness) async fn run(
                 store::queue::reorder(&mut tx, thread_id, &order).await?;
                 applied.push(Applied::Queue);
             }
-            Change::ClearQueue => {
-                let thread_id = thread.ok_or("a queue with no thread")?;
-                let cleared = store::queue::clear(&mut tx, thread_id).await?;
-                let mut stopped = Vec::new();
-                for card in cleared.cards {
-                    let reason = crate::harness::app::continuation::STOPPED;
-                    if crate::harness::app::continuation::cancel(&mut *tx, &card, reason).await? {
-                        stopped.push(card);
-                    }
+            Change::RequestStop { run_id } => {
+                let thread_id = thread.ok_or("a stop with no thread")?;
+                if store::queue::request_stop(&mut tx, thread_id, run_id).await? {
+                    outcome.stopped = Some(run_id);
+                    applied.push(Applied::Stopping(run_id));
                 }
-                outcome.dropped = cleared.texts;
+            }
+            Change::HoldQueue => {
+                let thread_id = thread.ok_or("a queue with no thread")?;
+                let reason = crate::harness::app::continuation::STOPPED;
+                let stopped =
+                    crate::harness::app::continuation::hold_queue(&mut tx, thread_id, reason)
+                        .await?;
                 applied.push(Applied::Queue);
                 applied.push(Applied::Cards(stopped));
             }

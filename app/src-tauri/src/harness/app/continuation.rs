@@ -18,8 +18,28 @@ pub(in crate::harness) const SKIPPED_JOB: &str =
 /// Startup: the card settled, but the app closed before its turn could start.
 pub(in crate::harness) const SKIPPED_QUEUED: &str =
     "The app closed before the agent could continue.";
-/// Stop cleared the queue the continuation was waiting in.
+/// Stop held the queue the continuation was waiting in.
 pub(in crate::harness) const STOPPED: &str = "Stopped before the agent continued.";
+/// The turn it waited behind failed, which holds the queue.
+pub(in crate::harness) const FAILED_BEFORE: &str =
+    "The turn before this failed, so the agent did not continue.";
+
+/// Hold the thread's queue (`store::queue::hold`) and write `reason` on
+/// every card whose waiting continuation that cancelled. Returns those
+/// cards, for their views.
+pub(in crate::harness) async fn hold_queue(
+    tx: &mut SqliteConnection,
+    thread_id: i64,
+    reason: &str,
+) -> Result<Vec<String>, String> {
+    let mut told = Vec::new();
+    for card in crate::harness::store::queue::hold(&mut *tx, thread_id).await? {
+        if cancel(&mut *tx, &card, reason).await? {
+            told.push(card);
+        }
+    }
+    Ok(told)
+}
 
 /// The card's row is still in its thread's timeline.
 const ROW_EXISTS: &str =

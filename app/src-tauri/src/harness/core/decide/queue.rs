@@ -34,7 +34,117 @@ pub(super) fn reorder(state: &State, order: &[i64]) -> Result<Decision, String> 
     plan(state, Change::ReorderQueued { order })
 }
 
-/// Stop takes back everything that waits, then the turn is interrupted.
-pub(super) fn stop(state: &State) -> Result<Decision, String> {
-    plan(state, Change::ClearQueue)
+/// Stop marks the run and holds the queue; the driver then asks the
+/// provider. Stop names the run the student saw: when that run is over, or
+/// another has taken its place, nothing is touched, not even the queue. A
+/// stop that names none takes whatever turn is open, the CLI's own included.
+pub(super) fn stop(state: &State, run_id: Option<i64>) -> Result<Decision, String> {
+    if state.thread.is_none() {
+        return Err("a stop names a thread".into());
+    }
+    let open = state
+        .open
+        .filter(|open| run_id.is_none_or(|id| id == open.run_id));
+    let changes = match open {
+        // Already stopping: a second click is the same stop.
+        Some(open) if open.stop_requested => Vec::new(),
+        Some(open) => vec![
+            Change::RequestStop {
+                run_id: open.run_id,
+            },
+            Change::HoldQueue,
+        ],
+        None if run_id.is_none() && state.live.own_turn => vec![Change::HoldQueue],
+        None => Vec::new(),
+    };
+    Ok(Decision::Commit(Plan {
+        changes,
+        text: None,
+    }))
+}
+
+/// Resume lifts the hold; the driver starts the first waiting message when
+/// nothing is open.
+pub(super) fn resume(state: &State) -> Result<Decision, String> {
+    plan(state, Change::Unhold)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::state::{Live, OpenRun};
+    use super::*;
+    use crate::harness::store::ThreadRow;
+    use crate::harness::Provider;
+
+    fn state(open: Option<i64>, own_turn: bool) -> State {
+        State {
+            thread: Some(ThreadRow {
+                id: 4,
+                provider: Provider::Claude,
+                provider_session_id: None,
+                model: None,
+                subject_code: None,
+                lecture: None,
+            }),
+            live: Live {
+                held: own_turn,
+                own_turn,
+            },
+            question: None,
+            newest_anchor: None,
+            waiting: 0,
+            held: 0,
+            open: open.map(|run_id| OpenRun {
+                run_id,
+                stop_requested: false,
+            }),
+        }
+    }
+
+    fn changes(state: &State, run_id: Option<i64>) -> Vec<Change> {
+        match stop(state, run_id).unwrap() {
+            Decision::Commit(plan) => plan.changes,
+            Decision::Ask(_) => panic!("a stop asks the provider nothing before its commit"),
+        }
+    }
+
+    #[test]
+    fn stop_marks_the_run_it_names_and_holds_the_queue() {
+        let marked = changes(&state(Some(7), false), Some(7));
+        assert!(matches!(
+            marked.as_slice(),
+            [Change::RequestStop { run_id: 7 }, Change::HoldQueue]
+        ));
+        let whatever = changes(&state(Some(7), false), None);
+        assert!(matches!(
+            whatever.as_slice(),
+            [Change::RequestStop { run_id: 7 }, Change::HoldQueue]
+        ));
+    }
+
+    #[test]
+    fn a_second_stop_of_a_run_already_stopping_changes_nothing() {
+        let mut stopping = state(Some(7), false);
+        stopping.open = Some(OpenRun {
+            run_id: 7,
+            stop_requested: true,
+        });
+        assert!(changes(&stopping, Some(7)).is_empty());
+    }
+
+    #[test]
+    fn stop_for_a_run_that_is_over_touches_nothing() {
+        assert!(changes(&state(None, false), Some(7)).is_empty());
+        // The next run has started meanwhile: it is not the one meant.
+        assert!(changes(&state(Some(8), false), Some(7)).is_empty());
+        // A turn of the CLI's own is not the run it named either.
+        assert!(changes(&state(None, true), Some(7)).is_empty());
+    }
+
+    #[test]
+    fn a_stop_that_names_no_run_reaches_a_turn_the_cli_started() {
+        let own = changes(&state(None, true), None);
+        assert!(matches!(own.as_slice(), [Change::HoldQueue]));
+        assert!(changes(&state(None, false), None).is_empty());
+    }
 }

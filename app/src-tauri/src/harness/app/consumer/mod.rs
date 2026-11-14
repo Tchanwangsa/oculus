@@ -67,6 +67,8 @@ pub(in crate::harness) fn consume(
         revisions: HashMap::new(),
         asking: HashMap::new(),
         started: HashSet::new(),
+        accepted: HashSet::new(),
+        asked: HashSet::new(),
     };
     for msg in rx {
         consumer.handle(msg, io);
@@ -97,6 +99,10 @@ struct Consumer {
     asking: HashMap<i64, commands::Asking>,
     /// Runs already handed to their start step (`drive`), until they settle.
     started: HashSet<i64>,
+    /// Runs whose provider has the message (`sent`).
+    accepted: HashSet<i64>,
+    /// Runs whose provider was asked to stop.
+    asked: HashSet<i64>,
 }
 
 impl Consumer {
@@ -442,6 +448,8 @@ impl Consumer {
         }
         self.runs.close(thread_id);
         self.started.remove(&run_id);
+        self.accepted.remove(&run_id);
+        self.asked.remove(&run_id);
         // Settlement removed the stored draft with the run.
         self.drafts.take(run_id);
         let mut out = Vec::new();
@@ -460,6 +468,18 @@ impl Consumer {
                 },
                 None,
             ));
+            // A failed run held the queue: the composer's list says so, and
+            // so does the card of a continuation that was cancelled.
+            if let Some(cards) = s.held {
+                if let Ok(messages) = self.rt.block_on(store::queue::list(pool, thread_id)) {
+                    out.push((HarnessEvent::Queue { messages }, None));
+                }
+                for card in cards {
+                    if let Ok(proposal) = self.rt.block_on(crate::db::proposals::get(pool, &card)) {
+                        out.push((HarnessEvent::Proposal { proposal }, None));
+                    }
+                }
+            }
         }
         Ok(out)
     }

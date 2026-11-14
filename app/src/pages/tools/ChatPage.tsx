@@ -67,8 +67,8 @@ export default function ChatPage() {
   const storedScope = useDraftStore((s) => s.scopes[newKey]);
   const scope = subjectsLoaded ? liveScope(storedScope, subjects) : null;
   const running = useHarnessStore((s) => (activeId != null && s.live[activeId]?.running) || false);
-  // Words a stop or a rewind handed back to this tab's composer — local, so a
-  // stop in one Chat tab doesn't type into every tab. `n` makes the same text
+  // Words a rewind handed back to this tab's composer — local, so a
+  // rewind in one Chat tab doesn't type into every tab. `n` makes the same text
   // twice two restores.
   const [restore, setRestore] = useState<{ text: string; n: number } | null>(null);
   const handBack = useCallback(

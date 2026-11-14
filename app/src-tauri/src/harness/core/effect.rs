@@ -21,7 +21,7 @@ pub(in crate::harness) enum Effect {
         command: String,
         ask: Box<RewindAsk>,
     },
-    /// Ask the thread's CLI to stop its turn.
+    /// Ask the thread's CLI to stop the turn it has open.
     Interrupt { thread_id: i64 },
     /// End the thread's session.
     Release { thread_id: i64, reason: Release },
