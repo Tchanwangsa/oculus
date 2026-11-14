@@ -509,3 +509,30 @@ fn a_release_closes_the_open_turn_by_its_reason() {
     assert!(busy);
     assert!(!events.iter().any(|e| e["event"]["type"] == "turn_finished"));
 }
+
+/// Another turn's end arrives while the run's agent is still thinking: it
+/// ends nothing here, so it must not stop the clock on that thought either.
+#[test]
+fn a_stray_terminal_leaves_the_live_thought_timed() {
+    let (_, _, events, _) = one_run("turn-stray-thought", |thread| {
+        vec![
+            from_session(thread, 1, HarnessEvent::ThinkingDelta { text: "hm".into() }),
+            from_session(thread, 1, ended("0")),
+            from_session(
+                thread,
+                1,
+                HarnessEvent::Thinking {
+                    text: "hm".into(),
+                    ms: None,
+                    source: None,
+                },
+            ),
+            from_session(thread, 1, ended("1")),
+        ]
+    });
+    let thought = events
+        .iter()
+        .find(|e| e["event"]["type"] == "thinking")
+        .expect("the thought went out");
+    assert!(thought["event"]["ms"].is_u64(), "{thought}");
+}

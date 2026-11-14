@@ -288,10 +288,6 @@ impl Consumer {
                 self.end_session(thread_id, provider, generation, Release::Exited, io);
             }
         }
-        match io.clock_time() {
-            Some(now) => self.clock.observe_at(thread_id, &mut ev, now),
-            None => self.clock.observe(thread_id, &mut ev),
-        }
         // Whose turn a terminal ends. One for a turn this thread does not
         // have open (another turn's, or a repeated `result`) settles nothing
         // and must not release a queued message.
@@ -312,6 +308,12 @@ impl Consumer {
                 );
             }
             return;
+        }
+        // After the stray check: a turn end that ends nothing here must not
+        // stop the clock on the open turn's thought.
+        match io.clock_time() {
+            Some(now) => self.clock.observe_at(thread_id, &mut ev, now),
+            None => self.clock.observe(thread_id, &mut ev),
         }
         let mut item_id = None;
         let mut entity_id = None;
