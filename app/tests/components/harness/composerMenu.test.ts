@@ -1,12 +1,22 @@
 import { describe, expect, test } from "bun:test";
 
 import { caretChunk, chunksText, maskedText, normalize, type Chunk } from "@/components/harness/mentions/chunks";
-import { toChunks } from "@/components/harness/mentions/dom";
 import { detectTrigger, isPathWord, slashQuery } from "@/components/harness/mentions/trigger";
-import { menuContent } from "@/components/harness/mentions/useComposerMenu";
 import { composerCommands } from "@/lib/harness/composerCommands";
 import type { MentionFile } from "@/lib/db";
 import type { Skill } from "@/lib/harness/skills";
+
+// `dom.ts` and the menu hook reach modules that listen on `window` and
+// `document` at load; they get inert stand-ins for the import, then the
+// globals go back so no other test sees a half DOM.
+const globals = globalThis as { window?: unknown; document?: unknown };
+const before = { window: globals.window, document: globals.document };
+const inert = { addEventListener: () => {}, removeEventListener: () => {} };
+globals.window ??= inert;
+globals.document ??= { ...inert, documentElement: { style: {} } };
+const { toChunks } = await import("@/components/harness/mentions/dom");
+const { menuContent } = await import("@/components/harness/mentions/useComposerMenu");
+Object.assign(globals, before);
 
 const at = (text: string) => detectTrigger(text, text.length);
 
@@ -65,6 +75,13 @@ describe("skill chunks", () => {
     expect(chunks[0].kind).toBe("text");
     expect(chunks[1]).toEqual({ kind: "skill", name: "oculus-plan" });
     expect(caretChunk(chunks, 3)).toEqual({ chunk: 2, offset: 0 });
+  });
+
+  test("a folder chip round-trips with its trailing slash", () => {
+    const text = "list `courses/MAST20004/pages/` please";
+    const chunks = normalize(toChunks(text, known));
+    expect(chunks.filter((c) => c.kind === "chip")).toEqual([{ kind: "chip", path: "courses/MAST20004/pages/" }]);
+    expect(chunksText(chunks)).toBe(text);
   });
 
   test("mentions and skills share a sentence", () => {
