@@ -45,6 +45,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | The JSON in a model's reply (whole reply, fences, balanced brackets), for the jobs that want JSON back | `app/src-tauri/src/harness/reply_json.rs` |
 | `@` and `/` menu, mention input, skill chips | `app/src/components/harness/mentions/useComposerMenu.ts`, `app/src/components/harness/mentions/ComposerMenu.tsx`, `app/src/components/harness/mentions/trigger.ts`, `app/src/components/harness/mentions/MentionInput.tsx`, `app/src/components/harness/mentions/SkillChip.tsx`, `app/src/components/markdown/FileChip.tsx`, `app/src/components/harness/composer/useComposerTools.ts` |
 | Commands and skills: the catalogue, its search, the ranking, how a picked skill reaches each bridge | `app/src/lib/harness/skills.ts`, `app/src/lib/harness/composerCommands.ts`, `app/src/stores/chat/skillStore.ts`, `app/src/lib/search/ranking.ts`, `app/src-tauri/src/harness/app/skills.rs`, `app/src-tauri/src/harness/providers/*/skill.rs` |
+| Earlier messages on ArrowUp | `app/src/lib/harness/promptHistory.ts`, `app/src/hooks/agents/usePromptHistory.ts` |
 | Studio's thread column and New video box, which use `Composer`'s `leading` (chips after the subject's) and `placeholder` | `app/src/components/studio/thread/ThreadColumn.tsx`, `app/src/components/studio/new/NewVideo.tsx` ([studio-page.md](./studio-page.md)) |
 | Voice dictation, microphone capture and cleanup job | `app/src/components/harness/dictation/`, `app/src/lib/dictation/recording.ts`, `app/src-tauri/src/harness/app/dictation.rs` |
 | Send, queue and stop controls shared by both composers | `app/src/components/harness/composer/SendControls.tsx` |
@@ -1863,12 +1864,21 @@ every bridge as text (Claude one-offs and every `agy` launch also run with
 `--disable-slash-commands`). The brief (`HARNESS.template.md`) tells the agent
 what the line means.
 
-## The empty box
+## The empty box and earlier messages
 
 **The placeholder names both menus**: "Ask anything. @ files, / skills"
 (`COMPOSER_PLACEHOLDER`), "Ask about this lecture. @ files, / skills" in the
 lecture dock. A running turn's own hint and the unscoped one win; Studio's
 New video and thread column pass their own.
+
+**ArrowUp in an empty box recalls earlier messages** of the open thread
+(`usePromptHistory`, `lib/harness/promptHistory.ts`, after T3's
+`composerPromptHistory`): its user rows only, oldest to newest, a repeat of
+the one before collapsed, each with its pasted blocks (`splitPastedText`) and
+picture line (`splitAttachments`) dropped and its mentions and skills kept as
+chips. ArrowUp walks back, ArrowDown forward and past the newest to an empty
+box; an edit to the recalled text ends the walk and gives the arrows back to
+the caret. The `@`/`/` menu's keys come first.
 
 ## Attachments are files in `agents/attachments/`
 

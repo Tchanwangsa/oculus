@@ -7,6 +7,7 @@ import { SendControls } from "@/components/harness/composer/SendControls";
 import { MentionInput, type MentionInputHandle } from "@/components/harness/mentions/MentionInput";
 import { ComposerMenu } from "@/components/harness/mentions/ComposerMenu";
 import { useComposerTools } from "@/components/harness/composer/useComposerTools";
+import { usePromptHistory } from "@/hooks/agents/usePromptHistory";
 import { notePickedSkills } from "@/lib/harness/skills";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ModelPicker, type PickerProvider } from "@/components/harness/composer/ModelPicker";
@@ -154,6 +155,7 @@ export function LectureChatComposer({
     notAPicture: "Only images can be attached — type @ for a course file.",
   });
   useEffect(() => onDropping?.(att.dropping), [att.dropping, onDropping]);
+  const history = usePromptHistory({ threadId, input: ref, text });
 
   /** Whether there is a message at all: words, pastes, pictures. */
   const ready = text.trim().length > 0 || att.items.length > 0 || att.texts.length > 0;
@@ -228,6 +230,8 @@ export function LectureChatComposer({
           onKeyDown={(e) => {
             // The menu's claimed keys come back prevented, so a pick never sends.
             mentions.keyDown(e);
+            if (e.defaultPrevented) return;
+            history.keyDown(e);
             if (e.defaultPrevented) return;
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();

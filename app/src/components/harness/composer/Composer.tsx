@@ -3,6 +3,7 @@ import { SendControls } from "@/components/harness/composer/SendControls";
 import { MentionInput, type MentionInputHandle } from "@/components/harness/mentions/MentionInput";
 import { ComposerMenu } from "@/components/harness/mentions/ComposerMenu";
 import { useComposerTools } from "@/components/harness/composer/useComposerTools";
+import { usePromptHistory } from "@/hooks/agents/usePromptHistory";
 import { notePickedSkills } from "@/lib/harness/skills";
 import { ModelPicker } from "@/components/harness/composer/ModelPicker";
 import { UsageMeter } from "@/components/harness/composer/UsageMeter";
@@ -125,6 +126,7 @@ export function Composer({
    *  long pastes as text cards. */
   const att = useAttachments(dropRef ?? wrapRef, draftKey);
   useEffect(() => onDropping?.(att.dropping), [att.dropping, onDropping]);
+  const history = usePromptHistory({ threadId, input: ref, text });
 
   // Restored text goes before anything typed since, because it was typed first;
   // its pasted blocks go back to being cards.
@@ -260,6 +262,8 @@ export function Composer({
             onKeyDown={(e) => {
               // The menu's claimed keys come back prevented, so a pick never sends.
               mentions.keyDown(e);
+              if (e.defaultPrevented) return;
+              history.keyDown(e);
               if (e.defaultPrevented) return;
               const action = enterAction(e, unscoped);
               if (action) e.preventDefault();
