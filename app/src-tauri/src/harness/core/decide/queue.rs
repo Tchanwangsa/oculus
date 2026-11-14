@@ -116,6 +116,7 @@ mod tests {
             held: 0,
             open: open.map(|run_id| OpenRun {
                 run_id,
+                starting: false,
                 stop_requested: false,
             }),
         }
@@ -147,6 +148,7 @@ mod tests {
         let mut stopping = state(Some(7), false);
         stopping.open = Some(OpenRun {
             run_id: 7,
+            starting: false,
             stop_requested: true,
         });
         assert!(changes(&stopping, Some(7)).is_empty());

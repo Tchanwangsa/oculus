@@ -6,6 +6,7 @@
 use tauri::State;
 
 use crate::harness::core::{load, Command, Kind, Outcome};
+use crate::harness::manager::policy::Mode;
 use crate::harness::manager::validate_effort;
 use crate::harness::{Provider, SendOptions};
 
@@ -30,7 +31,9 @@ impl HarnessState {
 /// the thread id once the message is saved: its run goes out afterwards, and
 /// a message sent mid-turn waits as a queued run (`store/queue.rs`).
 /// `command_id` is the webview's id for this send; the same one again
-/// starts nothing and returns the same thread.
+/// starts nothing and returns the same thread. `mode` is how the message
+/// should reach a chat that is mid-turn (`manager/policy.rs`); the
+/// composer's plain send names none.
 #[tauri::command]
 pub async fn harness_send(
     state: State<'_, HarnessState>,
@@ -39,6 +42,7 @@ pub async fn harness_send(
     provider: String,
     text: String,
     options: Option<SendOptions>,
+    mode: Option<Mode>,
 ) -> Result<i64, String> {
     let provider =
         Provider::parse(&provider).ok_or_else(|| format!("unknown provider {provider}"))?;
@@ -52,6 +56,7 @@ pub async fn harness_send(
         provider,
         text,
         options,
+        mode: mode.unwrap_or_default(),
     };
     let sent = state.command(Command {
         id: command_id,

@@ -131,6 +131,7 @@ fn sends_return_at_their_commit_and_go_out_one_at_a_time() {
                 provider: rig.provider,
                 text: "Replay request".into(),
                 options: SendOptions::default(),
+                mode: Default::default(),
             },
         })
         .unwrap();

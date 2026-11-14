@@ -69,7 +69,8 @@ pub(in crate::harness) fn decide(
             provider,
             text,
             options,
-        } => send::decide(state, command, *provider, text, options),
+            mode,
+        } => send::decide(state, command, (*provider, *mode), text, options),
         Kind::Rewind { item_id } => rewind::decide(state, command, *item_id, None, answer),
         Kind::EditResend {
             item_id,

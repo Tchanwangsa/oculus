@@ -26,6 +26,7 @@ fn send(rig: &mut Rig, id: &str, thread: i64) {
         provider: rig.provider,
         text: "Replay request".into(),
         options: SendOptions::default(),
+        mode: Default::default(),
     };
     command(rig, id, thread, kind);
 }

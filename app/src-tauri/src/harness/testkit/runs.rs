@@ -140,6 +140,7 @@ pub(super) fn send(
             provider,
             text: "question".into(),
             options: SendOptions::default(),
+            mode: Default::default(),
         },
     };
     (BusMsg::Command { command, reply }, answer)

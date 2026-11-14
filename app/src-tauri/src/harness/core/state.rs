@@ -3,6 +3,7 @@
 
 use sqlx::SqlitePool;
 
+use crate::harness::manager::policy::{Active, Chat};
 use crate::harness::store::{self, Question, ThreadRow};
 
 use super::command::{Command, Kind};
@@ -38,6 +39,8 @@ pub(in crate::harness) struct State {
 #[derive(Clone, Copy)]
 pub(in crate::harness) struct OpenRun {
     pub run_id: i64,
+    /// Saved and not yet taken by its start step.
+    pub starting: bool,
     /// The student already asked it to stop.
     pub stop_requested: bool,
 }
@@ -47,6 +50,18 @@ impl State {
     /// rewrite the chat's rows.
     pub fn busy(&self) -> bool {
         self.open.is_some() || self.live.held
+    }
+
+    /// The chat as the delivery policy reads it (`manager/policy.rs`).
+    pub fn chat(&self) -> Chat {
+        Chat {
+            active: self.open.map(|open| Active {
+                starting: open.starting,
+                stopping: open.stop_requested,
+            }),
+            held: self.live.held,
+            waiting: self.waiting > 0,
+        }
     }
 }
 
@@ -66,6 +81,7 @@ pub(in crate::harness) async fn read(
             store::queue::waiting(pool, id).await?,
             store::queue::open(pool, id).await?.map(|open| OpenRun {
                 run_id: open.run.run_id,
+                starting: open.starting,
                 stop_requested: open.stop_requested,
             }),
         ),

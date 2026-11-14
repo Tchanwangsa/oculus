@@ -271,6 +271,7 @@ impl Rig {
                 provider: self.provider,
                 text: "Replay request".into(),
                 options: opts.clone(),
+                mode: Default::default(),
             },
         })?;
         sent.run

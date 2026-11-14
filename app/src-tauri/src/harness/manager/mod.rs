@@ -8,6 +8,7 @@ mod instructions;
 mod naming;
 mod one_off;
 mod options;
+pub(in crate::harness) mod policy;
 mod queue;
 mod raw_log;
 mod release;

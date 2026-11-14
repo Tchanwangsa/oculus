@@ -283,6 +283,7 @@ pub(super) fn send(text: &str) -> Kind {
         provider: Provider::Claude,
         text: text.into(),
         options: SendOptions::default(),
+        mode: Default::default(),
     }
 }
 

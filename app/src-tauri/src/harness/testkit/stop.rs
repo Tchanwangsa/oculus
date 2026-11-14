@@ -25,6 +25,7 @@ fn send(rig: &mut Rig, id: &str, options: SendOptions) -> Outcome {
             provider: rig.provider,
             text: "Replay request".into(),
             options,
+            mode: Default::default(),
         },
     })
     .unwrap()

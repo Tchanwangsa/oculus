@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::harness::manager::policy::Mode;
 use crate::harness::store::RunStart;
 use crate::harness::{Provider, SendOptions};
 
@@ -20,6 +21,8 @@ pub(in crate::harness) enum Kind {
         provider: Provider,
         text: String,
         options: SendOptions,
+        /// How the student wants it delivered to a chat that is mid-turn.
+        mode: Mode,
     },
     /// Take the chat back to just before a question; nothing is sent.
     Rewind {

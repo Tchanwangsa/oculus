@@ -25,6 +25,12 @@ export interface SendOptions {
   studio?: StudioSend;
 }
 
+/** How a message should reach a chat that is mid-turn (`Mode` in
+ *  `harness/manager/policy.rs`). The composer's plain send names none, which
+ *  is `auto`; no bridge steers or restarts a turn yet, so every mode starts
+ *  on an idle chat and queues on a busy one. */
+export type DeliveryMode = "auto" | "queue" | "steer" | "restart";
+
 type MessagingInvoke = <T>(command: string, args: Record<string, unknown>) => Promise<T>;
 
 /** An id for one thing the student did. Rust keeps the result under it
@@ -38,9 +44,9 @@ export function commandId(): string {
  * dependencies let this ordering be checked without mocking global IPC. */
 export function createHarnessMessaging(invokeCommand: MessagingInvoke, flushThread: (thread: number) => Promise<void>) {
   return {
-    send: async (threadId: number | null, provider: Provider, text: string, options: SendOptions): Promise<number> => {
+    send: async (threadId: number | null, provider: Provider, text: string, options: SendOptions, mode?: DeliveryMode): Promise<number> => {
       if (threadId != null) await flushThread(threadId);
-      return invokeCommand<number>("harness_send", { commandId: commandId(), threadId, provider, text, options });
+      return invokeCommand<number>("harness_send", { commandId: commandId(), threadId, provider, text, options, mode });
     },
     editResend: async (threadId: number, itemId: number, text: string, options: SendOptions): Promise<void> => {
       await flushThread(threadId);

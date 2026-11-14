@@ -1,3 +1,5 @@
+use crate::harness::manager::policy::{resolve_delivery, Delivery, Mode};
+use crate::harness::providers::capabilities;
 use crate::harness::{Provider, SendOptions};
 
 use super::super::command::Command;
@@ -12,7 +14,7 @@ use super::{Decision, Plan};
 pub(super) fn decide(
     state: &State,
     command: &Command,
-    provider: Provider,
+    (provider, mode): (Provider, Mode),
     text: &str,
     options: &SendOptions,
 ) -> Result<Decision, String> {
@@ -35,19 +37,27 @@ pub(super) fn decide(
     if state.held > 0 {
         changes.push(Change::Unhold);
     }
-    changes.push(match state.busy() || state.waiting > 0 {
-        true => Change::Enqueue {
-            provider,
-            text: text.to_string(),
-            options: options.clone(),
-        },
-        false => Change::Begin {
+    // No bridge steers or restarts a turn (`capabilities.rs`), so a plain
+    // send starts or queues. A message the policy would steer, or send by
+    // restarting the turn, waits in the queue: neither has a change to
+    // commit, and the running turn is left as it is.
+    let slash = text.trim_start().starts_with('/');
+    let caps = capabilities::of(provider);
+    changes.push(match resolve_delivery(mode, &state.chat(), &caps, slash) {
+        Delivery::Start => Change::Begin {
             provider,
             text: text.to_string(),
             options: options.clone(),
             receipt: command.id.clone(),
             queued: None,
         },
+        Delivery::Queue | Delivery::Steer | Delivery::Restart | Delivery::StopThenQueue => {
+            Change::Enqueue {
+                provider,
+                text: text.to_string(),
+                options: options.clone(),
+            }
+        }
     });
     Ok(Decision::Commit(Plan {
         changes,
@@ -83,6 +93,7 @@ mod tests {
             held: 0,
             open: busy.then_some(OpenRun {
                 run_id: 9,
+                starting: false,
                 stop_requested: false,
             }),
         }
@@ -98,7 +109,8 @@ mod tests {
 
     fn changes(state: &State, command: &Command) -> Vec<Change> {
         let options = SendOptions::default();
-        match decide(state, command, Provider::Codex, "hello", &options).unwrap() {
+        let codex = (Provider::Codex, Mode::Auto);
+        match decide(state, command, codex, "hello", &options).unwrap() {
             Decision::Commit(plan) => plan.changes,
             Decision::Ask(_) => panic!("a send asks the provider nothing"),
         }
@@ -133,6 +145,32 @@ mod tests {
     }
 
     #[test]
+    fn a_steer_or_a_restart_waits_in_the_queue_while_no_bridge_can_do_either() {
+        let options = SendOptions::default();
+        let busy = state(Some(thread(Provider::Codex)), true);
+        for mode in [Mode::Steer, Mode::Restart, Mode::Queue] {
+            let codex = (Provider::Codex, mode);
+            let Decision::Commit(plan) =
+                decide(&busy, &send(Some(4)), codex, "correction", &options).unwrap()
+            else {
+                panic!("a send asks the provider nothing");
+            };
+            assert!(
+                matches!(plan.changes.as_slice(), [Change::Enqueue { .. }]),
+                "{mode:?}: the running turn is left as it is"
+            );
+        }
+        // On an idle chat any mode is a plain start.
+        let idle = state(Some(thread(Provider::Codex)), false);
+        let queue = (Provider::Codex, Mode::Queue);
+        let Decision::Commit(plan) = decide(&idle, &send(Some(4)), queue, "hi", &options).unwrap()
+        else {
+            panic!("a send asks the provider nothing");
+        };
+        assert!(matches!(plan.changes.as_slice(), [Change::Begin { .. }]));
+    }
+
+    #[test]
     fn a_send_with_no_chat_makes_one_in_the_same_commit() {
         let made = changes(&state(None, false), &send(None));
         assert!(matches!(
@@ -147,7 +185,7 @@ mod tests {
         let refused = decide(
             &state(Some(thread(Provider::Claude)), false),
             &send(Some(4)),
-            Provider::Codex,
+            (Provider::Codex, Mode::Auto),
             "hello",
             &options,
         );

@@ -11,7 +11,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 
 | Piece | Location |
 | --- | --- |
-| Manager, which threads are in a turn their CLI started (`OwnTurns`), `run_once`, per-thread `instructions` | `app/src-tauri/src/harness/manager/` (`queue.rs`, `one_off.rs`, `instructions.rs`) |
+| Manager, which threads are in a turn their CLI started (`OwnTurns`), how a message is delivered mid-turn (`resolve_delivery`), `run_once`, per-thread `instructions` | `app/src-tauri/src/harness/manager/` (`queue.rs`, `policy.rs`, `one_off.rs`, `instructions.rs`) |
 | Messages that wait their turn, as queued runs | `app/src-tauri/src/harness/store/queue.rs` |
 | Tauri commands (setup, models, turns, suggestions) | `app/src-tauri/src/harness/app/` |
 | The event enum, tool classification (`classify`) and answer selection | `app/src-tauri/src/harness/event/mod.rs`, `app/src-tauri/src/harness/event/classify.rs`, `app/src-tauri/src/harness/event/answer.rs` |
@@ -944,6 +944,20 @@ quit or a crash keeps it.
   lifts a hold on the queue and goes out behind the held ones. A waiting
   run that cannot be written leaves the queue as `failed` with an error
   row, and the next one is tried.
+- **One policy says how a message is delivered.** `resolve_delivery`
+  (`manager/policy.rs`) is a pure function of the send's `Mode` (`auto`,
+  `queue`, `steer`, `restart`; `harness_send`'s optional `mode`), what the
+  chat is doing and the bridge's capabilities. An idle chat starts the
+  message; a held one, or one with a queue, queues it. Into a running turn,
+  a plain send steers where the bridge has `active_steering` and queues
+  where it has not; an explicit steer falls back to a restart
+  (`steer_by_restart`) and then to the queue; an explicit restart on a
+  bridge that cannot restart means stop the turn and queue. A run still
+  `starting` has no turn to steer, a run being stopped takes nothing, and a
+  slash command is never written into a turn. Both flags are false on every
+  bridge, so the `Send` decider commits only a start or a waiting run today:
+  an outcome that would steer or restart waits in the queue and leaves the
+  running turn alone.
 - **What holds a chat is saved, with one exception.** A run in `starting`
   or `running` is the turn that has the chat; deciders and the driver read
   it from the rows (`store::queue::open`). A turn the CLI starts itself has
