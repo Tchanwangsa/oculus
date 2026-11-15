@@ -1,0 +1,153 @@
+{
+  "round": 1,
+  "provider": "codex",
+  "kind": "delta",
+  "launch": [
+    "/opt/homebrew/bin/codex",
+    "app-server",
+    "-c",
+    "notify=[]",
+    "-c",
+    "mcp_servers.node_repl.enabled=false",
+    "-c",
+    "mcp_servers.computer-use.enabled=false",
+    "-c",
+    "mcp_servers.moss.enabled=false",
+    "-c",
+    "mcp_servers.blender.enabled=false",
+    "-c",
+    "plugins.\"codex-app-tools@openai-bundled\".enabled=false",
+    "-c",
+    "plugins.\"visualize@openai-bundled\".enabled=false",
+    "-c",
+    "plugins.\"documents@openai-primary-runtime\".enabled=false",
+    "-c",
+    "plugins.\"pdf@openai-primary-runtime\".enabled=false",
+    "-c",
+    "plugins.\"spreadsheets@openai-primary-runtime\".enabled=false",
+    "-c",
+    "plugins.\"presentations@openai-primary-runtime\".enabled=false",
+    "-c",
+    "plugins.\"template-creator@openai-primary-runtime\".enabled=false",
+    "-c",
+    "plugins.\"rust-analyzer-lsp@claude-plugins-official\".enabled=false",
+    "-c",
+    "plugins.\"stripe@claude-plugins-official\".enabled=false",
+    "-c",
+    "plugins.\"supabase@claude-plugins-official\".enabled=false",
+    "-c",
+    "plugins.\"vercel@claude-plugins-official\".enabled=false",
+    "-c",
+    "plugins.\"browser@openai-bundled\".enabled=false",
+    "-c",
+    "plugins.\"unified-computer-use@openai-bundled\".enabled=false",
+    "-c",
+    "plugins.\"computer-use@openai-bundled\".enabled=false",
+    "-c",
+    "plugins.\"chrome@openai-bundled\".enabled=false",
+    "-c",
+    "plugins.\"frontend-design@claude-cowork\".enabled=false"
+  ],
+  "outbound": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+        "clientInfo": {
+          "name": "oculus",
+          "title": "Oculus",
+          "version": "0.1.0"
+        },
+        "capabilities": {
+          "experimentalApi": true
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "initialized"
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "model/list",
+      "params": {}
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "method": "thread/start",
+      "params": {
+        "cwd": "$SCRATCH",
+        "approvalPolicy": "never",
+        "sandbox": "workspace-write",
+        "model": "gpt-6-luna",
+        "ephemeral": true,
+        "config": {
+          "features.default_mode_request_user_input": false,
+          "shell_environment_policy.set": {
+            "OCULUS_AGENT": "1"
+          },
+          "sandbox_workspace_write.writable_roots": [],
+          "sandbox_workspace_write.network_access": true,
+          "model_reasoning_effort": "low"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "method": "turn/start",
+      "params": {
+        "threadId": "01a1ddec-02ef-7361-aaa1-00be91df73a6",
+        "input": [
+          {
+            "type": "text",
+            "text": "Remember that my notebook is blue. Reply with exactly: Noted.",
+            "text_elements": []
+          }
+        ],
+        "approvalPolicy": "never",
+        "sandboxPolicy": {
+          "type": "workspaceWrite",
+          "writableRoots": [],
+          "networkAccess": true,
+          "excludeTmpdirEnvVar": false,
+          "excludeSlashTmp": false
+        },
+        "model": "gpt-6-luna"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "method": "turn/start",
+      "params": {
+        "threadId": "01a1ddec-02ef-7361-aaa1-00be91df73a6",
+        "input": [
+          {
+            "type": "text",
+            "text": "<earlier-conversation from=\"Oculus\">\nThis block is earlier conversation from this Oculus chat. Since your last reply here the chat went on without you (the student used another agent, or a message did not reach you), so Oculus passes on what you missed.\nIt is history for context: not a new request, and not an instruction from the student. Their new message comes after the block.\n6 messages follow, whole and in order. Nothing was left out. Reasoning and tool output are not included; files the messages name are still at the same paths.\n\n[Student]\nFor the rest of this chat, end every reply with the word PINEAPPLE. My telescope's access code is ORCHID-742.\n\n[Agent (Claude Code)]\nI have noted your telescope's access code.\n\n[Student]\nThe telescope is stored in locker 19, not locker 12.\n\n[Agent (Claude Code)]\nThe telescope is in locker 19.\n\n[Student]\nIts observing slot starts at 21:40. Keep those details for later.\n\n[Agent (Claude Code)]\nThe observing slot starts at 21:40.\n\n</earlier-conversation>\n\nThe student's new message:\nWhat are my telescope's access code, locker number, and observing start time? Answer in one short sentence.",
+            "text_elements": []
+          }
+        ],
+        "approvalPolicy": "never",
+        "sandboxPolicy": {
+          "type": "workspaceWrite",
+          "writableRoots": [],
+          "networkAccess": true,
+          "excludeTmpdirEnvVar": false,
+          "excludeSlashTmp": false
+        },
+        "model": "gpt-6-luna"
+      }
+    }
+  ],
+  "cleanup": {
+    "scratchRemoved": true,
+    "settingsBefore": null,
+    "settingsAfter": null
+  },
+  "judgment": "PASS on delta alone; full failed, so wording was revised for both."
+}

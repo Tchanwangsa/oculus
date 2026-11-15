@@ -8,6 +8,7 @@ mod driver;
 mod fixture;
 mod force;
 mod guard;
+mod handoff_recordings;
 mod identity;
 mod io;
 mod locks;
