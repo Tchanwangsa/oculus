@@ -331,6 +331,29 @@ fn a_replaced_session_cancels_its_requests_and_tells_its_cli_no() {
 }
 
 #[test]
+fn a_session_replaced_while_an_answer_is_on_its_way_never_tells_that_callback_no() {
+    let mut bench = turn_open("request-replaced-sending");
+    let (fake, asked) = ask(&bench, json!(0), &[]);
+    bench.play(vec![asked]);
+    let request = told(&bench, "request_opened")[0]["id"].as_i64().unwrap();
+    fake.proves(Reply::Written);
+    answer(&mut bench, "answer", request, "accept").unwrap();
+    assert_eq!(requests(&bench)[0].3, "sending");
+    bench.play(vec![BusMsg::Released {
+        thread_id: bench.thread,
+        provider: Provider::Claude,
+        generation: 1,
+        reason: Release::Replaced,
+    }]);
+    assert_eq!(fake.replies(), ["accept"]);
+    assert_eq!(fake.withdrawn(), 0, "a decline would race the answer");
+    let (_, status, response, delivery, _) = requests(&bench).remove(0);
+    assert_eq!(status, "resolved");
+    assert_eq!(response.as_deref(), Some("accept"));
+    assert_eq!(delivery, "uncertain");
+}
+
+#[test]
 fn a_request_found_pending_at_startup_expires_and_cannot_be_answered() {
     let mut bench = turn_open("request-startup");
     let (_, asked) = ask(&bench, json!(0), &[]);

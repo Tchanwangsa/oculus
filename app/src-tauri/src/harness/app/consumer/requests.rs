@@ -234,8 +234,10 @@ impl Consumer {
             reason,
             Release::Stopped | Release::Replaced | Release::Deleted
         ) {
-            let routes = routes.into_iter().map(|(_, route)| route).collect();
-            io.perform(Effect::Withdraw { routes });
+            let routes: Vec<LiveRoute> = routes.into_iter().filter_map(|(_, r)| r).collect();
+            if !routes.is_empty() {
+                io.perform(Effect::Withdraw { routes });
+            }
         }
         if matches!(reason, Release::Deleted | Release::Quit) {
             return;

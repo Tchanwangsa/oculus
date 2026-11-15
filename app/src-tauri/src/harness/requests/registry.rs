@@ -59,8 +59,14 @@ impl Registry {
     }
 
     /// Every request of the session `generation` on this thread, taken out:
-    /// its session is over.
-    pub fn release(&mut self, thread_id: i64, generation: Generation) -> Vec<(i64, LiveRoute)> {
+    /// its session is over. Each comes with its route while it still waits
+    /// for an answer, and none once an answer is on its way: telling that
+    /// callback no would race the answer.
+    pub fn release(
+        &mut self,
+        thread_id: i64,
+        generation: Generation,
+    ) -> Vec<(i64, Option<LiveRoute>)> {
         let ids: Vec<i64> = self
             .routes
             .iter()
@@ -68,11 +74,12 @@ impl Registry {
             .map(|(id, _)| *id)
             .collect();
         ids.into_iter()
-            .filter_map(|id| self.routes.remove(&id).map(|e| (id, e.route)))
+            .filter_map(|id| self.routes.remove(&id).map(|e| (id, waiting(e))))
             .collect()
     }
 
-    /// The thread is gone, and every route with it.
+    /// The thread is gone, and every route with it: those still waiting
+    /// for an answer.
     pub fn forget(&mut self, thread_id: i64) -> Vec<LiveRoute> {
         let ids: Vec<i64> = self
             .routes
@@ -80,6 +87,12 @@ impl Registry {
             .filter(|(_, e)| e.thread_id == thread_id)
             .map(|(id, _)| *id)
             .collect();
-        ids.into_iter().filter_map(|id| self.remove(id)).collect()
+        ids.into_iter()
+            .filter_map(|id| self.routes.remove(&id).and_then(waiting))
+            .collect()
     }
+}
+
+fn waiting(entry: Entry) -> Option<LiveRoute> {
+    (!entry.sending).then_some(entry.route)
 }

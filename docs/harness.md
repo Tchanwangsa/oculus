@@ -1584,7 +1584,7 @@ keep their own commands.
 | What ends | Status, reason | The CLI |
 | --- | --- | --- |
 | the turn it waited in (`settle`, or a turn of the CLI's own) | `cancelled`, "The turn was stopped." after Stop, else "The turn ended before it was answered." | retires the callback itself after an interrupt; otherwise told no, since a spawned child may still be waiting |
-| `Release::Stopped` / `Replaced` | `cancelled` | told no (`Effect::Withdraw`) |
+| `Release::Stopped` / `Replaced` | `cancelled` | told no (`Effect::Withdraw`), unless an answer is already on its way |
 | `Release::Exited` | `expired`, "The agent's process ended." | nothing to tell |
 | `Release::Deleted` | the rows go with the chat | told no |
 | `RequestRetired` with no answer sent | `expired`, "The agent withdrew this request." | |
