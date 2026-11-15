@@ -2,13 +2,14 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex, Weak};
 use std::time::Duration;
 
 use serde_json::{json, Value};
 
 use crate::harness::child::{self, ChildProc};
 use crate::harness::event::{Bound, HarnessEvent, Provider};
+use crate::harness::requests::PermissionMode;
 use crate::harness::Sink;
 
 use super::translate::rate_windows;
@@ -32,8 +33,13 @@ pub struct CodexServer {
     pub(super) next_id: AtomicI64,
     pub(super) pending: Mutex<HashMap<i64, Pending>>,
     pub(super) routes: Mutex<HashMap<String, Arc<ThreadRoute>>>,
+    /// Spawned child agents' threads, to their parent's thread and their
+    /// agent path: a child asks under its own id (`approvals.rs`).
+    pub(super) children: Mutex<HashMap<String, (String, String)>>,
     /// Where account-scoped events go; absent for headless runs.
     pub(super) account_sink: Option<Sink>,
+    /// This server, for the routes its callbacks hand out.
+    pub(super) me: Weak<CodexServer>,
 }
 
 impl CodexServer {
@@ -75,12 +81,14 @@ impl CodexServer {
             .envs(cfg.env.iter().map(|(k, v)| (k, v)));
         // stderr is tracing and the user's MCP noise, kept only as a tail.
         let (proc, stdout) = ChildProc::spawn("codex", &mut cmd, true)?;
-        let server = Arc::new(CodexServer {
+        let server = Arc::new_cyclic(|me| CodexServer {
             proc,
             next_id: AtomicI64::new(1),
             pending: Mutex::new(HashMap::new()),
             routes: Mutex::new(HashMap::new()),
+            children: Mutex::new(HashMap::new()),
             account_sink: cfg.account_sink,
+            me: me.clone(),
         });
 
         let reader = server.clone();
@@ -257,12 +265,16 @@ impl CodexServer {
         if let Some(e) = &opts.reasoning_effort {
             config["model_reasoning_effort"] = json!(e);
         }
+        if opts.mode != PermissionMode::Quiet {
+            // The tool that asks for more file or network access.
+            config["features.request_permissions_tool"] = json!(true);
+        }
         let mut p = json!({
             "cwd": opts.cwd,
-            "approvalPolicy": "never",
             "sandbox": "workspace-write",
             "config": config,
         });
+        approvals(&mut p, opts.mode);
         if let Some(m) = &opts.model {
             p["model"] = json!(m);
         }
@@ -333,14 +345,14 @@ impl CodexServer {
         let mut p = json!({
             "threadId": thread_id,
             "input": [{ "type": "text", "text": text, "text_elements": [] }],
-            "approvalPolicy": "never",
-            "sandboxPolicy": {
+        });
+        approvals(&mut p, opts.mode);
+        p["sandboxPolicy"] = json!({
                 "type": "workspaceWrite",
                 "writableRoots": opts.writable_roots,
                 "networkAccess": true,
                 "excludeTmpdirEnvVar": false,
                 "excludeSlashTmp": false,
-            },
         });
         if let Some(m) = &opts.model {
             p["model"] = json!(m);
@@ -361,6 +373,9 @@ impl CodexServer {
     ) -> Result<(), String> {
         let p = Self::turn_params(thread_id, text, opts);
         let route = self.routes.lock().unwrap().get(thread_id).cloned();
+        if let Some(route) = &route {
+            route.state.lock().unwrap().mode = opts.mode;
+        }
         let bound = bound.clone();
         let started = move |r: &Value| {
             let Some(id) = r.pointer("/turn/id").and_then(|s| s.as_str()) else {
@@ -416,17 +431,29 @@ impl CodexServer {
         self.routes.lock().unwrap().remove(thread_id);
     }
 
-    /// The thread's CLI is waiting on a callback nobody has answered.
-    pub fn has_pending_request(&self, _thread_id: &str) -> bool {
-        false
-    }
-
     pub fn has_thread(&self, thread_id: &str) -> bool {
         self.routes.lock().unwrap().contains_key(thread_id)
     }
 
     pub fn kill(&self) {
         self.proc.kill();
+    }
+}
+
+/// How a thread or turn asks. "Don't ask" is `never`: nothing is asked
+/// and nothing is reviewed. Otherwise the reviewer goes on every request,
+/// since a reviewer set once stays for later turns that name none (probe
+/// `27`), so the mode the chat has saved is the one that runs.
+fn approvals(params: &mut Value, mode: PermissionMode) {
+    match mode {
+        PermissionMode::Quiet => params["approvalPolicy"] = json!("never"),
+        PermissionMode::Ask | PermissionMode::Auto => {
+            params["approvalPolicy"] = json!("on-request");
+            params["approvalsReviewer"] = json!(match mode {
+                PermissionMode::Auto => "auto_review",
+                _ => "user",
+            });
+        }
     }
 }
 

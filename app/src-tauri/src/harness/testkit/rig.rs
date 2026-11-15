@@ -106,6 +106,14 @@ impl Rig {
                 "Replay request",
             ))
             .unwrap();
+        let mode = scenario
+            .fixture
+            .permission_mode
+            .unwrap_or(crate::harness::requests::PermissionMode::Quiet);
+        let moded = sqlx::query("UPDATE harness_threads SET permission_mode = ?1")
+            .bind(mode.as_str())
+            .execute(&pool);
+        runtime.block_on(moded).unwrap();
         // A continuation sends its card's prompt where the recording sent the request.
         let card = scenario
             .continuation
@@ -338,6 +346,15 @@ impl Rig {
     pub fn second_chat(&mut self) -> (i64, Bridge) {
         let created = store::create_thread(&self.pool, self.provider, None, None, None, "Other");
         let thread = self.runtime.block_on(created).unwrap();
+        // It asks as the first chat does, as its recording did.
+        let moded = sqlx::query(
+            "UPDATE harness_threads SET permission_mode =
+               (SELECT permission_mode FROM harness_threads WHERE id = ?2) WHERE id = ?1",
+        )
+        .bind(thread)
+        .bind(self.thread)
+        .execute(&self.pool);
+        self.runtime.block_on(moded).unwrap();
         let bridge = session(
             &self.harness,
             thread,

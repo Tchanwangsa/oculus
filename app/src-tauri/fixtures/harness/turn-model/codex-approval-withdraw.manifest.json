@@ -1,0 +1,69 @@
+{
+  "provider": "codex",
+  "cli_version": "0.169.0",
+  "protocol": "app-server JSON-RPC (experimental API)",
+  "model": "gpt-6.1-sol",
+  "capture_date": "2026-11-15",
+  "source": "stage 2 Codex probe 09-command-withdraw.jsonl, frames 15-65 (turn 1)",
+  "redaction": "Server frames only. Home-folder paths become /Users/student and the probe's temp folder suffixes are removed; MCP startup, hook, remote-control, account and settings notifications from the student's own plugins are dropped. The probe sent its own turn/start (scratch sandbox, low effort); the expected outbound is the Oculus bridge's for this permission mode.",
+  "scenario": "an interrupt with a command request pending; serverRequest/resolved after turn/completed",
+  "frames": 31,
+  "sha256": "3db65b05a0d3eb3fb654a02d3c3360c7ddfa84f01de9ba66e0d5e9f2078a065e",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1dd45-9caf-7b82-8386-5c53ed00139f",
+          "input": [
+            {
+              "type": "text",
+              "text": "Replay request",
+              "text_elements": []
+            }
+          ],
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "user",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": true,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+          }
+        }
+      },
+      "response": {
+        "turn": {
+          "id": "01a1dd45-9d00-7f53-bfef-81dbb6748133"
+        }
+      }
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "turn/interrupt",
+        "params": {
+          "threadId": "01a1dd45-9caf-7b82-8386-5c53ed00139f",
+          "turnId": "01a1dd45-9d00-7f53-bfef-81dbb6748133"
+        }
+      },
+      "response": {}
+    }
+  ],
+  "input": "../codex-approval-withdraw.ndjson",
+  "native_session": "01a1dd45-9caf-7b82-8386-5c53ed00139f",
+  "permission_mode": "ask",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "recorded session route; scratch cwd",
+    "permission_mode": "ask"
+  }
+}

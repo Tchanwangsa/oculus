@@ -10,6 +10,7 @@
 //! (a mode string) while `turn/start` takes `sandboxPolicy` (an object), and a
 //! resumed thread replays its last turn's token usage first.
 
+mod approvals;
 mod inbound;
 mod server;
 mod skill;
@@ -103,6 +104,13 @@ struct ThreadState {
     partial_message: String,
     /// The streaming message's item id.
     partial_item: Option<String>,
+    /// How this thread asks, as its last `turn/start` said.
+    mode: PermissionMode,
+    /// Each `fileChange` item's changes, by item id: its approval request
+    /// names the item, not the paths (`approvals.rs`).
+    changes: HashMap<String, serde_json::Value>,
+    /// Callbacks raised and not yet answered or retired, by JSON id.
+    callbacks: std::collections::HashSet<String>,
 }
 
 #[cfg(test)]

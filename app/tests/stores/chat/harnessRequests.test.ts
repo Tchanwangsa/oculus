@@ -57,3 +57,16 @@ test("the chat's permission mode follows its event", () => {
   useHarnessStore.getState().fold(told(2, null, { type: "permission_mode", mode: "auto" }));
   expect(useHarnessStore.getState().threads[0].permission_mode).toBe("auto");
 });
+
+test("a reviewer's decision lands on its tool row's meta", async () => {
+  answer = async () => ({
+    revision: 1, runs: [], queued: [], requests: [],
+    items: [{ id: 5, thread_id: THREAD, kind: "tool", ref_id: "exec-1", content: "touch x", meta: JSON.stringify({ kind: "bash", ok: null }), created_at: "", run_id: 1 }],
+  });
+  await useHarnessStore.getState().load(THREAD);
+  const review = { status: "denied" as const, risk: "medium", rationale: "too broad" };
+  useHarnessStore.getState().fold(told(2, 5, { type: "tool_reviewed", id: "exec-1", review }));
+  const meta = JSON.parse(useHarnessStore.getState().items[THREAD][0].meta ?? "{}");
+  expect(meta.review).toEqual(review);
+  expect(meta.kind).toBe("bash");
+});

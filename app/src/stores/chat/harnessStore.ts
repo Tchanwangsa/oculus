@@ -539,6 +539,17 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           );
           live = { ...prev, streaming: "", thinking: "" };
           break;
+        case "tool_reviewed":
+          if (held) {
+            for (let i = rows.length - 1; i >= 0; i--) {
+              if (rows[i].kind === "tool" && rows[i].ref_id === event.id) {
+                rows = [...rows];
+                rows[i] = { ...rows[i], meta: JSON.stringify({ ...parseItemMeta(rows[i]), review: event.review }) };
+                break;
+              }
+            }
+          }
+          break;
         case "tool_finished": {
           if (held) {
             for (let i = rows.length - 1; i >= 0; i--) {

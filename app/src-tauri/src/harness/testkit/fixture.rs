@@ -25,6 +25,10 @@ pub(super) struct Fixture {
     input: Option<String>,
     #[serde(default)]
     pub native_session: String,
+    /// How the recorded chat asked. Recordings made before requests ran
+    /// under `never`, which is "Don't ask".
+    #[serde(default)]
+    pub permission_mode: Option<crate::harness::requests::PermissionMode>,
 }
 
 pub(super) fn directory() -> PathBuf {

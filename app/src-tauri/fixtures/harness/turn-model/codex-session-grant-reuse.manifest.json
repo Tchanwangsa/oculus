@@ -1,0 +1,57 @@
+{
+  "provider": "codex",
+  "cli_version": "0.169.0",
+  "protocol": "app-server JSON-RPC (experimental API)",
+  "model": "gpt-6.1-sol",
+  "capture_date": "2026-11-15",
+  "source": "stage 2 Codex probe 16-session-grant.jsonl, frames 72-106 (turn 2)",
+  "redaction": "Server frames only. Home-folder paths become /Users/student and the probe's temp folder suffixes are removed; MCP startup, hook, remote-control, account and settings notifications from the student's own plugins are dropped. The probe sent its own turn/start (scratch sandbox, low effort); the expected outbound is the Oculus bridge's for this permission mode.",
+  "scenario": "the turn after acceptForSession: the identical command runs with no request",
+  "frames": 35,
+  "sha256": "109b5a3adf9bcedac2b62d9e06bdc81d43c668f899c1337c46565c3743f928df",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1dd45-a52c-7ec2-bacc-5c4ae6496837",
+          "input": [
+            {
+              "type": "text",
+              "text": "Replay request",
+              "text_elements": []
+            }
+          ],
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "user",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": true,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+          }
+        }
+      },
+      "response": {
+        "turn": {
+          "id": "01a1dd45-bc04-7cf1-9a6f-e5820360545d"
+        }
+      }
+    }
+  ],
+  "input": "../codex-session-grant-reuse.ndjson",
+  "native_session": "01a1dd45-a52c-7ec2-bacc-5c4ae6496837",
+  "permission_mode": "ask",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "recorded session route; scratch cwd",
+    "permission_mode": "ask"
+  }
+}

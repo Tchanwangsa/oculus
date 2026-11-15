@@ -1,0 +1,77 @@
+{
+  "provider": "codex",
+  "cli_version": "0.169.0",
+  "protocol": "app-server JSON-RPC (experimental API)",
+  "model": "gpt-6.1-sol",
+  "capture_date": "2026-11-15",
+  "source": "stage 2 Codex probe 17-two-pending.jsonl, frames 15-106 (turn 1)",
+  "redaction": "Server frames only. Home-folder paths become /Users/student and the probe's temp folder suffixes are removed; MCP startup, hook, remote-control, account and settings notifications from the student's own plugins are dropped. The probe sent its own turn/start (scratch sandbox, low effort); the expected outbound is the Oculus bridge's for this permission mode.",
+  "scenario": "two command requests pending at once, answered out of order",
+  "frames": 69,
+  "sha256": "5ceef1173f260efe1fecc30379d3ca6a5262463d653074bb836b21a5aaa71f87",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1dd46-1b84-7d71-9f5a-12e3d064ad7a",
+          "input": [
+            {
+              "type": "text",
+              "text": "Replay request",
+              "text_elements": []
+            }
+          ],
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "user",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": true,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+          }
+        }
+      },
+      "response": {
+        "turn": {
+          "id": "01a1dd46-1bd4-7e33-bec1-a966456391b0"
+        }
+      }
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "decision": "decline"
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+          "decision": "accept"
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../codex-approval-two.ndjson",
+  "native_session": "01a1dd46-1b84-7d71-9f5a-12e3d064ad7a",
+  "permission_mode": "ask",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "recorded session route; scratch cwd",
+    "permission_mode": "ask"
+  }
+}

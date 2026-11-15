@@ -13,9 +13,7 @@ pub(in crate::harness) mod route;
 pub(in crate::harness) mod store;
 
 pub(in crate::harness) use registry::Registry;
-#[cfg(test)]
-pub(in crate::harness) use route::Route;
-pub(in crate::harness) use route::{LiveRoute, Reply};
+pub(in crate::harness) use route::{LiveRoute, Reply, Route};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

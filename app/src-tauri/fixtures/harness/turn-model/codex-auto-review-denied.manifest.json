@@ -1,0 +1,57 @@
+{
+  "provider": "codex",
+  "cli_version": "0.169.0",
+  "protocol": "app-server JSON-RPC (experimental API)",
+  "model": "gpt-6.1-sol",
+  "capture_date": "2026-11-15",
+  "source": "stage 2 Codex probe 26-reviewer-denial.jsonl, frames 249-320 (turn 5)",
+  "redaction": "Server frames only. Home-folder paths become /Users/student and the probe's temp folder suffixes are removed; MCP startup, hook, remote-control, account and settings notifications from the student's own plugins are dropped. The probe sent its own turn/start (scratch sandbox, low effort); the expected outbound is the Oculus bridge's for this permission mode.",
+  "scenario": "the reviewer denies a command; it completes declined and the turn goes on",
+  "frames": 72,
+  "sha256": "79c138078a42174217e8b1b58c8b2fa09e3a302f443549b850ec7dee0b6457c7",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1dd51-d8b6-7e03-be3f-4f43006556f3",
+          "input": [
+            {
+              "type": "text",
+              "text": "Replay request",
+              "text_elements": []
+            }
+          ],
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "auto_review",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": true,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+          }
+        }
+      },
+      "response": {
+        "turn": {
+          "id": "01a1dd52-bd15-7370-b5ad-b982f62244f2"
+        }
+      }
+    }
+  ],
+  "input": "../codex-auto-review-denied.ndjson",
+  "native_session": "01a1dd51-d8b6-7e03-be3f-4f43006556f3",
+  "permission_mode": "auto",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "recorded session route; scratch cwd",
+    "permission_mode": "auto"
+  }
+}

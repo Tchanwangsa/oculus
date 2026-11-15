@@ -79,6 +79,9 @@ impl ConsumerIo for Io {
     fn background(&self, thread_id: i64) -> bool {
         self.effects.harness.has_background_work(thread_id)
     }
+    fn library(&self) -> std::path::PathBuf {
+        self.scratch.clone()
+    }
     fn clock_time(&self) -> Option<std::time::Instant> {
         Some(self.epoch + Duration::from_millis(self.envelopes.len() as u64 * 10))
     }

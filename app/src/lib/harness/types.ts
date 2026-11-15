@@ -33,6 +33,9 @@ type HarnessEvent =
   | { type: "tool_started"; id: string; kind: ToolKind; name: string; title: string; input: unknown }
   | { type: "tool_output_delta"; id: string; text: string }
   | { type: "tool_finished"; id: string; ok: boolean; output: string; title?: string | null }
+  /** The CLI's reviewer decided on a call in Auto mode; Rust stored it on
+   *  the call's row (`env.itemId`) as `meta.review`. */
+  | { type: "tool_reviewed"; id: string; review: ToolReview }
   | { type: "usage"; input_tokens: number; output_tokens: number; context_tokens: number | null; context_window: number | null; cost_usd: number | null }
   | { type: "rate_limits"; windows: RateWindow[] }
   | { type: "thread_titled"; title: string }
@@ -242,6 +245,19 @@ export interface ToolMeta {
   input?: unknown;
   ok?: boolean | null;
   output?: string | null;
+  /** The CLI's own reviewer on this call, in the chat's Auto mode: the
+   *  student was not asked (`tool_reviewed`). */
+  review?: ToolReview;
+}
+
+/** A CLI reviewer's decision on one tool call (`Review` in
+ *  `app/src-tauri/src/harness/event/mod.rs`). A `denied` call did not run. */
+export interface ToolReview {
+  status: "in_progress" | "approved" | "denied" | "timed_out" | "aborted";
+  risk?: "low" | "medium" | "high" | string;
+  rationale?: string;
+  /** Who decided, as the CLI names it. */
+  source?: string;
 }
 
 export interface HarnessItem {

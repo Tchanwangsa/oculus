@@ -1,0 +1,67 @@
+{
+  "provider": "codex",
+  "cli_version": "0.169.0",
+  "protocol": "app-server JSON-RPC (experimental API)",
+  "model": "gpt-6.1-sol",
+  "capture_date": "2026-11-15",
+  "source": "stage 2 Codex probe 19-auto-review.jsonl, frames 81-138 (turn 2)",
+  "redaction": "Server frames only. Home-folder paths become /Users/student and the probe's temp folder suffixes are removed; MCP startup, hook, remote-control, account and settings notifications from the student's own plugins are dropped. The probe sent its own turn/start (scratch sandbox, low effort); the expected outbound is the Oculus bridge's for this permission mode.",
+  "scenario": "the second turn of a thread started under auto_review names the user as reviewer, and Codex asks again",
+  "frames": 51,
+  "sha256": "a15933ea702ed6325af7ccaea40b849683b7cf0cc95f447a295db0f8a17b8880",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1dd46-4237-7c42-b6d9-70ed40daaec5",
+          "input": [
+            {
+              "type": "text",
+              "text": "Replay request",
+              "text_elements": []
+            }
+          ],
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "user",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": true,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+          }
+        }
+      },
+      "response": {
+        "turn": {
+          "id": "01a1dd46-79cf-7e82-831b-ca28bbb51209"
+        }
+      }
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+          "decision": "decline"
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../codex-mode-switch.ndjson",
+  "native_session": "01a1dd46-4237-7c42-b6d9-70ed40daaec5",
+  "permission_mode": "ask",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "recorded session route; scratch cwd",
+    "permission_mode": "ask"
+  }
+}

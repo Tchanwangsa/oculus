@@ -189,6 +189,15 @@ startup gate on the same database), a pipe dying mid-reply, a write that
 reached nothing, numeric and string callback ids retired, a request before
 its tool row, a protected path and a request with no turn open declined
 unseen, the mode and provider held while one waits, and a reload.
+`testkit/codex_requests.rs` replays the Codex probe recordings
+(`fixtures/harness/codex-approval-*` and the rest; each manifest's
+`permission_mode` is the chat's, and a manifest without one ran under
+"Don't ask"): approve, decline, a file change, permissions, an exact-command
+grant and the next turn running it unasked, two requests answered out of
+order, Stop with one pending, a child agent's request, a restart with one
+pending, a mode switched back to Ask in the same thread, and Auto's
+approval and denial. The answers' frames are in each manifest's expected
+outbound, so a reply on the wrong id or with the wrong body fails the replay.
 `testkit/driver.rs` checks the driver through the rig: a crash before the
 start step (the message back in its queue, held, on all four bridges) and
 after it took the run, sends returning at their commit and going out one

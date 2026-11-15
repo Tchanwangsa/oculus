@@ -45,7 +45,9 @@ fn a_failed_request_write_does_not_leave_a_pending_reply() {
         next_id: AtomicI64::new(1),
         pending: Mutex::new(HashMap::new()),
         routes: Mutex::new(HashMap::new()),
+        children: Mutex::new(HashMap::new()),
         account_sink: None,
+        me: std::sync::Weak::new(),
     };
     let result = server.request("test", Value::Null);
     server.proc.kill();
@@ -299,4 +301,201 @@ fn another_turns_end_leaves_the_open_turn_as_it_is() {
         Some(HarnessEvent::TurnFinished { turn: Some(t), .. }) if t == "now"
     ));
     assert!(st.active_turn.is_none());
+}
+
+/// A server whose writes are captured, with one routed chat (`chat`) in
+/// `mode`, and what that chat's sink receives.
+fn captured(
+    mode: PermissionMode,
+) -> (
+    std::sync::Arc<CodexServer>,
+    std::sync::Arc<std::sync::Mutex<Vec<Value>>>,
+    std::sync::mpsc::Receiver<HarnessEvent>,
+) {
+    use crate::harness::child::ChildProc;
+    use std::collections::HashMap;
+    use std::sync::atomic::AtomicI64;
+    use std::sync::{Arc, Mutex};
+    let written: Arc<Mutex<Vec<Value>>> = Arc::default();
+    let wire = written.clone();
+    let server = Arc::new_cyclic(|me| CodexServer {
+        proc: ChildProc::replay(Arc::new(move |frame: Value| {
+            wire.lock().unwrap().push(frame);
+            Ok(())
+        })),
+        next_id: AtomicI64::new(1),
+        pending: Mutex::new(HashMap::new()),
+        routes: Mutex::new(HashMap::new()),
+        children: Mutex::new(HashMap::new()),
+        account_sink: None,
+        me: me.clone(),
+    });
+    let (tx, events) = std::sync::mpsc::channel();
+    server.route(
+        "chat",
+        Arc::new(move |event| {
+            let _ = tx.send(event);
+        }),
+        false,
+    );
+    server.routes.lock().unwrap()["chat"]
+        .state
+        .lock()
+        .unwrap()
+        .mode = mode;
+    (server, written, events)
+}
+
+fn ask(server: &CodexServer, id: Value, params: Value) {
+    let mut params = params;
+    params["threadId"] = serde_json::json!("chat");
+    server.dispatch(serde_json::json!({
+        "id": id, "method": "item/commandExecution/requestApproval", "params": params,
+    }));
+}
+
+#[test]
+fn a_string_callback_id_is_kept_as_sent_and_answered_on_it() {
+    let (server, written, events) = captured(PermissionMode::Ask);
+    ask(
+        &server,
+        serde_json::json!("call-7"),
+        serde_json::json!({ "command": "touch x", "cwd": "/w", "itemId": "exec-1" }),
+    );
+    let HarnessEvent::RequestAsked {
+        request,
+        route: Some(route),
+    } = events.try_recv().unwrap()
+    else {
+        panic!("the callback became a request");
+    };
+    assert_eq!(request.native_ref, "\"call-7\"");
+    assert!(
+        written.lock().unwrap().is_empty(),
+        "it waits for the student"
+    );
+    assert!(server.has_pending_request("chat"));
+    let accept = &request.options[0];
+    assert_eq!(
+        route.0.reply(accept),
+        crate::harness::requests::Reply::Written
+    );
+    let reply = written.lock().unwrap().pop().unwrap();
+    assert_eq!(reply["id"], "call-7");
+    assert_eq!(reply["result"]["decision"], "accept");
+    assert!(!server.has_pending_request("chat"));
+    server.handle_notification(
+        "serverRequest/resolved",
+        &serde_json::json!({ "threadId": "chat", "requestId": "call-7" }),
+    );
+    assert!(matches!(
+        events.try_recv().unwrap(),
+        HarnessEvent::RequestRetired { native_ref } if native_ref == "\"call-7\""
+    ));
+}
+
+#[test]
+fn a_dont_ask_chat_and_an_unrouted_thread_are_declined_without_a_request() {
+    let (server, written, events) = captured(PermissionMode::Quiet);
+    ask(
+        &server,
+        serde_json::json!(1),
+        serde_json::json!({ "command": "rm x" }),
+    );
+    server.dispatch(serde_json::json!({
+        "id": 2, "method": "item/fileChange/requestApproval",
+        "params": { "threadId": "nobody", "itemId": "f" },
+    }));
+    assert!(events.try_recv().is_err());
+    let replies = written.lock().unwrap().clone();
+    assert_eq!(replies[0]["result"]["decision"], "decline");
+    assert_eq!(replies[1]["result"]["decision"], "decline");
+    assert!(!server.has_pending_request("chat"));
+}
+
+#[test]
+fn a_file_change_whose_item_is_unknown_is_declined_and_a_known_one_names_its_paths() {
+    let (server, written, events) = captured(PermissionMode::Ask);
+    server.dispatch(serde_json::json!({
+        "id": 3, "method": "item/fileChange/requestApproval",
+        "params": { "threadId": "chat", "itemId": "unseen" },
+    }));
+    assert!(events.try_recv().is_err());
+    assert_eq!(written.lock().unwrap()[0]["result"]["decision"], "decline");
+    server.handle_notification(
+        "item/started",
+        &serde_json::json!({ "threadId": "chat", "item": {
+            "type": "fileChange", "id": "f1",
+            "changes": [{ "path": "/lib/courses/a.md", "kind": { "type": "update", "move_path": "/lib/b.md" }, "diff": "+x" }],
+        }}),
+    );
+    let _ = events.try_recv();
+    server.dispatch(serde_json::json!({
+        "id": 4, "method": "item/fileChange/requestApproval",
+        "params": { "threadId": "chat", "itemId": "f1" },
+    }));
+    let HarnessEvent::RequestAsked { request, .. } = events.try_recv().unwrap() else {
+        panic!("a request");
+    };
+    assert_eq!(request.paths, ["/lib/courses/a.md", "/lib/b.md"]);
+    assert_eq!(request.payload["changes"][0]["diff"], "+x");
+}
+
+#[test]
+fn a_childs_request_reaches_its_parents_chat_with_its_agent_path() {
+    let (server, _, events) = captured(PermissionMode::Ask);
+    server.handle_notification(
+        "item/started",
+        &serde_json::json!({ "threadId": "chat", "item": {
+            "type": "subAgentActivity", "agentThreadId": "child", "agentPath": "/root/helper",
+        }}),
+    );
+    while events.try_recv().is_ok() {}
+    server.dispatch(serde_json::json!({
+        "id": 0, "method": "item/commandExecution/requestApproval",
+        "params": { "threadId": "child", "command": "ls", "itemId": "e" },
+    }));
+    let HarnessEvent::RequestAsked { request, .. } = events.try_recv().unwrap() else {
+        panic!("a request");
+    };
+    assert_eq!(request.payload["agent"]["path"], "/root/helper");
+    assert!(server.has_pending_request("chat"));
+}
+
+#[test]
+fn each_mode_is_sent_on_every_turn_and_one_off_turns_never_ask() {
+    let opts = |mode| CodexThreadOpts {
+        cwd: "/lib/agents".into(),
+        writable_roots: Vec::new(),
+        model: None,
+        reasoning_effort: None,
+        instructions: String::new(),
+        ephemeral: false,
+        mode,
+        library: "/lib".into(),
+    };
+    for (mode, policy, reviewer) in [
+        (PermissionMode::Ask, "on-request", Some("user")),
+        (PermissionMode::Auto, "on-request", Some("auto_review")),
+        (PermissionMode::Quiet, "never", None),
+    ] {
+        let opts = opts(mode);
+        for params in [
+            CodexServer::thread_params(&opts),
+            CodexServer::turn_params("t", "hi", &opts),
+        ] {
+            assert_eq!(params["approvalPolicy"], policy, "{mode:?}");
+            assert_eq!(params["approvalsReviewer"].as_str(), reviewer, "{mode:?}");
+        }
+        let thread = CodexServer::thread_params(&opts);
+        // `OCULUS_AGENT` refuses its verbs inside an approved command too.
+        assert_eq!(
+            thread["config"]["shell_environment_policy.set"]["OCULUS_AGENT"],
+            "1"
+        );
+        assert_eq!(
+            thread["config"]["features.request_permissions_tool"].as_bool(),
+            (mode != PermissionMode::Quiet).then_some(true)
+        );
+    }
 }

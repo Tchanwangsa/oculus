@@ -13,6 +13,9 @@ struct ToolMeta {
     input: Option<serde_json::Value>,
     ok: Option<bool>,
     output: Option<String>,
+    /// The CLI's reviewer's decision on it, in Auto mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    review: Option<crate::harness::event::Review>,
 }
 
 /// The row an event wrote or updated, and its weak id within the run.
@@ -254,6 +257,7 @@ async fn apply_rows(
                 input: Some(input.clone()),
                 ok: None,
                 output: None,
+                review: None,
             };
             insert_item(
                 conn,
@@ -266,6 +270,35 @@ async fn apply_rows(
             )
             .await
             .map(Stored::row)
+        }
+        HarnessEvent::ToolReviewed { id, review } => {
+            let row = sqlx::query(
+                "SELECT id, meta FROM harness_items WHERE thread_id = ?1 AND ref_id = ?2 AND kind = 'tool' ORDER BY id DESC LIMIT 1",
+            )
+            .bind(thread_id)
+            .bind(id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(|e| e.to_string())?;
+            let Some(row) = row else {
+                return Ok(Stored::default());
+            };
+            let item_id: i64 = row.get("id");
+            let mut meta: ToolMeta = row
+                .get::<Option<String>, _>("meta")
+                .and_then(|m| serde_json::from_str(&m).ok())
+                .unwrap_or_default();
+            meta.review = Some(review.clone());
+            sqlx::query("UPDATE harness_items SET meta = ?2 WHERE id = ?1")
+                .bind(item_id)
+                .bind(serde_json::to_string(&meta).ok())
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(Stored {
+                item_id: Some(item_id),
+                ..Stored::default()
+            })
         }
         HarnessEvent::ToolFinished {
             id,

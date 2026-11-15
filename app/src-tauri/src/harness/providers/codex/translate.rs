@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use crate::harness::child::str_of as s;
 use crate::harness::event::cap_output;
 use crate::harness::event::{
-    classify, GapCause, HarnessEvent, Phase, Provider, RateWindow, Source, ToolKind,
+    classify, GapCause, HarnessEvent, Phase, Provider, RateWindow, Review, Source, ToolKind,
 };
 
 use super::ThreadState;
@@ -95,6 +95,7 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
             st.streamed_messages.clear();
             st.partial_message.clear();
             st.partial_item = None;
+            st.changes.clear();
             out.push(HarnessEvent::TurnStarted {
                 turn: st.active_turn.clone(),
             });
@@ -152,6 +153,8 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
                     });
                 }
                 "fileChange" => {
+                    // Its approval request names the item only.
+                    st.changes.insert(id.clone(), item["changes"].clone());
                     let paths: Vec<String> = item
                         .get("changes")
                         .and_then(|c| c.as_array())
@@ -195,6 +198,29 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
                 }
                 _ => {}
             }
+        }
+        // Auto mode's reviewer deciding a call: evidence on the call's row,
+        // never a request (probes `19`, `26`).
+        "item/autoApprovalReview/started" | "item/autoApprovalReview/completed" => {
+            let review = &p["review"];
+            let status = match s(review, "status").as_str() {
+                "inProgress" => "in_progress".to_string(),
+                "timedOut" => "timed_out".to_string(),
+                other => other.to_string(),
+            };
+            let text = |key: &str| review.get(key).and_then(|v| v.as_str()).map(String::from);
+            out.push(HarnessEvent::ToolReviewed {
+                id: s(p, "targetItemId"),
+                review: Review {
+                    status,
+                    risk: text("riskLevel"),
+                    rationale: text("rationale"),
+                    source: p
+                        .get("decisionSource")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                },
+            });
         }
         "item/agentMessage/delta" => {
             st.streamed_messages.insert(s(p, "itemId"));

@@ -1,8 +1,9 @@
 //! What the app-server sends unprompted: responses, the server's own
 //! requests, and thread or account notifications.
 
-use serde_json::{json, Value};
+use serde_json::Value;
 
+use super::approvals::{COMMAND, FILE_CHANGE, PERMISSIONS};
 use super::server::CodexServer;
 use super::translate::{translate, translate_account};
 
@@ -35,16 +36,11 @@ impl CodexServer {
         }
     }
 
-    /// `approvalPolicy: never` should mean no approvals arrive; one that does
-    /// is refused rather than left hanging.
-    fn handle_server_request(&self, id: &Value, method: &str, _params: &Value) {
+    /// An approval becomes a request (`approvals.rs`); anything else the
+    /// server asks is refused rather than left hanging.
+    fn handle_server_request(&self, id: &Value, method: &str, params: &Value) {
         match method {
-            "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
-                self.respond(id, json!({ "decision": "decline" }));
-            }
-            "item/permissions/requestApproval" => {
-                self.respond(id, json!({ "permissions": {}, "scope": "turn" }));
-            }
+            COMMAND | FILE_CHANGE | PERMISSIONS => self.approval(id, method, params),
             _ => self.respond_error(id, -32601, &format!("oculus does not handle {method}")),
         }
     }
@@ -73,6 +69,11 @@ impl CodexServer {
         let Some(thread_id) = thread_id else {
             return;
         };
+        match method {
+            "serverRequest/resolved" => return self.retired(params),
+            "item/started" => self.learn_child(params),
+            _ => {}
+        }
         let route = self.routes.lock().unwrap().get(&thread_id).cloned();
         let Some(route) = route else {
             return;

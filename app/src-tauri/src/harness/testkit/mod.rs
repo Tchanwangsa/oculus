@@ -2,6 +2,7 @@
 //! manager, ordered consumer, migrated SQLite and the frontend projection.
 
 mod assertions;
+mod codex_requests;
 mod commands;
 mod continuation;
 mod driver;

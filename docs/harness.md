@@ -157,7 +157,8 @@ protected paths are one list in `protected.rs`: the library folders, the root fi
   paths so `--add-dir` doesn't pull them into `acceptEdits`, and
   `--permission-prompts none`, since an unanswered prompt under `-p` hangs.
 - **Codex**: `workspace-write` rooted at the cwd (plus the two holes below),
-  `approvalPolicy: never`; any server request is declined.
+  its approval policy is the chat's permission mode
+  ([Requests](#requests)): `never` in "Don't ask" and every one-off turn.
 - **opencode has no sandbox** — a rule list its runner checks. File tools are
   real (`edit` covers `write`/`edit`/`apply_patch`); `bash` is a glob over the
   command string, allow-listing `oculus …` and `ls …` — it stops `rm -rf`, not
@@ -1606,6 +1607,56 @@ the mode.
 `harness_load` returns the thread's requests (`requests`), and the webview
 keeps them per thread (`requests` in `harnessStore`), replaced by each
 `request_opened` and `request_updated`.
+
+### Codex asks over its callbacks
+
+Recorded on Codex 0.169.0 (`fixtures/harness/codex-approval-*`,
+`codex-session-grant*`, `codex-auto-review*`, `codex-mode-switch`; replayed
+by `testkit/codex_requests.rs`). `providers/codex/approvals.rs`:
+
+| Mode | `thread/start` and every `turn/start` |
+| --- | --- |
+| `ask` | `approvalPolicy: on-request`, `approvalsReviewer: user` |
+| `auto` | `approvalPolicy: on-request`, `approvalsReviewer: auto_review` |
+| `quiet`, and one-off turns | `approvalPolicy: never`, no reviewer |
+
+The reviewer goes on every turn because a reviewer set once stays for later
+turns that name none. Outside `quiet` the thread's config also turns on
+`features.request_permissions_tool`, the tool that asks for more access.
+
+- **Commands** (`item/commandExecution/requestApproval`): the payload has
+  the command, its folder, the reason and `outsideSandbox: true`. Options:
+  Approve once (`accept`), "Always allow this exact command"
+  (`acceptForSession`; its scope says: this exact command, in this chat,
+  while the agent's session lasts; a changed command or another chat asks
+  again), Decline. `acceptForSession` is offered though the callback's
+  `availableDecisions` does not list it: the CLI takes it. A network-motivated
+  escalation arrives as an ordinary command request.
+- **File changes** carry no paths: the request names the `fileChange` item
+  that came before it, whose changes (path, diff, kind) the route state
+  keeps (`ThreadState::changes`). They become the payload and the paths
+  Rust checks; a request whose item is unknown is declined unseen.
+- **Permissions** are answered with the profile asked for and `scope:
+  "turn"` ("Allow for this turn"), or an empty profile to decline. The
+  write paths are checked. A grant lets later sandboxed commands reach the
+  folder, so it is not "outside the sandbox".
+- **Callback ids** are kept as sent, number or string (`native_ref` is the
+  JSON), and answered on the same id. `serverRequest/resolved` becomes
+  `RequestRetired`: an answered request becomes `acknowledged`, an
+  unanswered one `expired` as withdrawn. After an interrupt it arrives after
+  `turn/completed`, by which time the turn's end has cancelled the request,
+  so it changes nothing.
+- **A child agent** asks under its own thread id with no parent field. The
+  parent's `subAgentActivity` item names the child's thread and path
+  (`CodexServer::children`), so the request reaches the parent chat with
+  `agent: { path, thread }` in its payload.
+- **Auto**: the reviewer's decision arrives as
+  `item/autoApprovalReview/started` and `/completed`, never as a callback.
+  It becomes `ToolReviewed { id, review }` and is stored on the command's
+  row as `meta.review` (status, risk, rationale, source). A denial is final:
+  the command completes `declined` and the turn carries on.
+- `has_pending_request` counts callbacks not yet answered or retired, which
+  `decide_transition` reads to refuse a switch away from Codex.
 
 ## Going back rewinds the agent too
 

@@ -139,6 +139,21 @@ impl Phase {
     }
 }
 
+/// A CLI reviewer's decision on one tool call.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Review {
+    /// `in_progress`, `approved`, `denied`, `timed_out` or `aborted`.
+    pub status: String,
+    /// `low`, `medium`, `high`, as the reviewer rated it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
+    /// Who decided, as the CLI names it (`agent` for Codex's reviewer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
 /// What a [`HarnessEvent::DeliveryGap`] was observed from.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -245,6 +260,13 @@ pub enum HarnessEvent {
         /// One line for the row: the command, the path, the query.
         title: String,
         input: serde_json::Value,
+    },
+    /// The CLI's own reviewer on a tool call, in the chat's Auto mode:
+    /// stored on the call's row (`meta.review`). The student was not asked.
+    ToolReviewed {
+        /// The call's id, as its `ToolStarted` named it.
+        id: String,
+        review: Review,
     },
     /// Streamed tool output (command stdout so far).
     ToolOutputDelta {

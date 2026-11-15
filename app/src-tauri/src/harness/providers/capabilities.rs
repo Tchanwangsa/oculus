@@ -69,10 +69,13 @@ pub const fn of(provider: Provider) -> Capabilities {
             provider,
             Provider::Claude | Provider::Codex | Provider::Antigravity
         ),
-        approvals: false,
-        auto_review: false,
-        session_grants: false,
-        mode_switch_in_session: false,
+        // Codex: recorded on 0.169.0 (`codex-approval-*`, `codex-auto-review*`,
+        // `codex-session-grant`, `codex-mode-switch`). The other bridges'
+        // probes are stages 2.4 and 5.
+        approvals: matches!(provider, Provider::Codex),
+        auto_review: matches!(provider, Provider::Codex),
+        session_grants: matches!(provider, Provider::Codex),
+        mode_switch_in_session: matches!(provider, Provider::Codex),
     }
 }
 
@@ -96,6 +99,10 @@ pub const fn fixture(provider: Provider, flag: Flag) -> Option<&'static str> {
         (Provider::Antigravity, Flag::ProviderHandoff) => Some("handoff-antigravity-full"),
         (Provider::Codex, Flag::Interrupt) => Some("codex-interrupt"),
         (Provider::Opencode, Flag::Interrupt) => Some("opencode-v1-interrupt"),
+        (Provider::Codex, Flag::Approvals) => Some("codex-approval-command"),
+        (Provider::Codex, Flag::AutoReview) => Some("codex-auto-review-denied"),
+        (Provider::Codex, Flag::SessionGrants) => Some("codex-session-grant"),
+        (Provider::Codex, Flag::ModeSwitchInSession) => Some("codex-mode-switch"),
         _ => None,
     }
 }

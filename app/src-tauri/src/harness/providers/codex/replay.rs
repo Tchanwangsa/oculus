@@ -15,6 +15,7 @@ use super::{CodexServer, CodexThreadOpts, ThreadRoute, ThreadState};
 pub(in crate::harness) fn bridge(outbound: Outbound, sink: Sink, id: &str, root: &Path) -> Bridge {
     let model = outbound.codex_model();
     let server = Arc::new_cyclic(|weak: &Weak<CodexServer>| {
+        let me = weak.clone();
         let weak = weak.clone();
         CodexServer {
             proc: ChildProc::replay(Arc::new(move |frame: Value| {
@@ -29,7 +30,9 @@ pub(in crate::harness) fn bridge(outbound: Outbound, sink: Sink, id: &str, root:
             next_id: AtomicI64::new(1),
             pending: Mutex::new(HashMap::new()),
             routes: Mutex::new(HashMap::new()),
+            children: Mutex::new(HashMap::new()),
             account_sink: Some(sink.clone()),
+            me,
         }
     });
     server.routes.lock().unwrap().insert(
