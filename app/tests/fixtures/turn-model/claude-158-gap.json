@@ -8,7 +8,7 @@
       "itemId": 1,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003403138,
+      "sequence": 1794718174019646,
       "revision": 2,
       "event": {
         "type": "user_message",
@@ -21,7 +21,22 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003403139,
+      "sequence": 1794718174019647,
+      "revision": 2,
+      "event": {
+        "type": "run_selected",
+        "provider": "claude",
+        "model": null,
+        "effort": null
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794718174019648,
       "revision": 2,
       "event": {
         "type": "turn_started"
@@ -33,7 +48,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003403140,
+      "sequence": 1794718174019649,
       "revision": 3,
       "event": {
         "type": "delivery_gap",
@@ -48,7 +63,7 @@
       "runId": 1,
       "attemptId": 1,
       "entityId": "weak:0",
-      "sequence": 1794682003403141,
+      "sequence": 1794718174019650,
       "revision": 4,
       "event": {
         "type": "tool_started",
@@ -68,7 +83,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003403142,
+      "sequence": 1794718174019651,
       "revision": 5,
       "event": {
         "type": "tool_finished",
@@ -83,7 +98,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003403143,
+      "sequence": 1794718174019652,
       "revision": 5,
       "event": {
         "type": "assistant_delta",
@@ -96,7 +111,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003403144,
+      "sequence": 1794718174019653,
       "revision": 6,
       "event": {
         "type": "assistant_delta",
@@ -109,7 +124,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003403145,
+      "sequence": 1794718174019654,
       "revision": 6,
       "event": {
         "type": "assistant_delta",
@@ -122,7 +137,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003403146,
+      "sequence": 1794718174019655,
       "revision": 6,
       "event": {
         "type": "assistant_delta",
@@ -135,7 +150,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003403147,
+      "sequence": 1794718174019656,
       "revision": 6,
       "event": {
         "type": "assistant_delta",
@@ -148,7 +163,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003403148,
+      "sequence": 1794718174019657,
       "revision": 6,
       "event": {
         "type": "assistant_delta",
@@ -161,7 +176,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003403149,
+      "sequence": 1794718174019658,
       "revision": 6,
       "event": {
         "type": "assistant_delta",
@@ -175,7 +190,7 @@
       "runId": 1,
       "attemptId": 1,
       "entityId": "weak:1",
-      "sequence": 1794682003403150,
+      "sequence": 1794718174019659,
       "revision": 8,
       "event": {
         "type": "assistant_message",
@@ -192,7 +207,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003403151,
+      "sequence": 1794718174019660,
       "revision": 9,
       "event": {
         "type": "usage",
@@ -209,7 +224,7 @@
       "itemId": 4,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003403152,
+      "sequence": 1794718174019661,
       "revision": 11,
       "event": {
         "type": "delivery_notice",
@@ -222,7 +237,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003403153,
+      "sequence": 1794718174019662,
       "revision": 11,
       "event": {
         "type": "run_settled",
@@ -230,8 +245,8 @@
         "work_item_ids": [],
         "delivery": "incomplete",
         "status": "completed",
-        "started_at": "2026-11-14 18:46:43",
-        "ended_at": "2026-11-14 18:46:43"
+        "started_at": "2026-11-15 04:49:34",
+        "ended_at": "2026-11-15 04:49:34"
       }
     },
     {
@@ -240,7 +255,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003403154,
+      "sequence": 1794718174019663,
       "revision": 11,
       "event": {
         "type": "turn_finished",
@@ -251,7 +266,7 @@
       "threadId": 1,
       "provider": "claude",
       "itemId": null,
-      "sequence": 1794682003403155,
+      "sequence": 1794718174019664,
       "revision": 11,
       "event": {
         "type": "exited",
@@ -267,7 +282,7 @@
       "ref_id": null,
       "content": "Replay request",
       "meta": null,
-      "created_at": "2026-11-14 18:46:43",
+      "created_at": "2026-11-15 04:49:34",
       "anchor": null,
       "run_id": 1,
       "attempt_id": null,
@@ -284,7 +299,7 @@
       "ref_id": "toolu_01CMhgZT44BYgJcq4sgm4zng",
       "content": "xxxxxx xxxxxx xxxxxx xxxxxx \"xxxxxxx 00 (0 xxx) 'xxxxxxxxxxxx xx x_x xxx xxxx-xxxxxxxxx' xxxxx: xxxxx xxxx xxxx x_x = {<x> : x xxxxxxx <x>} ◇ xxxxxx xx 'xxxx xxx xxxxxx' (xxxxx xxx xxx xxxxx xxx xxx xxxxxxx xxxxxxxx; xxxxxxxx xxxxxxxx ~00:00)\" -x xxxx00000_0000_xx0",
       "meta": "{\"kind\":\"bash\",\"name\":\"Bash\",\"input\":{\"command\":\"xxxxxx xxxxxx xxxxxx xxxxxx \\\"xxxxxxx 00 (0 xxx) 'xxxxxxxxxxxx xx x_x xxx xxxx-xxxxxxxxx' xxxxx: xxxxx xxxx xxxx x_x = {<x> : x xxxxxxx <x>} ◇ xxxxxx xx 'xxxx xxx xxxxxx' (xxxxx xxx xxx xxxxx xxx xxx xxxxxxx xxxxxxxx; xxxxxxxx xxxxxxxx ~00:00)\\\" -x xxxx00000_0000_xx0\",\"description\":\"xxxxxx xxxxx xxxxx xxx x_x xxxxxxxxxx\"},\"ok\":true,\"output\":\"xxxxx xx xxxxxx: - xxxxxxx 00 (0 xxx) 'xxxxxxxxxxxx xx x_x xxx xxxx-xxxxxxxxx' xxxxx: xxxxx xxxx xxxx x_x = {<x> : x xxxxxxx <x>} ◇ xxxxxx xx 'xxxx xxx xxxxxx' (xxxxx xxx xxx xxxxx xxx xxx xxxxxxx xxxxxxxx; xxxxxxxx xxxxxxxx ~00:00)\"}",
-      "created_at": "2026-11-14 18:46:43",
+      "created_at": "2026-11-15 04:49:34",
       "anchor": null,
       "run_id": 1,
       "attempt_id": 1,
@@ -301,7 +316,7 @@
       "ref_id": null,
       "content": "x xxxxx xx xxx xxxx00000 xxxxxx xxxxx xxxx xxxx xxxxx'x xxxxxxxxxx xx $x_x$ xxxxxx xxx \"xxxx xxx xxxxxx\".",
       "meta": null,
-      "created_at": "2026-11-14 18:46:43",
+      "created_at": "2026-11-15 04:49:34",
       "anchor": null,
       "run_id": 1,
       "attempt_id": 1,
@@ -318,7 +333,7 @@
       "ref_id": null,
       "content": "Some earlier reply text did not reach Oculus. This reply may be incomplete.",
       "meta": null,
-      "created_at": "2026-11-14 18:46:43",
+      "created_at": "2026-11-15 04:49:34",
       "anchor": null,
       "run_id": 1,
       "attempt_id": 1,
@@ -339,8 +354,12 @@
       "origin": "student",
       "delivery_state": "incomplete",
       "answer_item_id": 3,
-      "started_at": "2026-11-14 18:46:43",
-      "ended_at": "2026-11-14 18:46:43"
+      "started_at": "2026-11-15 04:49:34",
+      "ended_at": "2026-11-15 04:49:34",
+      "provider": "claude",
+      "model": null,
+      "effort": null,
+      "resolved_model": null
     }
   ]
 }

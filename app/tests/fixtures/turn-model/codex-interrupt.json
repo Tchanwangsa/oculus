@@ -8,7 +8,7 @@
       "itemId": 1,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003774629,
+      "sequence": 1794718174473607,
       "revision": 2,
       "event": {
         "type": "user_message",
@@ -21,8 +21,38 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003774630,
+      "sequence": 1794718174473608,
+      "revision": 2,
+      "event": {
+        "type": "run_selected",
+        "provider": "codex",
+        "model": null,
+        "effort": null
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794718174473609,
       "revision": 3,
+      "event": {
+        "type": "session_started",
+        "provider_session_id": "01a09ebd-3374-7100-bb0f-c42308e70fba",
+        "model": null,
+        "cwd": ""
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "codex",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794718174473610,
+      "revision": 4,
       "event": {
         "type": "turn_anchor",
         "anchor": "01a09ebd-33de-7d00-825b-ed4c057a5347"
@@ -34,8 +64,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003774631,
-      "revision": 3,
+      "sequence": 1794718174473611,
+      "revision": 4,
       "event": {
         "type": "turn_started"
       }
@@ -46,8 +76,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003774632,
-      "revision": 3,
+      "sequence": 1794718174473612,
+      "revision": 4,
       "event": {
         "type": "assistant_delta",
         "text": "1"
@@ -59,8 +89,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003774633,
-      "revision": 4,
+      "sequence": 1794718174473613,
+      "revision": 5,
       "event": {
         "type": "assistant_delta",
         "text": "."
@@ -72,8 +102,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003774634,
-      "revision": 4,
+      "sequence": 1794718174473614,
+      "revision": 5,
       "event": {
         "type": "assistant_delta",
         "text": " Set"
@@ -85,8 +115,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003774635,
-      "revision": 4,
+      "sequence": 1794718174473615,
+      "revision": 5,
       "event": {
         "type": "assistant_delta",
         "text": " the"
@@ -98,8 +128,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003774636,
-      "revision": 4,
+      "sequence": 1794718174473616,
+      "revision": 5,
       "event": {
         "type": "assistant_delta",
         "text": " night"
@@ -111,8 +141,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003774637,
-      "revision": 4,
+      "sequence": 1794718174473617,
+      "revision": 5,
       "event": {
         "type": "assistant_delta",
         "text": " before"
@@ -124,8 +154,8 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003774638,
-      "revision": 4,
+      "sequence": 1794718174473618,
+      "revision": 5,
       "event": {
         "type": "assistant_delta",
         "text": " an"
@@ -138,8 +168,8 @@
       "runId": 1,
       "attemptId": 1,
       "entityId": "weak:0",
-      "sequence": 1794682003774639,
-      "revision": 6,
+      "sequence": 1794718174473619,
+      "revision": 7,
       "event": {
         "type": "assistant_message",
         "text": "1. Set the night before an",
@@ -156,16 +186,16 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003774640,
-      "revision": 8,
+      "sequence": 1794718174473620,
+      "revision": 9,
       "event": {
         "type": "run_settled",
         "answer_item_id": 2,
         "work_item_ids": [],
         "delivery": "incomplete",
         "status": "interrupted",
-        "started_at": "2026-11-14 18:46:43",
-        "ended_at": "2026-11-14 18:46:43"
+        "started_at": "2026-11-15 04:49:34",
+        "ended_at": "2026-11-15 04:49:34"
       }
     },
     {
@@ -175,8 +205,8 @@
       "runId": 1,
       "attemptId": 1,
       "entityId": "weak:1",
-      "sequence": 1794682003774641,
-      "revision": 8,
+      "sequence": 1794718174473621,
+      "revision": 9,
       "event": {
         "type": "turn_finished",
         "status": "interrupted"
@@ -186,8 +216,8 @@
       "threadId": 1,
       "provider": "codex",
       "itemId": null,
-      "sequence": 1794682003774642,
-      "revision": 8,
+      "sequence": 1794718174473622,
+      "revision": 9,
       "event": {
         "type": "exited",
         "code": null
@@ -202,7 +232,7 @@
       "ref_id": null,
       "content": "Replay request",
       "meta": null,
-      "created_at": "2026-11-14 18:46:43",
+      "created_at": "2026-11-15 04:49:34",
       "anchor": "01a09ebd-33de-7d00-825b-ed4c057a5347",
       "run_id": 1,
       "attempt_id": null,
@@ -219,7 +249,7 @@
       "ref_id": null,
       "content": "1. Set the night before an",
       "meta": null,
-      "created_at": "2026-11-14 18:46:43",
+      "created_at": "2026-11-15 04:49:34",
       "anchor": null,
       "run_id": 1,
       "attempt_id": 1,
@@ -236,7 +266,7 @@
       "ref_id": null,
       "content": null,
       "meta": null,
-      "created_at": "2026-11-14 18:46:43",
+      "created_at": "2026-11-15 04:49:34",
       "anchor": null,
       "run_id": 1,
       "attempt_id": 1,
@@ -257,8 +287,12 @@
       "origin": "student",
       "delivery_state": "incomplete",
       "answer_item_id": 2,
-      "started_at": "2026-11-14 18:46:43",
-      "ended_at": "2026-11-14 18:46:43"
+      "started_at": "2026-11-15 04:49:34",
+      "ended_at": "2026-11-15 04:49:34",
+      "provider": "codex",
+      "model": null,
+      "effort": null,
+      "resolved_model": null
     }
   ]
 }

@@ -19,7 +19,7 @@ pub(super) async fn ledger(pool: &SqlitePool, thread: i64) -> Value {
     let rows = |sql: &'static str| async move {
         sqlx::query(sql).bind(thread).fetch_all(pool).await.unwrap()
     };
-    let runs = rows("SELECT id, initiating_item_id, binding_id, active_attempt_id, execution_status, origin, delivery_state, answer_item_id, COALESCE(started_at, requested_at) AS started_at, ended_at FROM harness_runs WHERE thread_id = ?1 ORDER BY id").await;
+    let runs = rows("SELECT r.id, r.initiating_item_id, r.binding_id, r.active_attempt_id, r.execution_status, r.origin, r.delivery_state, r.answer_item_id, COALESCE(r.started_at, r.requested_at) AS started_at, r.ended_at, b.provider, r.model, r.effort, r.resolved_model FROM harness_runs r JOIN harness_bindings b ON b.id = r.binding_id WHERE r.thread_id = ?1 ORDER BY r.id").await;
     let attempts = rows("SELECT a.id, a.run_id, a.status FROM harness_attempts a JOIN harness_runs r ON r.id = a.run_id WHERE r.thread_id = ?1 ORDER BY a.id").await;
     let bindings =
         rows("SELECT id, provider, native_session, current, covered_through FROM harness_bindings WHERE thread_id = ?1 ORDER BY id")
@@ -35,6 +35,9 @@ pub(super) async fn ledger(pool: &SqlitePool, thread: i64) -> Value {
             "execution_status": r.get::<String,_>("execution_status"), "origin": r.get::<String,_>("origin"),
             "delivery_state": r.get::<String,_>("delivery_state"), "answer_item_id": r.get::<Option<i64>,_>("answer_item_id"),
             "started_at": r.get::<Option<String>,_>("started_at"), "ended_at": r.get::<Option<String>,_>("ended_at"),
+            // What `harness_load` returns of the run's selection (`core/load.rs`).
+            "provider": r.get::<String,_>("provider"), "model": r.get::<Option<String>,_>("model"),
+            "effort": r.get::<Option<String>,_>("effort"), "resolved_model": r.get::<Option<String>,_>("resolved_model"),
         })).collect::<Vec<_>>(),
         "attempts": attempts.iter().map(|r| json!({
             "id": r.get::<i64,_>("id"), "run_id": r.get::<i64,_>("run_id"), "status": r.get::<String,_>("status"),

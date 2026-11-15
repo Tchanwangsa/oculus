@@ -8,7 +8,7 @@
       "itemId": 1,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003681719,
+      "sequence": 1794718174362559,
       "revision": 2,
       "event": {
         "type": "user_message",
@@ -21,7 +21,22 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003681720,
+      "sequence": 1794718174362560,
+      "revision": 2,
+      "event": {
+        "type": "run_selected",
+        "provider": "claude",
+        "model": null,
+        "effort": null
+      }
+    },
+    {
+      "threadId": 1,
+      "provider": "claude",
+      "itemId": null,
+      "runId": 1,
+      "attemptId": 1,
+      "sequence": 1794718174362561,
       "revision": 3,
       "event": {
         "type": "session_started",
@@ -36,7 +51,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003681721,
+      "sequence": 1794718174362562,
       "revision": 3,
       "event": {
         "type": "turn_started"
@@ -48,7 +63,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003681722,
+      "sequence": 1794718174362563,
       "revision": 3,
       "event": {
         "type": "assistant_delta",
@@ -61,7 +76,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003681723,
+      "sequence": 1794718174362564,
       "revision": 4,
       "event": {
         "type": "assistant_delta",
@@ -74,7 +89,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003681724,
+      "sequence": 1794718174362565,
       "revision": 4,
       "event": {
         "type": "assistant_delta",
@@ -87,7 +102,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003681725,
+      "sequence": 1794718174362566,
       "revision": 4,
       "event": {
         "type": "assistant_delta",
@@ -100,7 +115,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003681726,
+      "sequence": 1794718174362567,
       "revision": 4,
       "event": {
         "type": "assistant_delta",
@@ -113,7 +128,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003681727,
+      "sequence": 1794718174362568,
       "revision": 4,
       "event": {
         "type": "assistant_delta",
@@ -126,7 +141,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003681728,
+      "sequence": 1794718174362569,
       "revision": 4,
       "event": {
         "type": "assistant_delta",
@@ -140,7 +155,7 @@
       "runId": 1,
       "attemptId": 1,
       "entityId": "weak:0",
-      "sequence": 1794682003681729,
+      "sequence": 1794718174362570,
       "revision": 6,
       "event": {
         "type": "assistant_message",
@@ -157,7 +172,7 @@
       "itemId": null,
       "runId": 1,
       "attemptId": 1,
-      "sequence": 1794682003681730,
+      "sequence": 1794718174362571,
       "revision": 8,
       "event": {
         "type": "run_settled",
@@ -165,8 +180,8 @@
         "work_item_ids": [],
         "delivery": "incomplete",
         "status": "interrupted",
-        "started_at": "2026-11-14 18:46:43",
-        "ended_at": "2026-11-14 18:46:43"
+        "started_at": "2026-11-15 04:49:34",
+        "ended_at": "2026-11-15 04:49:34"
       }
     },
     {
@@ -176,7 +191,7 @@
       "runId": 1,
       "attemptId": 1,
       "entityId": "weak:1",
-      "sequence": 1794682003681731,
+      "sequence": 1794718174362572,
       "revision": 8,
       "event": {
         "type": "turn_finished",
@@ -187,7 +202,7 @@
       "threadId": 1,
       "provider": "claude",
       "itemId": null,
-      "sequence": 1794682003681732,
+      "sequence": 1794718174362573,
       "revision": 8,
       "event": {
         "type": "exited",
@@ -203,7 +218,7 @@
       "ref_id": null,
       "content": "Replay request",
       "meta": null,
-      "created_at": "2026-11-14 18:46:43",
+      "created_at": "2026-11-15 04:49:34",
       "anchor": null,
       "run_id": 1,
       "attempt_id": null,
@@ -220,7 +235,7 @@
       "ref_id": null,
       "content": "1. Start studying.\n9. Use the Feynman Technique: explain concepts",
       "meta": null,
-      "created_at": "2026-11-14 18:46:43",
+      "created_at": "2026-11-15 04:49:34",
       "anchor": null,
       "run_id": 1,
       "attempt_id": 1,
@@ -237,7 +252,7 @@
       "ref_id": null,
       "content": null,
       "meta": null,
-      "created_at": "2026-11-14 18:46:43",
+      "created_at": "2026-11-15 04:49:34",
       "anchor": null,
       "run_id": 1,
       "attempt_id": 1,
@@ -258,8 +273,12 @@
       "origin": "student",
       "delivery_state": "incomplete",
       "answer_item_id": 2,
-      "started_at": "2026-11-14 18:46:43",
-      "ended_at": "2026-11-14 18:46:43"
+      "started_at": "2026-11-15 04:49:34",
+      "ended_at": "2026-11-15 04:49:34",
+      "provider": "claude",
+      "model": null,
+      "effort": null,
+      "resolved_model": "claude-haiku-4-5"
     }
   ]
 }
