@@ -80,6 +80,12 @@ type HarnessEvent =
   /** What the run was sent with (the chat's selection when it started),
    *  told once after its question. */
   | { type: "run_selected"; provider: Provider; model: string | null; effort: string | null }
+  /** A request saved with its row (`env.itemId`), and every later change
+   *  to it: answered, its answer's delivery learned, or ended unanswered. */
+  | { type: "request_opened"; request: HarnessRequest }
+  | { type: "request_updated"; request: HarnessRequest }
+  /** How the chat asks from its next run on (`harnessSetPermissionMode`). */
+  | { type: "permission_mode"; mode: PermissionMode }
   /** The row saying an answer, or part of it, did not arrive. */
   | { type: "delivery_notice"; text: string }
   | { type: "compaction"; source?: string }
@@ -142,6 +148,54 @@ export interface HarnessThread {
   viewed_at?: string | null;
   /** When its latest run ended: `MAX(harness_runs.ended_at)`, read, never stored. */
   settled_at?: string | null;
+  /** How the chat asks for what its sandbox blocks; `ask` when absent. */
+  permission_mode?: PermissionMode;
+}
+
+/** `ask` shows each request; `quiet` ("Don't ask") declines without one;
+ *  `auto` hands it to the CLI's reviewer, which asks as `ask` where the
+ *  bridge has none (`Capabilities.autoReview`). */
+export type PermissionMode = "ask" | "quiet" | "auto";
+
+/** One answer a request offers (`RequestOption` in
+ *  `app/src-tauri/src/harness/requests/mod.rs`). `scope` says, in a
+ *  sentence, how far it reaches past this one call. */
+export interface RequestOption {
+  id: string;
+  label: string;
+  decision: "accept" | "accept_for_session" | "decline";
+  scope?: string;
+}
+
+/** What the agent asked mid-turn (`RequestView` in
+ *  `app/src-tauri/src/harness/requests/mod.rs`). Answer a `pending` one with
+ *  `harnessRespond`; `responder` other than `live` cannot be answered and
+ *  `reason` says why. `delivery` is what is known of the answer's way to
+ *  the CLI: `uncertain` was never resent, `failed` may be answered again. */
+export interface HarnessRequest {
+  id: number;
+  thread_id: number;
+  run_id: number | null;
+  /** The `request` row that shows it. */
+  item_id: number | null;
+  provider: Provider;
+  kind: "approval" | "question";
+  action: "command" | "file_change" | "permissions" | "network" | "access" | "tool" | "rule";
+  /** Per action. A command: `command`, `cwd`, `reason`, `outsideSandbox`.
+   *  A file change: `changes` (`path`, `diff`, `kind`), `reason`. Permissions:
+   *  `permissions` (the profile asked for), `reason`. Any: `agent` (`path`,
+   *  `thread`) when a child agent asked, `tool` (the native item id, which
+   *  its tool row's `ref_id` matches). */
+  payload: Record<string, unknown>;
+  options: RequestOption[];
+  status: "pending" | "resolved" | "expired" | "cancelled";
+  responder: "live" | "message" | "not_resumable";
+  reason: string | null;
+  /** The option chosen. */
+  response: string | null;
+  delivery: "none" | "sending" | "acknowledged" | "failed" | "uncertain";
+  created_at: string;
+  resolved_at: string | null;
 }
 
 /** `interrupted` is an empty marker where a turn was stopped. */
@@ -161,7 +215,10 @@ type ItemKind =
   | "continuation"
   /** A run whose answer, or part of it, never arrived; `content` says which. */
   | "delivery_notice"
-  | "compaction";
+  | "compaction"
+  /** Something the agent asked the student; `ref_id` is the `HarnessRequest`'s
+   *  id and the row holds nothing else. */
+  | "request";
 
 /** A message waiting its turn: a queued run in the database
  *  (`harness/store/queue.rs`), so it survives a reload and a restart. */

@@ -46,6 +46,8 @@ pub(in crate::harness) fn bridge(outbound: Outbound, sink: Sink, id: &str, root:
         reasoning_effort: None,
         instructions: String::new(),
         ephemeral: true,
+        mode: crate::harness::requests::PermissionMode::Quiet,
+        library: root.to_path_buf(),
     });
     let (reader, closing) = (server.clone(), server.clone());
     Bridge {

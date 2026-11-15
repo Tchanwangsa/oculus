@@ -141,22 +141,29 @@ impl Harness {
             model: opts.model.clone(),
             effort: opts.reasoning_effort.clone(),
         };
+        let mode = opts.permission_mode;
         let current = live.get(&thread_id).filter(|l| l.is_alive());
         let transition = decide_transition(
             current.map(|l| Current {
                 selection: &l.selection,
+                mode: l.mode,
                 background: l.handle.has_background_work(),
+                pending_request: l.handle.has_pending_request(),
             }),
-            &target,
+            (&target, mode),
             &caps,
         );
         match transition {
             Transition::Reuse => return Ok(()),
             Transition::Reject(reason) => return Err(reason),
-            Transition::SwitchModelInSession => {
+            Transition::SwitchModelInSession | Transition::SwitchModeInSession => {
                 if let Some(session) = live.get_mut(&thread_id) {
-                    session.handle = session.handle.with_model(target.model.clone());
+                    if session.selection.model != target.model {
+                        session.handle = session.handle.with_model(target.model.clone());
+                    }
+                    session.handle = session.handle.with_mode(mode);
                     session.selection = target;
+                    session.mode = mode;
                 }
                 return Ok(());
             }
@@ -184,8 +191,9 @@ impl Harness {
             live.insert(
                 thread_id,
                 Live {
-                    handle: spawn(sink),
+                    handle: spawn(sink).with_mode(mode),
                     selection: target,
+                    mode,
                     generation,
                     sinks: sinks.clone(),
                 },
@@ -250,6 +258,8 @@ impl Harness {
                         opts.studio_brief.as_ref(),
                     ),
                     ephemeral: false,
+                    mode,
+                    library: self.data_dir.clone(),
                 };
                 let tid = match resume {
                     Some(id) => {
@@ -302,6 +312,7 @@ impl Harness {
             Live {
                 handle,
                 selection: target,
+                mode,
                 generation,
                 sinks: sinks.clone(),
             },

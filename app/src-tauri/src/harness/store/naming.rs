@@ -133,6 +133,8 @@ pub async fn reconcile(pool: &SqlitePool) -> Result<Reconciled, String> {
         .map_err(|e| e.to_string())?;
     // Their process is gone: what streamed is kept, and they end interrupted.
     super::runs::recover(&mut tx).await?;
+    // No request's route survives either (`requests::store::reconcile`).
+    crate::harness::requests::store::reconcile(&mut tx).await?;
     // So is every session: one that never named itself cannot be resumed.
     super::bindings::forget_unnamed(&mut *tx, None).await?;
     for sql in [

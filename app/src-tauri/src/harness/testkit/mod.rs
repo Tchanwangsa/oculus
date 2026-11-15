@@ -20,6 +20,7 @@ mod queue;
 mod recovery;
 mod reload;
 pub(in crate::harness) mod replay;
+mod requests;
 mod rig;
 mod runs;
 mod scenario;

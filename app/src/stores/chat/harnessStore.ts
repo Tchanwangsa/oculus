@@ -10,6 +10,7 @@ import {
   runFromRow,
   type HarnessEnvelope,
   type HarnessItem,
+  type HarnessRequest,
   type HarnessRun,
   type HarnessThread,
   type Provider,
@@ -42,6 +43,7 @@ const IDLE: LiveTurn = { running: false, streaming: "", thinking: "", toolOutput
  *  would re-render the timeline on every store write. */
 const EMPTY: HarnessItem[] = [];
 const NO_RUNS: Record<number, HarnessRun> = {};
+const NO_REQUESTS: Record<number, HarnessRequest> = {};
 
 interface HarnessState {
   threads: HarnessThread[];
@@ -71,6 +73,9 @@ interface HarnessState {
   /** Each thread's waiting messages: a mirror of its queued runs, read
    *  with its rows and replaced by every `queue` event. */
   queued: Record<number, QueuedMessage[]>;
+  /** Each thread's requests by id, read with its rows and replaced by every
+   *  `request_opened` and `request_updated`; a `request` row names one. */
+  requests: Record<number, Record<number, HarnessRequest>>;
   /** Threads where a rewind could not reach the agent. Never cleared: the
    *  agent's context still holds what left the screen. */
   contextDrift: Record<number, boolean>;
@@ -163,6 +168,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   live: {},
   rateLimits: {},
   queued: {},
+  requests: {},
   contextDrift: {},
   provider: DEFAULT_CHAT_PROVIDER,
   subjects: [],
@@ -221,10 +227,12 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
     const rows = snapshot?.items ?? [];
     const runs = snapshot ? Object.fromEntries(snapshot.runs.map((r) => [r.id, runFromRow(r)])) : NO_RUNS;
     const waiting: QueuedMessage[] = snapshot?.queued ?? [];
+    const asked = snapshot ? Object.fromEntries((snapshot.requests ?? []).map((r) => [r.id, r])) : NO_REQUESTS;
     set((s) => ({
       items: { ...s.items, [id]: rows },
       runs: { ...s.runs, [id]: runs },
       queued: { ...s.queued, [id]: waiting },
+      requests: { ...s.requests, [id]: asked },
     }));
     // Only what the snapshot does not hold yet: `fold` skips the rest by revision.
     for (const env of during) get().fold(env, true);
@@ -285,6 +293,8 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
     set((s) => {
       const queued = { ...s.queued };
       delete queued[id];
+      const requests = { ...s.requests };
+      delete requests[id];
       const items = { ...s.items };
       delete items[id];
       const runs = { ...s.runs };
@@ -302,6 +312,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         items,
         runs,
         queued,
+        requests,
         live,
         holds,
         contextDrift,
@@ -394,6 +405,10 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
       const setRun = (run: HarnessRun) => {
         if (held) runs = { ...runs, [run.id]: run };
       };
+      let asked = s.requests[threadId] ?? NO_REQUESTS;
+      const setRequest = (request: HarnessRequest) => {
+        if (held) asked = { ...asked, [request.id]: request };
+      };
 
       // A row Rust updated in place (the same provider message again) replaces its copy.
       const push = (row: HarnessItem) => {
@@ -430,6 +445,17 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           break;
         case "selected":
           touchThread({ provider: event.provider, model: event.model, effort: event.effort });
+          break;
+        case "permission_mode":
+          touchThread({ permission_mode: event.mode });
+          break;
+        case "request_opened":
+          // The row holds the id only; the request is in `requests`.
+          push({ ...rowFrom(env, "request", ""), ref_id: String(event.request.id), content: null });
+          setRequest(event.request);
+          break;
+        case "request_updated":
+          setRequest(event.request);
           break;
         case "handoff": {
           const run = runs[event.run_id];
@@ -566,9 +592,19 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           // Rust deleted the runs asked from the removed rows.
           const gone = new Set(rows.filter((i) => !keep(i) && i.run_id != null).map((i) => i.run_id));
           const left = Object.fromEntries(Object.entries(runs).filter(([id]) => !gone.has(Number(id))));
+          // Their requests went with the rows that showed them.
+          const stay = Object.fromEntries(
+            Object.entries(asked).filter(([, r]) => r.item_id != null && r.item_id < event.from_item_id),
+          );
           return {
             contextDrift: drift,
-            ...(held ? { items: { ...s.items, [threadId]: kept }, runs: { ...s.runs, [threadId]: left } } : {}),
+            ...(held
+              ? {
+                  items: { ...s.items, [threadId]: kept },
+                  runs: { ...s.runs, [threadId]: left },
+                  requests: { ...s.requests, [threadId]: stay },
+                }
+              : {}),
           };
         }
         case "usage": {
@@ -621,6 +657,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
       return {
         items: held && rows !== s.items[threadId] ? { ...s.items, [threadId]: rows } : s.items,
         runs: held && runs !== (s.runs[threadId] ?? NO_RUNS) ? { ...s.runs, [threadId]: runs } : s.runs,
+        requests: held && asked !== (s.requests[threadId] ?? NO_REQUESTS) ? { ...s.requests, [threadId]: asked } : s.requests,
         threads: rowsOnly ? s.threads : threads,
         live: live && !rowsOnly ? { ...s.live, [threadId]: live } : s.live,
       };

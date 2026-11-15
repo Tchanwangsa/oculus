@@ -121,6 +121,8 @@ mod tests {
                 starting: false,
                 stop_requested: false,
             }),
+            request: None,
+            pending: 0,
         }
     }
 

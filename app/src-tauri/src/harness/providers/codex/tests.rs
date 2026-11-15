@@ -4,6 +4,7 @@ use crate::harness::event::{HarnessEvent, ToolKind};
 
 use super::translate::{translate, translate_account};
 use super::{CodexServer, CodexThreadOpts, ThreadState};
+use crate::harness::requests::PermissionMode;
 
 #[cfg(unix)]
 #[test]
@@ -66,6 +67,8 @@ fn a_thread_may_write_the_database_and_studio_and_nothing_else_outside_its_cwd()
         reasoning_effort: Some("high".into()),
         instructions: String::new(),
         ephemeral: false,
+        mode: PermissionMode::Quiet,
+        library: library.to_path_buf(),
     };
     let want = serde_json::json!([db, library.join("studio")]);
     for dir in crate::library::paths::agent_write_dirs(&library) {
@@ -112,6 +115,8 @@ fn every_thread_and_turn_keeps_the_sandbox_network_open() {
             reasoning_effort: effort.map(String::from),
             instructions: instructions.into(),
             ephemeral,
+            mode: PermissionMode::Quiet,
+            library: "/lib".into(),
         };
         let thread = CodexServer::thread_params(&opts);
         assert_eq!(thread["sandbox"], "workspace-write");

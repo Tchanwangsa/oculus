@@ -13,6 +13,7 @@ pub(in crate::harness) mod proposal_context;
 #[cfg(test)]
 mod proposal_context_tests;
 pub mod proposal_jobs;
+pub mod requests;
 pub mod revision;
 pub(in crate::harness) mod rewind;
 mod run_scope;
@@ -107,6 +108,13 @@ pub(in crate::harness) enum BusMsg {
         provider: Provider,
         run_id: i64,
         outcome: send::Sent,
+    },
+    /// What the write of an answer to a request proved (`Effect::Reply`).
+    Replied {
+        thread_id: i64,
+        provider: Provider,
+        request_id: i64,
+        reply: crate::harness::requests::Reply,
     },
     /// The time the consumer asked to be woken at has come
     /// (`ConsumerIo::wake_at`): work that was waiting on it is due.

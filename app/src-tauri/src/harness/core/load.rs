@@ -8,6 +8,7 @@ use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 
 use crate::harness::handoff::store::{self as handoff, HandoffView};
+use crate::harness::requests::RequestView;
 use crate::harness::store::{queue, QueuedMessage};
 
 #[derive(Serialize)]
@@ -18,6 +19,9 @@ pub struct Snapshot {
     pub runs: Vec<Run>,
     /// The student's messages waiting their turn, in queue order.
     pub queued: Vec<QueuedMessage>,
+    /// What the agent asked, each shown by its `request` row: pending ones
+    /// with their options, ended ones with how they ended.
+    pub requests: Vec<RequestView>,
     /// The answer text the open run has streamed and not committed as a row
     /// yet. It holds every `assistant_delta` told below `revision`, and none
     /// told at or above it.
@@ -129,6 +133,7 @@ pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String>
     })
     .collect();
     let queued = queue::list(&mut *tx, thread_id).await?;
+    let requests = crate::harness::requests::store::list(&mut tx, thread_id).await?;
     let draft = sqlx::query(
         "SELECT d.run_id, d.text FROM harness_stream_drafts d
            JOIN harness_runs r ON r.id = d.run_id
@@ -149,6 +154,7 @@ pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String>
         items,
         runs,
         queued,
+        requests,
         draft,
     })
 }

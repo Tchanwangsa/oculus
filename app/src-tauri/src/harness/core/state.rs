@@ -4,6 +4,7 @@
 use sqlx::SqlitePool;
 
 use crate::harness::manager::policy::{Active, Chat};
+use crate::harness::requests::{self, RequestView};
 use crate::harness::store::bindings::Holder;
 use crate::harness::store::{self, Question, ThreadRow};
 use crate::harness::Provider;
@@ -24,6 +25,9 @@ pub(in crate::harness) struct Live {
     pub background: bool,
     /// Which bridges can take over a chat another provider started.
     pub takeover: Takeover,
+    /// The request a `Respond` names still has its session's route: the
+    /// session that raised it is the live one.
+    pub route: bool,
 }
 
 /// The bridges whose `provider_handoff` capability is true, as the running
@@ -73,6 +77,10 @@ pub(in crate::harness) struct State {
     pub held: i64,
     /// The run going out or being answered.
     pub open: Option<OpenRun>,
+    /// The request a `Respond` names, if it is this chat's.
+    pub request: Option<RequestView>,
+    /// How many of the chat's requests wait for the student.
+    pub pending: i64,
 }
 
 /// What a decider needs of the chat's open run.
@@ -127,6 +135,19 @@ pub(in crate::harness) async fn read(
         ),
         None => ((0, 0), None),
     };
+    let pending = match command.thread_id {
+        Some(id) => requests::store::pending(pool, id).await?,
+        None => 0,
+    };
+    let request = match (command.thread_id, &command.kind) {
+        (Some(thread_id), Kind::Respond { request_id, .. }) => {
+            let mut conn = pool.acquire().await.map_err(|e| e.to_string())?;
+            requests::store::get(&mut conn, *request_id)
+                .await?
+                .filter(|r| r.thread_id == thread_id)
+        }
+        _ => None,
+    };
     let mut state = State {
         thread,
         live,
@@ -136,6 +157,8 @@ pub(in crate::harness) async fn read(
         waiting,
         held,
         open,
+        request,
+        pending,
     };
     if let (Some(thread_id), Kind::Rewind { item_id } | Kind::EditResend { item_id, .. }) =
         (command.thread_id, &command.kind)

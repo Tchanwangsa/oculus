@@ -23,13 +23,24 @@ export interface Capabilities {
    *  earlier conversation Rust hands it. Where false its models are locked
    *  in a started chat of another provider's: start a new chat to switch. */
   providerHandoff: boolean;
+  /** The CLI asks before what its sandbox blocks and the student answers in
+   *  the chat (`HarnessRequest`). Where false such a step is declined. */
+  approvals: boolean;
+  /** Auto hands requests to the CLI's own reviewer and the student is never
+   *  asked. Where false, Auto behaves as Ask and the mode control says so. */
+  autoReview: boolean;
+  /** Some answers reach past one call; each option's `scope` says how far. */
+  sessionGrants: boolean;
+  /** A live session takes a new permission mode with its next turn. */
+  modeSwitchInSession: boolean;
 }
 
 /** What a provider is taken to do until Rust has answered: nothing optional. */
 function unknown(provider: Provider): Capabilities {
   return {
     provider, interrupt: false, rewind: false, sharedProcess: false, activeSteering: false, steerByRestart: false,
-    modelSwitchInSession: false, providerHandoff: false,
+    modelSwitchInSession: false, providerHandoff: false, approvals: false, autoReview: false,
+    sessionGrants: false, modeSwitchInSession: false,
   };
 }
 

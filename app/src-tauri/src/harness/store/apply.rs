@@ -112,6 +112,11 @@ pub fn writes(ev: &HarnessEvent) -> bool {
             | HarnessEvent::DeliveryNotice { .. }
             | HarnessEvent::RateLimits { .. }
             | HarnessEvent::TurnStarted { .. }
+            | HarnessEvent::RequestAsked { .. }
+            | HarnessEvent::RequestOpened { .. }
+            | HarnessEvent::RequestUpdated { .. }
+            | HarnessEvent::RequestRetired { .. }
+            | HarnessEvent::PermissionMode { .. }
             | HarnessEvent::Exited { .. }
     )
 }
@@ -449,7 +454,13 @@ async fn apply_rows(
         | HarnessEvent::Selected { .. }
         | HarnessEvent::Handoff { .. }
         | HarnessEvent::DeliveryNotice { .. }
-        | HarnessEvent::RateLimits { .. } => Ok(Stored::default()),
+        | HarnessEvent::RateLimits { .. }
+        // Saved by the consumer through `requests::store`, which owns the table.
+        | HarnessEvent::RequestAsked { .. }
+        | HarnessEvent::RequestOpened { .. }
+        | HarnessEvent::RequestUpdated { .. }
+        | HarnessEvent::RequestRetired { .. }
+        | HarnessEvent::PermissionMode { .. } => Ok(Stored::default()),
     }
 }
 

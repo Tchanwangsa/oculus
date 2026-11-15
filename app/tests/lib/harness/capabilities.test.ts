@@ -3,7 +3,8 @@ import { createCapabilities, type Capabilities } from "@/lib/harness/capabilitie
 
 const codex: Capabilities = {
   provider: "codex", interrupt: true, rewind: true, sharedProcess: true, activeSteering: false, steerByRestart: false,
-  modelSwitchInSession: true, providerHandoff: true,
+  modelSwitchInSession: true, providerHandoff: true, approvals: true, autoReview: true, sessionGrants: true,
+  modeSwitchInSession: true,
 };
 
 test("every optional action reads as unavailable until Rust has answered", async () => {
@@ -18,6 +19,7 @@ test("every optional action reads as unavailable until Rust has answered", async
   const before = caps.of("codex");
   expect(before).toEqual({
     ...codex, interrupt: false, rewind: false, sharedProcess: false, modelSwitchInSession: false, providerHandoff: false,
+    approvals: false, autoReview: false, sessionGrants: false, modeSwitchInSession: false,
   });
   // The same object while nothing has changed, as `useSyncExternalStore` needs.
   expect(caps.of("codex")).toBe(before);

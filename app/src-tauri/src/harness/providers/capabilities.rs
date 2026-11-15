@@ -32,6 +32,19 @@ pub struct Capabilities {
     /// the earlier conversation at the top of its first prompt as history
     /// and answers the new message (`handoff/`).
     pub provider_handoff: bool,
+    /// The CLI asks before what its sandbox blocks, and the student's
+    /// answer goes back to the waiting call (`requests/`). Where false,
+    /// such a step is declined without a prompt, whatever the chat's mode.
+    pub approvals: bool,
+    /// The CLI's own reviewer decides requests in the chat's Auto mode,
+    /// and the student is never asked. Where false, Auto behaves as Ask.
+    pub auto_review: bool,
+    /// An answer can allow more than the one call ("Always allow this
+    /// exact command in this chat"); each option's `scope` says how much.
+    pub session_grants: bool,
+    /// A live session takes a new permission mode with its next turn.
+    /// Where false on a bridge with approvals, a mode change restarts it.
+    pub mode_switch_in_session: bool,
 }
 
 /// One bridge's flags. Antigravity stops by killing its own child, which
@@ -56,6 +69,10 @@ pub const fn of(provider: Provider) -> Capabilities {
             provider,
             Provider::Claude | Provider::Codex | Provider::Antigravity
         ),
+        approvals: false,
+        auto_review: false,
+        session_grants: false,
+        mode_switch_in_session: false,
     }
 }
 
@@ -91,6 +108,10 @@ pub enum Flag {
     ActiveSteering,
     SteerByRestart,
     ProviderHandoff,
+    Approvals,
+    AutoReview,
+    SessionGrants,
+    ModeSwitchInSession,
 }
 
 #[cfg(test)]
@@ -111,6 +132,10 @@ mod tests {
                 (Flag::ActiveSteering, caps.active_steering),
                 (Flag::SteerByRestart, caps.steer_by_restart),
                 (Flag::ProviderHandoff, caps.provider_handoff),
+                (Flag::Approvals, caps.approvals),
+                (Flag::AutoReview, caps.auto_review),
+                (Flag::SessionGrants, caps.session_grants),
+                (Flag::ModeSwitchInSession, caps.mode_switch_in_session),
             ] {
                 let named = fixture(caps.provider, flag);
                 assert!(
@@ -130,6 +155,10 @@ mod tests {
                 Flag::ActiveSteering,
                 Flag::SteerByRestart,
                 Flag::ProviderHandoff,
+                Flag::Approvals,
+                Flag::AutoReview,
+                Flag::SessionGrants,
+                Flag::ModeSwitchInSession,
             ] {
                 if let Some(name) = fixture(caps.provider, flag) {
                     assert!(recorded(name), "{name} is not under fixtures/harness");

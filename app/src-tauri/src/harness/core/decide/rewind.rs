@@ -128,6 +128,8 @@ mod tests {
             waiting: 0,
             held: 0,
             open: None,
+            request: None,
+            pending: 0,
         }
     }
 

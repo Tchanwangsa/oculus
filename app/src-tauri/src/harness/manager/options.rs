@@ -43,6 +43,10 @@ pub struct SendOptions {
     /// (`antigravity_rules::install`). `None` keeps the last ones written.
     #[serde(skip)]
     pub antigravity_rules: Option<Vec<String>>,
+    /// How the chat asks (`harness_threads.permission_mode`), read from its
+    /// row at each start, so the saved mode is what runs.
+    #[serde(skip)]
+    pub permission_mode: crate::harness::requests::PermissionMode,
     /// Set by the app, never the webview: this send is the follow-up of
     /// that card (`app/continuation.rs`), not something the student typed.
     #[serde(skip)]
@@ -204,12 +208,14 @@ mod tests {
         o.scope = Some("COMP1".into());
         o.continuation = Some("12.0".into());
         o.antigravity_rules = Some(vec!["command(ls)".into()]);
+        o.permission_mode = crate::harness::requests::PermissionMode::Auto;
         let stored = serde_json::to_value(&o).unwrap();
         for resolved in [
             "scope",
             "lecture",
             "studioBrief",
             "antigravityRules",
+            "permissionMode",
             "continuation",
         ] {
             assert!(stored.get(resolved).is_none(), "{resolved} was stored");

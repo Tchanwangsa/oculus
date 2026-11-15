@@ -385,6 +385,34 @@ pub enum HarnessEvent {
         model: Option<String>,
         effort: Option<String>,
     },
+    /// The CLI is waiting on the student: run a command outside the
+    /// sandbox, change files, reach more. From a bridge only; the consumer
+    /// checks it, saves it with `route` registered, and tells
+    /// [`Self::RequestOpened`] in its place.
+    RequestAsked {
+        request: crate::harness::requests::NewRequest,
+        /// The way back to the waiting callback; never serialized.
+        #[serde(skip)]
+        route: Option<crate::harness::requests::LiveRoute>,
+    },
+    /// A request saved, with its timeline row (`item_id`).
+    RequestOpened {
+        request: crate::harness::requests::RequestView,
+    },
+    /// A request changed: answered, its answer's delivery learned, or ended
+    /// without one.
+    RequestUpdated {
+        request: crate::harness::requests::RequestView,
+    },
+    /// The provider retired a callback (`native_ref`): after an answer it
+    /// has it; with none, it withdrew the request. From a bridge only.
+    RequestRetired {
+        native_ref: String,
+    },
+    /// How the chat asks from its next run on.
+    PermissionMode {
+        mode: crate::harness::requests::PermissionMode,
+    },
     /// A completed run whose answer, or part of it, never reached Oculus.
     /// Persisted as a row; never followed by a resend.
     DeliveryNotice {

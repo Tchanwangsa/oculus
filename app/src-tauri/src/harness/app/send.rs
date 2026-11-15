@@ -127,9 +127,11 @@ async fn send(rt: &Runtime, start: Start) -> Result<bool, Failure> {
         Provider::Antigravity => Some(antigravity_rules::stored(&pool).await?),
         _ => None,
     };
+    let permission_mode = crate::harness::requests::store::mode(&pool, thread_id).await?;
     let opts = SendOptions {
         model,
         reasoning_effort: effort,
+        permission_mode,
         scope: row.subject_code,
         lecture,
         studio_brief,

@@ -3,6 +3,7 @@
 //! made by `Harness::ensure` from the live session and the run's selection.
 
 use crate::harness::providers::capabilities::Capabilities;
+use crate::harness::requests::PermissionMode;
 use crate::harness::Provider;
 
 /// A provider, a model and a reasoning level: what a run is sent with, and
@@ -17,16 +18,24 @@ pub(in crate::harness) struct Selection {
 /// The chat's live session, as the decision reads it.
 pub(in crate::harness) struct Current<'a> {
     pub selection: &'a Selection,
+    /// The permission mode it was started or last told under.
+    pub mode: PermissionMode,
     /// It has work running in the background that would die with it.
     pub background: bool,
+    /// Its CLI is waiting on a request the student has not answered.
+    pub pending_request: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::harness) enum Transition {
     /// The live session takes the message as it is.
     Reuse,
-    /// The same session, told the new model with the turn.
+    /// The same session, told the new model with the turn (and the new
+    /// permission mode, if that changed too).
     SwitchModelInSession,
+    /// The same session, told the new permission mode with the turn; or a
+    /// bridge that reads no mode, which only records it.
+    SwitchModeInSession,
     /// The session is ended and its native conversation resumed under the
     /// new model or reasoning level.
     RestartAndResume,
@@ -54,16 +63,28 @@ pub(in crate::harness) fn background_alive(current: Provider) -> String {
     )
 }
 
+/// The old provider's CLI is waiting on the student: ending its session
+/// would leave the request unanswerable.
+pub(in crate::harness) fn request_pending(current: Provider) -> String {
+    format!(
+        "{} is waiting for you to answer a request in this chat. Answer it before switching.",
+        current.label()
+    )
+}
+
 /// In order: another provider's session is live (refused while the target
-/// cannot take a handoff or the old one has background work, else a new
-/// session with a handoff); a different reasoning level restarts, since
-/// every CLI binds it at session start; a different model is told with the
-/// turn where the bridge can, else restarts; otherwise the session is kept.
+/// cannot take a handoff, the old one has background work or a request
+/// waiting, else a new session with a handoff); a different reasoning level
+/// restarts, since every CLI binds it at session start; a different model,
+/// or permission mode, is told with the turn where the bridge can, else
+/// restarts; otherwise the session is kept. A bridge with no approvals
+/// reads no mode, so a mode change there only records it.
 pub(in crate::harness) fn decide_transition(
     current: Option<Current>,
-    target: &Selection,
+    target: (&Selection, PermissionMode),
     caps: &Capabilities,
 ) -> Transition {
+    let (target, mode) = target;
     let Some(current) = current else {
         return Transition::CreateWithHandoff;
     };
@@ -75,18 +96,26 @@ pub(in crate::harness) fn decide_transition(
         if current.background {
             return Transition::Reject(background_alive(live.provider));
         }
+        if current.pending_request {
+            return Transition::Reject(request_pending(live.provider));
+        }
         return Transition::CreateWithHandoff;
     }
     if live.effort != target.effort {
         return Transition::RestartAndResume;
     }
-    if live.model != target.model {
-        return match caps.model_switch_in_session {
-            true => Transition::SwitchModelInSession,
-            false => Transition::RestartAndResume,
-        };
+    let model = live.model != target.model;
+    let moded = current.mode != mode;
+    if (model && !caps.model_switch_in_session)
+        || (moded && caps.approvals && !caps.mode_switch_in_session)
+    {
+        return Transition::RestartAndResume;
     }
-    Transition::Reuse
+    match (model, moded) {
+        (true, _) => Transition::SwitchModelInSession,
+        (false, true) => Transition::SwitchModeInSession,
+        (false, false) => Transition::Reuse,
+    }
 }
 
 #[cfg(test)]
@@ -109,9 +138,11 @@ mod tests {
         };
         let current = live.map(|(selection, background)| Current {
             selection,
+            mode: PermissionMode::Ask,
             background,
+            pending_request: false,
         });
-        decide_transition(current, target, &caps)
+        decide_transition(current, (target, PermissionMode::Ask), &caps)
     }
 
     #[test]
@@ -214,5 +245,87 @@ mod tests {
                 Transition::Reuse
             );
         }
+    }
+
+    fn moded(
+        provider: Provider,
+        live: PermissionMode,
+        target: PermissionMode,
+        model: Option<&str>,
+    ) -> Transition {
+        let caps = capabilities::of(provider);
+        let running = selection(provider, "m", Some("high"));
+        let next = selection(provider, model.unwrap_or("m"), Some("high"));
+        let current = Current {
+            selection: &running,
+            mode: live,
+            background: false,
+            pending_request: false,
+        };
+        decide_transition(Some(current), (&next, target), &caps)
+    }
+
+    #[test]
+    fn a_permission_mode_change_is_part_of_the_reuse_key() {
+        use PermissionMode::{Ask, Auto, Quiet};
+        // Codex takes the mode with each `turn/start`: the session stays.
+        assert_eq!(
+            moded(Provider::Codex, Ask, Auto, None),
+            Transition::SwitchModeInSession
+        );
+        assert_eq!(
+            moded(Provider::Codex, Quiet, Ask, Some("other")),
+            Transition::SwitchModelInSession
+        );
+        assert_eq!(moded(Provider::Codex, Ask, Ask, None), Transition::Reuse);
+        // A bridge with no approvals reads no mode: it is only recorded.
+        for provider in [Provider::Claude, Provider::Opencode, Provider::Antigravity] {
+            assert!(!capabilities::of(provider).approvals);
+            assert_eq!(
+                moded(provider, Ask, Quiet, None),
+                Transition::SwitchModeInSession,
+                "{provider:?}"
+            );
+        }
+        // One that fixes its mode at spawn restarts for it.
+        let caps = Capabilities {
+            approvals: true,
+            mode_switch_in_session: false,
+            ..capabilities::of(Provider::Claude)
+        };
+        let running = selection(Provider::Claude, "m", None);
+        let current = Current {
+            selection: &running,
+            mode: Ask,
+            background: false,
+            pending_request: false,
+        };
+        assert_eq!(
+            decide_transition(Some(current), (&running, Auto), &caps),
+            Transition::RestartAndResume
+        );
+    }
+
+    #[test]
+    fn a_switch_away_from_a_session_with_a_request_waiting_is_refused() {
+        let live = selection(Provider::Codex, "gpt", None);
+        let target = selection(Provider::Claude, "opus", None);
+        let caps = Capabilities {
+            provider_handoff: true,
+            ..capabilities::of(Provider::Claude)
+        };
+        let current = Current {
+            selection: &live,
+            mode: PermissionMode::Ask,
+            background: false,
+            pending_request: true,
+        };
+        assert_eq!(
+            decide_transition(Some(current), (&target, PermissionMode::Ask), &caps),
+            Transition::Reject(
+                "Codex is waiting for you to answer a request in this chat. Answer it before switching."
+                    .into()
+            )
+        );
     }
 }

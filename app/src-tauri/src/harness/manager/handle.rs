@@ -9,6 +9,7 @@ use crate::harness::Provider;
 
 use super::sinks::{Generation, Sinks};
 use super::transition::Selection;
+use crate::harness::requests::PermissionMode;
 
 /// Where a rewind goes back to: `anchor` is the provider's handle for the
 /// question to take out, kept on its row; `last_seen` the newest question's,
@@ -55,6 +56,29 @@ impl Handle {
         match self {
             Handle::Claude(s) => s.has_background_tasks(),
             _ => false,
+        }
+    }
+
+    /// The CLI is waiting on a callback nobody has answered.
+    pub(super) fn has_pending_request(&self) -> bool {
+        match self {
+            Handle::Codex(server, tid, _) => server.has_pending_request(tid),
+            _ => false,
+        }
+    }
+
+    /// The same session, sending its later turns under `mode`. Only Codex
+    /// reads one, on each `turn/start`; the others record it.
+    pub(super) fn with_mode(&self, mode: PermissionMode) -> Handle {
+        match self {
+            Handle::Codex(server, tid, opts) => {
+                let opts = CodexThreadOpts {
+                    mode,
+                    ..(**opts).clone()
+                };
+                Handle::Codex(server.clone(), tid.clone(), Arc::new(opts))
+            }
+            _ => self.clone(),
         }
     }
 
@@ -149,6 +173,8 @@ impl Handle {
 pub(super) struct Live {
     pub(super) handle: Handle,
     pub(super) selection: Selection,
+    /// The permission mode its turns are sent under.
+    pub(super) mode: PermissionMode,
     /// Minted when this session was spawned or attached; its sink carries it.
     pub(super) generation: Generation,
     /// Where this session reports.

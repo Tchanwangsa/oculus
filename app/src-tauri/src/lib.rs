@@ -374,6 +374,8 @@ pub fn run() {
             harness::app::turns::harness_resume,
             harness::app::turns::harness_force_stop,
             harness::app::turns::harness_delete_thread,
+            harness::app::requests::harness_respond,
+            harness::app::requests::harness_set_permission_mode,
             harness::store::threads::harness_thread_viewed,
             harness::app::suggest::document_suggest,
             harness::app::suggest::document_suggest_cancel,

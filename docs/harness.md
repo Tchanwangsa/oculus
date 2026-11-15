@@ -28,6 +28,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | The brief appended to each prompt; `AGENTS.md`; skills | `app/src-tauri/templates/HARNESS.template.md`, `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/skills/`, `app/src-tauri/src/agents/mod.rs` |
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
 | Provider table (`PROVIDERS`), platform capabilities, types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/availability.ts`, `app/src/lib/harness/` |
+| What an agent asks mid-turn: the request table, its live routes, the protected-path check, the `Respond` and permission-mode commands | `app/src-tauri/src/harness/requests/`, `app/src-tauri/src/harness/core/decide/respond.rs`, `app/src-tauri/src/harness/app/consumer/requests.rs`, `app/src-tauri/src/harness/app/requests.rs` |
 | A thread's selection, what a send does to its session (`decide_transition`), and the context handoff | `app/src-tauri/src/harness/core/decide/select.rs`, `app/src-tauri/src/harness/manager/transition.rs`, `app/src-tauri/src/harness/handoff/`, `app/src-tauri/src/harness/store/bindings.rs`, `app/src-tauri/src/harness/store/switching.sql` |
 | What each bridge can do (Stop, rewind, steering, switching), declared in Rust and read by the webview | `app/src-tauri/src/harness/providers/capabilities.rs`, `app/src/lib/harness/capabilities.ts`, `app/src/hooks/agents/useCapabilities.ts` |
 | Live state and event folding | `app/src/stores/chat/harnessStore.ts`, `app/src/hooks/backend/useBackendEvents.ts` |
@@ -63,7 +64,9 @@ one server process serves every chat (`shared_process`: Codex, opencode),
 whether a live session takes another model with its next turn
 (`model_switch_in_session`: Codex, opencode), whether the bridge can take
 over a chat another provider started (`provider_handoff`,
-[Changing provider mid-chat](#changing-provider-mid-chat)), and
+[Changing provider mid-chat](#changing-provider-mid-chat)), the request
+flags ([Requests](#requests): `approvals`, `auto_review`,
+`session_grants`, `mode_switch_in_session`), and
 the steering flags (`active_steering`, `steer_by_restart`), which are false
 on every bridge. A flag for work that is not built starts false and turns
 true only with the recording under `fixtures/harness/` that shows the CLI
@@ -1107,7 +1110,8 @@ is skipped.
 
 Everything the student does to a chat is a `Command` (`core/command.rs`):
 `Send`, `Rewind`, `EditResend`, `DeleteThread`, `EditQueued`, `RemoveQueued`,
-`ReorderQueued`, `Stop`, `Resume`, `ForceStop`, `SelectModel`. A Tauri command in
+`ReorderQueued`, `Stop`, `Resume`, `ForceStop`, `SelectModel`, `Respond`,
+`SetPermissionMode`. A Tauri command in
 `app/src-tauri/src/harness/app/turns.rs` only builds one, with the id the webview minted for it
 (`commandId` in `lib/harness/commands.ts`), puts it on the consumer's bus
 (`BusMsg::Command`) and awaits the result. The consumer takes it through
@@ -1524,6 +1528,85 @@ know of as their process dies, with the CLI's own exit message; this rule
 covers what they cannot, such as opencode's server dying after it took a
 prompt and before the turn's first event.
 
+## Requests
+
+When the CLI wants something its sandbox blocks (a command outside it, a
+file change, more access) the student is asked in the chat and the answer
+goes back to the same waiting call. One table, `harness_requests`
+(migration 58, `requests/requests.sql`), holds each request's state; its
+timeline row (kind `request`) holds only its id.
+
+**A request is saved with its route, or not at all.** A bridge turns its
+CLI's callback into `RequestAsked { request, route }`: a `NewRequest`
+(action, payload, the options this provider really takes, the callback id
+as JSON exactly as sent, the paths it names) and a `Route` back to the
+callback (`requests/route.rs`). The consumer (`app/consumer/requests.rs`)
+saves it and its row in one transaction under the open run, registers the
+route in its `Registry` by request id, and tells `RequestOpened`. That is
+one consumer step, and a release is another, so a request is fully stored
+before its session is released or never stored for that session. The
+CLI is told no, and the request is never shown, when:
+
+- no turn is open (a background agent asking after its turn closed);
+- it names a protected path (`requests/policy.rs` against `protected.rs`;
+  relative paths are read against `agents/`). A shell command cannot be
+  checked this way, so its payload says it runs outside the sandbox; the
+  name denies and `OCULUS_AGENT` keep refusing inside an approved command;
+- its session has ended (the event arrives stale), or it cannot be saved.
+
+**An answer is a command.** `Respond { request_id, option_id, feedback }`
+(`harness_respond`) is decided against the saved request: refused when it
+is not this chat's, was already answered, has ended (with its reason), its
+route is gone ("The agent that asked has gone …"), the option is not one it
+offers, or it carries feedback (no bridge takes one yet). The commit's
+conditional `UPDATE … WHERE status = 'pending'` is the claim, so of two
+panes clicking, one lands and the other is refused; the same command id
+again returns the first result. The commit sets `delivery = 'sending'`;
+the consumer tells `RequestUpdated` and an effect (`Effect::Reply`) writes
+the answer off its thread, never under the live-session lock. What the
+write proved comes back as `BusMsg::Replied`:
+
+| Reply | Delivery | |
+| --- | --- | --- |
+| `Acknowledged` | `acknowledged` | the write itself is the proof |
+| `Written` | stays `sending` | the CLI will retire the callback (`RequestRetired`, Codex's `serverRequest/resolved`), which makes it `acknowledged` |
+| `Failed` | `failed`, back to `pending` | nothing reached the CLI; the student may answer again |
+| `Uncertain` | `uncertain` | the write broke partway; never resent |
+
+An answer never applies a proposal card or lifts the agent guard: those
+keep their own commands.
+
+**Ending a request has one home.** Nothing but the consumer settles one:
+
+| What ends | Status, reason | The CLI |
+| --- | --- | --- |
+| the turn it waited in (`settle`, or a turn of the CLI's own) | `cancelled`, "The turn was stopped." after Stop, else "The turn ended before it was answered." | retires the callback itself |
+| `Release::Stopped` / `Replaced` | `cancelled` | told no (`Effect::Withdraw`) |
+| `Release::Exited` | `expired`, "The agent's process ended." | nothing to tell |
+| `Release::Deleted` | the rows go with the chat | told no |
+| `RequestRetired` with no answer sent | `expired`, "The agent withdrew this request." | |
+| startup (`store::reconcile`) | `expired`, "The app was closed."; an answer still `sending` becomes `uncertain` | no route survives a restart |
+
+An ended request's `responder` is `not_resumable` and its answer is
+refused. An answer still `sending` when its session ends becomes
+`uncertain`.
+
+**How a chat asks** is `harness_threads.permission_mode`: `ask` (the
+default), `quiet` ("Don't ask": declined without a prompt, as one-off jobs
+always are) or `auto` (the CLI's own reviewer decides and the student is
+never asked; a bridge with no reviewer, `auto_review` false, asks as `ask`).
+`SetPermissionMode` (`harness_set_permission_mode`) stores it at once and
+tells `PermissionMode`; it is refused while a request waits ("Answer the
+waiting request before changing how this chat asks."). The start step
+reads it off the row (`SendOptions::permission_mode`), and it is part of
+the session's reuse key ([`decide_transition`](#changing-provider-mid-chat)).
+A bridge whose `approvals` flag is false declines every request, whatever
+the mode.
+
+`harness_load` returns the thread's requests (`requests`), and the webview
+keeps them per thread (`requests` in `harnessStore`), replaced by each
+`request_opened` and `request_updated`.
+
 ## Going back rewinds the agent too
 
 Edit, Retry and Rewind truncate at a row (`harness::store::truncate`, announced as
@@ -1600,12 +1683,13 @@ a live Oculus switch or permission transfer.
 `Selected` tells every view. A `Send`, and an `EditResend` that names a
 provider, carry the composer's selection and store it in the commit that
 writes or queues the message. A pick of another provider is refused, with
-the reason and nothing recorded, in two cases:
+the reason and nothing recorded, in three cases:
 
 | Refusal | Why |
 | --- | --- |
 | "… cannot take over a chat that has started. Start a new chat to switch." | the target bridge's `provider_handoff` is false: no recording shows it treating handed-over conversation as history |
 | "… is still running a background task in this chat. Wait for it to finish, or stop it, before switching." | the chat's live session has a background task (Claude's backgrounded `Agent` and Bash, counted by its reader); ending the session would kill it |
+| "… is waiting for you to answer a request in this chat. Answer it before switching." | a request is pending ([Requests](#requests)); ending the session would leave it unanswerable. `decide_transition` refuses it too, from the bridge's own count of unanswered callbacks |
 
 **A run takes the selection when it starts**, not when it was typed
 (`commit::begin`). A message that waited in the queue goes out under
@@ -1623,11 +1707,12 @@ from the thread's live session and the run's selection, in this order:
 | Live session | Transition | What happens |
 | --- | --- | --- |
 | none | `CreateWithHandoff` | a session is spawned, resuming the run's binding's native session when it has one |
-| another provider's, and the target takes no handoff or the old one has a background task | `Reject` | the send fails with the reason, as a failed run |
+| another provider's, and the target takes no handoff, or the old one has a background task or a request waiting | `Reject` | the send fails with the reason, as a failed run |
 | another provider's | `CreateWithHandoff` | the old session is released (`Replaced`) and the target's is spawned or resumed |
 | same provider, another reasoning level | `RestartAndResume` | released and resumed under the new level |
 | same provider, another model | `SwitchModelInSession` where `model_switch_in_session` is true: Codex's next `turn/start` and opencode's next prompt name it. Else `RestartAndResume` | |
-| the same selection | `Reuse` | |
+| same provider, another permission mode | `SwitchModeInSession` where `mode_switch_in_session` is true (Codex names it on its next `turn/start`) or the bridge has no `approvals` (it reads no mode, so the mode is only recorded). Else `RestartAndResume` | |
+| the same selection and mode | `Reuse` | |
 
 A rewind brings up the question's provider the same way, without regard to
 model or level.

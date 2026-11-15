@@ -3,6 +3,7 @@
 //! committed here (`commands.rs`), so the two can never interleave.
 
 mod commands;
+mod requests;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -14,6 +15,7 @@ use tokio::runtime::Runtime;
 use crate::harness::core::effect::Effect;
 use crate::harness::event::{GapCause, Source};
 use crate::harness::providers::capabilities::{self, Capabilities};
+use crate::harness::requests::Registry;
 use crate::harness::{
     jobs, store, Generation, HarnessEvent, OwnTurns, Provider, Release, SendOptions,
 };
@@ -44,6 +46,10 @@ pub(in crate::harness) trait ConsumerIo {
     /// The thread's live session has a background task running.
     fn background(&self, _thread_id: i64) -> bool {
         false
+    }
+    /// The library whose protected paths no request may name.
+    fn library(&self) -> std::path::PathBuf {
+        crate::library::paths::data_dir()
     }
     fn open_pool(&mut self, rt: &Runtime) -> Option<SqlitePool>;
     fn name(
@@ -79,6 +85,7 @@ pub(in crate::harness) fn consume(
         accepted: HashSet::new(),
         asked: HashSet::new(),
         stops: HashMap::new(),
+        requests: Registry::default(),
     };
     for msg in rx {
         consumer.handle(msg, io);
@@ -115,6 +122,8 @@ struct Consumer {
     asked: HashSet<i64>,
     /// Runs the student stopped that have not ended yet, by run.
     stops: HashMap<i64, Stopping>,
+    /// The live routes of the requests saved here (`requests.rs`).
+    requests: Registry,
 }
 
 impl Consumer {
@@ -155,6 +164,12 @@ impl Consumer {
                 run_id,
                 outcome,
             } => self.sent(thread_id, provider, run_id, outcome, io),
+            BusMsg::Replied {
+                thread_id,
+                provider,
+                request_id,
+                reply,
+            } => self.request_replied(thread_id, provider, request_id, reply, io),
             BusMsg::Wake => {}
         }
     }
@@ -254,6 +269,7 @@ impl Consumer {
         if reason == Release::Stopped {
             self.hold_queue(thread_id, provider, io);
         }
+        self.end_requests(thread_id, provider, generation, reason, io);
         let status = match reason {
             Release::Stopped | Release::Replaced => Some("interrupted"),
             Release::Exited => Some("failed"),
@@ -340,12 +356,30 @@ impl Consumer {
                     "[oculus] harness thread {thread_id}: dropped {} from ended session {generation}",
                     kind(&ev)
                 );
+                // A request nobody will see is told no, or its CLI waits.
+                if let HarnessEvent::RequestAsked {
+                    route: Some(route), ..
+                } = ev
+                {
+                    io.perform(Effect::Withdraw {
+                        routes: vec![route],
+                    });
+                }
                 return;
             }
             // The process is gone, and so is its session.
             if matches!(ev, HarnessEvent::Exited { .. }) {
                 self.end_session(thread_id, provider, generation, Release::Exited, io);
             }
+        }
+        match ev {
+            HarnessEvent::RequestAsked { request, route } if thread_id > 0 => {
+                return self.request_asked(thread_id, provider, from, request, route, io);
+            }
+            HarnessEvent::RequestRetired { native_ref } if thread_id > 0 => {
+                return self.request_retired(thread_id, provider, from, &native_ref, io);
+            }
+            _ => {}
         }
         // Whose turn a terminal ends. One for a turn this thread does not
         // have open (another turn's, or a repeated `result`) settles nothing
@@ -491,6 +525,12 @@ impl Consumer {
                             return;
                         }
                     },
+                    // A turn the CLI started itself takes its own requests
+                    // with it.
+                    (Some(Terminal::Own), _, _, HarnessEvent::TurnFinished { status, .. }) => {
+                        let status = status.clone();
+                        self.requests_left_by(thread_id, None, &status)
+                    }
                     _ => {
                         self.runs
                             .learn_session(&self.rt, p, thread_id, &ev, terminal);
@@ -543,7 +583,8 @@ impl Consumer {
         self.stops.remove(&run_id);
         // Settlement removed the stored draft with the run.
         self.drafts.take(run_id);
-        let mut out = Vec::new();
+        // Requests still waiting in the turn end with it.
+        let mut out = self.requests_left_by(thread_id, Some(run_id), status);
         if let Some(s) = settlement {
             if let Some((id, text)) = s.notice {
                 out.push((HarnessEvent::DeliveryNotice { text }, Some(id)));

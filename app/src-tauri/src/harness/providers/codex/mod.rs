@@ -24,6 +24,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 
 use crate::harness::event::ToolKind;
+use crate::harness::requests::PermissionMode;
 use crate::harness::{RawLog, Sink};
 
 pub use server::CodexServer;
@@ -51,6 +52,10 @@ pub struct CodexThreadOpts {
     pub instructions: String,
     /// Kept out of the student's `codex resume` list: a one-off turn's thread.
     pub ephemeral: bool,
+    /// How the thread asks: `quiet` for a one-off turn, which never prompts.
+    pub mode: PermissionMode,
+    /// The library, whose protected paths a request may not name.
+    pub library: PathBuf,
 }
 
 /// What a Codex thread over `library` may write besides its cwd: the

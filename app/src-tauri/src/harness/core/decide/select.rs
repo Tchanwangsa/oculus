@@ -3,7 +3,7 @@
 //! nothing that is already written; the switch itself happens when a run
 //! starts (`manager/transition.rs`, `handoff/`).
 
-use crate::harness::manager::transition::{background_alive, no_handoff};
+use crate::harness::manager::transition::{background_alive, no_handoff, request_pending};
 use crate::harness::store::ThreadRow;
 use crate::harness::Provider;
 
@@ -22,6 +22,9 @@ pub(super) fn refusal(state: &State, provider: Provider) -> Option<String> {
     }
     if !state.live.takeover.allows(provider) {
         return Some(no_handoff(provider));
+    }
+    if state.pending > 0 {
+        return Some(request_pending(row.provider));
     }
     state
         .live
@@ -92,6 +95,8 @@ mod tests {
             waiting: 0,
             held: 0,
             open: None,
+            request: None,
+            pending: 0,
         }
     }
 

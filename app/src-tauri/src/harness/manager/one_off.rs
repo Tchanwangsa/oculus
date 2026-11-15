@@ -118,6 +118,9 @@ impl Harness {
                     reasoning_effort: sel.reasoning_effort.clone(),
                     instructions: instructions.to_string(),
                     ephemeral: true,
+                    // A one-off turn never prompts: nobody is there to answer.
+                    mode: crate::harness::requests::PermissionMode::Quiet,
+                    library: self.data_dir.clone(),
                 };
                 let tid = server.start_thread(&opts, sink)?;
                 Handle::Codex(server, tid, Arc::new(opts))

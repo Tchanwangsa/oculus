@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::harness::manager::policy::Mode;
+use crate::harness::requests::PermissionMode;
 use crate::harness::store::RunStart;
 use crate::harness::{Provider, SendOptions};
 
@@ -73,6 +74,19 @@ pub(in crate::harness) enum Kind {
     ForceStop {
         run_id: i64,
     },
+    /// Answer a request the agent is waiting on with one of its options.
+    /// `feedback` is a message for the agent with a decline, which no
+    /// bridge takes yet.
+    Respond {
+        request_id: i64,
+        option_id: String,
+        feedback: Option<String>,
+    },
+    /// How the chat asks from its next run on. Refused while a request
+    /// waits: it was raised under the mode in force.
+    SetPermissionMode {
+        mode: PermissionMode,
+    },
 }
 
 impl Kind {
@@ -90,6 +104,8 @@ impl Kind {
             Kind::Stop { .. } => "stop",
             Kind::Resume => "resume",
             Kind::ForceStop { .. } => "force_stop",
+            Kind::Respond { .. } => "respond",
+            Kind::SetPermissionMode { .. } => "set_permission_mode",
         }
     }
 }
@@ -114,4 +130,7 @@ pub(in crate::harness) struct Outcome {
     /// The run a stop reached.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stopped: Option<i64>,
+    /// The request an answer claimed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered: Option<i64>,
 }

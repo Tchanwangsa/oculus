@@ -180,6 +180,15 @@ another chat refused, a retried first message making one chat, a refusal
 recording nothing, a message sent while the provider rewinds, an edit's
 single commit, a delete heard twice, and the revision on every envelope
 against `load::read`.
+`testkit/requests.rs` checks requests on the same bench with a fake
+bridge (`Fake`, a `Route` that records what it was told and proves what
+the test says): an answer reaching its callback, two requests at once, two
+panes and a repeated receipt, Stop, a process exit, a replaced session and
+a delete while one waits, one found pending at startup (the production
+startup gate on the same database), a pipe dying mid-reply, a write that
+reached nothing, numeric and string callback ids retired, a request before
+its tool row, a protected path and a request with no turn open declined
+unseen, the mode and provider held while one waits, and a reload.
 `testkit/driver.rs` checks the driver through the rig: a crash before the
 start step (the message back in its queue, held, on all four bridges) and
 after it took the run, sends returning at their commit and going out one

@@ -416,6 +416,11 @@ impl CodexServer {
         self.routes.lock().unwrap().remove(thread_id);
     }
 
+    /// The thread's CLI is waiting on a callback nobody has answered.
+    pub fn has_pending_request(&self, _thread_id: &str) -> bool {
+        false
+    }
+
     pub fn has_thread(&self, thread_id: &str) -> bool {
         self.routes.lock().unwrap().contains_key(thread_id)
     }

@@ -62,6 +62,8 @@ struct Io {
     rewinds: Arc<AtomicBool>,
     /// Every bridge takes a handoff, as a replay's rig lets them.
     handoff: Arc<AtomicBool>,
+    /// The scratch library whose protected paths a request may not name.
+    library: std::path::PathBuf,
 }
 
 impl ConsumerIo for Io {
@@ -74,6 +76,9 @@ impl ConsumerIo for Io {
     fn open_pool(&mut self, _: &tokio::runtime::Runtime) -> Option<SqlitePool> {
         Some(self.pool.clone())
     }
+    fn library(&self) -> std::path::PathBuf {
+        self.library.clone()
+    }
     fn name(&mut self, _: i64, _: Provider, _: Vec<jobs::JobSelection>, _: store::NamingSeed) {}
     fn perform(&mut self, effect: Effect) {
         let mut record = self.record.lock().unwrap();
@@ -84,6 +89,8 @@ impl ConsumerIo for Io {
             Effect::ForceStop { .. } => "force stop".to_string(),
             Effect::Release { reason, .. } => format!("release {reason:?}"),
             Effect::Forget { provider, .. } => format!("forget {}", provider.as_str()),
+            Effect::Reply(reply) => format!("reply {}", reply.option.id),
+            Effect::Withdraw { routes } => format!("withdraw {}", routes.len()),
         });
         match effect {
             Effect::Rewind { command, ask } => {
@@ -97,6 +104,18 @@ impl ConsumerIo for Io {
                 });
             }
             Effect::Start(start) => record.starts.push(*start),
+            // A bridge's write, made here as the production effect makes it
+            // off the consumer's thread, and its proof sent back.
+            Effect::Reply(reply) => {
+                let proved = reply.route.0.reply(&reply.option);
+                let _ = self.bus.send(BusMsg::Replied {
+                    thread_id: reply.thread_id,
+                    provider: reply.provider,
+                    request_id: reply.request_id,
+                    reply: proved,
+                });
+            }
+            Effect::Withdraw { routes } => routes.iter().for_each(|r| r.0.withdraw()),
             _ => {}
         }
     }
@@ -141,6 +160,7 @@ impl Bench {
             record: record.clone(),
             rewinds: rewinds.clone(),
             handoff: handoff.clone(),
+            library: dir.to_path_buf(),
         };
         let feed = Feed {
             rx,
@@ -176,6 +196,11 @@ impl Bench {
         waiting
             .recv_timeout(std::time::Duration::from_secs(10))
             .expect("the consumer caught up");
+    }
+
+    /// The scratch folder the consumer takes for the library.
+    pub(super) fn library(&self) -> std::path::PathBuf {
+        self._dir.to_path_buf()
     }
 
     /// From now on every bridge takes a handoff.

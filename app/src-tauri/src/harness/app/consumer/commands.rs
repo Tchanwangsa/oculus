@@ -65,7 +65,7 @@ impl Consumer {
         if self.asking.values().any(|a| a.command.id == command.id) {
             return Err(format!("command {} is still running", command.id));
         }
-        let live = self.live(command.thread_id, io);
+        let live = self.live(command, io);
         let state = self.rt.block_on(state::read(&pool, command, live))?;
         let provider = match (&state.thread, &command.kind) {
             (Some(row), _) => row.provider,
@@ -141,7 +141,7 @@ impl Consumer {
     ) -> Result<Outcome, String> {
         let pool = self.pool.clone().ok_or("the database is not open")?;
         let command = &asking.command;
-        let live = self.live(command.thread_id, io);
+        let live = self.live(command, io);
         let state = self.rt.block_on(state::read(&pool, command, live))?;
         match decide(&state, command, Some(answer))? {
             Decision::Commit(plan) => {
@@ -152,12 +152,18 @@ impl Consumer {
     }
 
     /// What only this process knows about a chat, for its deciders.
-    fn live(&self, thread_id: Option<i64>, io: &impl ConsumerIo) -> Live {
+    fn live(&self, command: &Command, io: &impl ConsumerIo) -> Live {
+        let thread_id = command.thread_id;
+        let route = match &command.kind {
+            Kind::Respond { request_id, .. } => self.requests.answerable(*request_id).is_some(),
+            _ => false,
+        };
         Live {
             held: thread_id.is_some_and(|id| self.held(id)),
             own_turn: thread_id.is_some_and(|id| self.runs.own_open(id)),
             background: thread_id.is_some_and(|id| io.background(id)),
             takeover: Takeover::read(|provider| io.capabilities(provider).provider_handoff),
+            route,
         }
     }
 
@@ -323,9 +329,15 @@ impl Consumer {
                     });
                 }
             }
+            Applied::Responded(request) => self.responded(thread_id, provider, *request, io),
+            Applied::Mode(mode) => {
+                let told = HarnessEvent::PermissionMode { mode };
+                self.event(thread_id, provider, From::App, told, None, io);
+            }
             Applied::Deleted => {
                 // Whatever its session still says is nobody's: the rows are
                 // gone, and a late event must not write new ones.
+                self.forget_requests(thread_id, io);
                 self.runs.forget(thread_id);
                 self.runs.silence(thread_id);
                 self.parked.remove(&thread_id);

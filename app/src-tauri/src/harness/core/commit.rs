@@ -7,6 +7,7 @@ use sqlx::{Row, SqliteConnection, SqlitePool};
 
 use crate::harness::handoff::store::{self as handoff, HandoffView};
 use crate::harness::manager::transition::Selection;
+use crate::harness::requests::{self, PermissionMode, RequestView};
 use crate::harness::store::{self, RunStart, SendIntent};
 use crate::harness::{Provider, SendOptions};
 
@@ -77,6 +78,16 @@ pub(in crate::harness) enum Change {
         context: bool,
     },
     DeleteThread,
+    /// The student's answer claims the request: one conditional write, so
+    /// of two answers only one lands.
+    Respond {
+        request_id: i64,
+        option_id: String,
+    },
+    /// How the chat asks from its next run on.
+    SetMode {
+        mode: PermissionMode,
+    },
 }
 
 /// What a change did, for the consumer to announce and act on.
@@ -102,6 +113,10 @@ pub(in crate::harness) enum Applied {
         stale: Vec<Provider>,
     },
     Deleted,
+    /// A request was answered; its answer goes to the provider next.
+    Responded(Box<RequestView>),
+    /// The chat's permission mode changed.
+    Mode(PermissionMode),
 }
 
 /// A run written as `starting`: its row is in the timeline, and the driver
@@ -251,6 +266,22 @@ pub(in crate::harness) async fn run(
                     context,
                     stale,
                 });
+            }
+            Change::Respond {
+                request_id,
+                option_id,
+            } => {
+                let thread_id = thread.ok_or("an answer with no thread")?;
+                let claimed =
+                    requests::store::respond(&mut tx, thread_id, request_id, &option_id).await?;
+                let request = claimed.ok_or(crate::harness::core::decide::respond::ANSWERED)?;
+                outcome.answered = Some(request_id);
+                applied.push(Applied::Responded(Box::new(request)));
+            }
+            Change::SetMode { mode } => {
+                let thread_id = thread.ok_or("a mode with no thread")?;
+                requests::store::set_mode(&mut tx, thread_id, mode).await?;
+                applied.push(Applied::Mode(mode));
             }
             Change::DeleteThread => {
                 let thread_id = thread.ok_or("a delete with no thread")?;

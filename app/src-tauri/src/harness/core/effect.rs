@@ -7,6 +7,7 @@ use std::sync::Arc;
 use sqlx::SqlitePool;
 
 use crate::harness::app::{Bus, BusMsg};
+use crate::harness::requests::{LiveRoute, RequestOption};
 use crate::harness::store::RunStart;
 use crate::harness::{Harness, Provider, Release, SendOptions};
 
@@ -30,6 +31,20 @@ pub(in crate::harness) enum Effect {
     /// End the thread's session if it is `provider`'s: a rewind took rows
     /// that session had seen.
     Forget { thread_id: i64, provider: Provider },
+    /// Write the student's answer to the callback it was saved for; what
+    /// the write proved comes back as [`BusMsg::Replied`].
+    Reply(Box<Reply>),
+    /// Tell these callbacks no without asking anyone: requests the app
+    /// gave up or never showed.
+    Withdraw { routes: Vec<LiveRoute> },
+}
+
+pub(in crate::harness) struct Reply {
+    pub thread_id: i64,
+    pub provider: Provider,
+    pub request_id: i64,
+    pub route: LiveRoute,
+    pub option: RequestOption,
 }
 
 #[derive(Clone)]
@@ -99,5 +114,31 @@ pub(in crate::harness) async fn run(rt: &Runtime, effect: Effect) {
             thread_id,
             provider,
         } => rt.harness.release_provider(thread_id, provider),
+        Effect::Reply(reply) => {
+            let Reply {
+                thread_id,
+                provider,
+                request_id,
+                route,
+                option,
+            } = *reply;
+            let written = crate::runtime::blocking::run(move || Ok(route.0.reply(&option)));
+            let reply = written
+                .await
+                .unwrap_or_else(crate::harness::requests::Reply::Uncertain);
+            let _ = rt.bus.send(BusMsg::Replied {
+                thread_id,
+                provider,
+                request_id,
+                reply,
+            });
+        }
+        Effect::Withdraw { routes } => {
+            let withdrawn = crate::runtime::blocking::run(move || {
+                routes.iter().for_each(|route| route.0.withdraw());
+                Ok(())
+            });
+            let _: Result<(), String> = withdrawn.await;
+        }
     }
 }

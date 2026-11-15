@@ -5,6 +5,7 @@
 
 mod delete;
 mod queue;
+pub(in crate::harness) mod respond;
 mod rewind;
 mod select;
 mod send;
@@ -98,5 +99,11 @@ pub(in crate::harness) fn decide(
         Kind::Stop { run_id } => queue::stop(state, *run_id),
         Kind::Resume => queue::resume(state),
         Kind::ForceStop { run_id } => queue::force_stop(state, *run_id),
+        Kind::Respond {
+            request_id,
+            option_id,
+            feedback,
+        } => respond::decide(state, *request_id, option_id, feedback.as_ref()),
+        Kind::SetPermissionMode { mode } => respond::mode(state, *mode),
     }
 }
