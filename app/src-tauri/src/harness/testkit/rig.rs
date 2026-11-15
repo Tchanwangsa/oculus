@@ -367,6 +367,16 @@ impl Rig {
     /// ([`Self::prompts`]). The bridge is the test's to feed.
     pub fn session_of(&mut self, recording: &Recording) -> Bridge {
         self.expect_turn(recording);
+        self.register_session(recording)
+    }
+
+    /// Register a recording without relaxing its outbound prompt checks.
+    pub fn session_checked(&mut self, recording: &Recording) -> Bridge {
+        self.outbound.expect(recording.expected.iter().cloned());
+        self.register_session(recording)
+    }
+
+    fn register_session(&self, recording: &Recording) -> Bridge {
         session(
             &self.harness,
             self.thread,

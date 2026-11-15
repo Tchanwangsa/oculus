@@ -52,7 +52,7 @@ pub const fn of(provider: Provider) -> Capabilities {
         // Codex names the model in `turn/start` and opencode in each
         // prompt; Claude and `agy` take `--model` at spawn.
         model_switch_in_session: shared_process,
-        provider_handoff: false,
+        provider_handoff: matches!(provider, Provider::Claude),
     }
 }
 
@@ -71,6 +71,7 @@ pub fn all() -> Vec<Capabilities> {
 pub const fn fixture(provider: Provider, flag: Flag) -> Option<&'static str> {
     match (provider, flag) {
         (Provider::Claude, Flag::Interrupt) => Some("claude-interrupt"),
+        (Provider::Claude, Flag::ProviderHandoff) => Some("handoff-claude-full"),
         (Provider::Codex, Flag::Interrupt) => Some("codex-interrupt"),
         (Provider::Opencode, Flag::Interrupt) => Some("opencode-v1-interrupt"),
         _ => None,
