@@ -15,6 +15,7 @@ import {
   type Provider,
   type QueuedMessage,
   type RateWindow,
+  type Selection,
   type ThreadUsage,
 } from "@/lib/harness";
 import { getSubjects, type Subject } from "@/lib/db";
@@ -86,6 +87,10 @@ interface HarnessState {
   setProvider: (p: Provider) => void;
   setModel: (m: string | null) => void;
   setReasoning: (level: string | null) => void;
+  /** Rust stored this selection for the thread (`harnessSelectModel`
+   *  resolved): what `selected` will say, written now so the composer does
+   *  not show the old one while the event is on its way. */
+  selected: (id: number, selection: Selection) => void;
   loadSubjects: () => Promise<void>;
   apply: (env: HarnessEnvelope) => void;
   /** `apply` without the repeat check. `rowsOnly` is `load` folding what
@@ -254,6 +259,8 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   },
   setModel: (model) => set({ model }),
   setReasoning: (reasoning) => set({ reasoning }),
+  selected: (id, { provider, model, effort }) =>
+    set((s) => ({ threads: s.threads.map((t) => (t.id === id ? { ...t, provider, model, effort } : t)) })),
   loadSubjects: async () => set({ subjects: await getSubjects(), subjectsLoaded: true }),
 
   release: (id) =>

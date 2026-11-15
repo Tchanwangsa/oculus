@@ -1726,6 +1726,22 @@ fit, the crash on either side of the start step, a message queued before a
 switch, and the refusals. Its rig lets every bridge take a handoff
 (`Harness::allow_handoff_everywhere`), which no production path can.
 
+### In the composer and the timeline
+
+The decisions are pure functions in `lib/harness/switching.ts`, tested in
+`tests/lib/harness/switching.test.ts`.
+
+- **A pick is held until Rust has it** (`stores/chat/pickStore.ts`). The
+  composer shows the held pick over the thread's selection
+  (`threadSelection`), so the model it names is the one the next message
+  uses. Every pick one click makes (a model and the level it brings) is one
+  `harnessSelectModel`. Another provider's pick starts with no model
+  (`pickSelection`) and is saved only once the composer has filled one from
+  that provider's catalogue (`pickSaves`). A pick during a running turn is
+  saved the same way and waits for the next send; the running run keeps
+  what it was sent with. When Rust refuses, the pick is dropped and its
+  sentence is kept (`refused`) until the next pick or send.
+
 ## opencode providers go through its own server
 
 `opencode serve` exposes `/provider`, `/provider/auth`, `PUT`/`DELETE
