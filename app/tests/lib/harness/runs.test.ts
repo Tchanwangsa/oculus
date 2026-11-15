@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { liveRunId, runEnded, runFromRow, runningSince, STOP_PATIENCE_MS, stopOverdue, type RunRow } from "@/lib/harness/runs";
+import { lastRunStatus, liveRunId, runEnded, runFromRow, runningSince, STOP_PATIENCE_MS, stopDueAt, stopOverdue, type RunRow } from "@/lib/harness/runs";
+import type { HarnessRun } from "@/lib/harness/types";
 
 const row = (id: number, execution_status: string, more: Partial<RunRow> = {}): RunRow => ({
   id, execution_status, delivery_state: "unknown", answer_item_id: null, started_at: "2026-11-15 00:00:00", ended_at: null, ...more,
@@ -41,4 +42,22 @@ test("a stop is overdue once Rust says so, or fifteen seconds after it was asked
   expect(stopOverdue({ ...asked, stop_requested_ms: null, unresponsive: { others: 1 } }, at)).toBe(true);
   expect(stopOverdue(runFromRow(row(6, "running")), at + 60_000)).toBe(false);
   expect(stopOverdue(undefined, at)).toBe(false);
+});
+
+const run = (patch: Partial<HarnessRun>): HarnessRun => ({
+  id: 5, status: "running", delivery: "unknown", answer_item_id: null, started_ms: 0, ended_ms: null, ...patch,
+});
+
+test("stopDueAt: a stop read from a snapshot is due STOP_PATIENCE_MS after it was asked", () => {
+  expect(stopDueAt(run({ stopping: true, stop_requested_ms: 1000 }))).toBe(1000 + STOP_PATIENCE_MS);
+  // Rust already said so, or there is no stop or no time: nothing to wait for.
+  expect(stopDueAt(run({ stopping: true, stop_requested_ms: 1000, unresponsive: { others: 0 } }))).toBeNull();
+  expect(stopDueAt(run({}))).toBeNull();
+  expect(stopDueAt(run({ stopping: true, stop_requested_ms: null }))).toBeNull();
+  expect(stopDueAt(undefined)).toBeNull();
+});
+
+test("lastRunStatus: the newest run's status, or null before any", () => {
+  expect(lastRunStatus(undefined)).toBeNull();
+  expect(lastRunStatus({ 3: run({ id: 3, status: "failed" }), 9: run({ id: 9, status: "interrupted" }) })).toBe("interrupted");
 });

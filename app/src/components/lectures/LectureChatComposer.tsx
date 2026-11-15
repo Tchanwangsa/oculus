@@ -111,6 +111,7 @@ export function LectureChatComposer({
   onSend,
   onStop,
   onResume,
+  onForceStop,
   dropRef,
   onDropping,
   threadId = null,
@@ -144,6 +145,8 @@ export function LectureChatComposer({
   onStop: (runId: number | null) => Promise<void> | void;
   /** Lift the hold on the open thread's queue. */
   onResume?: () => Promise<void>;
+  /** Kill what answers a run that ignored Stop (`stop_unresponsive`). */
+  onForceStop?: (runId: number) => Promise<void>;
   /** A wider drop target than the box (the panel around it), which then
    *  draws its own overlay from `onDropping`. */
   dropRef?: RefObject<HTMLElement | null>;
@@ -206,7 +209,13 @@ export function LectureChatComposer({
       <DictationFeedback dictation={dictation} />
       {att.error && <div className="px-0.5 text-[11px] text-destructive">{att.error}</div>}
       {controls.error && <div className="px-0.5 text-[11px] text-destructive">{controls.error}</div>}
-      <ThreadBanners threadId={threadId} rateLimits={rateLimits} onResume={onResume} />
+      <ThreadBanners
+        threadId={threadId}
+        provider={provider}
+        rateLimits={rateLimits}
+        onResume={onResume}
+        onForceStop={onForceStop}
+      />
       {stash.menu.entries.length > 0 && (
         <div className="flex justify-end px-0.5">
           <StashMenu {...stash.menu} />

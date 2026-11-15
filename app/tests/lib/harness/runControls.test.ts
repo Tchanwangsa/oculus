@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { commandError, moveQueued, queueHeld, queuedLabel, resumeLabel, runControls, type RunControlInputs } from "@/lib/harness";
+import { commandError, forceStopLabel, moveQueued, queueHeld, queuedLabel, resumeLabel, runControls, type RunControlInputs } from "@/lib/harness";
 
 const idle: RunControlInputs = {
   running: false,
@@ -128,5 +128,18 @@ describe("moveQueued", () => {
   test("the list it was given is left as it was", () => {
     moveQueued(ids, "b", 1);
     expect(ids).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("forceStopLabel", () => {
+  test("no other chat on the server: plain Force stop", () => {
+    expect(forceStopLabel(0, true)).toBe("Force stop");
+  });
+  test("one other chat, then several", () => {
+    expect(forceStopLabel(1, true)).toBe("Force stop — also stops 1 other chat");
+    expect(forceStopLabel(3, true)).toBe("Force stop — also stops 3 other chats");
+  });
+  test("a bridge with a process per chat never names others", () => {
+    expect(forceStopLabel(2, false)).toBe("Force stop");
   });
 });

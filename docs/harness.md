@@ -1070,14 +1070,22 @@ drawn by `SendControls` in every composer):
   failed run it says the last reply failed; a stop and a restart hold the
   queue alike and nothing saved tells them apart, so they share "Held after
   a stop or a restart".
+- **Agent not responding to Stop** heads the banner lane once the run on
+  screen is overdue (`stopOverdue`: `stop_unresponsive` arrived, or after a
+  reload the clock passed `STOP_PATIENCE_MS` from `stop_requested_at`; the
+  lane sets a timer for that moment, `stopDueAt`). Its Force stop pill
+  sends `harness_force_stop` with that run's id. On a bridge whose
+  `sharedProcess` is true it says what else stops: "Force stop — also stops
+  1 other chat" from `others`, or, with no count told, a description that
+  other chats on the same server stop too.
 - **Waiting messages** (`Pending.tsx`, under the timeline in every chat
   view) each say "Held" or "Waiting" in words above the bubble, and keep
   Edit and Remove either way. With more than one, Move earlier and Move
   later buttons send the whole new order (`moveQueued`,
   `harness_reorder_queued`); they rest while a reorder is out.
 - **A command that fails** says why where the student acted: Stop and the
-  main button's Resume on a line above the box, the notice's Resume in the
-  notice, an edit, removal or reorder under the waiting messages. Nothing stays pending: each control is inert only while its own
+  main button's Resume on a line above the box, a notice's Resume or Force
+  stop in the notice, an edit, removal or reorder under the waiting messages. Nothing stays pending: each control is inert only while its own
   command is out (`useRunCommand`).
 
 Codex never completes an interrupted message, so the

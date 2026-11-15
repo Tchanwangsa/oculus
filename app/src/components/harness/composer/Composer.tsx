@@ -70,6 +70,7 @@ export function Composer({
   onSend,
   onStop,
   onResume,
+  onForceStop,
   autoFocus,
   dropRef,
   onDropping,
@@ -110,6 +111,8 @@ export function Composer({
   /** Lift the hold on the open thread's queue; without it the box never
    *  offers Resume. */
   onResume?: () => Promise<void>;
+  /** Kill what answers a run that ignored Stop (`stop_unresponsive`). */
+  onForceStop?: (runId: number) => Promise<void>;
   autoFocus?: boolean;
   /** A wider drop target than the box (the page around it), which then draws
    *  its own overlay from `onDropping`. */
@@ -252,7 +255,13 @@ export function Composer({
         />
       )}
 
-      <ThreadBanners threadId={threadId} rateLimits={rateLimits} onResume={onResume} />
+      <ThreadBanners
+        threadId={threadId}
+        provider={provider}
+        rateLimits={rateLimits}
+        onResume={onResume}
+        onForceStop={onForceStop}
+      />
 
       <div
         className={cn(

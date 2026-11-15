@@ -92,6 +92,14 @@ export function moveQueued(ids: string[], id: string, by: -1 | 1): string[] | nu
   return next;
 }
 
+/** Force stop's words: what it will cost is said on the button. `others` is
+ *  how many other chats have a run on the same server (`stop_unresponsive`);
+ *  it only counts where the bridge shares one process between chats. */
+export function forceStopLabel(others: number, sharedProcess: boolean): string {
+  if (!sharedProcess || others <= 0) return "Force stop";
+  return `Force stop — also stops ${others} other ${others === 1 ? "chat" : "chats"}`;
+}
+
 /** A failed command's reason, for the line beside the control the student
  *  used. Tauri rejects with the Rust error's string. */
 export function commandError(e: unknown): string {

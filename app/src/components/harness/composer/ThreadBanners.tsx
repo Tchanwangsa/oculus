@@ -1,13 +1,20 @@
-import { useEffect, useMemo } from "react";
-import { Hourglass, Pause } from "@phosphor-icons/react";
+import { useEffect, useMemo, useState } from "react";
+import { Hourglass, Pause, Warning } from "@phosphor-icons/react";
 import {
+  forceStopLabel,
   lastRunStatus,
+  liveRunId,
+  stopDueAt,
+  stopOverdue,
   usageLimitHit,
   type HarnessItem,
+  type HarnessRun,
+  type Provider,
   type QueuedMessage,
   type RateWindow,
   type RunStatus,
 } from "@/lib/harness";
+import { useCapabilities } from "@/hooks/agents/useCapabilities";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { useBannerDismissals } from "@/stores/chat/bannerDismissals";
 import { BannerLane, type BannerItem } from "./BannerLane";
@@ -39,6 +46,12 @@ export interface ThreadBannerInputs {
   lastRun?: RunStatus | null;
   /** Lifts the hold; without it no held notice is shown. */
   resume?: BannerCommand | null;
+  /** The run on screen (`liveRunId`), whose stop may have gone unanswered. */
+  liveRun?: HarnessRun | null;
+  /** The bridge answers every chat from one process (`sharedProcess`). */
+  sharedProcess?: boolean;
+  /** Kills what answers the run; without it no unresponsive notice. */
+  forceStop?: Omit<BannerCommand, "onClick"> & { onClick: (runId: number) => void };
 }
 
 const RESUME_HINT = "Resume sends them in order; a new message also resumes them and goes after them.";
@@ -52,14 +65,49 @@ export function heldDescription(lastRun: RunStatus | null | undefined): string {
     : `Held after a stop or a restart. ${RESUME_HINT}`;
 }
 
+/** Why Force stop costs what it does. `others` is null when no count was
+ *  told (a stop found overdue after a reload), so a shared server's other
+ *  chats are named without a number. */
+export function unresponsiveDescription(others: number | null, sharedProcess: boolean): string {
+  const lead = "It may still be working. Force stop ends its process; what has arrived is kept.";
+  if (!sharedProcess || others === 0) return lead;
+  if (others == null) return `${lead} Other chats on the same server stop too.`;
+  return `${lead} The same server is answering ${others} other ${others === 1 ? "chat" : "chats"}, which stop too.`;
+}
+
 /**
- * The thread's notices, in the lane's order: the usage limit of a limited
- * run (dismissed per run), then held messages waiting for Resume. Pure, so
- * the order and wording are tested without a store.
+ * The thread's notices, in the lane's order: an agent that has not answered
+ * Stop, with Force stop; the usage limit of a limited run (dismissed per
+ * run); held messages waiting for Resume. Pure, so the order and wording
+ * are tested without a store.
  */
 export function threadBannerItems(i: ThreadBannerInputs): BannerItem[] {
   const out: BannerItem[] = [];
-  const limit = usageLimitHit(i.items, i.windows, i.now ?? Date.now());
+  const now = i.now ?? Date.now();
+  const run = i.liveRun;
+  if (run && i.forceStop && stopOverdue(run, now)) {
+    const { forceStop } = i;
+    const shared = !!i.sharedProcess;
+    const others = run.unresponsive ? run.unresponsive.others : null;
+    out.push({
+      id: `unresponsive:${run.id}`,
+      tone: forceStop.error ? "danger" : "warning",
+      icon: Warning,
+      title: "Agent not responding to Stop",
+      description: forceStop.error
+        ? `Couldn't force stop: ${forceStop.error}`
+        : unresponsiveDescription(others, shared),
+      actions: [
+        {
+          label: forceStopLabel(others ?? 0, shared),
+          primary: true,
+          disabled: forceStop.pending,
+          onClick: () => forceStop.onClick(run.id),
+        },
+      ],
+    });
+  }
+  const limit = usageLimitHit(i.items, i.windows, now);
   if (limit) {
     const id = `limit:${limit.key}`;
     if (!i.dismissed.includes(id)) {
@@ -94,12 +142,16 @@ export function threadBannerItems(i: ThreadBannerInputs): BannerItem[] {
  *  thread's rows itself, so the composer around it never re-renders for them. */
 export function ThreadBanners({
   threadId,
+  provider,
   rateLimits,
   onResume,
+  onForceStop,
 }: {
   threadId: number | null;
+  provider: Provider;
   rateLimits: RateWindow[];
   onResume?: () => Promise<void>;
+  onForceStop?: (runId: number) => Promise<void>;
 }) {
   const items = useHarnessStore((s) => (threadId == null ? NONE : (s.items[threadId] ?? NONE)));
   const queued = useHarnessStore((s) => (threadId == null ? NO_QUEUE : (s.queued[threadId] ?? NO_QUEUE)));
@@ -107,12 +159,39 @@ export function ThreadBanners({
   const lastRun = useHarnessStore((s) => (threadId == null ? null : lastRunStatus(s.runs[threadId])));
   const dismissed = useBannerDismissals((s) => (threadId == null ? NOTHING : (s.dismissed[threadId] ?? NOTHING)));
   const dismiss = useBannerDismissals((s) => s.dismiss);
+  const liveRun = useHarnessStore((s) => {
+    if (threadId == null) return null;
+    const id = liveRunId(s.runs[threadId]);
+    return id == null ? null : (s.runs[threadId]?.[id] ?? null);
+  });
+  const sharedProcess = useCapabilities(provider).sharedProcess;
   const { run, pending, error, clear } = useRunCommand();
-  useEffect(() => clear(), [threadId, clear]);
+  const force = useRunCommand();
+  const { clear: clearForce } = force;
+  useEffect(() => {
+    clear();
+    clearForce();
+  }, [threadId, clear, clearForce]);
   const resumeCommand = useMemo(
     (): BannerCommand | null => (onResume ? { onClick: () => void run(onResume), pending, error } : null),
     [onResume, run, pending, error],
   );
+  const forceCommand = useMemo(
+    () =>
+      onForceStop
+        ? { onClick: (runId: number) => void force.run(() => onForceStop(runId)), pending: force.pending, error: force.error }
+        : undefined,
+    [onForceStop, force.run, force.pending, force.error],
+  );
+  // A stop read from a snapshot turns overdue on the clock, with no event
+  // to say so: look again at that moment.
+  const due = stopDueAt(liveRun ?? undefined);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (due == null) return;
+    const timer = setTimeout(() => setTick((n) => n + 1), Math.max(0, due - Date.now()));
+    return () => clearTimeout(timer);
+  }, [due]);
   const banners = useMemo(
     () =>
       threadId == null
@@ -126,8 +205,13 @@ export function ThreadBanners({
             running,
             lastRun,
             resume: resumeCommand,
+            liveRun,
+            sharedProcess,
+            forceStop: forceCommand,
           }),
-    [threadId, items, rateLimits, dismissed, dismiss, queued, running, lastRun, resumeCommand],
+    // `tick` is the clock: a stop becoming overdue changes nothing else.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [threadId, items, rateLimits, dismissed, dismiss, queued, running, lastRun, resumeCommand, liveRun, sharedProcess, forceCommand, tick],
   );
   return <BannerLane items={banners} />;
 }

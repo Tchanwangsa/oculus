@@ -156,7 +156,7 @@ export default function ChatPage() {
   const recentScroll = useRef<HTMLDivElement>(null);
   useScrollFade(recentScroll, "y", fresh);
 
-  const { send: sendTurn, onStop, onResume, onProvider, onModel, onReasoning, questions, pending } = useThreadActions({
+  const { send: sendTurn, onStop, onResume, onForceStop, onProvider, onModel, onReasoning, questions, pending } = useThreadActions({
     threadId: () => activeRef.current,
     provider: activeProvider,
     model: activeModel,
@@ -239,6 +239,7 @@ export default function ChatPage() {
       onSend={send}
       onStop={onStop}
       onResume={onResume}
+      onForceStop={onForceStop}
       autoFocus
       dropRef={columnRef}
       onDropping={setDropping}

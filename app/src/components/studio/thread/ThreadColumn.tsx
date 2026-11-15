@@ -61,7 +61,7 @@ export function ThreadColumn({ threadId, onTurnEnd }: { threadId: number; onTurn
 
   const threadRef = useRef(threadId);
   threadRef.current = threadId;
-  const { send, onStop, onResume, onProvider, onModel, onReasoning, questions, pending } = useThreadActions({
+  const { send, onStop, onResume, onForceStop, onProvider, onModel, onReasoning, questions, pending } = useThreadActions({
     threadId: () => threadRef.current,
     provider: activeProvider,
     model: activeModel,
@@ -105,6 +105,7 @@ export function ThreadColumn({ threadId, onTurnEnd }: { threadId: number; onTurn
             onSend={onSend}
             onStop={onStop}
             onResume={onResume}
+            onForceStop={onForceStop}
             autoFocus
             dropRef={columnRef}
             onDropping={setDropping}

@@ -50,6 +50,14 @@ export function stopOverdue(run: HarnessRun | undefined, nowMs: number): boolean
   return run.stop_requested_ms != null && nowMs - run.stop_requested_ms >= STOP_PATIENCE_MS;
 }
 
+/** When a stop read from a snapshot becomes overdue, for a view that must
+ *  look again then; null when nothing is waiting for that moment (no stop,
+ *  no time, or Rust already said it went unanswered). */
+export function stopDueAt(run: HarnessRun | undefined): number | null {
+  if (!run?.stopping || run.unresponsive || run.stop_requested_ms == null) return null;
+  return run.stop_requested_ms + STOP_PATIENCE_MS;
+}
+
 /** The thread's newest live run (going out, or being answered): the run a
  *  Stop names. Null with none. */
 export function liveRunId(runs: Record<number, HarnessRun> | undefined): number | null {
