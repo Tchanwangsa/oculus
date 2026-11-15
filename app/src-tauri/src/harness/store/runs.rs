@@ -34,8 +34,6 @@ pub struct SendIntent {
     pub model: Option<String>,
     /// The reasoning level it is sent under; `None` where the model has none.
     pub effort: Option<String>,
-    /// The session this send resumes; `None` for a fresh one.
-    pub native_session: Option<String>,
     pub receipt: String,
     pub text: String,
     pub at: Option<i64>,
@@ -94,13 +92,10 @@ pub async fn begin(tx: &mut SqliteConnection, send: &SendIntent) -> Result<RunSt
             return Err(NOT_CLAIMED.into());
         }
     }
-    let binding_id = binding_for(
-        &mut *tx,
-        send.thread_id,
-        send.provider,
-        send.native_session.as_deref(),
-    )
-    .await?;
+    // The provider's one current session in this chat is what it resumes.
+    let binding_id = super::bindings::current(&mut *tx, send.thread_id, send.provider)
+        .await?
+        .id;
     sqlx::query(
         "UPDATE harness_threads SET status = 'running', updated_at = datetime('now') WHERE id = ?1",
     )
@@ -234,58 +229,6 @@ pub async fn begin_run(pool: &SqlitePool, send: &SendIntent) -> Result<RunStart,
     let run = begin(&mut tx, send).await?;
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(run)
-}
-
-/// The thread's binding for the session `native_session`, made when it has
-/// none yet.
-async fn binding_for(
-    tx: &mut SqliteConnection,
-    thread_id: i64,
-    provider: Provider,
-    native_session: Option<&str>,
-) -> Result<i64, String> {
-    let err = |e: sqlx::Error| e.to_string();
-    let bound: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM harness_bindings
-          WHERE thread_id = ?1 AND provider = ?2 AND native_session IS ?3
-          ORDER BY id DESC LIMIT 1",
-    )
-    .bind(thread_id)
-    .bind(provider.as_str())
-    .bind(native_session)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(err)?;
-    match bound {
-        Some(id) => Ok(id),
-        None => sqlx::query(
-            "INSERT INTO harness_bindings (thread_id, provider, native_session) VALUES (?1, ?2, ?3)",
-        )
-        .bind(thread_id)
-        .bind(provider.as_str())
-        .bind(native_session)
-        .execute(&mut *tx)
-        .await
-        .map(|r| r.last_insert_rowid())
-        .map_err(err),
-    }
-}
-
-/// The binding of the session the thread would resume now. A waiting run
-/// holds it until it starts, when [`begin`] resolves it again.
-pub(super) async fn binding(
-    tx: &mut SqliteConnection,
-    thread_id: i64,
-    provider: Provider,
-) -> Result<i64, String> {
-    let session: Option<String> =
-        sqlx::query_scalar("SELECT provider_session_id FROM harness_threads WHERE id = ?1")
-            .bind(thread_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("no thread {thread_id}"))?;
-    binding_for(tx, thread_id, provider, session.as_deref()).await
 }
 
 /// The start step takes the run for its provider call: `starting` becomes
@@ -650,50 +593,10 @@ pub(super) async fn recover(tx: &mut sqlx::SqliteConnection) -> Result<u64, Stri
     Ok(open.len() as u64)
 }
 
-/// The provider named its session. A binding learns its first one; a
-/// different one is a new conversation, so the run moves to a new binding.
+/// [`bindings::bind_session`](super::bindings::bind_session) as a
+/// transaction of its own.
 pub async fn bind_session(pool: &SqlitePool, run_id: i64, session: &str) -> Result<(), String> {
-    let err = |e: sqlx::Error| e.to_string();
-    let mut tx = pool.begin().await.map_err(err)?;
-    let row = sqlx::query(
-        "SELECT b.id, b.thread_id, b.provider, b.native_session
-           FROM harness_runs r JOIN harness_bindings b ON b.id = r.binding_id WHERE r.id = ?1",
-    )
-    .bind(run_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(err)?;
-    let Some(row) = row else {
-        return Ok(());
-    };
-    match row.get::<Option<String>, _>("native_session") {
-        Some(known) if known == session => {}
-        None => {
-            sqlx::query("UPDATE harness_bindings SET native_session = ?2 WHERE id = ?1")
-                .bind(row.get::<i64, _>("id"))
-                .bind(session)
-                .execute(&mut *tx)
-                .await
-                .map_err(err)?;
-        }
-        Some(_) => {
-            let id = sqlx::query(
-                "INSERT INTO harness_bindings (thread_id, provider, native_session) VALUES (?1, ?2, ?3)",
-            )
-            .bind(row.get::<i64, _>("thread_id"))
-            .bind(row.get::<String, _>("provider"))
-            .bind(session)
-            .execute(&mut *tx)
-            .await
-            .map_err(err)?
-            .last_insert_rowid();
-            sqlx::query("UPDATE harness_runs SET binding_id = ?2 WHERE id = ?1")
-                .bind(run_id)
-                .bind(id)
-                .execute(&mut *tx)
-                .await
-                .map_err(err)?;
-        }
-    }
-    tx.commit().await.map_err(err)
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    super::bindings::bind_session(&mut tx, run_id, session).await?;
+    tx.commit().await.map_err(|e| e.to_string())
 }

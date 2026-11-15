@@ -1233,7 +1233,7 @@ gets the run, the attempt and a weak attempt-local `entity_ref` (`weak:0`,
 `weak:1`, …), which is no provider id. Envelopes add `runId`, `attemptId` and
 a row's `entityId`; the webview stamps `runId` on the rows it makes live, as
 `run_id` is stored, and folds by it (below). `SessionStarted`
-gives the binding its native session (a different one opens a new binding),
+gives the binding its native session,
 and its own turn's `TurnFinished` settles the run
 ([Events say whose they are](#events-say-whose-they-are)). A turn the provider starts
 itself (`UnpromptedTurn`) is unowned and leaves an open run as it is, as is every row from before migration
@@ -1241,6 +1241,17 @@ itself (`UnpromptedTurn`) is unowned and leaves an open run as it is, as is ever
 settlement sets it back; only an unowned turn's `UnpromptedTurn` and
 `TurnFinished` set it themselves. A rewind deletes runs asked from the
 removed rows (and their gaps and drafts).
+
+**A provider has one current binding per chat** (`store/bindings.rs`,
+`harness_bindings.current`, at most one true row per thread and provider).
+It holds the native session that provider's next send resumes, so a send
+reads its session from its run's binding (`bindings::of_run` in the start
+step), never from the thread. `store::begin` puts a run on its provider's
+current binding and makes one, with no session, the first time. When the
+provider names a session other than the one resumed, the run moves to a new
+binding, which takes the old one's place as current. `covered_through` is
+the last run ordinal that session has seen
+([Changing provider mid-chat](#changing-provider-mid-chat)).
 
 **A run records what it was sent with.** `harness_runs.model` and `.effort`
 are the model and reasoning level of the send, and its binding names the

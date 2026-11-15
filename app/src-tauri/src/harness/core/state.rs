@@ -27,6 +27,8 @@ pub(in crate::harness) struct State {
     pub question: Option<Question>,
     /// The newest question's anchor, which Claude needs to rewind past it.
     pub newest_anchor: Option<String>,
+    /// The native session a rewind would ask to forget the question.
+    pub session: Option<String>,
     /// How many runs wait in the chat's queue, and how many of those are
     /// held.
     pub waiting: i64,
@@ -92,6 +94,7 @@ pub(in crate::harness) async fn read(
         live,
         question: None,
         newest_anchor: None,
+        session: None,
         waiting,
         held,
         open,
@@ -101,6 +104,11 @@ pub(in crate::harness) async fn read(
     {
         state.question = Some(store::user_item(pool, thread_id, *item_id).await?);
         state.newest_anchor = store::newest_anchor(pool, thread_id).await.ok().flatten();
+        if let Some(row) = &state.thread {
+            state.session = store::bindings::find(pool, thread_id, row.provider)
+                .await?
+                .and_then(|binding| binding.native_session);
+        }
     }
     Ok(state)
 }

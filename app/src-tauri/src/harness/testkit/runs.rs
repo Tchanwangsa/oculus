@@ -107,13 +107,12 @@ pub(super) async fn scratch_pool(name: &str) -> (crate::test_support::Scratch, S
     (dir, pool)
 }
 
-pub(super) fn intent(thread_id: i64, receipt: &str, session: Option<&str>) -> store::SendIntent {
+pub(super) fn intent(thread_id: i64, receipt: &str) -> store::SendIntent {
     store::SendIntent {
         thread_id,
         provider: Provider::Claude,
         model: None,
         effort: None,
-        native_session: session.map(String::from),
         receipt: receipt.into(),
         text: "question".into(),
         at: None,
@@ -157,10 +156,10 @@ async fn a_repeated_receipt_starts_no_second_run() {
     let thread = store::create_thread(&pool, Provider::Claude, None, None, None, "q")
         .await
         .unwrap();
-    let first = store::begin_run(&pool, &intent(thread, "r1", None))
+    let first = store::begin_run(&pool, &intent(thread, "r1"))
         .await
         .unwrap();
-    let repeat = store::begin_run(&pool, &intent(thread, "r1", None)).await;
+    let repeat = store::begin_run(&pool, &intent(thread, "r1")).await;
     assert!(repeat.unwrap_err().contains("already started"));
     assert_eq!(
         store::receipt_run(&pool, "r1").await.unwrap(),
@@ -188,22 +187,62 @@ async fn bindings_follow_the_native_session_and_rewinds_drop_their_runs() {
     let thread = store::create_thread(&pool, Provider::Claude, None, None, None, "q")
         .await
         .unwrap();
-    let first = store::begin_run(&pool, &intent(thread, "a", None))
-        .await
-        .unwrap();
+    let first = store::begin_run(&pool, &intent(thread, "a")).await.unwrap();
     store::bind_session(&pool, first.run_id, "s1")
         .await
         .unwrap();
-    let second = store::begin_run(&pool, &intent(thread, "b", Some("s1")))
+    let second = store::begin_run(&pool, &intent(thread, "b")).await.unwrap();
+    assert_eq!(second.binding_id, first.binding_id, "a resume reuses it");
+    let current = |pool: SqlitePool| async move {
+        store::bindings::find(&pool, thread, Provider::Claude)
+            .await
+            .unwrap()
+            .unwrap()
+    };
+    assert_eq!(current(pool.clone()).await.id, first.binding_id);
+    sqlx::query("UPDATE harness_bindings SET covered_through = 1 WHERE id = ?1")
+        .bind(first.binding_id)
+        .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(second.binding_id, first.binding_id, "a resume reuses it");
-    // A provider that answers with another session starts a new binding.
+    // A provider that answers with another session starts a new binding,
+    // which takes the old one's place as current and what it had covered.
     store::bind_session(&pool, second.run_id, "s2")
         .await
         .unwrap();
     assert_eq!(
         count(&pool, "SELECT COUNT(*) FROM harness_bindings").await,
+        2
+    );
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT COUNT(*) FROM harness_bindings WHERE current = 1"
+        )
+        .await,
+        1,
+        "one current binding per chat and provider"
+    );
+    let moved = current(pool.clone()).await;
+    assert_ne!(moved.id, first.binding_id);
+    assert_eq!(moved.native_session.as_deref(), Some("s2"));
+    assert_eq!(moved.covered_through, 1);
+    let of_run = store::bindings::of_run(&pool, second.run_id).await.unwrap();
+    assert_eq!(of_run.map(|binding| binding.id), Some(moved.id));
+    // Another provider's binding in the same chat is its own, and current too.
+    let mut conn = pool.acquire().await.unwrap();
+    let other = store::bindings::current(&mut conn, thread, Provider::Codex)
+        .await
+        .unwrap();
+    drop(conn);
+    assert_eq!((other.native_session, other.covered_through), (None, 0));
+    assert_eq!(current(pool.clone()).await.id, moved.id);
+    assert_eq!(
+        count(
+            &pool,
+            "SELECT COUNT(*) FROM harness_bindings WHERE current = 1"
+        )
+        .await,
         2
     );
     assert!(
@@ -258,9 +297,7 @@ async fn a_restart_interrupts_runs_left_open() {
     let thread = store::create_thread(&pool, Provider::Claude, None, None, None, "q")
         .await
         .unwrap();
-    let open = store::begin_run(&pool, &intent(thread, "a", None))
-        .await
-        .unwrap();
+    let open = store::begin_run(&pool, &intent(thread, "a")).await.unwrap();
     // As the start step leaves it once the provider has the message.
     assert!(store::claim_start(&pool, &open).await.unwrap());
     store::mark_sent(&pool, &open).await.unwrap();
@@ -408,9 +445,7 @@ async fn settled(
     let thread = store::create_thread(&pool, Provider::Codex, None, None, None, "q")
         .await
         .unwrap();
-    let run = store::begin_run(&pool, &intent(thread, "s", None))
-        .await
-        .unwrap();
+    let run = store::begin_run(&pool, &intent(thread, "s")).await.unwrap();
     let mut ids = Vec::new();
     for (i, (text, phase)) in replies.iter().enumerate() {
         let id = sqlx::query(

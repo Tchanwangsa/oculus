@@ -275,7 +275,7 @@ async fn begin(
     provider: Provider,
     (text, options, receipt, queued): (String, SendOptions, String, Option<i64>),
 ) -> Result<Began, String> {
-    let row = sqlx::query("SELECT model, provider_session_id FROM harness_threads WHERE id = ?1")
+    let row = sqlx::query("SELECT model FROM harness_threads WHERE id = ?1")
         .bind(thread_id)
         .fetch_optional(&mut *tx)
         .await
@@ -297,7 +297,6 @@ async fn begin(
         provider,
         model: options.model.clone().or(model),
         effort: options.reasoning_effort.clone(),
-        native_session: row.get("provider_session_id"),
         receipt,
         text,
         at: options.at,

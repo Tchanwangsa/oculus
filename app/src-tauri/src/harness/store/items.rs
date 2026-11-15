@@ -100,6 +100,7 @@ pub async fn truncate(
     let runs = "SELECT id FROM harness_runs WHERE thread_id = ?1 AND initiating_item_id >= ?2";
     for sql in [
         format!("DELETE FROM harness_command_receipts WHERE run_id IN ({runs})"),
+        format!("DELETE FROM harness_handoffs WHERE run_id IN ({runs})"),
         format!("DELETE FROM harness_delivery_gaps WHERE run_id IN ({runs})"),
         format!("DELETE FROM harness_stream_drafts WHERE run_id IN ({runs})"),
         format!("DELETE FROM harness_attempts WHERE run_id IN ({runs})"),

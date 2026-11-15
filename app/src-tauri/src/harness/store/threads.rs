@@ -107,8 +107,8 @@ fn title_from(text: &str) -> String {
 
 pub struct ThreadRow {
     pub id: i64,
+    /// What the next send will use; a run records what it was sent with.
     pub provider: Provider,
-    pub provider_session_id: Option<String>,
     pub model: Option<String>,
     /// The subject's Canvas code, i.e. its `courses/` folder. Joined, not stored,
     /// so a rename cannot strand the thread; None is the general thread.
@@ -132,7 +132,7 @@ pub struct LectureRef {
 
 pub async fn thread(pool: &SqlitePool, id: i64) -> Result<ThreadRow, String> {
     let r = sqlx::query(
-        "SELECT t.id, t.provider, t.provider_session_id, t.model, s.code AS subject_code,
+        "SELECT t.id, t.provider, t.model, s.code AS subject_code,
                 l.id AS lecture_id, l.title AS lecture_title, l.date AS lecture_date,
                 l.transcript_path
          FROM harness_threads t
@@ -164,7 +164,6 @@ pub async fn thread(pool: &SqlitePool, id: i64) -> Result<ThreadRow, String> {
         id: r.get("id"),
         provider: Provider::parse(&provider)
             .ok_or_else(|| format!("unknown provider {provider}"))?,
-        provider_session_id: r.get("provider_session_id"),
         model: r.get("model"),
         subject_code: r.get("subject_code"),
         lecture,
@@ -216,6 +215,7 @@ pub async fn delete(conn: &mut SqliteConnection, id: i64) -> Result<(), String> 
         "DELETE FROM chat_proposals WHERE thread_id = ?1",
         "DELETE FROM harness_items WHERE thread_id = ?1",
         "DELETE FROM harness_command_receipts WHERE thread_id = ?1",
+        "DELETE FROM harness_handoffs WHERE thread_id = ?1",
         "DELETE FROM harness_delivery_gaps WHERE thread_id = ?1",
         "DELETE FROM harness_stream_drafts WHERE run_id IN (SELECT id FROM harness_runs WHERE thread_id = ?1)",
         "DELETE FROM harness_attempts WHERE run_id IN (SELECT id FROM harness_runs WHERE thread_id = ?1)",

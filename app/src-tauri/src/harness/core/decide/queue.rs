@@ -101,7 +101,6 @@ mod tests {
             thread: Some(ThreadRow {
                 id: 4,
                 provider: Provider::Claude,
-                provider_session_id: None,
                 model: None,
                 subject_code: None,
                 lecture: None,
@@ -112,6 +111,7 @@ mod tests {
             },
             question: None,
             newest_anchor: None,
+            session: None,
             waiting: 0,
             held: 0,
             open: open.map(|run_id| OpenRun {

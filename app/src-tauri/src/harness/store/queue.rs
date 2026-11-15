@@ -76,7 +76,11 @@ pub async fn enqueue(
     options: &SendOptions,
 ) -> Result<i64, String> {
     let err = |e: sqlx::Error| e.to_string();
-    let binding_id = super::runs::binding(&mut *tx, thread_id, provider).await?;
+    // A waiting run holds its provider's current binding until it starts,
+    // when `runs::begin` resolves it again.
+    let binding_id = super::bindings::current(&mut *tx, thread_id, provider)
+        .await?
+        .id;
     let origin = match options.continuation {
         Some(_) => "continuation",
         None => "student",
@@ -306,8 +310,8 @@ pub async fn others_open(
 ) -> Result<i64, String> {
     sqlx::query_scalar(
         "SELECT COUNT(DISTINCT r.thread_id) FROM harness_runs r
-           JOIN harness_threads t ON t.id = r.thread_id
-          WHERE t.provider = ?1 AND r.thread_id != ?2
+           JOIN harness_bindings b ON b.id = r.binding_id
+          WHERE b.provider = ?1 AND r.thread_id != ?2
             AND r.execution_status IN ('preparing', 'starting', 'running')",
     )
     .bind(provider.as_str())
@@ -391,6 +395,8 @@ pub(super) async fn requeue_unsent(tx: &mut SqliteConnection, skipped: &str) -> 
     .await
     .map_err(err)?;
     for sql in [
+        "DELETE FROM harness_handoffs WHERE run_id IN
+           (SELECT id FROM harness_runs WHERE execution_status = 'starting')",
         "DELETE FROM harness_items WHERE id IN
            (SELECT initiating_item_id FROM harness_runs WHERE execution_status = 'starting')",
         "DELETE FROM harness_attempts WHERE run_id IN

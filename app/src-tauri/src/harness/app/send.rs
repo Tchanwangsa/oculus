@@ -124,7 +124,11 @@ async fn send(rt: &Runtime, start: Start) -> Result<bool, String> {
         antigravity_rules,
         ..opts
     };
-    let resume = row.provider_session_id;
+    // The session to resume is the run's binding's, the provider's current
+    // one in this chat when the run was written.
+    let resume = store::bindings::of_run(&pool, run.run_id)
+        .await?
+        .and_then(|binding| binding.native_session);
     let (text, cards) = prompt(
         &pool,
         thread_id,

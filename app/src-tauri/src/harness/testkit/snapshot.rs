@@ -22,7 +22,7 @@ pub(super) async fn ledger(pool: &SqlitePool, thread: i64) -> Value {
     let runs = rows("SELECT id, initiating_item_id, binding_id, active_attempt_id, execution_status, origin, delivery_state, answer_item_id, COALESCE(started_at, requested_at) AS started_at, ended_at FROM harness_runs WHERE thread_id = ?1 ORDER BY id").await;
     let attempts = rows("SELECT a.id, a.run_id, a.status FROM harness_attempts a JOIN harness_runs r ON r.id = a.run_id WHERE r.thread_id = ?1 ORDER BY a.id").await;
     let bindings =
-        rows("SELECT id, native_session FROM harness_bindings WHERE thread_id = ?1 ORDER BY id")
+        rows("SELECT id, provider, native_session, current, covered_through FROM harness_bindings WHERE thread_id = ?1 ORDER BY id")
             .await;
     let receipts =
         rows("SELECT id, run_id FROM harness_command_receipts WHERE thread_id = ?1 ORDER BY id")
@@ -41,6 +41,8 @@ pub(super) async fn ledger(pool: &SqlitePool, thread: i64) -> Value {
         })).collect::<Vec<_>>(),
         "bindings": bindings.iter().map(|r| json!({
             "id": r.get::<i64,_>("id"), "native_session": r.get::<Option<String>,_>("native_session"),
+            "provider": r.get::<String,_>("provider"), "current": r.get::<i64,_>("current") != 0,
+            "covered_through": r.get::<i64,_>("covered_through"),
         })).collect::<Vec<_>>(),
         "receipts": receipts.iter().map(|r| json!({
             "id": r.get::<String,_>("id"), "run_id": r.get::<i64,_>("run_id"),

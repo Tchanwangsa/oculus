@@ -76,7 +76,6 @@ mod tests {
         ThreadRow {
             id: 4,
             provider,
-            provider_session_id: None,
             model: None,
             subject_code: None,
             lecture: None,
@@ -89,6 +88,7 @@ mod tests {
             live: Live::default(),
             question: None,
             newest_anchor: None,
+            session: None,
             waiting: 0,
             held: 0,
             open: busy.then_some(OpenRun {

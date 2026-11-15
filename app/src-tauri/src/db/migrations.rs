@@ -993,6 +993,57 @@ mod tests {
             "SQL comments and whitespace are part of an applied migration's identity");
     }
 
+    /// 57 gives every chat one current binding for its provider: the one
+    /// its thread resumes, made for a chat from before bindings, and marked
+    /// as having seen every run so far.
+    #[tokio::test]
+    async fn existing_chats_get_one_current_binding_that_has_seen_them() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let (before, after): (Vec<_>, Vec<_>) = super::all()
+            .into_iter()
+            .partition(|migration| migration.version < 57);
+        for migration in before {
+            sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+        }
+        // 1: from before bindings. 2: its binding moved to a second session
+        // mid-run. 3: its first send never reached a session.
+        sqlx::raw_sql(
+            "INSERT INTO harness_threads (id, provider, status, provider_session_id) VALUES
+               (1, 'claude', 'idle', 'legacy'), (2, 'codex', 'idle', 's2'), (3, 'claude', 'error', NULL);
+             INSERT INTO harness_bindings (id, thread_id, provider, native_session) VALUES
+               (10, 2, 'codex', 's1'), (11, 2, 'codex', 's2'), (12, 3, 'claude', NULL);
+             INSERT INTO harness_runs (thread_id, ordinal, origin, binding_id, execution_status) VALUES
+               (2, 1, 'student', 10, 'completed'), (2, 2, 'student', 11, 'completed'),
+               (2, -1, 'student', 11, 'queued'), (3, 1, 'student', 12, 'failed');",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for migration in after {
+            sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+        }
+        let rows: Vec<(i64, Option<String>, i64, i64)> = sqlx::query_as(
+            "SELECT thread_id, native_session, current, covered_through FROM harness_bindings
+              ORDER BY thread_id, id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (1, Some("legacy".into()), 1, 0),
+                (2, Some("s1".into()), 0, 0),
+                (2, Some("s2".into()), 1, 2),
+                (3, None, 1, 1),
+            ]
+        );
+    }
+
     /// 55 adds `viewed_at`, stamping threads that already exist as seen
     /// without touching the `updated_at` that orders the list.
     #[tokio::test]

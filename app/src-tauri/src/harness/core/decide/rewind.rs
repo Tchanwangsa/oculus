@@ -29,9 +29,7 @@ pub(super) fn decide(
                 }
                 .into());
             }
-            if let (Some(anchor), Some(resume)) =
-                (question.anchor.clone(), row.provider_session_id.clone())
-            {
+            if let (Some(anchor), Some(resume)) = (question.anchor.clone(), state.session.clone()) {
                 let options = match resend {
                     Some((_, options)) => options.clone(),
                     None => SendOptions::default(),
@@ -81,7 +79,6 @@ mod tests {
             thread: Some(ThreadRow {
                 id: 4,
                 provider: Provider::Codex,
-                provider_session_id: session.map(String::from),
                 model: Some("gpt".into()),
                 subject_code: None,
                 lecture: None,
@@ -95,6 +92,7 @@ mod tests {
                 anchor: anchor.map(String::from),
             }),
             newest_anchor: Some("newest".into()),
+            session: session.map(String::from),
             waiting: 0,
             held: 0,
             open: None,
