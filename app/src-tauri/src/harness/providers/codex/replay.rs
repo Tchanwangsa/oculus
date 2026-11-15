@@ -13,6 +13,7 @@ use crate::harness::Sink;
 use super::{CodexServer, CodexThreadOpts, ThreadRoute, ThreadState};
 
 pub(in crate::harness) fn bridge(outbound: Outbound, sink: Sink, id: &str, root: &Path) -> Bridge {
+    let model = outbound.codex_model();
     let server = Arc::new_cyclic(|weak: &Weak<CodexServer>| {
         let weak = weak.clone();
         CodexServer {
@@ -41,7 +42,7 @@ pub(in crate::harness) fn bridge(outbound: Outbound, sink: Sink, id: &str, root:
     let opts = Arc::new(CodexThreadOpts {
         cwd: root.join("agents"),
         writable_roots: Vec::new(),
-        model: None,
+        model,
         reasoning_effort: None,
         instructions: String::new(),
         ephemeral: true,

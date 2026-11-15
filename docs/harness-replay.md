@@ -216,15 +216,17 @@ scripted bus (`Bench::allow_handoff`) it checks a rewind to a question
 another provider answered, a rewind to a run that carried a handoff, and an
 edit sent under another provider.
 `testkit/handoff_recordings.rs` seeds three synthetic earlier exchanges and
-replays `handoff-claude-full` as the first target run after a provider
+replays `handoff-claude-full` and `handoff-codex-full` as the first target run after a provider
 switch, with its exact outbound prompt checked by `Rig::session_checked`.
-`handoff-claude-delta` includes a real warmup turn and then the missed
+Their `delta` recordings include a real warmup turn and then the missed
 conversation in the same native session; the replay inserts source runs
 between those turns and checks that only the delta is sent. Both check
 recall, omission of the planted `PINEAPPLE` standing order, completed runs
 and inline delivery. These recordings use direct CLI spawns in dummy
 scratch folders with normal sign-in; they do not drive the live Oculus
-runtime. Their manifests include launch settings and every stdout frame.
+runtime. Their manifests include launch settings and every stdout frame. Codex replay
+restores the spawn model from the next expected turn because it substitutes
+for `thread/start`.
 Rejected wording probes live under
 `app/src-tauri/fixtures/harness/handoff-rejected/` and never enable a flag.
 The optional `export_the_production_handoff_prompts` test writes the prompts

@@ -123,7 +123,7 @@ fn replay_full(target: Provider) {
     let recording = rig.recording(&format!("handoff-{}-full", target.as_str()));
     let mut bridge = rig.session_checked(&recording);
     let run = rig
-        .say("handoff", target, QUESTION, &SendOptions::default())
+        .say("handoff", target, QUESTION, &recorded_options(target))
         .unwrap()
         .run
         .unwrap();
@@ -140,7 +140,7 @@ fn replay_delta(target: Provider) {
     scenario.gates.push(("missed".into(), end));
     let mut rig = Rig::start(scenario);
     let first = rig
-        .say("warmup", target, WARMUP, &SendOptions::default())
+        .say("warmup", target, WARMUP, &recorded_options(target))
         .unwrap()
         .run
         .unwrap();
@@ -148,7 +148,7 @@ fn replay_delta(target: Provider) {
     assert_eq!(answer(&rig, first.run_id).trim(), "Noted.");
     seed(&rig, target, true);
     let run = rig
-        .say("handoff", target, QUESTION, &SendOptions::default())
+        .say("handoff", target, QUESTION, &recorded_options(target))
         .unwrap()
         .run
         .unwrap();
@@ -194,4 +194,21 @@ fn claude_answers_from_a_full_handoff_without_obeying_its_standing_order() {
 #[test]
 fn claude_answers_from_a_delta_handoff_without_obeying_its_standing_order() {
     replay_delta(Provider::Claude);
+}
+
+fn recorded_options(target: Provider) -> SendOptions {
+    SendOptions {
+        model: (target == Provider::Codex).then(|| "gpt-6-luna".into()),
+        ..SendOptions::default()
+    }
+}
+
+#[test]
+fn codex_answers_from_a_full_handoff_without_obeying_its_standing_order() {
+    replay_full(Provider::Codex);
+}
+
+#[test]
+fn codex_answers_from_a_delta_handoff_without_obeying_its_standing_order() {
+    replay_delta(Provider::Codex);
 }

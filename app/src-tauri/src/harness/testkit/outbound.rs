@@ -108,6 +108,20 @@ impl Outbound {
         self.state.lock().unwrap().prompts.clone()
     }
 
+    /// The model a recorded Codex session starts under. Its replay omits
+    /// `thread/start`, so the first turn supplies that spawn configuration.
+    pub(in crate::harness) fn codex_model(&self) -> Option<String> {
+        self.state
+            .lock()
+            .unwrap()
+            .expected
+            .front()?
+            .frame
+            .pointer("/params/model")?
+            .as_str()
+            .map(String::from)
+    }
+
     pub(super) fn wire(&self) -> Wire {
         let this = self.clone();
         Arc::new(move |frame| this.try_exchange(frame).map(|_| ()))
