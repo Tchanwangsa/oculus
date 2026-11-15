@@ -8,7 +8,6 @@
 use sqlx::SqlitePool;
 
 use crate::harness::store::queue::{self, Open, Waiting};
-use crate::harness::Provider;
 
 use super::effect::Start;
 
@@ -57,20 +56,18 @@ pub(in crate::harness) enum Step {
     Wait,
 }
 
-pub(in crate::harness) fn step(
-    thread_id: i64,
-    provider: Provider,
-    saved: Saved,
-    calls: Calls,
-) -> Step {
+/// The run's own provider, model and level go with it: the chat's
+/// selection may have moved on since it was written.
+pub(in crate::harness) fn step(thread_id: i64, saved: Saved, calls: Calls) -> Step {
     match (saved.open, saved.next) {
         (Some(open), _) if open.starting && !calls.started => Step::Start(Box::new(Start {
             thread_id,
-            provider,
+            provider: open.provider,
             run: open.run,
             text: open.text,
             options: open.options,
-            respawn: open.respawn,
+            model: open.model,
+            effort: open.effort,
         })),
         (Some(open), _)
             if !open.starting && open.stop_requested && calls.accepted && !calls.asked =>
@@ -87,7 +84,7 @@ pub(in crate::harness) fn step(
 mod tests {
     use super::*;
     use crate::harness::store::RunStart;
-    use crate::harness::SendOptions;
+    use crate::harness::{Provider, SendOptions};
 
     fn open(starting: bool) -> Option<Open> {
         stopped(starting, false)
@@ -105,7 +102,9 @@ mod tests {
             stop_requested,
             text: "asked".into(),
             options: SendOptions::default(),
-            respawn: false,
+            provider: Provider::Claude,
+            model: Some("opus".into()),
+            effort: Some("high".into()),
         })
     }
 
@@ -126,7 +125,7 @@ mod tests {
     }
 
     fn take(open: Option<Open>, next: Option<Waiting>, calls: Calls) -> Step {
-        step(4, Provider::Codex, Saved { open, next }, calls)
+        step(4, Saved { open, next }, calls)
     }
 
     #[test]
@@ -136,6 +135,10 @@ mod tests {
         };
         assert_eq!((start.thread_id, start.run.run_id), (4, 7));
         assert_eq!(start.text, "asked");
+        // What the run was written with, not what the chat has since picked.
+        assert_eq!(start.provider, Provider::Claude);
+        assert_eq!(start.model.as_deref(), Some("opus"));
+        assert_eq!(start.effort.as_deref(), Some("high"));
         assert!(matches!(
             take(open(true), next(), calls(true, false)),
             Step::Wait

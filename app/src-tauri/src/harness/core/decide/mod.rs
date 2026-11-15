@@ -6,6 +6,7 @@
 mod delete;
 mod queue;
 mod rewind;
+mod select;
 mod send;
 
 use crate::harness::{Provider, SendOptions};
@@ -76,7 +77,20 @@ pub(in crate::harness) fn decide(
             item_id,
             text,
             options,
-        } => rewind::decide(state, command, *item_id, Some((text, options)), answer),
+            provider,
+        } => {
+            let resend = rewind::Resend {
+                text,
+                options,
+                provider: *provider,
+            };
+            rewind::decide(state, command, *item_id, Some(resend), answer)
+        }
+        Kind::SelectModel {
+            provider,
+            model,
+            effort,
+        } => select::decide(state, *provider, model.as_ref(), effort.as_ref()),
         Kind::DeleteThread => delete::decide(state),
         Kind::EditQueued { run_id, text } => queue::edit(state, *run_id, text),
         Kind::RemoveQueued { run_id } => queue::remove(state, *run_id),

@@ -360,6 +360,13 @@ pub enum HarnessEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ended_at: Option<String>,
     },
+    /// The chat's selection changed: the provider, model and reasoning
+    /// level its next send will use. A run already written keeps its own.
+    Selected {
+        provider: Provider,
+        model: Option<String>,
+        effort: Option<String>,
+    },
     /// What a run is sent with: the provider, model and reasoning level of
     /// the chat's selection when it started. Told once, after the run's
     /// question; an answer's footer reads it, never the thread.

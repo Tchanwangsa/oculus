@@ -52,9 +52,10 @@ export function createHarnessMessaging(invokeCommand: MessagingInvoke, flushThre
       if (threadId != null) await flushThread(threadId);
       return invokeCommand<number>("harness_send", { commandId: commandId(), threadId, provider, text, options, mode });
     },
-    editResend: async (threadId: number, itemId: number, text: string, options: SendOptions): Promise<void> => {
+    /** `provider` is the one the composer shows; omitted, the chat keeps its own. */
+    editResend: async (threadId: number, itemId: number, text: string, options: SendOptions, provider?: Provider): Promise<void> => {
       await flushThread(threadId);
-      return invokeCommand("harness_edit_resend", { commandId: commandId(), threadId, itemId, text, options });
+      return invokeCommand("harness_edit_resend", { commandId: commandId(), threadId, itemId, text, options, provider });
     },
   };
 }
@@ -77,6 +78,18 @@ export function harnessSend(
 /** Rewind to a question and send new text in its place. See docs/harness.md
  *  "Going back" for when the agent's own context cannot follow. */
 export const harnessEditResend = messaging.editResend;
+
+/** Choose what a thread's next send uses. Rust stores it at once, mid-turn
+ *  or not, and tells every view (`selected`); the running turn keeps what it
+ *  was sent with, and a waiting message goes out under whatever is chosen
+ *  when its turn comes. A send carries the composer's selection too, so a
+ *  pick the student has not confirmed with a send need not be saved first.
+ *  Rejects with the reason when the chat cannot move to `provider`: its
+ *  bridge takes no handoff (`providerHandoff`), or the current provider
+ *  still runs a background task. */
+export function harnessSelectModel(threadId: number, provider: Provider, model: string | null, effort: string | null): Promise<void> {
+  return invoke("harness_select_model", { commandId: commandId(), threadId, provider, model, effort });
+}
 
 /** `harnessEditResend` without the send: resolves to the question's text. */
 export function harnessRewind(threadId: number, itemId: number): Promise<string> {

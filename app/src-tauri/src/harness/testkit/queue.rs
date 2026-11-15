@@ -228,9 +228,10 @@ fn a_waiting_message_keeps_the_options_it_was_sent_with() {
     assert_eq!(start.options.reasoning_effort.as_deref(), Some("high"));
     assert_eq!(start.options.context.as_deref(), Some("the moment"));
     assert_eq!(start.options.at, Some(42));
-    assert!(
-        start.respawn,
-        "the chat's model changed as the message went out"
+    assert_eq!(
+        (start.model.as_deref(), start.effort.as_deref()),
+        (Some("gpt-other"), Some("high")),
+        "the run goes out under the selection its send carried"
     );
     let (model, at): (Option<String>, Option<String>) = bench
         .runtime

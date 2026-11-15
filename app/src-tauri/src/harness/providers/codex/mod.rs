@@ -39,6 +39,7 @@ pub struct CodexSpawn {
 }
 
 /// How to open a thread. `cwd` is also the sandbox's writable root.
+#[derive(Clone)]
 pub struct CodexThreadOpts {
     pub cwd: PathBuf,
     /// Writable besides `cwd`: [`writable_roots`] for a thread, none for a

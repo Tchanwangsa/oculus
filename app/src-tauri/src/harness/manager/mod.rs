@@ -16,6 +16,7 @@ mod session;
 mod sinks;
 mod stoppable;
 mod studio;
+pub(in crate::harness) mod transition;
 
 pub(in crate::harness) use handle::Handle;
 pub use handle::RewindTo;
@@ -27,6 +28,7 @@ pub use options::{LectureBrief, SendOptions, StudioSend};
 pub use queue::OwnTurns;
 pub use raw_log::RawLog;
 pub use release::Release;
+pub use session::SendError;
 pub use sinks::{Generation, OneSink, Sinks};
 pub use studio::StudioBrief;
 
@@ -37,6 +39,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::harness::codex::CodexServer;
 use crate::harness::opencode::OpencodeServer;
+use crate::harness::providers::capabilities::Capabilities;
 use crate::harness::Sink;
 
 use catalogue::ClaudeCatalogue;
@@ -49,7 +52,10 @@ pub struct Harness {
     replay_only: bool,
     /// Recorded sessions a replay's next spawn takes, by thread.
     #[cfg(test)]
-    replay_spawns: Mutex<HashMap<i64, ReplaySpawn>>,
+    replay_spawns: Mutex<HashMap<(i64, crate::harness::Provider), ReplaySpawn>>,
+    /// A replay's stand-in for a recording: every bridge takes a handoff.
+    #[cfg(test)]
+    handoff_everywhere: std::sync::atomic::AtomicBool,
     live: Mutex<HashMap<i64, Live>>,
     /// The last [`Generation`] minted.
     generations: AtomicU64,
@@ -77,6 +83,8 @@ impl Harness {
             replay_only: false,
             #[cfg(test)]
             replay_spawns: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            handoff_everywhere: std::sync::atomic::AtomicBool::new(false),
             live: Mutex::new(HashMap::new()),
             generations: AtomicU64::new(0),
             codex: Mutex::new(None),
@@ -99,6 +107,18 @@ impl Harness {
         *self.opencode_default_sink.lock().unwrap() = Some(sink);
     }
 
+    /// What `provider`'s bridge can do, as this app's sessions are held to
+    /// it (`providers/capabilities.rs`).
+    pub fn capabilities(&self, provider: crate::harness::Provider) -> Capabilities {
+        #[allow(unused_mut)]
+        let mut caps = crate::harness::providers::capabilities::of(provider);
+        #[cfg(test)]
+        if self.handoff_everywhere.load(Ordering::SeqCst) {
+            caps.provider_handoff = true;
+        }
+        caps
+    }
+
     /// A number no session of this app has had.
     fn mint(&self) -> Generation {
         self.generations.fetch_add(1, Ordering::SeqCst) + 1
@@ -117,15 +137,23 @@ impl Harness {
         harness
     }
 
-    /// The session the thread's next spawn opens, in place of a process.
+    /// From now on every bridge takes a handoff, as if each had its
+    /// recording: for replays of a switch through bridges that have none.
+    pub(in crate::harness) fn allow_handoff_everywhere(&self) {
+        self.handoff_everywhere.store(true, Ordering::SeqCst);
+    }
+
+    /// The session the thread's next spawn of `provider` opens, in place
+    /// of a process.
     pub(in crate::harness) fn replay_spawn(
         &self,
         thread: i64,
+        provider: crate::harness::Provider,
         spawn: impl FnOnce(Sink) -> Handle + Send + 'static,
     ) {
         self.replay_spawns
             .lock()
             .unwrap()
-            .insert(thread, Box::new(spawn));
+            .insert((thread, provider), Box::new(spawn));
     }
 }

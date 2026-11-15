@@ -156,3 +156,18 @@ test("a snapshot's run carries its provider, model and effort", () => {
   expect(old.provider).toBeUndefined();
   expect(runModel(old)).toBeNull();
 });
+
+test("a pick changes the thread's selection and leaves its runs alone", () => {
+  useHarnessStore.setState({
+    threads: [{ id: 1, status: "running", provider: "claude", model: "opus", effort: "high" }] as HarnessThread[],
+    items: { 1: [] },
+    runs: { 1: { 7: { id: 7, status: "running", delivery: "unknown", answer_item_id: null, started_ms: 1, ended_ms: null, provider: "claude", model: "opus", effort: "high" } } },
+  });
+  useHarnessStore.getState().apply({
+    threadId: 1, provider: "claude", itemId: null,
+    event: { type: "selected", provider: "codex", model: "gpt-6.1", effort: null },
+  });
+  const state = useHarnessStore.getState();
+  expect(state.threads[0]).toMatchObject({ provider: "codex", model: "gpt-6.1", effort: null });
+  expect(state.runs[1][7]).toMatchObject({ provider: "claude", model: "opus", effort: "high" });
+});

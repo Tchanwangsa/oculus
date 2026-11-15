@@ -32,38 +32,32 @@ pub struct Waiting {
 }
 
 /// What a run keeps of its send: the options as the webview sent them,
-/// whole, the card a continuation belongs to (which the app sets and the
-/// options never serialize), and whether the send changed the chat's model.
+/// whole, and the card a continuation belongs to (which the app sets and
+/// the options never serialize).
 #[derive(Serialize, Deserialize, Default)]
 struct Stored {
     send: SendOptions,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     continuation: Option<String>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    respawn: bool,
 }
 
-/// `options` as a run stores them. `respawn` is set once the run starts:
-/// its send changed the chat's model, which a CLI that fixes its model at
-/// spawn can only take as a new session.
-pub fn stored(options: &SendOptions, respawn: bool) -> Result<String, String> {
+/// `options` as a run stores them.
+pub fn stored(options: &SendOptions) -> Result<String, String> {
     serde_json::to_string(&Stored {
         send: options.clone(),
         continuation: options.continuation.clone(),
-        respawn,
     })
     .map_err(|e| e.to_string())
 }
 
-fn restored(json: Option<String>) -> (SendOptions, bool) {
+fn restored(json: Option<String>) -> SendOptions {
     let stored: Stored = json
         .and_then(|json| serde_json::from_str(&json).ok())
         .unwrap_or_default();
-    let options = SendOptions {
+    SendOptions {
         continuation: stored.continuation,
         ..stored.send
-    };
-    (options, stored.respawn)
+    }
 }
 
 /// Add a message to the back of the thread's queue. Its ordinal is a
@@ -99,7 +93,7 @@ pub async fn enqueue(
     .bind(origin)
     .bind(binding_id)
     .bind(text)
-    .bind(stored(options, false)?)
+    .bind(stored(options)?)
     .execute(&mut *tx)
     .await
     .map_err(err)?
@@ -150,7 +144,7 @@ pub async fn next(db: impl SqliteExecutor<'_>, thread_id: i64) -> Result<Option<
         text: r
             .get::<Option<String>, _>("queued_text")
             .unwrap_or_default(),
-        options: restored(r.get("queued_options")).0,
+        options: restored(r.get("queued_options")),
     }))
 }
 
@@ -164,25 +158,30 @@ pub struct Open {
     /// The row's text: the student's words, or a continuation's line.
     pub text: String,
     pub options: SendOptions,
-    pub respawn: bool,
+    /// What it is sent with: its binding's provider, and the model and
+    /// reasoning level written with it.
+    pub provider: Provider,
+    pub model: Option<String>,
+    pub effort: Option<String>,
 }
 
 /// A thread runs one turn at a time, so at most one run is open.
 pub async fn open(db: impl SqliteExecutor<'_>, thread_id: i64) -> Result<Option<Open>, String> {
     let row = sqlx::query(
-        "SELECT id, active_attempt_id, binding_id, initiating_item_id, execution_status,
-                queued_text, queued_options, stop_requested_at IS NOT NULL AS stop_requested
-           FROM harness_runs
-          WHERE thread_id = ?1 AND execution_status IN ('preparing', 'starting', 'running')
-          ORDER BY id DESC LIMIT 1",
+        "SELECT r.id, r.active_attempt_id, r.binding_id, r.initiating_item_id, r.execution_status,
+                r.queued_text, r.queued_options, r.model, r.effort, b.provider,
+                r.stop_requested_at IS NOT NULL AS stop_requested
+           FROM harness_runs r JOIN harness_bindings b ON b.id = r.binding_id
+          WHERE r.thread_id = ?1 AND r.execution_status IN ('preparing', 'starting', 'running')
+          ORDER BY r.id DESC LIMIT 1",
     )
     .bind(thread_id)
     .fetch_optional(db)
     .await
     .map_err(|e| e.to_string())?;
-    Ok(row.map(|r| {
-        let (options, respawn) = restored(r.get("queued_options"));
-        Open {
+    row.map(|r| {
+        let provider: String = r.get("provider");
+        Ok(Open {
             run: RunStart {
                 run_id: r.get("id"),
                 attempt_id: r
@@ -198,10 +197,14 @@ pub async fn open(db: impl SqliteExecutor<'_>, thread_id: i64) -> Result<Option<
             text: r
                 .get::<Option<String>, _>("queued_text")
                 .unwrap_or_default(),
-            options,
-            respawn,
-        }
-    }))
+            options: restored(r.get("queued_options")),
+            provider: Provider::parse(&provider)
+                .ok_or_else(|| format!("unknown provider {provider}"))?,
+            model: r.get("model"),
+            effort: r.get("effort"),
+        })
+    })
+    .transpose()
 }
 
 /// How many runs wait in the thread's queue, and how many of them are held.
@@ -359,7 +362,7 @@ pub async fn hold(tx: &mut SqliteConnection, thread_id: i64) -> Result<Vec<Strin
     .map_err(err)?;
     let cards = rows
         .iter()
-        .filter_map(|row| restored(row.get("queued_options")).0.continuation)
+        .filter_map(|row| restored(row.get("queued_options")).continuation)
         .collect();
     for sql in [
         "UPDATE harness_runs SET execution_status = 'cancelled', queue_position = NULL, queue_held = 0

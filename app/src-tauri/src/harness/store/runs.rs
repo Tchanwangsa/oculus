@@ -231,6 +231,27 @@ pub async fn begin_run(pool: &SqlitePool, send: &SendIntent) -> Result<RunStart,
     Ok(run)
 }
 
+/// What the thread's newest run that started was sent with: the provider,
+/// model and reasoning level a card's continuation carries on under.
+pub async fn last_selection(
+    tx: &mut SqliteConnection,
+    thread_id: i64,
+) -> Result<Option<(Provider, Option<String>, Option<String>)>, String> {
+    let row = sqlx::query(
+        "SELECT b.provider, r.model, r.effort FROM harness_runs r
+           JOIN harness_bindings b ON b.id = r.binding_id
+          WHERE r.thread_id = ?1 AND r.ordinal > 0 ORDER BY r.ordinal DESC LIMIT 1",
+    )
+    .bind(thread_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(row.and_then(|row| {
+        let provider = Provider::parse(&row.get::<String, _>("provider"))?;
+        Some((provider, row.get("model"), row.get("effort")))
+    }))
+}
+
 /// The start step takes the run for its provider call: `starting` becomes
 /// `running`, once, and only while nobody asked it to stop. False means
 /// the call must not be made: the run was stopped, settled or deleted in

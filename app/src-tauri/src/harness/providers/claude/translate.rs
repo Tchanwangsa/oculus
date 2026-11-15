@@ -6,7 +6,7 @@
 //! its own, announced as [`HarnessEvent::UnpromptedTurn`].
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use base64::Engine;
@@ -136,6 +136,9 @@ pub(super) struct Translator {
     pub(super) turn_unprompted: bool,
     /// Running background tasks by tool_use id.
     pub(super) background: HashMap<String, BackgroundTask>,
+    /// How many of them, for the session's other threads to read: a switch
+    /// to another provider would kill them with the process.
+    pub(super) background_count: Arc<AtomicUsize>,
     /// Background rows their notification already finished; the launch's
     /// tool_result, arriving later, is dropped.
     pub(super) settled: HashSet<String>,
@@ -167,6 +170,7 @@ impl Translator {
 
     /// The process is gone: background rows still running never will finish.
     pub(super) fn close(&mut self) -> Vec<HarnessEvent> {
+        self.background_count.store(0, Ordering::SeqCst);
         self.background
             .drain()
             .map(|(id, _)| HarnessEvent::ToolFinished {
@@ -223,6 +227,13 @@ impl Translator {
     }
 
     pub(super) fn translate(&mut self, v: &Value) -> Vec<HarnessEvent> {
+        let out = self.translate_line(v);
+        self.background_count
+            .store(self.background.len(), Ordering::SeqCst);
+        out
+    }
+
+    fn translate_line(&mut self, v: &Value) -> Vec<HarnessEvent> {
         let mut out = Vec::new();
         let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
         // A subagent's own output; the parent's tool row carries its result.

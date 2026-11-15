@@ -28,7 +28,8 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | The brief appended to each prompt; `AGENTS.md`; skills | `app/src-tauri/templates/HARNESS.template.md`, `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/skills/`, `app/src-tauri/src/agents/mod.rs` |
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
 | Provider table (`PROVIDERS`), platform capabilities, types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/availability.ts`, `app/src/lib/harness/` |
-| What each bridge can do (Stop, rewind, steering), declared in Rust and read by the webview | `app/src-tauri/src/harness/providers/capabilities.rs`, `app/src/lib/harness/capabilities.ts`, `app/src/hooks/agents/useCapabilities.ts` |
+| A thread's selection, what a send does to its session (`decide_transition`), and the context handoff | `app/src-tauri/src/harness/core/decide/select.rs`, `app/src-tauri/src/harness/manager/transition.rs`, `app/src-tauri/src/harness/handoff/`, `app/src-tauri/src/harness/store/bindings.rs`, `app/src-tauri/src/harness/store/switching.sql` |
+| What each bridge can do (Stop, rewind, steering, switching), declared in Rust and read by the webview | `app/src-tauri/src/harness/providers/capabilities.rs`, `app/src/lib/harness/capabilities.ts`, `app/src/hooks/agents/useCapabilities.ts` |
 | Live state and event folding | `app/src/stores/chat/harnessStore.ts`, `app/src/hooks/backend/useBackendEvents.ts` |
 | Row titles: a reasoning block's "Thought for 12s" and latest line, an `oculus …` command's "Saved a memory" | `app/src/lib/harness/thought.ts`, `app/src/lib/harness/oculusCli.ts`, `app/src-tauri/src/harness/app/thought_clock.rs` |
 | Page, thread list, recent list, timeline, rows, composer | `app/src/pages/tools/ChatPage.tsx`, `app/src/components/harness/` (`threads/`, `timeline/`, `composer/`; recent list: `threads/RecentThreads.tsx`) |
@@ -58,7 +59,11 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 **A bridge's capabilities are one struct.** `providers/capabilities.rs`
 (`Capabilities`, `of`) says per bridge whether Stop ends a turn
 (`interrupt`), whether the CLI can take a question back (`rewind`), whether
-one server process serves every chat (`shared_process`: Codex, opencode), and
+one server process serves every chat (`shared_process`: Codex, opencode),
+whether a live session takes another model with its next turn
+(`model_switch_in_session`: Codex, opencode), whether the bridge can take
+over a chat another provider started (`provider_handoff`,
+[Changing provider mid-chat](#changing-provider-mid-chat)), and
 the steering flags (`active_steering`, `steer_by_restart`), which are false
 on every bridge. A flag for work that is not built starts false and turns
 true only with the recording under `fixtures/harness/` that shows the CLI
@@ -1102,7 +1107,7 @@ is skipped.
 
 Everything the student does to a chat is a `Command` (`core/command.rs`):
 `Send`, `Rewind`, `EditResend`, `DeleteThread`, `EditQueued`, `RemoveQueued`,
-`ReorderQueued`, `Stop`, `Resume`, `ForceStop`. A Tauri command in
+`ReorderQueued`, `Stop`, `Resume`, `ForceStop`, `SelectModel`. A Tauri command in
 `app/turns.rs` only builds one, with the id the webview minted for it
 (`commandId` in `lib/harness/commands.ts`), puts it on the consumer's bus
 (`BusMsg::Command`) and awaits the result. The consumer takes it through
@@ -1502,7 +1507,7 @@ next send resumes the thread by session id under a new generation.
 | Reason | Who releases | A turn the session left open |
 | --- | --- | --- |
 | `Stopped` | `Harness::force_stop`, for a turn whose CLI ignored Stop: the chat's own session, and on Codex and opencode every session of the server that is then killed | interrupted, and the thread's queue held |
-| `Replaced` | `ensure`, for a different reasoning level; the start step (`app/send.rs`), for a different model on Claude or Antigravity; an Antigravity rule allowed or revoked | interrupted |
+| `Replaced` | `ensure`, when the send needs another session ([`decide_transition`](#changing-provider-mid-chat)): a different reasoning level, a different model on Claude or Antigravity, or another provider; an Antigravity rule allowed or revoked | interrupted |
 | `Exited` | `ensure`, finding the session dead | failed |
 | `Deleted` | the `DeleteThread` command's `Release` effect, after its commit; the consumer has already stopped hearing the session (`RunScope::silence`), so nothing it still says writes a row | forgotten with the thread's rows |
 | `Quit` | `Harness::shutdown` | left for the next startup's repair |
@@ -1563,8 +1568,55 @@ compile without one.
   opencode's are variants; `agy` bakes them into the slug (`parse_models`
   splits, `model_slug` rejoins). `sortReasoning` orders by
   `REASONING_LABELS`; `default_variant` asks for `high` and steps down.
-- Claude and Codex bind the level at session start, so a change respawns the
-  process or restarts the Codex thread.
+- Every bridge binds the level at session start, so a change ends the
+  session and resumes its conversation in a new one. A model change does
+  the same on Claude and Antigravity, which take `--model` at spawn; Codex
+  and opencode take the model with each turn
+  ([Changing provider mid-chat](#changing-provider-mid-chat)).
+
+## Changing provider mid-chat
+
+A thread's `provider`, `model` and `effort` (`harness_threads`) are its
+**selection**: what its next send will use. A run records what it was sent
+with ([Each send is a run](#each-send-is-a-run)), so changing the selection
+changes nothing already written.
+
+**Two things set the selection.** `SelectModel` (`harness_select_model`,
+`core/decide/select.rs`) stores a pick at once, mid-turn or not, and
+`Selected` tells every view. A `Send`, and an `EditResend` that names a
+provider, carry the composer's selection and store it in the commit that
+writes or queues the message. A pick of another provider is refused, with
+the reason and nothing recorded, in two cases:
+
+| Refusal | Why |
+| --- | --- |
+| "… cannot take over a chat that has started. Start a new chat to switch." | the target bridge's `provider_handoff` is false: no recording shows it treating handed-over conversation as history |
+| "… is still running a background task in this chat. Wait for it to finish, or stop it, before switching." | the chat's live session has a background task (Claude's backgrounded `Agent` and Bash, counted by its reader); ending the session would kill it |
+
+**A run takes the selection when it starts**, not when it was typed
+(`commit::begin`). A message that waited in the queue goes out under
+whatever is chosen when its turn comes, so one queued before a switch runs
+on the new provider. A card's continuation has no composer behind it and
+never switches the chat: it carries on under what the newest run was sent
+with. The start step sends the run's own provider, model and effort
+(`driver::Step::Start` reads them off the run), so a pick made while a run
+was `starting` does not reach it.
+
+**What the send does to the session is one pure decision.**
+`decide_transition` (`manager/transition.rs`), made in `Harness::ensure`
+from the thread's live session and the run's selection, in this order:
+
+| Live session | Transition | What happens |
+| --- | --- | --- |
+| none | `CreateWithHandoff` | a session is spawned, resuming the run's binding's native session when it has one |
+| another provider's, and the target takes no handoff or the old one has a background task | `Reject` | the send fails with the reason, as a failed run |
+| another provider's | `CreateWithHandoff` | the old session is released (`Replaced`) and the target's is spawned or resumed |
+| same provider, another reasoning level | `RestartAndResume` | released and resumed under the new level |
+| same provider, another model | `SwitchModelInSession` where `model_switch_in_session` is true: Codex's next `turn/start` and opencode's next prompt name it. Else `RestartAndResume` | |
+| the same selection | `Reuse` | |
+
+A rewind brings up the question's provider the same way, without regard to
+model or level.
 
 ## opencode providers go through its own server
 

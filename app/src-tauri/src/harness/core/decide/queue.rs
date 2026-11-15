@@ -102,12 +102,14 @@ mod tests {
                 id: 4,
                 provider: Provider::Claude,
                 model: None,
+                effort: None,
                 subject_code: None,
                 lecture: None,
             }),
             live: Live {
                 held: own_turn,
                 own_turn,
+                ..Live::default()
             },
             question: None,
             newest_anchor: None,

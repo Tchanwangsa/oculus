@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 import { createCapabilities, type Capabilities } from "@/lib/harness/capabilities";
 
-const codex: Capabilities = { provider: "codex", interrupt: true, rewind: true, sharedProcess: true, activeSteering: false, steerByRestart: false };
+const codex: Capabilities = {
+  provider: "codex", interrupt: true, rewind: true, sharedProcess: true, activeSteering: false, steerByRestart: false,
+  modelSwitchInSession: true, providerHandoff: true,
+};
 
 test("every optional action reads as unavailable until Rust has answered", async () => {
   let answer!: (rows: Capabilities[]) => void;
@@ -13,7 +16,9 @@ test("every optional action reads as unavailable until Rust has answered", async
   let told = 0;
   caps.subscribe(() => (told += 1));
   const before = caps.of("codex");
-  expect(before).toEqual({ ...codex, interrupt: false, rewind: false, sharedProcess: false });
+  expect(before).toEqual({
+    ...codex, interrupt: false, rewind: false, sharedProcess: false, modelSwitchInSession: false, providerHandoff: false,
+  });
   // The same object while nothing has changed, as `useSyncExternalStore` needs.
   expect(caps.of("codex")).toBe(before);
   expect(asked).toBe(1);

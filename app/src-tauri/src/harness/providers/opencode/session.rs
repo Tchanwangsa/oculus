@@ -20,7 +20,9 @@ pub(super) struct SessionRoute {
     /// are ignored, and a prompt that omits them runs as opencode's stock
     /// `build` agent with none of the containment (1.18.31).
     pub(super) agent: &'static str,
-    pub(super) model: Option<String>,
+    /// Replaced by [`OpencodeServer::set_model`] when the chat's model
+    /// changes: the next prompt names the new one.
+    pub(super) model: Mutex<Option<String>>,
     pub(super) variant: Option<String>,
     pub(super) state: Mutex<SessionState>,
 }
@@ -100,7 +102,7 @@ impl OpencodeServer {
             SessionRoute {
                 sink: sink.clone(),
                 agent: opts.agent,
-                model: opts.model.clone(),
+                model: Mutex::new(opts.model.clone()),
                 variant: opts.variant.clone(),
                 state: Mutex::new(SessionState {
                     context_window: window,
@@ -140,7 +142,7 @@ impl OpencodeServer {
             SessionRoute {
                 sink: sink.clone(),
                 agent: opts.agent,
-                model: model.clone(),
+                model: Mutex::new(model.clone()),
                 variant: opts.variant.clone(),
                 state: Mutex::new(SessionState {
                     // Seeded so a reopened thread's usage does not restart.
@@ -189,7 +191,8 @@ impl OpencodeServer {
             "agent": route.agent,
             "parts": [{ "type": "text", "text": text }],
         });
-        if let Some((provider, id)) = route.model.as_deref().and_then(split_model) {
+        let model = route.model.lock().unwrap().clone();
+        if let Some((provider, id)) = model.as_deref().and_then(split_model) {
             body["model"] = json!({ "providerID": provider, "modelID": id });
         }
         if let Some(v) = &route.variant {
@@ -200,6 +203,17 @@ impl OpencodeServer {
             body,
         )?;
         Ok(())
+    }
+
+    /// The session's later prompts go to `model`: opencode takes the model
+    /// with each prompt, so a change needs no new session.
+    pub fn set_model(&self, session: &str, model: Option<String>) {
+        let Some(route) = self.routes.lock().unwrap().get(session).cloned() else {
+            return;
+        };
+        let window = model.as_deref().and_then(|m| self.context_window(m));
+        route.state.lock().unwrap().context_window = window;
+        *route.model.lock().unwrap() = model;
     }
 
     /// `POST /session/{id}/abort`; the stream's side is in [`super::events::translate`].

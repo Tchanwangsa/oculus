@@ -8,6 +8,7 @@ use crate::harness::opencode::OpencodeServer;
 use crate::harness::Provider;
 
 use super::sinks::{Generation, Sinks};
+use super::transition::Selection;
 
 /// Where a rewind goes back to: `anchor` is the provider's handle for the
 /// question to take out, kept on its row; `last_seen` the newest question's,
@@ -45,6 +46,35 @@ impl Handle {
             Handle::Codex(server, tid, _) => server.is_alive() && server.has_thread(tid),
             Handle::Opencode(server, ses) => server.is_alive() && server.has_session(ses),
             Handle::Antigravity(s) => s.is_alive(),
+        }
+    }
+
+    /// The session has work running in the background that ends with it:
+    /// Claude's backgrounded `Agent` and Bash. No other bridge has any.
+    pub(super) fn has_background_work(&self) -> bool {
+        match self {
+            Handle::Claude(s) => s.has_background_tasks(),
+            _ => false,
+        }
+    }
+
+    /// The same session, sending its later turns to `model`. Only for a
+    /// bridge whose `model_switch_in_session` is true; the others keep the
+    /// model they were spawned with.
+    pub(super) fn with_model(&self, model: Option<String>) -> Handle {
+        match self {
+            Handle::Codex(server, tid, opts) => {
+                let opts = CodexThreadOpts {
+                    model,
+                    ..(**opts).clone()
+                };
+                Handle::Codex(server.clone(), tid.clone(), Arc::new(opts))
+            }
+            Handle::Opencode(server, ses) => {
+                server.set_model(ses, model);
+                self.clone()
+            }
+            Handle::Claude(_) | Handle::Antigravity(_) => self.clone(),
         }
     }
 
@@ -113,11 +143,12 @@ impl Handle {
     }
 }
 
-/// A thread's live session and the reasoning level it was started under.
-/// Every CLI binds the level at session start, so a different one respawns.
+/// A thread's live session and what it was started under: the provider,
+/// the model and the reasoning level (`transition.rs` reads them to decide
+/// what the next send does to it).
 pub(super) struct Live {
     pub(super) handle: Handle,
-    pub(super) effort: Option<String>,
+    pub(super) selection: Selection,
     /// Minted when this session was spawned or attached; its sink carries it.
     pub(super) generation: Generation,
     /// Where this session reports.

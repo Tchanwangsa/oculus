@@ -71,6 +71,9 @@ type HarnessEvent =
       started_at?: string | null;
       ended_at?: string | null;
     }
+  /** The chat's selection changed (`harnessSelectModel`, or a send under
+   *  another one): what its next send will use. Runs keep their own. */
+  | { type: "selected"; provider: Provider; model: string | null; effort: string | null }
   /** What the run was sent with (the chat's selection when it started),
    *  told once after its question. */
   | { type: "run_selected"; provider: Provider; model: string | null; effort: string | null }
@@ -114,9 +117,12 @@ export interface ThreadUsage {
 
 export interface HarnessThread {
   id: number;
+  /** `provider`, `model` and `effort` are the thread's selection: what its
+   *  next send will use. What an answer came from is on its run. */
   provider: Provider;
   provider_session_id: string | null;
   model: string | null;
+  effort?: string | null;
   /** Null is the general thread. Fixed at creation: CLIs bind instructions
    *  at session start. */
   subject_id: number | null;

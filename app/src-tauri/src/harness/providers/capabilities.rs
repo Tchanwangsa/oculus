@@ -24,6 +24,14 @@ pub struct Capabilities {
     /// A running turn can be stopped and started again with a correction,
     /// as one run.
     pub steer_by_restart: bool,
+    /// A live session takes a different model with its next turn. Where
+    /// false, the model is fixed at spawn and a change restarts the session
+    /// and resumes its conversation.
+    pub model_switch_in_session: bool,
+    /// The bridge can take over a chat another provider started: it treats
+    /// the earlier conversation at the top of its first prompt as history
+    /// and answers the new message (`handoff/`).
+    pub provider_handoff: bool,
 }
 
 /// One bridge's flags. Antigravity stops by killing its own child, which
@@ -41,6 +49,10 @@ pub const fn of(provider: Provider) -> Capabilities {
         shared_process,
         active_steering: false,
         steer_by_restart: false,
+        // Codex names the model in `turn/start` and opencode in each
+        // prompt; Claude and `agy` take `--model` at spawn.
+        model_switch_in_session: shared_process,
+        provider_handoff: false,
     }
 }
 
@@ -72,6 +84,7 @@ pub enum Flag {
     Interrupt,
     ActiveSteering,
     SteerByRestart,
+    ProviderHandoff,
 }
 
 #[cfg(test)]
@@ -91,6 +104,7 @@ mod tests {
             for (flag, on) in [
                 (Flag::ActiveSteering, caps.active_steering),
                 (Flag::SteerByRestart, caps.steer_by_restart),
+                (Flag::ProviderHandoff, caps.provider_handoff),
             ] {
                 let named = fixture(caps.provider, flag);
                 assert!(
@@ -105,7 +119,12 @@ mod tests {
     #[test]
     fn every_named_recording_exists() {
         for caps in all() {
-            for flag in [Flag::Interrupt, Flag::ActiveSteering, Flag::SteerByRestart] {
+            for flag in [
+                Flag::Interrupt,
+                Flag::ActiveSteering,
+                Flag::SteerByRestart,
+                Flag::ProviderHandoff,
+            ] {
                 if let Some(name) = fixture(caps.provider, flag) {
                     assert!(recorded(name), "{name} is not under fixtures/harness");
                 }
@@ -135,5 +154,16 @@ mod tests {
         assert_eq!(wire["provider"], "codex");
         assert_eq!(wire["sharedProcess"], true);
         assert_eq!(wire["activeSteering"], false);
+        assert_eq!(wire["modelSwitchInSession"], true);
+        assert_eq!(
+            wire["providerHandoff"],
+            of(Provider::Codex).provider_handoff
+        );
+        let in_session: Vec<Provider> = all()
+            .into_iter()
+            .filter(|c| c.model_switch_in_session)
+            .map(|c| c.provider)
+            .collect();
+        assert_eq!(in_session, [Provider::Codex, Provider::Opencode]);
     }
 }

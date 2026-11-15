@@ -5,6 +5,7 @@
 
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
+use crate::harness::manager::transition::Selection;
 use crate::harness::store::{self, RunStart, SendIntent};
 use crate::harness::{Provider, SendOptions};
 
@@ -21,10 +22,16 @@ pub(in crate::harness) enum Change {
         options: SendOptions,
         first_message: String,
     },
-    /// The run of a message going out now: its question row, attempt,
-    /// binding and run receipt (`store::begin`).
-    Begin {
+    /// The chat's selection becomes this: what its next run is sent with.
+    Select {
         provider: Provider,
+        model: Option<String>,
+        effort: Option<String>,
+    },
+    /// The run of a message going out now: its question row, attempt,
+    /// binding and run receipt (`store::begin`). It is sent with the
+    /// chat's selection as it stands in this commit.
+    Begin {
         text: String,
         options: SendOptions,
         /// The run receipt's id: the command's own for a send, a fresh one
@@ -36,7 +43,6 @@ pub(in crate::harness) enum Change {
     /// A message, or a card's continuation, joins the back of the queue as
     /// a waiting run (`store/queue.rs`).
     Enqueue {
-        provider: Provider,
         text: String,
         options: SendOptions,
     },
@@ -75,6 +81,12 @@ pub(in crate::harness) enum Change {
 /// What a change did, for the consumer to announce and act on.
 pub(in crate::harness) enum Applied {
     Began(Box<Began>),
+    /// The chat's selection changed.
+    Selected {
+        provider: Provider,
+        model: Option<String>,
+        effort: Option<String>,
+    },
     /// The queue changed: the webview's list is told again.
     Queue,
     /// These cards' continuations were cancelled.
@@ -148,8 +160,21 @@ pub(in crate::harness) async fn run(
             } => {
                 thread = Some(create(&mut tx, provider, &options, &first_message).await?);
             }
-            Change::Begin {
+            Change::Select {
                 provider,
+                model,
+                effort,
+            } => {
+                let thread_id = thread.ok_or("a selection with no thread")?;
+                let (m, e) = (model.as_deref(), effort.as_deref());
+                store::threads::select(&mut tx, thread_id, provider, m, e).await?;
+                applied.push(Applied::Selected {
+                    provider,
+                    model,
+                    effort,
+                });
+            }
+            Change::Begin {
                 text,
                 options,
                 receipt,
@@ -157,16 +182,13 @@ pub(in crate::harness) async fn run(
             } => {
                 let thread_id = thread.ok_or("a send with no thread")?;
                 let send = (text, options, receipt, queued);
-                let began = begin(&mut tx, thread_id, provider, send).await?;
+                let began = begin(&mut tx, thread_id, send).await?;
                 outcome.run = Some(began.run);
                 applied.push(Applied::Began(Box::new(began)));
             }
-            Change::Enqueue {
-                provider,
-                text,
-                options,
-            } => {
+            Change::Enqueue { text, options } => {
                 let thread_id = thread.ok_or("a send with no thread")?;
+                let provider = selection(&mut tx, thread_id, &options).await?.provider;
                 let run_id =
                     store::queue::enqueue(&mut tx, thread_id, provider, &text, &options).await?;
                 outcome.queued = Some(run_id);
@@ -251,10 +273,14 @@ async fn create(
     options: &SendOptions,
     first_message: &str,
 ) -> Result<i64, String> {
-    let id = store::threads::create(
-        &mut *tx,
+    let chosen = (
         provider,
         options.model.as_deref(),
+        options.reasoning_effort.as_deref(),
+    );
+    let id = store::threads::create(
+        &mut *tx,
+        chosen,
         options.subject_id,
         options.lecture_id.as_deref(),
         first_message,
@@ -267,46 +293,63 @@ async fn create(
     Ok(id)
 }
 
-/// Write a run that goes out now. The row, not the send, decides what it
-/// resumes; a send that names another model changes the chat's from here on.
-async fn begin(
+/// What a run on this chat is sent with: the chat's selection, which a
+/// student's message takes as it stands when the run starts, however long
+/// it waited. A card's continuation has no composer behind it and never
+/// switches the chat: it carries on under what the newest run was sent
+/// with.
+async fn selection(
     tx: &mut SqliteConnection,
     thread_id: i64,
-    provider: Provider,
-    (text, options, receipt, queued): (String, SendOptions, String, Option<i64>),
-) -> Result<Began, String> {
-    let row = sqlx::query("SELECT model FROM harness_threads WHERE id = ?1")
+    options: &SendOptions,
+) -> Result<Selection, String> {
+    if options.continuation.is_some() {
+        if let Some((provider, model, effort)) = store::last_selection(&mut *tx, thread_id).await? {
+            return Ok(Selection {
+                provider,
+                model,
+                effort,
+            });
+        }
+    }
+    let row = sqlx::query("SELECT provider, model, effort FROM harness_threads WHERE id = ?1")
         .bind(thread_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("no thread {thread_id}"))?;
-    let model: Option<String> = row.get("model");
-    let respawn = options.model.is_some() && options.model != model;
-    if respawn {
-        sqlx::query("UPDATE harness_threads SET model = ?2 WHERE id = ?1")
-            .bind(thread_id)
-            .bind(&options.model)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
+    let provider: String = row.get("provider");
+    Ok(Selection {
+        provider: Provider::parse(&provider)
+            .ok_or_else(|| format!("unknown provider {provider}"))?,
+        model: row.get("model"),
+        effort: row.get("effort"),
+    })
+}
+
+/// Write a run that goes out now, under the chat's selection.
+async fn begin(
+    tx: &mut SqliteConnection,
+    thread_id: i64,
+    (text, options, receipt, queued): (String, SendOptions, String, Option<i64>),
+) -> Result<Began, String> {
+    let chosen = selection(&mut *tx, thread_id, &options).await?;
     // The send's options stay on the run: its start step reads them there.
     let intent = SendIntent {
         thread_id,
-        provider,
-        model: options.model.clone().or(model),
-        effort: options.reasoning_effort.clone(),
+        provider: chosen.provider,
+        model: chosen.model,
+        effort: chosen.effort,
         receipt,
         text,
         at: options.at,
         continuation: options.continuation.clone(),
         queued,
-        options: Some(store::queue::stored(&options, respawn)?),
+        options: Some(store::queue::stored(&options)?),
     };
     let run = store::begin(&mut *tx, &intent).await?;
     Ok(Began {
-        provider,
+        provider: intent.provider,
         model: intent.model,
         effort: intent.effort,
         run,

@@ -44,8 +44,7 @@ pub async fn harness_send(
     options: Option<SendOptions>,
     mode: Option<Mode>,
 ) -> Result<i64, String> {
-    let provider =
-        Provider::parse(&provider).ok_or_else(|| format!("unknown provider {provider}"))?;
+    let provider = parse_provider(&provider)?;
     let mut options = options.unwrap_or_default();
     options.reasoning_effort = validate_effort(options.reasoning_effort)?;
     options.scope_new_thread(thread_id)?;
@@ -66,10 +65,45 @@ pub async fn harness_send(
     Ok(sent.await?.thread_id)
 }
 
+fn parse_provider(provider: &str) -> Result<Provider, String> {
+    Provider::parse(provider).ok_or_else(|| format!("unknown provider {provider}"))
+}
+
+/// Choose what the thread's next send uses: a provider, a model and a
+/// reasoning level. Stored at once, mid-turn or not: the running turn and
+/// every run already written keep what they were sent with, and a message
+/// that waits goes out under whatever is chosen when its turn comes.
+/// Another provider is refused, with the reason, where its bridge cannot
+/// take over a started chat (`providerHandoff`) or the current one has a
+/// background task alive.
+#[tauri::command]
+pub async fn harness_select_model(
+    state: State<'_, HarnessState>,
+    command_id: String,
+    thread_id: i64,
+    provider: String,
+    model: Option<String>,
+    effort: Option<String>,
+) -> Result<(), String> {
+    let kind = Kind::SelectModel {
+        provider: parse_provider(&provider)?,
+        model,
+        effort: validate_effort(effort)?,
+    };
+    let selected = state.command(Command {
+        id: command_id,
+        thread_id: Some(thread_id),
+        kind,
+    });
+    selected.await.map(|_| ())
+}
+
 /// Ask a question again, differently: rewind the thread to that question
 /// (rows and, where it can, the agent's context) and send the new text.
 /// A provider that cannot rewind is not fatal — the rows still go, and
-/// the `Rewound` event says the agent kept the original.
+/// the `Rewound` event says the agent kept the original. `provider` is the
+/// one the composer shows (null keeps the chat's): another one switches the
+/// chat with this send, as [`harness_send`] does.
 #[tauri::command]
 pub async fn harness_edit_resend(
     state: State<'_, HarnessState>,
@@ -78,13 +112,16 @@ pub async fn harness_edit_resend(
     item_id: i64,
     text: String,
     options: Option<SendOptions>,
+    provider: Option<String>,
 ) -> Result<(), String> {
     let mut options = options.unwrap_or_default();
     options.reasoning_effort = validate_effort(options.reasoning_effort)?;
+    let provider = provider.map(|p| parse_provider(&p)).transpose()?;
     let kind = Kind::EditResend {
         item_id,
         text,
         options,
+        provider,
     };
     let edited = state.command(Command {
         id: command_id,

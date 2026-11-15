@@ -8,7 +8,7 @@ use sqlx::SqlitePool;
 use crate::harness::antigravity_rules;
 use crate::harness::core::effect::{Runtime, Start};
 use crate::harness::store;
-use crate::harness::{LectureBrief, Provider, Release, SendOptions, StudioBrief};
+use crate::harness::{LectureBrief, Provider, SendError, SendOptions, StudioBrief};
 use crate::runtime::blocking::run as blocking;
 
 use super::proposal_context::{self, Cards};
@@ -24,9 +24,13 @@ pub(in crate::harness) async fn start(rt: &Runtime, start: Start) {
     let outcome = match send(rt, start).await {
         Ok(true) => Sent::Accepted,
         Ok(false) => Sent::Withdrawn,
-        Err(e) => {
+        Err(Failure::Unsent(e)) => {
             elog!("[oculus] harness send: {e}");
             Sent::Failed(e)
+        }
+        Err(Failure::Unknown(e)) => {
+            elog!("[oculus] harness send: {e}");
+            Sent::Unknown(e)
         }
     };
     let _ = rt.bus.send(BusMsg::Sent {
@@ -45,8 +49,12 @@ pub(in crate::harness) enum Sent {
     /// The run was no longer `starting`, or was asked to stop: the provider
     /// was not called.
     Withdrawn,
-    /// The send failed, before or at the provider.
+    /// The send failed before the provider could hear of it.
     Failed(String),
+    /// The write to the provider failed, so whether it has the message is
+    /// not known. The run fails the same way; a handoff it carried stays
+    /// unconfirmed (`handoff/`).
+    Unknown(String),
 }
 
 /// The lecture section of a thread's brief, read off its row on every
@@ -81,24 +89,37 @@ pub(super) async fn studio_brief(pool: &SqlitePool, thread_id: i64) -> Option<St
     ))
 }
 
+/// Why a start step did not hand its run to the provider.
+enum Failure {
+    /// The provider heard nothing of it.
+    Unsent(String),
+    /// The write to the provider failed: it may or may not have the message.
+    Unknown(String),
+}
+
+impl From<String> for Failure {
+    fn from(error: String) -> Self {
+        Failure::Unsent(error)
+    }
+}
+
 /// False when the run was not this start's to send any more.
-async fn send(rt: &Runtime, start: Start) -> Result<bool, String> {
+async fn send(rt: &Runtime, start: Start) -> Result<bool, Failure> {
     let Start {
         thread_id,
         provider,
         run,
         text,
         options: opts,
-        respawn,
+        model,
+        effort,
     } = start;
     let pool = rt.pools.open().await?;
     let row = store::thread(&pool, thread_id).await?;
-    // Claude and agy fix `--model` at spawn. The run is not bound to a turn
-    // yet, so replacing the session interrupts nothing.
-    if respawn && matches!(provider, Provider::Claude | Provider::Antigravity) {
-        rt.harness.release(thread_id, Release::Replaced);
-    }
-    // The row, not the payload, decides model, subject, lecture and video.
+    // The row, not the payload, decides subject, lecture and video; the
+    // run, not the row, decides provider, model and reasoning level, since
+    // the chat's selection may have moved on. What that does to a live
+    // session is `Harness::ensure`'s call (`manager/transition.rs`).
     let lecture = lecture_brief(&pool, &row).await;
     let studio_brief = studio_brief(&pool, thread_id).await;
     // Only a spawn uses these, but whether this send spawns is `ensure`'s call.
@@ -106,18 +127,9 @@ async fn send(rt: &Runtime, start: Start) -> Result<bool, String> {
         Provider::Antigravity => Some(antigravity_rules::stored(&pool).await?),
         _ => None,
     };
-    // A continuation has no composer behind it: it keeps the live session's
-    // reasoning level, and the row's model, as the student last chose them.
-    let reasoning_effort = match &opts.continuation {
-        Some(_) => opts
-            .reasoning_effort
-            .clone()
-            .or_else(|| rt.harness.live_effort(thread_id)),
-        None => opts.reasoning_effort.clone(),
-    };
     let opts = SendOptions {
-        model: opts.model.or(row.model),
-        reasoning_effort,
+        model,
+        reasoning_effort: effort,
         scope: row.subject_code,
         lecture,
         studio_brief,
@@ -144,7 +156,13 @@ async fn send(rt: &Runtime, start: Start) -> Result<bool, String> {
         return Ok(false);
     }
     let (h, sinks) = (rt.harness.clone(), sinks_for(&rt.bus, thread_id, provider));
-    blocking(move || h.send(thread_id, provider, resume.as_deref(), &opts, &text, &sinks)).await?;
+    let sent =
+        blocking(move || Ok(h.send(thread_id, provider, resume.as_deref(), &opts, &text, &sinks)));
+    match sent.await? {
+        Ok(()) => {}
+        Err(SendError::Unsent(e)) => return Err(Failure::Unsent(e)),
+        Err(SendError::Unknown(e)) => return Err(Failure::Unknown(e)),
+    }
     if let Err(e) = store::mark_sent(&pool, &run).await {
         elog!("[oculus] harness run {}: {e}", run.run_id);
     }

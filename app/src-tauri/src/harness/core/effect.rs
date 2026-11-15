@@ -37,8 +37,9 @@ pub(in crate::harness) struct Start {
     /// The run's row text: the student's words, or a continuation's line.
     pub text: String,
     pub options: SendOptions,
-    /// The chat's model changed with this send.
-    pub respawn: bool,
+    /// The model and reasoning level the run was written with.
+    pub model: Option<String>,
+    pub effort: Option<String>,
 }
 
 /// What an effect works with: the live sessions, the consumer's bus and

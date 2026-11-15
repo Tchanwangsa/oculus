@@ -107,6 +107,7 @@ pub fn writes(ev: &HarnessEvent) -> bool {
             | HarnessEvent::Rewound { .. }
             | HarnessEvent::RunSettled { .. }
             | HarnessEvent::RunSelected { .. }
+            | HarnessEvent::Selected { .. }
             | HarnessEvent::DeliveryNotice { .. }
             | HarnessEvent::RateLimits { .. }
             | HarnessEvent::TurnStarted { .. }
@@ -438,6 +439,7 @@ async fn apply_rows(
         // The consumer writes and emits these itself, at settlement.
         | HarnessEvent::RunSettled { .. }
         | HarnessEvent::RunSelected { .. }
+        | HarnessEvent::Selected { .. }
         | HarnessEvent::DeliveryNotice { .. }
         | HarnessEvent::RateLimits { .. } => Ok(Stored::default()),
     }

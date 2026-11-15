@@ -442,6 +442,7 @@ fn an_edit_rewinds_and_sends_in_one_commit() {
         item_id: question,
         text: "again".into(),
         options: SendOptions::default(),
+        provider: None,
     };
     let (edited, sent) = bench.command("c2", edit());
     bench.play(vec![edited]);

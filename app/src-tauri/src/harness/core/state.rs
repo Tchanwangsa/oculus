@@ -5,6 +5,7 @@ use sqlx::SqlitePool;
 
 use crate::harness::manager::policy::{Active, Chat};
 use crate::harness::store::{self, Question, ThreadRow};
+use crate::harness::Provider;
 
 use super::command::{Command, Kind};
 
@@ -17,6 +18,41 @@ pub(in crate::harness) struct Live {
     pub held: bool,
     /// The CLI is in a turn it started itself, which no run stands for.
     pub own_turn: bool,
+    /// The chat's live session has a background task running, which a
+    /// switch to another provider would kill.
+    pub background: bool,
+    /// Which bridges can take over a chat another provider started.
+    pub takeover: Takeover,
+}
+
+/// The bridges whose `provider_handoff` capability is true, as the running
+/// app holds them (`Harness::capabilities`).
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub(in crate::harness) struct Takeover(u8);
+
+impl Takeover {
+    fn bit(provider: Provider) -> u8 {
+        match provider {
+            Provider::Claude => 1,
+            Provider::Codex => 2,
+            Provider::Opencode => 4,
+            Provider::Antigravity => 8,
+        }
+    }
+
+    pub fn read(handoff: impl Fn(Provider) -> bool) -> Self {
+        let providers = crate::harness::discover::PROVIDERS;
+        Takeover(
+            providers
+                .into_iter()
+                .filter(|provider| handoff(*provider))
+                .fold(0, |bits, provider| bits | Self::bit(provider)),
+        )
+    }
+
+    pub fn allows(self, provider: Provider) -> bool {
+        self.0 & Self::bit(provider) != 0
+    }
 }
 
 pub(in crate::harness) struct State {

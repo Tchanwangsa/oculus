@@ -1,9 +1,17 @@
-use crate::harness::SendOptions;
+use crate::harness::{Provider, SendOptions};
 
 use super::super::command::Command;
 use super::super::commit::Change;
 use super::super::state::State;
-use super::{Answer, Ask, Decision, Plan, RewindAsk};
+use super::{select, Answer, Ask, Decision, Plan, RewindAsk};
+
+/// An edit's new question, and what the composer showed when it was sent.
+pub(super) struct Resend<'a> {
+    pub text: &'a String,
+    pub options: &'a SendOptions,
+    /// `None` keeps the chat's provider.
+    pub provider: Option<Provider>,
+}
 
 /// Rewind, and edit-and-resend: the rows from a question on go, and with
 /// `resend` new text is asked in its place. The provider is asked to forget
@@ -13,7 +21,7 @@ pub(super) fn decide(
     state: &State,
     command: &Command,
     item_id: i64,
-    resend: Option<(&String, &SendOptions)>,
+    resend: Option<Resend>,
     answer: Option<Answer>,
 ) -> Result<Decision, String> {
     let (Some(row), Some(question)) = (&state.thread, &state.question) else {
@@ -29,20 +37,25 @@ pub(super) fn decide(
                 }
                 .into());
             }
+            // An edit sent under another provider is a switch, refused
+            // before anything is taken out.
+            let target = resend.as_ref().and_then(|resend| resend.provider);
+            if let Some(reason) = target.and_then(|to| select::refusal(state, to)) {
+                return Err(reason);
+            }
             if let (Some(anchor), Some(resume)) = (question.anchor.clone(), state.session.clone()) {
-                let options = match resend {
-                    Some((_, options)) => options.clone(),
-                    None => SendOptions::default(),
-                };
                 return Ok(Decision::Ask(Ask::Rewind(Box::new(RewindAsk {
                     thread_id: row.id,
                     provider: row.provider,
                     anchor,
                     last_seen: state.newest_anchor.clone(),
                     resume,
+                    // A respawn for the rewind runs under the chat's own
+                    // model and level, whatever the edit goes out under.
                     options: SendOptions {
-                        model: options.model.clone().or_else(|| row.model.clone()),
-                        ..options
+                        model: row.model.clone(),
+                        reasoning_effort: row.effort.clone(),
+                        ..SendOptions::default()
                     },
                 }))));
             }
@@ -54,13 +67,19 @@ pub(super) fn decide(
         text: None,
     };
     match resend {
-        Some((text, options)) => plan.changes.push(Change::Begin {
-            provider: row.provider,
-            text: text.clone(),
-            options: options.clone(),
-            receipt: command.id.clone(),
-            queued: None,
-        }),
+        Some(resend) => {
+            let provider = resend.provider.unwrap_or(row.provider);
+            let options = resend.options;
+            let (model, effort) = (options.model.as_ref(), options.reasoning_effort.as_ref());
+            plan.changes
+                .extend(select::change(row, provider, model, effort));
+            plan.changes.push(Change::Begin {
+                text: resend.text.clone(),
+                options: options.clone(),
+                receipt: command.id.clone(),
+                queued: None,
+            });
+        }
         None => plan.text = Some(question.text.clone()),
     }
     Ok(Decision::Commit(plan))
@@ -80,12 +99,13 @@ mod tests {
                 id: 4,
                 provider: Provider::Codex,
                 model: Some("gpt".into()),
+                effort: Some("high".into()),
                 subject_code: None,
                 lecture: None,
             }),
             live: Live {
                 held: busy,
-                own_turn: false,
+                ..Live::default()
             },
             question: Some(Question {
                 text: "the question".into(),
@@ -96,6 +116,14 @@ mod tests {
             waiting: 0,
             held: 0,
             open: None,
+        }
+    }
+
+    fn resend<'a>(text: &'a String, options: &'a SendOptions) -> Resend<'a> {
+        Resend {
+            text,
+            options,
+            provider: None,
         }
     }
 
@@ -116,7 +144,7 @@ mod tests {
             "stop the current turn before rewinding"
         );
         let (text, options) = ("again".to_string(), SendOptions::default());
-        let edit = decide(&state, &command(), 12, Some((&text, &options)), None);
+        let edit = decide(&state, &command(), 12, Some(resend(&text, &options)), None);
         assert_eq!(
             edit.err().unwrap(),
             "stop the current turn before editing a question"
@@ -138,6 +166,7 @@ mod tests {
         assert_eq!((ask.anchor.as_str(), ask.resume.as_str()), ("a", "s"));
         assert_eq!(ask.last_seen.as_deref(), Some("newest"));
         assert_eq!(ask.options.model.as_deref(), Some("gpt"), "the row's model");
+        assert_eq!(ask.options.reasoning_effort.as_deref(), Some("high"));
     }
 
     #[test]
@@ -161,9 +190,19 @@ mod tests {
     fn the_answer_decides_the_context_and_an_edit_sends_under_the_commands_id() {
         // The chat is held for the rewind by then, which is not a refusal.
         let state = state(true, Some("a"), Some("s"));
-        let (text, options) = ("again".to_string(), SendOptions::default());
+        let text = "again".to_string();
+        let options = SendOptions {
+            reasoning_effort: Some("high".into()),
+            ..SendOptions::default()
+        };
         let answer = Some(Answer::Rewound { context: true });
-        let decided = decide(&state, &command(), 12, Some((&text, &options)), answer);
+        let decided = decide(
+            &state,
+            &command(),
+            12,
+            Some(resend(&text, &options)),
+            answer,
+        );
         let Ok(Decision::Commit(plan)) = decided else {
             panic!("the answer is in");
         };
@@ -178,5 +217,44 @@ mod tests {
             ] if receipt == "c9" && text == "again"
         ));
         assert_eq!(plan.text, None, "an edit hands nothing back");
+    }
+
+    #[test]
+    fn an_edit_sent_under_another_model_or_provider_changes_the_chats_selection() {
+        let mut state = state(true, Some("a"), Some("s"));
+        let text = "again".to_string();
+        let options = SendOptions {
+            model: Some("other".into()),
+            reasoning_effort: Some("high".into()),
+            ..SendOptions::default()
+        };
+        let answer = Some(Answer::Rewound { context: true });
+        let edit = |state: &State, provider, answer| {
+            let resend = Resend {
+                text: &text,
+                options: &options,
+                provider,
+            };
+            decide(state, &command(), 12, Some(resend), answer)
+        };
+        let Ok(Decision::Commit(plan)) = edit(&state, None, answer) else {
+            panic!("the answer is in");
+        };
+        assert!(matches!(
+            plan.changes.as_slice(),
+            [
+                Change::Truncate { .. },
+                Change::Select { provider: Provider::Codex, model: Some(model), .. },
+                Change::Begin { .. }
+            ] if model == "other"
+        ));
+        // Another provider is a switch: refused, before anything is asked
+        // or removed, where its bridge takes no handoff.
+        state.live.held = false;
+        let refused = edit(&state, Some(Provider::Claude), None);
+        assert!(refused
+            .err()
+            .unwrap()
+            .contains("Start a new chat to switch"));
     }
 }

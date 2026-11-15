@@ -14,6 +14,7 @@ use tokio::runtime::Runtime;
 use crate::harness::app::consumer::ConsumerIo;
 use crate::harness::app::{BusMsg, Envelope};
 use crate::harness::core::effect::{self, Effect};
+use crate::harness::providers::capabilities::Capabilities;
 use crate::harness::{jobs, store, Provider};
 
 use super::{guard::assert_scratch, outbound::Outbound, snapshot};
@@ -72,6 +73,12 @@ impl Clock {
 }
 
 impl ConsumerIo for Io {
+    fn capabilities(&self, provider: Provider) -> Capabilities {
+        self.effects.harness.capabilities(provider)
+    }
+    fn background(&self, thread_id: i64) -> bool {
+        self.effects.harness.has_background_work(thread_id)
+    }
     fn clock_time(&self) -> Option<std::time::Instant> {
         Some(self.epoch + Duration::from_millis(self.envelopes.len() as u64 * 10))
     }

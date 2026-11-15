@@ -21,11 +21,10 @@ pub use queue::QueuedMessage;
 #[cfg(test)]
 pub use runs::begin_run;
 pub use runs::{
-    begin, bind_session, claim_start, fresh_receipt, mark_sent, receipt_run, set_draft,
-    settle as settle_run, Owner, RunStart, SendIntent, Settlement, NOT_CLAIMED, NO_ANSWER,
-    PART_MISSING,
+    begin, bind_session, claim_start, fresh_receipt, last_selection, mark_sent, receipt_run,
+    set_draft, settle as settle_run, Owner, RunStart, SendIntent, Settlement, NOT_CLAIMED,
+    NO_ANSWER, PART_MISSING,
 };
 pub use threads::{
-    create_thread, delete_thread, raise_revision, revision, set_model, thread, LectureRef,
-    ThreadRow,
+    create_thread, delete_thread, raise_revision, revision, thread, LectureRef, ThreadRow,
 };

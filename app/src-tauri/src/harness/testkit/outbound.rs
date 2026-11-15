@@ -13,6 +13,33 @@ pub(super) struct Expected {
     pub response: Value,
     #[serde(default)]
     pub error: Option<String>,
+    /// Where the recording sent its request, any prompt is accepted, and
+    /// kept for the test to read ([`Outbound::prompts`]).
+    #[serde(default)]
+    pub any_prompt: bool,
+}
+
+/// What every recording sent as its request.
+pub(super) const REQUEST: &str = "Replay request";
+
+/// Whether `actual` is `expected`, with any string where the recording
+/// sent its request; that string is the prompt.
+fn same_but_prompt(actual: &Value, expected: &Value, prompt: &mut Option<String>) -> bool {
+    match (actual, expected) {
+        (Value::String(said), Value::String(recorded)) if recorded == REQUEST => {
+            *prompt = Some(said.clone());
+            true
+        }
+        (Value::Array(a), Value::Array(e)) => {
+            a.len() == e.len() && a.iter().zip(e).all(|(a, e)| same_but_prompt(a, e, prompt))
+        }
+        (Value::Object(a), Value::Object(e)) => {
+            a.len() == e.len()
+                && a.iter()
+                    .all(|(key, a)| e.get(key).is_some_and(|e| same_but_prompt(a, e, prompt)))
+        }
+        (a, e) => a == e,
+    }
 }
 
 #[derive(Clone)]
@@ -24,6 +51,7 @@ pub(in crate::harness) struct Outbound {
 struct State {
     expected: VecDeque<Expected>,
     captured: Vec<Value>,
+    prompts: Vec<String>,
 }
 
 impl Outbound {
@@ -32,6 +60,7 @@ impl Outbound {
             state: Arc::new(Mutex::new(State {
                 expected: expected.into(),
                 captured: Vec::new(),
+                prompts: Vec::new(),
             })),
             scratch: scratch.display().to_string(),
         }
@@ -48,15 +77,35 @@ impl Outbound {
             .expected
             .pop_front()
             .unwrap_or_else(|| panic!("unrecorded outbound operation: {frame}"));
-        assert_eq!(
-            frame, expected.frame,
-            "outbound frame differs from manifest"
-        );
+        if expected.any_prompt {
+            let mut prompt = None;
+            assert!(
+                same_but_prompt(&frame, &expected.frame, &mut prompt),
+                "outbound frame differs from manifest beyond its prompt: {frame}"
+            );
+            state.prompts.extend(prompt);
+        } else {
+            assert_eq!(
+                frame, expected.frame,
+                "outbound frame differs from manifest"
+            );
+        }
         state.captured.push(frame);
         match expected.error {
             Some(error) => Err(error),
             None => Ok(expected.response),
         }
+    }
+
+    /// More operations the replay is expected to make, after those already
+    /// listed.
+    pub(super) fn expect(&self, more: impl IntoIterator<Item = Expected>) {
+        self.state.lock().unwrap().expected.extend(more);
+    }
+
+    /// The prompts sent where an expected operation accepted any.
+    pub(super) fn prompts(&self) -> Vec<String> {
+        self.state.lock().unwrap().prompts.clone()
     }
 
     pub(super) fn wire(&self) -> Wire {

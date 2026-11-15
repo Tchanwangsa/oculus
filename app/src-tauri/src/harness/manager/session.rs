@@ -20,7 +20,27 @@ use super::options::SendOptions;
 use super::raw_log::RawLog;
 use super::release::Release;
 use super::sinks::Sinks;
+use super::transition::{decide_transition, Current, Selection, Transition};
 use super::Harness;
+
+/// Why a send did not go through.
+#[derive(Debug)]
+pub enum SendError {
+    /// No session could be brought up, or the switch was refused: the
+    /// provider heard nothing of the message.
+    Unsent(String),
+    /// The write to the provider failed, so whether it has the message is
+    /// not known.
+    Unknown(String),
+}
+
+impl SendError {
+    pub fn into_message(self) -> String {
+        match self {
+            SendError::Unsent(e) | SendError::Unknown(e) => e,
+        }
+    }
+}
 
 impl Harness {
     /// Bring a thread's session up if it is not, then send. `resume` is the
@@ -34,14 +54,17 @@ impl Harness {
         opts: &SendOptions,
         text: &str,
         sinks: &Arc<dyn Sinks>,
-    ) -> Result<(), String> {
+    ) -> Result<(), SendError> {
         // Sent outside the lock: the CLI can take a minute to accept a
         // message, and holding the map would stall every other thread's
         // send and Stop, this thread's Stop included.
         let (handle, generation, sinks) = {
             let mut live = self.live.lock().unwrap();
-            self.ensure(&mut live, thread_id, provider, resume, opts, sinks)?;
-            let session = live.get(&thread_id).ok_or("no session")?;
+            self.ensure(&mut live, thread_id, provider, resume, opts, sinks)
+                .map_err(SendError::Unsent)?;
+            let session = live
+                .get(&thread_id)
+                .ok_or_else(|| SendError::Unsent("no session".into()))?;
             (
                 session.handle.clone(),
                 session.generation,
@@ -50,16 +73,15 @@ impl Harness {
         };
         // The run this send belongs to is bound to the turn it is accepted as.
         let bound: Bound = Arc::new(move |turn| sinks.bound(generation, turn));
-        handle.send_turn(text, &bound)
+        handle.send_turn(text, &bound).map_err(SendError::Unknown)
     }
 
-    /// The reasoning level the thread's live session runs under, if one is
-    /// up. A card's continuation keeps it, so the session is not respawned.
-    pub fn live_effort(&self, thread_id: i64) -> Option<String> {
+    /// The thread's live session has work running in the background that
+    /// would end with it (`Handle::has_background_work`).
+    pub fn has_background_work(&self, thread_id: i64) -> bool {
         let live = self.live.lock().unwrap();
         live.get(&thread_id)
-            .filter(|l| l.is_alive())
-            .and_then(|l| l.effort.clone())
+            .is_some_and(|l| l.is_alive() && l.handle.has_background_work())
     }
 
     /// Take a question and everything after it out of the provider's own
@@ -78,9 +100,12 @@ impl Harness {
         // would stall every other thread's next message.
         let handle = {
             let mut live = self.live.lock().unwrap();
-            // Any live session will do — the reasoning level is irrelevant to
-            // a control-channel instruction, so no `ensure` respawn.
-            if !live.get(&thread_id).is_some_and(|l| l.is_alive()) {
+            // Any live session of this provider will do: the model and the
+            // reasoning level are irrelevant to a control-channel
+            // instruction, so they cause no respawn. Another provider's
+            // session gives way, as it would for a send.
+            let up = |l: &Live| l.is_alive() && l.selection.provider == provider;
+            if !live.get(&thread_id).is_some_and(up) {
                 self.ensure(&mut live, thread_id, provider, resume, opts, sinks)?;
             }
             live.get(&thread_id).ok_or("no session")?.handle.clone()
@@ -88,10 +113,12 @@ impl Harness {
         handle.rewind(to)
     }
 
-    /// Make sure this thread has a session that can be talked to, spawning or
-    /// resuming one when it has none. A live session is reused only if it
-    /// runs under the reasoning level asked for. A new one is a new
-    /// [`Generation`](super::Generation), and its sink carries that number.
+    /// Make sure this thread has a session of `provider` that can be talked
+    /// to under the model and reasoning level asked for. What becomes of a
+    /// live one is [`decide_transition`]'s call: kept, told the new model,
+    /// or ended for a session spawned or resumed in its place. A new one is
+    /// a new [`Generation`](super::Generation), and its sink carries that
+    /// number.
     fn ensure(
         &self,
         live: &mut HashMap<i64, Live>,
@@ -101,14 +128,34 @@ impl Harness {
         opts: &SendOptions,
         sinks: &Arc<dyn Sinks>,
     ) -> Result<(), String> {
-        if live
-            .get(&thread_id)
-            .is_some_and(|l| l.is_alive() && l.effort == opts.reasoning_effort)
-        {
-            return Ok(());
+        let target = Selection {
+            provider,
+            model: opts.model.clone(),
+            effort: opts.reasoning_effort.clone(),
+        };
+        let current = live.get(&thread_id).filter(|l| l.is_alive());
+        let transition = decide_transition(
+            current.map(|l| Current {
+                selection: &l.selection,
+                background: l.handle.has_background_work(),
+            }),
+            &target,
+            &self.capabilities(provider),
+        );
+        match transition {
+            Transition::Reuse => return Ok(()),
+            Transition::Reject(reason) => return Err(reason),
+            Transition::SwitchModelInSession => {
+                if let Some(session) = live.get_mut(&thread_id) {
+                    session.handle = session.handle.with_model(target.model.clone());
+                    session.selection = target;
+                }
+                return Ok(());
+            }
+            Transition::RestartAndResume | Transition::CreateWithHandoff => {}
         }
-        // A session that died is gone; a live one under another reasoning
-        // level has to go before its successor resumes the same session id.
+        // A session that died is gone; a live one that cannot take this
+        // send as it is has to go before its successor comes up.
         if let Some(old) = live.remove(&thread_id) {
             let reason = match old.is_alive() {
                 true => Release::Replaced,
@@ -124,13 +171,13 @@ impl Harness {
                 .replay_spawns
                 .lock()
                 .unwrap()
-                .remove(&thread_id)
+                .remove(&(thread_id, provider))
                 .expect("unrecorded provider spawn in replay");
             live.insert(
                 thread_id,
                 Live {
                     handle: spawn(sink),
-                    effort: opts.reasoning_effort.clone(),
+                    selection: target,
                     generation,
                     sinks: sinks.clone(),
                 },
@@ -246,7 +293,7 @@ impl Harness {
             thread_id,
             Live {
                 handle,
-                effort: opts.reasoning_effort.clone(),
+                selection: target,
                 generation,
                 sinks: sinks.clone(),
             },

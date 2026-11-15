@@ -14,23 +14,15 @@ pub async fn create_thread(
     first_message: &str,
 ) -> Result<i64, String> {
     let mut conn = pool.acquire().await.map_err(|e| e.to_string())?;
-    create(
-        &mut conn,
-        provider,
-        model,
-        subject_id,
-        lecture_id,
-        first_message,
-    )
-    .await
+    let chosen = (provider, model, None);
+    create(&mut conn, chosen, subject_id, lecture_id, first_message).await
 }
 
 /// [`create_thread`] on the caller's connection, so a send that creates its
 /// thread writes both in one transaction (`core/commit.rs`).
 pub async fn create(
     conn: &mut SqliteConnection,
-    provider: Provider,
-    model: Option<&str>,
+    (provider, model, effort): (Provider, Option<&str>, Option<&str>),
     subject_id: Option<i64>,
     lecture_id: Option<&str>,
     first_message: &str,
@@ -48,14 +40,15 @@ pub async fn create(
     };
     let title = title_from(first_message);
     let res = sqlx::query(
-        "INSERT INTO harness_threads (provider, model, subject_id, lecture_id, title, status)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'idle')",
+        "INSERT INTO harness_threads (provider, model, subject_id, lecture_id, title, status, effort)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'idle', ?6)",
     )
     .bind(provider.as_str())
     .bind(model)
     .bind(subject_id)
     .bind(lecture_id)
     .bind(title)
+    .bind(effort)
     .execute(&mut *conn)
     .await
     .map_err(|e| e.to_string())?;
@@ -110,6 +103,7 @@ pub struct ThreadRow {
     /// What the next send will use; a run records what it was sent with.
     pub provider: Provider,
     pub model: Option<String>,
+    pub effort: Option<String>,
     /// The subject's Canvas code, i.e. its `courses/` folder. Joined, not stored,
     /// so a rename cannot strand the thread; None is the general thread.
     pub subject_code: Option<String>,
@@ -132,7 +126,7 @@ pub struct LectureRef {
 
 pub async fn thread(pool: &SqlitePool, id: i64) -> Result<ThreadRow, String> {
     let r = sqlx::query(
-        "SELECT t.id, t.provider, t.model, s.code AS subject_code,
+        "SELECT t.id, t.provider, t.model, t.effort, s.code AS subject_code,
                 l.id AS lecture_id, l.title AS lecture_title, l.date AS lecture_date,
                 l.transcript_path
          FROM harness_threads t
@@ -165,16 +159,27 @@ pub async fn thread(pool: &SqlitePool, id: i64) -> Result<ThreadRow, String> {
         provider: Provider::parse(&provider)
             .ok_or_else(|| format!("unknown provider {provider}"))?,
         model: r.get("model"),
+        effort: r.get("effort"),
         subject_code: r.get("subject_code"),
         lecture,
     })
 }
 
-pub async fn set_model(pool: &SqlitePool, id: i64, model: Option<&str>) -> Result<(), String> {
-    sqlx::query("UPDATE harness_threads SET model = ?2 WHERE id = ?1")
+/// The provider, model and reasoning level the thread's next send uses.
+/// A run that is already written keeps what it was sent with.
+pub async fn select(
+    conn: &mut SqliteConnection,
+    id: i64,
+    provider: Provider,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Result<(), String> {
+    sqlx::query("UPDATE harness_threads SET provider = ?2, model = ?3, effort = ?4 WHERE id = ?1")
         .bind(id)
+        .bind(provider.as_str())
         .bind(model)
-        .execute(pool)
+        .bind(effort)
+        .execute(&mut *conn)
         .await
         .map(|_| ())
         .map_err(|e| e.to_string())

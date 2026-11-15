@@ -29,10 +29,21 @@ pub(in crate::harness) enum Kind {
         item_id: i64,
     },
     /// Take the chat back to a question and ask `text` in its place.
+    /// `provider` is the one the composer shows; `None` keeps the chat's.
     EditResend {
         item_id: i64,
         text: String,
         options: SendOptions,
+        provider: Option<Provider>,
+    },
+    /// What the chat's next send uses: a provider, a model and a reasoning
+    /// level. Stored at once, a running turn or not; a run already written
+    /// keeps what it was sent with, and a message that waits goes out under
+    /// whatever is chosen when its turn comes.
+    SelectModel {
+        provider: Provider,
+        model: Option<String>,
+        effort: Option<String>,
     },
     DeleteThread,
     /// Rewrite a message that still waits.
@@ -71,6 +82,7 @@ impl Kind {
             Kind::Send { .. } => "send",
             Kind::Rewind { .. } => "rewind",
             Kind::EditResend { .. } => "edit_resend",
+            Kind::SelectModel { .. } => "select_model",
             Kind::DeleteThread => DELETE_THREAD,
             Kind::EditQueued { .. } => "edit_queued",
             Kind::RemoveQueued { .. } => "remove_queued",

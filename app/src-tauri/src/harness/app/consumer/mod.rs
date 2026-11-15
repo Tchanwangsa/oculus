@@ -13,6 +13,7 @@ use tokio::runtime::Runtime;
 
 use crate::harness::core::effect::Effect;
 use crate::harness::event::{GapCause, Source};
+use crate::harness::providers::capabilities::{self, Capabilities};
 use crate::harness::{
     jobs, store, Generation, HarnessEvent, OwnTurns, Provider, Release, SendOptions,
 };
@@ -36,6 +37,14 @@ pub(in crate::harness) trait ConsumerIo {
     /// Ask for a `BusMsg::Wake` at `at`, sooner if another message comes
     /// first. Unanswered, waiting work is found by the next message.
     fn wake_at(&mut self, _at: Instant) {}
+    /// What `provider`'s bridge can do, as the app's sessions are held to it.
+    fn capabilities(&self, provider: Provider) -> Capabilities {
+        capabilities::of(provider)
+    }
+    /// The thread's live session has a background task running.
+    fn background(&self, _thread_id: i64) -> bool {
+        false
+    }
     fn open_pool(&mut self, rt: &Runtime) -> Option<SqlitePool>;
     fn name(
         &mut self,
@@ -185,7 +194,7 @@ impl Consumer {
             if self.runs.open_run(thread_id) != Some(run_id) {
                 continue;
             }
-            let shared = crate::harness::providers::capabilities::of(provider).shared_process;
+            let shared = io.capabilities(provider).shared_process;
             let others = match (&self.pool, shared) {
                 (Some(p), true) => self
                     .rt

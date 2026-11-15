@@ -3,6 +3,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::harness::core::effect::{self, Effect, Pools, Runtime};
+use crate::harness::providers::capabilities::Capabilities;
 use crate::harness::{jobs, opencode, store};
 use crate::harness::{Harness, HarnessEvent, OwnTurns, Provider};
 
@@ -55,6 +56,14 @@ struct AppIo {
 }
 
 impl ConsumerIo for AppIo {
+    fn capabilities(&self, provider: Provider) -> Capabilities {
+        self.namer.capabilities(provider)
+    }
+
+    fn background(&self, thread_id: i64) -> bool {
+        self.namer.has_background_work(thread_id)
+    }
+
     fn open_pool(&mut self, rt: &tokio::runtime::Runtime) -> Option<sqlx::SqlitePool> {
         rt.block_on(crate::db::store::open_pool()).ok()
     }

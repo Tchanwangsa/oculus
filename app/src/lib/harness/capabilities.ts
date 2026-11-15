@@ -16,11 +16,21 @@ export interface Capabilities {
   activeSteering: boolean;
   /** A running turn can be stopped and started again with a correction. */
   steerByRestart: boolean;
+  /** A live session takes another model with its next turn; where false a
+   *  model change restarts the session and resumes its conversation. */
+  modelSwitchInSession: boolean;
+  /** The bridge can take over a chat another provider started, from the
+   *  earlier conversation Rust hands it. Where false its models are locked
+   *  in a started chat of another provider's: start a new chat to switch. */
+  providerHandoff: boolean;
 }
 
 /** What a provider is taken to do until Rust has answered: nothing optional. */
 function unknown(provider: Provider): Capabilities {
-  return { provider, interrupt: false, rewind: false, sharedProcess: false, activeSteering: false, steerByRestart: false };
+  return {
+    provider, interrupt: false, rewind: false, sharedProcess: false, activeSteering: false, steerByRestart: false,
+    modelSwitchInSession: false, providerHandoff: false,
+  };
 }
 
 /** One shared answer for every reader, asked for once. `read` is explicit so

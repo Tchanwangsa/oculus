@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
@@ -42,9 +42,17 @@ pub struct ClaudeSession {
     /// The process's turn ordinals, shared with its reader: the stream names
     /// no turn.
     pub(super) turns: Arc<Turns>,
+    /// How many background tasks its reader counts as running.
+    pub(super) background: Arc<AtomicUsize>,
 }
 
 impl ClaudeSession {
+    /// A background `Agent` or Bash is still running in this process, and
+    /// would die with it.
+    pub fn has_background_tasks(&self) -> bool {
+        self.background.load(Ordering::SeqCst) > 0
+    }
+
     pub fn spawn(cfg: ClaudeSpawn, sink: Sink) -> Result<Arc<Self>, String> {
         if cfg!(windows) {
             return Err(
@@ -117,6 +125,7 @@ impl ClaudeSession {
         let interrupting = Arc::new(AtomicBool::new(false));
         let expecting = Arc::new(AtomicBool::new(false));
         let turns = Arc::new(Turns::default());
+        let background = Arc::new(AtomicUsize::new(0));
         let session = Arc::new(ClaudeSession {
             proc,
             request_ids: AtomicU64::new(1),
@@ -124,6 +133,7 @@ impl ClaudeSession {
             interrupting: interrupting.clone(),
             expecting: expecting.clone(),
             turns: turns.clone(),
+            background: background.clone(),
         });
 
         let reader_session = session.clone();
@@ -133,6 +143,7 @@ impl ClaudeSession {
                 interrupting,
                 expecting: expecting.clone(),
                 turns,
+                background_count: background,
                 ..Default::default()
             };
             child::read_json_lines(stdout, raw_log.as_ref(), |v| {

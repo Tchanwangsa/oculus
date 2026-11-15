@@ -233,7 +233,9 @@ pub fn run_once(
     });
     // Thread id 0 in the log dir: a headless run is not a thread.
     let sinks: Arc<dyn Sinks> = Arc::new(OneSink(sink));
-    harness.send(0, provider, None, opts, prompt, &sinks)?;
+    harness
+        .send(0, provider, None, opts, prompt, &sinks)
+        .map_err(|e| e.into_message())?;
     let failed = drain_turn(&rx, None, "finishing", &on_event);
     harness.shutdown();
     match failed {

@@ -421,6 +421,9 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           live = { ...prev, running: true };
           touchThread({ status: "running" });
           break;
+        case "selected":
+          touchThread({ provider: event.provider, model: event.model, effort: event.effort });
+          break;
         case "run_selected": {
           const run = env.runId == null ? undefined : runs[env.runId];
           if (run) setRun({ ...run, provider: event.provider, model: event.model, effort: event.effort });

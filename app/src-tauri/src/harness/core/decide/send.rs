@@ -5,12 +5,14 @@ use crate::harness::{Provider, SendOptions};
 use super::super::command::Command;
 use super::super::commit::Change;
 use super::super::state::State;
-use super::{Decision, Plan};
+use super::{select, Decision, Plan};
 
 /// A message starts its run on an idle chat and waits behind a busy one, or
 /// behind messages already waiting. A send with no chat makes one first, in
 /// the same commit. A message from the student also lifts a hold on the
 /// queue: it joins the back, and the held messages go out ahead of it.
+/// Whichever it does, the run takes the chat's selection when it starts,
+/// not when it was typed (`commit::begin`).
 pub(super) fn decide(
     state: &State,
     command: &Command,
@@ -20,14 +22,15 @@ pub(super) fn decide(
 ) -> Result<Decision, String> {
     let mut changes = Vec::new();
     match &state.thread {
-        Some(row) if row.provider != provider => {
-            return Err(format!(
-                "thread {} is a {} thread",
-                row.id,
-                row.provider.label()
-            ));
+        // A send carries the composer's selection, which becomes the chat's:
+        // another provider's is the switch, refused where it cannot be made.
+        Some(row) => {
+            if let Some(reason) = select::refusal(state, provider) {
+                return Err(reason);
+            }
+            let (model, effort) = (options.model.as_ref(), options.reasoning_effort.as_ref());
+            changes.extend(select::change(row, provider, model, effort));
         }
-        Some(_) => {}
         None => changes.push(Change::CreateThread {
             provider,
             options: options.clone(),
@@ -45,7 +48,6 @@ pub(super) fn decide(
     let caps = capabilities::of(provider);
     changes.push(match resolve_delivery(mode, &state.chat(), &caps, slash) {
         Delivery::Start => Change::Begin {
-            provider,
             text: text.to_string(),
             options: options.clone(),
             receipt: command.id.clone(),
@@ -53,7 +55,6 @@ pub(super) fn decide(
         },
         Delivery::Queue | Delivery::Steer | Delivery::Restart | Delivery::StopThenQueue => {
             Change::Enqueue {
-                provider,
                 text: text.to_string(),
                 options: options.clone(),
             }
@@ -67,7 +68,7 @@ pub(super) fn decide(
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::state::{Live, OpenRun};
+    use super::super::super::state::{Live, OpenRun, Takeover};
     use super::*;
     use crate::harness::core::Kind;
     use crate::harness::store::ThreadRow;
@@ -77,6 +78,7 @@ mod tests {
             id: 4,
             provider,
             model: None,
+            effort: None,
             subject_code: None,
             lecture: None,
         }
@@ -180,15 +182,50 @@ mod tests {
     }
 
     #[test]
-    fn another_providers_chat_refuses_the_send() {
-        let options = SendOptions::default();
-        let refused = decide(
-            &state(Some(thread(Provider::Claude)), false),
-            &send(Some(4)),
-            (Provider::Codex, Mode::Auto),
-            "hello",
-            &options,
+    fn a_send_under_another_provider_switches_the_chat_where_the_bridge_takes_handoffs() {
+        let options = SendOptions {
+            model: Some("gpt".into()),
+            ..SendOptions::default()
+        };
+        let codex = (Provider::Codex, Mode::Auto);
+        let mut claude = state(Some(thread(Provider::Claude)), false);
+        let refused = decide(&claude, &send(Some(4)), codex, "hello", &options);
+        assert_eq!(
+            refused.err().unwrap(),
+            "Codex cannot take over a chat that has started. Start a new chat to switch."
         );
-        assert_eq!(refused.err().unwrap(), "thread 4 is a Claude Code thread");
+        claude.live.takeover = Takeover::read(|p| p == Provider::Codex);
+        let Decision::Commit(plan) =
+            decide(&claude, &send(Some(4)), codex, "hello", &options).unwrap()
+        else {
+            panic!("a send asks the provider nothing");
+        };
+        assert!(matches!(
+            plan.changes.as_slice(),
+            [
+                Change::Select { provider: Provider::Codex, model: Some(model), effort: None },
+                Change::Begin { .. }
+            ] if model == "gpt"
+        ));
+        // Mid-turn the pick is stored and the message waits: it goes out
+        // under whatever is chosen when its turn comes.
+        claude.open = Some(OpenRun {
+            run_id: 9,
+            starting: false,
+            stop_requested: false,
+        });
+        let Decision::Commit(plan) =
+            decide(&claude, &send(Some(4)), codex, "hello", &options).unwrap()
+        else {
+            panic!("a send asks the provider nothing");
+        };
+        assert!(matches!(
+            plan.changes.as_slice(),
+            [Change::Select { .. }, Change::Enqueue { .. }]
+        ));
+        // A background task of the old provider's holds the chat to it.
+        claude.live.background = true;
+        let held = decide(&claude, &send(Some(4)), codex, "hello", &options);
+        assert!(held.err().unwrap().contains("background task"));
     }
 }

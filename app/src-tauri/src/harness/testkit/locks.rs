@@ -32,7 +32,7 @@ fn a_send_waiting_on_its_cli_holds_up_no_other_thread() {
     let quick: Wire = Arc::new(|_| Ok(()));
     for (thread, wire) in [(1, slow), (2, quick)] {
         let bridge = crate::harness::claude::replay::bridge(wire, Arc::new(|_| {}));
-        harness.replay_spawn(thread, move |_| bridge.handle);
+        harness.replay_spawn(thread, Provider::Claude, move |_| bridge.handle);
     }
 
     let send = |thread: i64| {
@@ -57,7 +57,7 @@ fn a_send_waiting_on_its_cli_holds_up_no_other_thread() {
     let other = harness.clone();
     let second = send(2);
     std::thread::spawn(move || {
-        let sent = second.join().unwrap();
+        let sent = second.join().unwrap().map_err(|e| e.into_message());
         let stopped = other.interrupt(2).and_then(|()| other.interrupt(1));
         let _ = done.send(sent.and(stopped));
     });

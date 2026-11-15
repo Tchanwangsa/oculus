@@ -34,7 +34,7 @@ pub(in crate::harness) fn bridge(outbound: Outbound, sink: Sink, id: &str, root:
         SessionRoute {
             sink,
             agent: "oculus",
-            model: None,
+            model: Mutex::new(None),
             variant: None,
             state: Mutex::new(SessionState::default()),
         },

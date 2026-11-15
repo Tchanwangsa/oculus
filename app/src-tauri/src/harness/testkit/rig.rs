@@ -337,6 +337,88 @@ impl Rig {
         (thread, bridge)
     }
 
+    /// Another provider's recording, for the same chat: its frames and what
+    /// its bridge is expected to be sent. Nothing is registered yet.
+    pub fn recording(&self, name: &str) -> Recording {
+        let (fixture, frames) = super::fixture::Fixture::load(name);
+        Recording {
+            provider: fixture.provider,
+            frames,
+            expected: fixture.expected_outbound,
+            native_session: fixture.native_session,
+        }
+    }
+
+    /// A recorded session of `recording`'s provider, which the manager's
+    /// next spawn of that provider for this chat opens, and one more turn
+    /// its bridge is expected to be sent, under any prompt
+    /// ([`Self::prompts`]). The bridge is the test's to feed.
+    pub fn session_of(&mut self, recording: &Recording) -> Bridge {
+        self.expect_turn(recording);
+        session(
+            &self.harness,
+            self.thread,
+            recording.provider,
+            &self.outbound,
+            &recording.native_session,
+            &self.scratch,
+        )
+    }
+
+    /// One more turn `recording`'s bridge is expected to be sent, under
+    /// any prompt.
+    pub fn expect_turn(&self, recording: &Recording) {
+        self.outbound
+            .expect(recording.expected.iter().cloned().map(|mut turn| {
+                turn.any_prompt = true;
+                turn
+            }));
+    }
+
+    /// The prompts that went out where any was accepted, in order.
+    pub fn prompts(&self) -> Vec<String> {
+        self.outbound.prompts()
+    }
+
+    /// A student's message under the composer's `provider` and `opts`.
+    pub fn say(
+        &mut self,
+        receipt: &str,
+        provider: Provider,
+        text: &str,
+        opts: &SendOptions,
+    ) -> Result<Outcome, String> {
+        self.command(Command {
+            id: receipt.into(),
+            thread_id: Some(self.thread),
+            kind: Kind::Send {
+                provider,
+                text: text.into(),
+                options: opts.clone(),
+                mode: Default::default(),
+            },
+        })
+    }
+
+    /// The student picks what the chat's next send uses.
+    pub fn select(
+        &mut self,
+        receipt: &str,
+        provider: Provider,
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> Result<Outcome, String> {
+        self.command(Command {
+            id: receipt.into(),
+            thread_id: Some(self.thread),
+            kind: Kind::SelectModel {
+                provider,
+                model: model.map(String::from),
+                effort: effort.map(String::from),
+            },
+        })
+    }
+
     /// What this runtime's consumer has told so far.
     pub fn envelopes(&self) -> Vec<Value> {
         self.told.lock().unwrap().clone()
@@ -503,6 +585,23 @@ impl Rig {
     }
 }
 
+/// A recording joined to a rig's chat ([`Rig::recording`]).
+pub(super) struct Recording {
+    pub provider: Provider,
+    pub frames: Vec<Value>,
+    expected: Vec<super::outbound::Expected>,
+    native_session: String,
+}
+
+impl Recording {
+    /// Feed the whole recording to `bridge`.
+    pub fn play(&self, bridge: &mut Bridge) {
+        for frame in &self.frames {
+            (bridge.inbound)(frame);
+        }
+    }
+}
+
 /// What a restart tears down and brings up again: the manager, the consumer
 /// on its bus, and a recorded session for the thread's next spawn.
 struct Running {
@@ -638,7 +737,7 @@ fn session(
         Provider::Antigravity => crate::harness::antigravity::replay::bridge(outbound.wire(), sink),
     };
     let handle = bridge.handle.clone();
-    harness.replay_spawn(thread, move |sink| {
+    harness.replay_spawn(thread, provider, move |sink| {
         *opened.lock().unwrap() = Some(sink);
         handle
     });

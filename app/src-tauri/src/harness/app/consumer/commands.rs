@@ -7,7 +7,7 @@ use crate::harness::core::commit::{self, Applied, Began, Change, Receipt};
 use crate::harness::core::decide::{decide, Answer, Ask, Decision, Plan};
 use crate::harness::core::driver::{self, Calls, Step};
 use crate::harness::core::effect::Effect;
-use crate::harness::core::state::{self, Live};
+use crate::harness::core::state::{self, Live, Takeover};
 use crate::harness::core::{receipts, Command, Kind, Outcome};
 use crate::harness::store::queue::Waiting;
 use crate::harness::{store, HarnessEvent, Provider, Release, SendOptions};
@@ -64,7 +64,7 @@ impl Consumer {
         if self.asking.values().any(|a| a.command.id == command.id) {
             return Err(format!("command {} is still running", command.id));
         }
-        let live = self.live(command.thread_id);
+        let live = self.live(command.thread_id, io);
         let state = self.rt.block_on(state::read(&pool, command, live))?;
         let provider = match (&state.thread, &command.kind) {
             (Some(row), _) => row.provider,
@@ -140,7 +140,7 @@ impl Consumer {
     ) -> Result<Outcome, String> {
         let pool = self.pool.clone().ok_or("the database is not open")?;
         let command = &asking.command;
-        let live = self.live(command.thread_id);
+        let live = self.live(command.thread_id, io);
         let state = self.rt.block_on(state::read(&pool, command, live))?;
         match decide(&state, command, Some(answer))? {
             Decision::Commit(plan) => {
@@ -151,10 +151,12 @@ impl Consumer {
     }
 
     /// What only this process knows about a chat, for its deciders.
-    fn live(&self, thread_id: Option<i64>) -> Live {
+    fn live(&self, thread_id: Option<i64>, io: &impl ConsumerIo) -> Live {
         Live {
             held: thread_id.is_some_and(|id| self.held(id)),
             own_turn: thread_id.is_some_and(|id| self.runs.own_open(id)),
+            background: thread_id.is_some_and(|id| io.background(id)),
+            takeover: Takeover::read(|provider| io.capabilities(provider).provider_handoff),
         }
     }
 
@@ -260,6 +262,18 @@ impl Consumer {
                 self.event(thread_id, provider, From::App, event, continuation, io);
                 let selected = HarnessEvent::RunSelected {
                     provider,
+                    model,
+                    effort,
+                };
+                self.event(thread_id, provider, From::App, selected, None, io);
+            }
+            Applied::Selected {
+                provider: chosen,
+                model,
+                effort,
+            } => {
+                let selected = HarnessEvent::Selected {
+                    provider: chosen,
                     model,
                     effort,
                 };
@@ -374,7 +388,6 @@ impl Consumer {
     ) -> Result<(), String> {
         let plan = Plan {
             changes: vec![Change::Begin {
-                provider,
                 text,
                 options,
                 receipt: store::fresh_receipt(),
@@ -396,11 +409,7 @@ impl Consumer {
         io: &mut impl ConsumerIo,
     ) -> Result<(), String> {
         let plan = Plan {
-            changes: vec![Change::Enqueue {
-                provider,
-                text,
-                options,
-            }],
+            changes: vec![Change::Enqueue { text, options }],
             text: None,
         };
         self.commit(None, Some(thread_id), provider, plan, io)
@@ -432,7 +441,7 @@ impl Consumer {
                 asked: open.is_some_and(|run| self.asked.contains(&run)),
                 held: self.held(thread_id),
             };
-            match driver::step(thread_id, provider, saved, calls) {
+            match driver::step(thread_id, saved, calls) {
                 Step::Start(start) => {
                     self.started.insert(start.run.run_id);
                     io.perform(Effect::Start(start));
@@ -523,8 +532,10 @@ impl Consumer {
             Sent::Withdrawn => Some("interrupted"),
             // A start that died under a stop (a force stop killed the
             // process it was waiting on) is the stop's doing, not a failure.
-            Sent::Failed(_) if self.stops.contains_key(&run_id) => Some("interrupted"),
-            Sent::Failed(error) => {
+            Sent::Failed(_) | Sent::Unknown(_) if self.stops.contains_key(&run_id) => {
+                Some("interrupted")
+            }
+            Sent::Failed(error) | Sent::Unknown(error) => {
                 self.event(
                     thread_id,
                     provider,
