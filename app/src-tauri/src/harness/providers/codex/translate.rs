@@ -154,7 +154,7 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
                 }
                 "fileChange" => {
                     // Its approval request names the item only.
-                    st.changes.insert(id.clone(), item["changes"].clone());
+                    keep_changes(st, &id, &item["changes"]);
                     let paths: Vec<String> = item
                         .get("changes")
                         .and_then(|c| c.as_array())
@@ -222,6 +222,9 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
                 },
             });
         }
+        // A patch that changed after its item started: its approval must
+        // still check every path it named.
+        "item/fileChange/patchUpdated" => keep_changes(st, &s(p, "itemId"), &p["changes"]),
         "item/agentMessage/delta" => {
             st.streamed_messages.insert(s(p, "itemId"));
             let text = s(p, "delta");
@@ -416,6 +419,27 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
 }
 
 /// Leaks a few bytes per distinct window length ever seen.
+/// Add `changes` to what the `fileChange` item `id` is known to change,
+/// keyed by path and kind: a later version of one replaces its diff, and a
+/// path it no longer names stays, so the check before its approval is
+/// never narrower than anything the patch said.
+fn keep_changes(st: &mut ThreadState, id: &str, changes: &Value) {
+    let kept = st
+        .changes
+        .entry(id.to_string())
+        .or_insert_with(|| json!([]));
+    let (Some(kept), Some(changes)) = (kept.as_array_mut(), changes.as_array()) else {
+        return;
+    };
+    for change in changes {
+        let same = |c: &&mut Value| c["path"] == change["path"] && c["kind"] == change["kind"];
+        match kept.iter_mut().find(same) {
+            Some(old) => *old = change.clone(),
+            None => kept.push(change.clone()),
+        }
+    }
+}
+
 fn return_label(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }

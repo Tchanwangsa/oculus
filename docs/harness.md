@@ -1636,7 +1636,8 @@ turns that name none. Outside `quiet` the thread's config also turns on
   escalation arrives as an ordinary command request.
 - **File changes** carry no paths: the request names the `fileChange` item
   that came before it, whose changes (path, diff, kind) the route state
-  keeps (`ThreadState::changes`). They become the payload and the paths
+  keeps (`ThreadState::changes`), adding any `item/fileChange/patchUpdated`
+  sends for it, so a path the patch named once is still checked. They become the payload and the paths
   Rust checks; a request whose item is unknown is declined unseen.
 - **Permissions** are answered with the profile asked for and `scope:
   "turn"` ("Allow for this turn"), or an empty profile to decline. The

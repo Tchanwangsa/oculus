@@ -538,3 +538,33 @@ fn a_permissions_grant_on_a_glob_or_a_special_root_is_declined_unseen() {
     };
     assert_eq!(request.paths, ["/elsewhere"]);
 }
+
+#[test]
+fn a_patch_that_grows_after_its_item_started_has_every_path_checked() {
+    let (server, _, events) = captured(PermissionMode::Ask);
+    let change = |path: &str, diff: &str| serde_json::json!({ "path": path, "kind": { "type": "update", "move_path": null }, "diff": diff });
+    server.handle_notification(
+        "item/started",
+        &serde_json::json!({ "threadId": "chat", "item": {
+            "type": "fileChange", "id": "f1", "changes": [change("/w/a.md", "+a")],
+        }}),
+    );
+    server.handle_notification(
+        "item/fileChange/patchUpdated",
+        &serde_json::json!({ "threadId": "chat", "turnId": "t", "itemId": "f1",
+            "changes": [change("/w/a.md", "+a2"), change("/lib/courses/b.md", "+b")] }),
+    );
+    while events.try_recv().is_ok() {}
+    server.dispatch(serde_json::json!({
+        "id": 5, "method": "item/fileChange/requestApproval",
+        "params": { "threadId": "chat", "itemId": "f1" },
+    }));
+    let HarnessEvent::RequestAsked { request, .. } = events.try_recv().unwrap() else {
+        panic!("a request");
+    };
+    assert_eq!(request.paths, ["/w/a.md", "/lib/courses/b.md"]);
+    assert_eq!(
+        request.payload["changes"][0]["diff"], "+a2",
+        "the latest diff is shown"
+    );
+}
