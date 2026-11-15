@@ -14,9 +14,11 @@ use serde_json::Value;
 
 use crate::harness::child::str_of;
 use crate::harness::event::{
-    cap_output, classify, GapCause, HarnessEvent, Provider, RateWindow, Source, TurnId, Turns,
+    cap_output, classify, GapCause, HarnessEvent, Provider, RateWindow, Review, Source, TurnId,
+    Turns,
 };
 
+use super::approvals::Agent;
 use super::transcript::{anchor_for, tool_result_text, transcript_path};
 
 fn varint(bytes: &mut &[u8]) -> Option<u64> {
@@ -144,6 +146,31 @@ pub(super) struct Translator {
     pub(super) settled: HashSet<String>,
     /// Descriptions of background tasks finished since a turn last opened.
     pub(super) finished: Vec<String>,
+    /// The subagents started in this process, by task id: a permission
+    /// prompt names its subagent by that id (`approvals.rs`).
+    pub(super) agents: HashMap<String, Agent>,
+}
+
+/// A decision the CLI made on a call without asking anyone, as its row
+/// shows it: the Auto classifier's either way, or a deny rule's refusal
+/// (the protected paths, `sqlite3`). The host's own answers and calls the
+/// mode allows say nothing.
+fn review_of(meta: &Value) -> Option<Review> {
+    let decision = meta.get("permission_decision")?;
+    let status = match (
+        str_of(decision, "decision").as_str(),
+        str_of(decision, "reason_type").as_str(),
+    ) {
+        ("accept", "classifier") => "approved",
+        ("reject", "classifier" | "rule") => "denied",
+        _ => return None,
+    };
+    Some(Review {
+        status: status.into(),
+        risk: None,
+        rationale: None,
+        source: Some(str_of(decision, "reason_type")),
+    })
 }
 
 impl Translator {
@@ -187,6 +214,15 @@ impl Translator {
         let id = str_of(v, "tool_use_id");
         if id.is_empty() {
             return;
+        }
+        let kind = str_of(v, "subagent_type");
+        if v.get("subtype").and_then(|s| s.as_str()) == Some("task_started") && !kind.is_empty() {
+            let agent = Agent {
+                kind,
+                tool: id.clone(),
+                description: str_of(v, "description"),
+            };
+            self.agents.insert(str_of(v, "task_id"), agent);
         }
         match v.get("subtype").and_then(|s| s.as_str()) {
             // A foreground task (a subagent's own Bash) ends with its tool_result.
@@ -412,6 +448,18 @@ impl Translator {
                     let output = tool_result_text(block, v.get("tool_use_result"));
                     if self.settled.remove(&id) {
                         continue;
+                    }
+                    let meta = v.get("tool_result_meta").and_then(Value::as_array);
+                    let review = meta
+                        .into_iter()
+                        .flatten()
+                        .find(|m| str_of(m, "id") == id)
+                        .and_then(review_of);
+                    if let Some(review) = review {
+                        out.push(HarnessEvent::ToolReviewed {
+                            id: id.clone(),
+                            review,
+                        });
                     }
                     // A launch that failed has no task to wait for.
                     if let Some(task) = self.background.get_mut(&id) {

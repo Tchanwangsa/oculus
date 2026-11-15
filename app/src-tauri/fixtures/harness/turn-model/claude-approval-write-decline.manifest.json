@@ -1,0 +1,53 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.325",
+  "protocol": "Claude print stream-json with the control channel (--permission-prompts host --permission-prompt-tool stdio)",
+  "model": "claude-haiku-5-5",
+  "capture_date": "2026-11-15",
+  "source": "stage 2 Claude probe 04-approval-write-deny.jsonl, lines 3-142, inbound frames",
+  "redaction": "CLI stdout frames only, as recorded (tokens, account ids and emails were already removed by the probe). The probe's temp-folder suffixes are removed and any home path becomes /Users/student. The expected outbound is the Oculus bridge's for this permission mode, not the probe driver's messages. Recorded with a private CLAUDE_CONFIG_DIR, --setting-sources '' and --strict-mcp-config.",
+  "scenario": "a Write outside the allowed folders declined",
+  "frames": 139,
+  "sha256": "fad3d2257eb30f29875e7eb364403d9e86e6129a65d05514b9632a97bae6505a",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "e9447400-3a19-4ffa-a64f-ed4a8d985236",
+          "response": {
+            "behavior": "deny",
+            "message": "The student declined this. Do not retry it or try another way to do the same thing."
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-approval-write-decline.ndjson",
+  "native_session": "",
+  "permission_mode": "ask",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "recorded session route; scratch cwd",
+    "recorded_permission_mode": "acceptEdits",
+    "permission_mode": "ask"
+  }
+}

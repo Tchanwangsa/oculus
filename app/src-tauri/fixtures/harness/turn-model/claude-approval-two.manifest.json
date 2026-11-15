@@ -1,0 +1,75 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.325",
+  "protocol": "Claude print stream-json with the control channel (--permission-prompts host --permission-prompt-tool stdio)",
+  "model": "claude-haiku-5-5",
+  "capture_date": "2026-11-15",
+  "source": "stage 2 Claude probe 17-two-pending-readonly.jsonl, lines 3-87, inbound frames",
+  "redaction": "CLI stdout frames only, as recorded (tokens, account ids and emails were already removed by the probe). The probe's temp-folder suffixes are removed and any home path becomes /Users/student. The expected outbound is the Oculus bridge's for this permission mode, not the probe driver's messages. Recorded with a private CLAUDE_CONFIG_DIR, --setting-sources '' and --strict-mcp-config.",
+  "scenario": "two escapes pending at once, answered second first",
+  "frames": 82,
+  "sha256": "2fa64df7ddd13597401fb9cf127ce7badb82ada5fd0d10f19d024e0508b22886",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "a7b7ce7d-036c-4906-aaae-452382bc444b",
+          "response": {
+            "behavior": "allow",
+            "updatedInput": {
+              "command": "echo SECOND-PARALLEL",
+              "description": "Echo SECOND-PARALLEL marker",
+              "dangerouslyDisableSandbox": true
+            }
+          }
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "df43fcbf-ad8c-46bc-890a-1d4bc52e2522",
+          "response": {
+            "behavior": "allow",
+            "updatedInput": {
+              "command": "echo FIRST-PARALLEL",
+              "description": "Echo FIRST-PARALLEL marker",
+              "dangerouslyDisableSandbox": true
+            }
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-approval-two.ndjson",
+  "native_session": "",
+  "permission_mode": "ask",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "recorded session route; scratch cwd",
+    "recorded_permission_mode": "acceptEdits",
+    "permission_mode": "ask"
+  }
+}

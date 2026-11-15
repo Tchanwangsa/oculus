@@ -154,9 +154,13 @@ protected paths are one list in `protected.rs`: the library folders, the root fi
 
 - **Claude**: its sandbox with the cwd as the write root (plus the two holes
   below), `--add-dir` for
-  reads (without it `ls ../courses` is refused), `Edit` denies on protected
-  paths so `--add-dir` doesn't pull them into `acceptEdits`, and
-  `--permission-prompts none`, since an unanswered prompt under `-p` hangs.
+  reads (without it `ls ../courses` is refused), and `Edit` denies on
+  protected paths so `--add-dir` doesn't pull them into `acceptEdits`. What
+  that leaves undecided comes to the host as a permission prompt and is
+  asked of the student by the chat's mode
+  ([Claude asks over its control channel](#claude-asks-over-its-control-channel));
+  a one-off turn runs `--permission-prompts none`, since nobody is there to
+  answer and an unanswered prompt under `-p` hangs.
 - **Codex**: `workspace-write` rooted at the cwd (plus the two holes below),
   its approval policy is the chat's permission mode
   ([Requests](#requests)): `never` in "Don't ask" and every one-off turn.
@@ -1609,8 +1613,10 @@ tells `PermissionMode`; it is refused while a request waits ("Answer the
 waiting request before changing how this chat asks."). The consumer reads
 the saved mode as each request arrives, so a change mid-turn decides the
 turn's next request: under `quiet` it is declined unseen, under `ask` or
-`auto` it is shown. Auto's reviewer is a wire setting, so a switch to or
-from `auto` takes effect from the next turn's start. The start step
+`auto` it is shown. Auto's reviewer is a launch setting (Codex's on each
+`turn/start`, Claude's at spawn), so a switch to or from `auto` takes effect
+from the next turn's start, and on Claude, whose mode is fixed at spawn, by
+restarting the session for it. The start step
 reads it off the row (`SendOptions::permission_mode`), as does a rewind
 that respawns the session, and it is part of
 the session's reuse key ([`decide_transition`](#changing-provider-mid-chat)).
@@ -1729,6 +1735,66 @@ saved mode. Outside `quiet` the thread's config also turns on
 - `has_pending_request` counts callbacks not yet answered or retired, which
   `decide_transition` reads to refuse a switch away from Codex.
 
+### Claude asks over its control channel
+
+Recorded on Claude Code 2.1.325 (`fixtures/harness/claude-approval-*`,
+`claude-auto-*`; replayed by `testkit/claude_requests.rs`).
+`providers/claude/approvals.rs`; the launch is `session::permission_args`
+and `settings_json`:
+
+| Mode | `--permission-mode` | Prompts | `allowUnsandboxedCommands` |
+| --- | --- | --- | --- |
+| `ask` | `acceptEdits` | `--permission-prompts host --permission-prompt-tool stdio` | true |
+| `auto` | `auto` (the CLI's classifier) | the same | false |
+| `quiet` | `acceptEdits` | the same; the consumer declines each prompt unseen | false |
+| one-off turns | `default` | `--permission-prompts none`: the CLI denies them | false |
+
+A chat's launch also passes `--disallowedTools AskUserQuestion`: under host
+prompts the CLI would offer it, and nothing answers a question yet. Only Ask
+lets a command ask to leave the sandbox: in Auto the classifier would be all
+that stands between a shell command and a protected folder, and in Don't ask
+nobody would approve one. The mode is fixed at spawn (the settings file
+differs between Ask and the others), so `mode_switch_in_session` is false and
+a change restarts the session at the next send.
+
+- **The wire.** A prompt is a `control_request` `can_use_tool`; the answer is
+  a `control_response` on its `request_id`: `allow` with the tool's input as
+  sent, or `deny` with a message ("The student declined this…", or "Oculus
+  declined this without asking the student…" when Rust declines it unseen).
+  The CLI sends nothing back for an answer, so a line the pipe took is
+  `acknowledged`; a write that breaks is `uncertain`; a process already gone
+  is `failed`. `native_ref` is the `request_id` as JSON.
+- **What is asked.** A `Bash` call (payload `command`, its `description` as
+  the reason, `outsideSandbox` only when it sets `dangerouslyDisableSandbox`);
+  a file tool (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`) writing outside
+  the allowed folders, as a file change whose `paths` are the file and every
+  folder the CLI's `addDirectories` suggestion names, so a grant reaching a
+  protected folder or the library refuses it unseen; and
+  `SandboxNetworkAccess`, a new host for a sandboxed command (payload
+  `host`; its call id is not the command's). Any other prompt (a read
+  outside, a web fetch, an MCP tool) is declined unseen, as is every prompt
+  of a one-off turn and one that arrives while Stop is being asked. The
+  CLI's suggested grants are never sent back: the network one would persist
+  to `localSettings`. Approve once and Decline only.
+- **Withdrawal.** `control_cancel_request` names a prompt the CLI gave up.
+  After our interrupt (probe `08`) the turn's end cancels it as stopped and
+  nothing is written to it; otherwise it becomes `RequestRetired` (expired,
+  withdrawn).
+- **A subagent** asks on the parent's channel with `agent_id`, the task's
+  id, not `parent_tool_use_id`. The translator keeps each `task_started`'s
+  `subagent_type`, Agent call and description by task id, so the payload
+  says `agent: { path, tool, description }`. A background subagent can ask
+  after its parent's `result`: no turn is open, so the consumer declines it
+  unseen. One that asks inside a turn the CLI started itself is shown with
+  no run and cancelled when that turn ends.
+- **Auto** sends no prompt for what the classifier decides; the tool result's
+  `tool_result_meta[].permission_decision` says it (`reason_type:
+  classifier`), and a deny rule's refusal too (`reason_type: rule`, in any
+  mode). The translator turns either into `ToolReviewed` with `source`
+  `classifier` or `rule`. No classifier refusal has been recorded.
+- `has_pending_request` counts prompts not yet answered or withdrawn, which
+  `decide_transition` reads to refuse a switch away from Claude.
+
 ## Going back rewinds the agent too
 
 Edit, Retry and Rewind truncate at a row (`harness::store::truncate`, announced as
@@ -1833,7 +1899,7 @@ from the thread's live session and the run's selection, in this order:
 | another provider's | `CreateWithHandoff` | the old session is released (`Replaced`) and the target's is spawned or resumed |
 | same provider, another reasoning level | `RestartAndResume` | released and resumed under the new level |
 | same provider, another model | `SwitchModelInSession` where `model_switch_in_session` is true: Codex's next `turn/start` and opencode's next prompt name it. Else `RestartAndResume` | |
-| same provider, another permission mode | `SwitchModeInSession` where `mode_switch_in_session` is true (Codex names it on its next `turn/start`) or the bridge has no `approvals` (it reads no mode, so the mode is only recorded). Else `RestartAndResume` | |
+| same provider, another permission mode | `SwitchModeInSession` where `mode_switch_in_session` is true (Codex names it on its next `turn/start`) or the bridge has no `approvals` (it reads no mode, so the mode is only recorded). Else `RestartAndResume` (Claude, whose mode is fixed at spawn) | |
 | the same selection and mode | `Reuse` | |
 
 A rewind brings up the question's provider the same way, without regard to

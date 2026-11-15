@@ -101,9 +101,10 @@ impl Harness {
                 ClaudeSpawn {
                     base: self.claude_base(base(cwd)?)?,
                     oculus: discover::oculus_cli(),
-                    // `default` auto-allows no tool; with prompts routed to
-                    // `none` a stray call is refused rather than hanging.
-                    permission_mode: "default".into(),
+                    // Never read: a one-off turn's prompts are denied by the
+                    // CLI (`--permission-prompts none`), so a stray call is
+                    // refused rather than hanging.
+                    mode: crate::harness::requests::PermissionMode::Quiet,
                     system_append: instructions.to_string(),
                     one_off: true,
                 },

@@ -463,6 +463,12 @@ impl Rig {
         self.told.lock().unwrap().clone()
     }
 
+    /// The library the replayed chat runs over: the scratch folder, whose
+    /// protected paths a request may not name.
+    pub fn library(&self) -> PathBuf {
+        self.scratch.to_path_buf()
+    }
+
     /// Whether the thread's recorded process is still up: a replayed
     /// process records its kill.
     pub fn alive(&self) -> bool {

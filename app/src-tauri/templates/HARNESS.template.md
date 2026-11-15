@@ -57,12 +57,15 @@ paths at the end of the message.
   ids. Read `oculus-plan` when amending one.
 ## Chat shell
 
-Respect sandbox refusals; do not work around them.
+Respect sandbox refusals; do not work around them. Depending on how the
+student set up this chat, a step the sandbox blocks may be refused outright
+or put to them to approve once; a declined step stays declined.
 
 - **Run one command per call.** Pipes and `&&` are permitted; loops,
   substitution (`$(…)` and backticks), shell variables and multiline
-  arguments are refused with nobody to approve them. Write literal values,
-  quote subject codes with spaces, and make separate calls for several files.
+  arguments are refused or held for the student's approval. Write literal
+  values, quote subject codes with spaces, and make separate calls for
+  several files.
 - `oculus` is already on `PATH`. Call it by name, never by an absolute path,
   and do not `cd` out of this folder to reach it. On opencode, shell commands
   are limited to `oculus …` and `ls …`; use native read and grep tools for

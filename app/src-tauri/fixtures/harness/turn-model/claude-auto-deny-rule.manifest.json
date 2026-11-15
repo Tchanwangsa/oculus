@@ -1,0 +1,39 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.325",
+  "protocol": "Claude print stream-json with the control channel (--permission-prompts host --permission-prompt-tool stdio)",
+  "model": "claude-haiku-5-5",
+  "capture_date": "2026-11-15",
+  "source": "stage 2 Claude probe 18-auto-deny-rules.jsonl, lines 3-54, inbound frames",
+  "redaction": "CLI stdout frames only, as recorded (tokens, account ids and emails were already removed by the probe). The probe's temp-folder suffixes are removed and any home path becomes /Users/student. The expected outbound is the Oculus bridge's for this permission mode, not the probe driver's messages. Recorded with the normal config folder and --setting-sources '' --strict-mcp-config; no owner settings, hooks or MCP.",
+  "scenario": "Auto: a Write into a protected folder is refused by the Edit deny rule, nobody is asked (first of the probe's two turns)",
+  "frames": 52,
+  "sha256": "710338eaba08c838cd75f8eac758459dc1e5e0c4be9fb90227b949815477601b",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-auto-deny-rule.ndjson",
+  "native_session": "",
+  "permission_mode": "auto",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "recorded session route; scratch cwd",
+    "recorded_permission_mode": "auto",
+    "permission_mode": "auto"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.325",
+  "protocol": "Claude print stream-json with the control channel (--permission-prompts host --permission-prompt-tool stdio)",
+  "model": "claude-haiku-5-5",
+  "capture_date": "2026-11-15",
+  "source": "stage 2 Claude probe 01-approval-escape-allow.jsonl, lines 3-132, inbound frames",
+  "redaction": "CLI stdout frames only, as recorded (tokens, account ids and emails were already removed by the probe). The probe's temp-folder suffixes are removed and any home path becomes /Users/student. The expected outbound is the Oculus bridge's for this permission mode, not the probe driver's messages. The probe's first redactor also replaced the letters 'pro' with [REDACTED] in some strings; left as recorded. Recorded with a private CLAUDE_CONFIG_DIR, --setting-sources '' and --strict-mcp-config.",
+  "scenario": "a Bash call with dangerouslyDisableSandbox approved once",
+  "frames": 129,
+  "sha256": "63c747cc8f5084798c542998c4621959ba43dd7c4882e6a69194e57a994a237e",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "d173312d-34b4-44f2-b37d-c64c45f3e4e8",
+          "response": {
+            "behavior": "allow",
+            "updatedInput": {
+              "command": "touch /private/tmp/oculus-claude-external.XXXXXX/escape-allow",
+              "description": "Touch escape-allow file outside sandbox",
+              "dangerouslyDisableSandbox": true
+            }
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-approval-escape.ndjson",
+  "native_session": "",
+  "permission_mode": "ask",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "recorded session route; scratch cwd",
+    "recorded_permission_mode": "acceptEdits",
+    "permission_mode": "ask"
+  }
+}

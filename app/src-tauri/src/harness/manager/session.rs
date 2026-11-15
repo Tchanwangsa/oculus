@@ -233,7 +233,7 @@ impl Harness {
                 ClaudeSpawn {
                     base: self.claude_base(base(cwd)?)?,
                     oculus: discover::oculus_cli(),
-                    permission_mode: "acceptEdits".into(),
+                    mode,
                     system_append: instructions(
                         &self.data_dir,
                         opts.scope.as_deref(),
