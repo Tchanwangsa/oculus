@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createAnnouncer, SETTLE_MS, spokenStatus, type Spoken, type Timers } from "@/lib/harness";
+import { createAnnouncer, lastTurnEnd, SETTLE_MS, spokenStatus, type HarnessRun, type Spoken, type Timers } from "@/lib/harness";
 
 /** Hand-driven timers: `tick(ms)` fires what is due. */
 function fakeTimers() {
@@ -119,5 +119,18 @@ describe("spokenStatus", () => {
     expect(spokenStatus({ ...base, lastRun: "interrupted" })).toBe("stopped");
     expect(spokenStatus({ ...base, approval: true, running: true })).toBe("approval");
     expect(spokenStatus(base)).toBeNull();
+  });
+});
+
+describe("lastTurnEnd", () => {
+  const runs: Record<number, HarnessRun> = {
+    2: { id: 2, status: "completed", delivery: "delivered", answer_item_id: 1, started_ms: 0, ended_ms: 1 },
+  };
+  test("the last turn heard ending wins: a stopped CLI turn has no run of its own", () => {
+    expect(lastTurnEnd("interrupted", runs)).toBe("interrupted");
+  });
+  test("with none heard (a fresh view), the newest run says", () => {
+    expect(lastTurnEnd(undefined, runs)).toBe("completed");
+    expect(lastTurnEnd(undefined, undefined)).toBeNull();
   });
 });

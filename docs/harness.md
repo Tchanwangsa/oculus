@@ -907,7 +907,12 @@ writes it into the draft once and drops it from the route.
   `app/src/lib/harness/announce.ts`): never the status a view opens on or
   switches to, only one that holds for 300 ms (a queued message going out
   flips Done to Working at once), never the same word twice, and never a
-  message or a step.
+  message or a step. How the last turn ended is the last `turn_finished`
+  the view heard (`LiveTurn.ended`, `lastTurnEnd`), else the newest run's
+  status: a turn the CLI started itself has no run, so stopping it is still
+  said as Stopped. A run being stopped is still open and stays Working until
+  its turn ends; a held queue does not keep a thread Working
+  (`turn_finished` stays running only for a message that is not held).
 
 Deleting a thread drops its retained live output, view holds and context-drift
 marker as well as rows and queue, so removed turns cannot leave the sidebar busy.

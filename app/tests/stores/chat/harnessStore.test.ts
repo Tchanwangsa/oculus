@@ -1,6 +1,6 @@
 import { beforeEach, expect, test } from "bun:test";
 import { anyRunning, useHarnessStore } from "@/stores/chat/harnessStore";
-import type { HarnessEnvelope, HarnessItem, HarnessThread } from "@/lib/harness";
+import { lastTurnEnd, spokenStatus, type HarnessEnvelope, type HarnessItem, type HarnessThread } from "@/lib/harness";
 
 const idle = { running: false, streaming: "", thinking: "", toolOutput: {} };
 beforeEach(() => {
@@ -61,4 +61,53 @@ test("a turn the agent starts itself leaves a row and runs until it finishes", (
   state = useHarnessStore.getState();
   expect(state.live[1].running).toBe(false);
   expect(state.threads[0].status).toBe("idle");
+});
+
+/** What the open thread's announcer would say now. */
+function spoken(threadId: number) {
+  const s = useHarnessStore.getState();
+  return spokenStatus({
+    running: s.live[threadId]?.running ?? false,
+    approval: false,
+    input: false,
+    lastRun: lastTurnEnd(s.live[threadId]?.ended, s.runs[threadId]),
+  });
+}
+
+test("stopping a turn the agent started itself is said as Stopped, not as the run before it ended", () => {
+  useHarnessStore.setState({
+    threads: [{ id: 1, status: "idle" }] as HarnessThread[],
+    items: { 1: [] },
+    runs: { 1: { 4: { id: 4, status: "failed", delivery: "incomplete", answer_item_id: null, started_ms: 0, ended_ms: 1 } } },
+  });
+  const apply = useHarnessStore.getState().apply;
+  apply({ threadId: 1, provider: "claude", itemId: 31, event: { type: "unprompted_turn", after: ["Agent"] } });
+  expect(spoken(1)).toBe("working");
+  apply({ threadId: 1, provider: "claude", itemId: 32, event: { type: "turn_finished", status: "interrupted" } });
+  expect(useHarnessStore.getState().live[1].ended).toBe("interrupted");
+  expect(spoken(1)).toBe("stopped");
+});
+
+test("a stopped run whose queue is held ends idle and Stopped, not Working", () => {
+  useHarnessStore.setState({
+    threads: [{ id: 1, status: "running" }] as HarnessThread[],
+    items: { 1: [] },
+    live: { 1: { ...idle, running: true } },
+    runs: { 1: { 5: { id: 5, status: "running", delivery: "unknown", answer_item_id: null, started_ms: 0, ended_ms: null } } },
+  });
+  const apply = useHarnessStore.getState().apply;
+  apply({ threadId: 1, provider: "claude", itemId: null, event: { type: "stop_requested", run_id: 5 } });
+  // Still open while it stops: Working is true until the turn ends.
+  expect(useHarnessStore.getState().runs[1][5].stopping).toBe(true);
+  expect(spoken(1)).toBe("working");
+  apply({ threadId: 1, provider: "claude", itemId: null, event: { type: "queue", messages: [{ id: "8", text: "next", held: true }] } });
+  apply({
+    threadId: 1, provider: "claude", itemId: null, runId: 5,
+    event: { type: "run_settled", answer_item_id: null, work_item_ids: [], delivery: "incomplete", status: "interrupted" },
+  } as HarnessEnvelope);
+  apply({ threadId: 1, provider: "claude", itemId: 33, event: { type: "turn_finished", status: "interrupted" } });
+  const state = useHarnessStore.getState();
+  expect(state.live[1].running).toBe(false);
+  expect(state.threads[0].status).toBe("idle");
+  expect(spoken(1)).toBe("stopped");
 });

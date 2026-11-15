@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { createAnnouncer, lastRunStatus, spokenStatus } from "@/lib/harness";
+import { createAnnouncer, lastTurnEnd, spokenStatus } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 
 /**
@@ -12,7 +12,7 @@ import { useHarnessStore } from "@/stores/chat/harnessStore";
 export function ThreadAnnouncer({ threadId }: { threadId: number }) {
   const [text, setText] = useState("");
   const running = useHarnessStore((s) => s.live[threadId]?.running ?? false);
-  const lastRun = useHarnessStore((s) => lastRunStatus(s.runs[threadId]));
+  const lastRun = useHarnessStore((s) => lastTurnEnd(s.live[threadId]?.ended, s.runs[threadId]));
   // Until the thread's runs are read, its status is unknown, not news.
   const loaded = useHarnessStore((s) => threadId in s.runs);
   const announcer = useRef<ReturnType<typeof createAnnouncer> | null>(null);

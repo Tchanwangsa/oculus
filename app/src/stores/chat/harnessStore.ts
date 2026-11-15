@@ -30,6 +30,9 @@ export interface LiveTurn {
   streaming: string;
   thinking: string;
   toolOutput: Record<string, string>;
+  /** How the newest turn heard of ended (`turn_finished`), a turn the CLI
+   *  started itself included, which has no run to say so. */
+  ended?: "completed" | "interrupted" | "failed";
 }
 
 const IDLE: LiveTurn = { running: false, streaming: "", thinking: "", toolOutput: {} };
@@ -564,7 +567,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           // held one is not (a stop or a failed turn holds the queue).
           if (event.status === "interrupted") push(rowFrom(env, "interrupted", ""));
           const more = (s.queued[threadId] ?? []).some((q) => !q.held);
-          live = { ...IDLE, running: more };
+          live = { ...IDLE, running: more, ended: event.status };
           touchThread({
             status: event.status === "failed" ? "error" : more ? "running" : "idle",
             settled_at: new Date().toISOString(),
@@ -579,7 +582,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           break;
         case "exited":
           if (prev.running) {
-            live = { ...IDLE };
+            live = { ...IDLE, ended: prev.ended };
             touchThread({ status: "idle" });
           }
           break;

@@ -1,5 +1,6 @@
+import { lastRunStatus } from "./runs";
 import { threadStatus, type ThreadStatus } from "./threadStatus";
-import type { RunStatus } from "./types";
+import type { HarnessRun, RunStatus } from "./types";
 
 /** What the announcer can say about the open thread. */
 export type Spoken = ThreadStatus | "stopped";
@@ -30,6 +31,18 @@ export function spokenStatus(i: {
   });
   if (s) return s;
   return i.lastRun === "interrupted" ? "stopped" : null;
+}
+
+/** How the thread's newest turn ended, for `spokenStatus`: the last
+ *  `turn_finished` this view heard (`LiveTurn.ended`), which covers a turn
+ *  the CLI started itself, else its newest run's status. A stopped CLI turn
+ *  has no run, so the runs alone would still say how the turn before it
+ *  ended. */
+export function lastTurnEnd(
+  ended: RunStatus | undefined,
+  runs: Record<number, HarnessRun> | undefined,
+): RunStatus | null {
+  return ended ?? lastRunStatus(runs);
 }
 
 export interface Timers {
