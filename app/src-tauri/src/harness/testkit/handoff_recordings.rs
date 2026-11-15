@@ -115,7 +115,7 @@ fn answer(rig: &Rig, run: i64) -> String {
     ).bind(run).fetch_one(&rig.pool)).unwrap()
 }
 
-fn replay_full(target: Provider) {
+fn replay_full(target: Provider) -> super::replay::Replay {
     let mut scenario = Scenario::recorded(&format!("{}-ls", source(target).as_str()));
     scenario.fixture.expected_outbound.clear();
     let mut rig = Rig::start(scenario);
@@ -132,9 +132,10 @@ fn replay_full(target: Provider) {
     check(&rig, run.run_id, "full", 1, 3);
     let replay = rig.finish();
     assert_eq!(replay.ledger["runs"][3]["provider"], target.as_str());
+    replay
 }
 
-fn replay_delta(target: Provider) {
+fn replay_delta(target: Provider) -> super::replay::Replay {
     let mut scenario = Scenario::recorded(&format!("handoff-{}-delta", target.as_str()));
     let end = scenario.frames.iter().position(terminal).unwrap() + 1;
     scenario.gates.push(("missed".into(), end));
@@ -160,7 +161,7 @@ fn replay_delta(target: Provider) {
     rig.drain();
     check(&rig, run.run_id, "delta", 2, 4);
     rig.close();
-    rig.finish();
+    rig.finish()
 }
 
 fn check(rig: &Rig, run: i64, kind: &str, from: i64, to: i64) {
@@ -221,4 +222,25 @@ fn antigravity_answers_from_a_full_handoff_without_obeying_its_standing_order() 
 #[test]
 fn antigravity_answers_from_a_delta_handoff_without_obeying_its_standing_order() {
     replay_delta(Provider::Antigravity);
+}
+
+pub(super) const NAMES: [&str; 6] = [
+    "handoff-claude-full",
+    "handoff-claude-delta",
+    "handoff-codex-full",
+    "handoff-codex-delta",
+    "handoff-antigravity-full",
+    "handoff-antigravity-delta",
+];
+
+pub(super) fn recorded(name: &str) -> super::replay::Replay {
+    assert!(NAMES.contains(&name));
+    let rest = name.strip_prefix("handoff-").unwrap();
+    let (provider, kind) = rest.rsplit_once('-').unwrap();
+    let provider = Provider::parse(provider).unwrap();
+    if kind == "full" {
+        replay_full(provider)
+    } else {
+        replay_delta(provider)
+    }
 }

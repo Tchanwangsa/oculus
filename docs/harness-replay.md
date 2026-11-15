@@ -216,24 +216,29 @@ scripted bus (`Bench::allow_handoff`) it checks a rewind to a question
 another provider answered, a rewind to a run that carried a handoff, and an
 edit sent under another provider.
 `testkit/handoff_recordings.rs` seeds three synthetic earlier exchanges and
-replays the Claude, Codex and print-mode Antigravity `handoff-*-full` fixtures as the first target run after a provider
-switch, with its exact outbound prompt checked by `Rig::session_checked`.
+replays the Claude, Codex and print-mode Antigravity `handoff-*-full`
+fixtures as the first target run after a provider switch, with its exact
+outbound prompt checked by `Rig::session_checked`.
 Their `delta` recordings include a real warmup turn and then the missed
 conversation in the same native session; the replay inserts source runs
 between those turns and checks that only the delta is sent. Both check
 recall, omission of the planted `PINEAPPLE` standing order, completed runs
 and inline delivery. These recordings use direct CLI spawns in dummy
 scratch folders with normal sign-in; they do not drive the live Oculus
-runtime. Their manifests include launch settings and every stdout frame. Codex replay
-restores the spawn model from the next expected turn because it substitutes
-for `thread/start`.
+runtime. Their manifests include launch settings and every stdout frame.
+Codex replay restores the spawn model from the next expected turn because
+it substitutes for `thread/start`.
 Antigravity's manifest pins equal before/after settings checksums: direct
 print-mode recording does not install the Oculus bridge's global rules.
 Rejected wording probes live under
 `app/src-tauri/fixtures/harness/handoff-rejected/` and never enable a flag.
 The optional `export_the_production_handoff_prompts` test writes the prompts
 from the production replay send into `OCULUS_HANDOFF_CAPTURE_DIR`, which
-must be a temporary folder. No CLI runs from that test.
+must be a temporary folder. No CLI runs from that test. The registry
+dispatches these six fixtures to their multi-run driver: source rows are
+seeded in SQL, target rows pass through the live event projection, and all
+rows survive reopen. The release
+gate runs the six handoff fixtures as well as the 39 matrix cases.
 
 `testkit/queue.rs` checks queued runs: a message sent mid-turn through a
 real bridge waiting as a run and starting as the same run, the queue's

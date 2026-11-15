@@ -21,30 +21,56 @@ fn recorded_registry_runs_every_provider_through_store_and_rows() {
         else {
             continue;
         };
-        let replay = run(Scenario::recorded(name));
-        assert_eq!(replay.items, replay.reopened, "reopened SQL: {name}");
-        assert_eq!(replay.outbound.len(), 1, "only recorded send: {name}");
-        assert!(!replay.busy, "queue settled: {name}");
-        let projection = project(&replay);
-        assert_eq!(
-            stable(&replay.items),
-            stable(projection["items"].as_array().unwrap()),
-            "live/reload: {name}"
-        );
-        let ids: Vec<i64> = replay
-            .items
-            .iter()
-            .map(|v| v["id"].as_i64().unwrap())
-            .collect();
-        assert!(
-            ids.windows(2).all(|w| w[0] < w[1]),
-            "monotonic committed row ids: {name}"
-        );
-        assert_eq!(replay.snapshots.len(), replay.envelopes.len());
-        assert!(replay.schema.contains(&"harness_items".to_string()));
+        verify_fixture(name);
         count += 1;
     }
-    assert_eq!(count, 19, "every fixture needs a registered runner");
+    assert_eq!(count, 25, "every fixture needs a registered runner");
+}
+
+fn verify_fixture(name: &str) {
+    let scenario = Scenario::recorded(name);
+    let provider = scenario.fixture.provider;
+    let sends = scenario.fixture.expected_outbound.len();
+    let handoff = super::handoff_recordings::NAMES.contains(&name);
+    let replay = if handoff {
+        super::handoff_recordings::recorded(name)
+    } else {
+        run(scenario)
+    };
+    assert_eq!(replay.items, replay.reopened, "reopened SQL: {name}");
+    assert_eq!(replay.outbound.len(), sends, "only recorded send: {name}");
+    assert!(!replay.busy, "queue settled: {name}");
+    let projection = project(&replay);
+    // Synthetic source runs precede the captured turns in SQL, not on the
+    // target's event stream; only the recorded target rows project live.
+    let live_items: Vec<_> =
+        replay
+            .items
+            .iter()
+            .filter(|item| {
+                !handoff
+                    || replay.ledger["runs"].as_array().unwrap().iter().any(|run| {
+                        run["id"] == item["run_id"] && run["provider"] == provider.as_str()
+                    })
+            })
+            .cloned()
+            .collect();
+    assert_eq!(
+        stable(&live_items),
+        stable(projection["items"].as_array().unwrap()),
+        "live/reload: {name}"
+    );
+    let ids: Vec<i64> = replay
+        .items
+        .iter()
+        .map(|v| v["id"].as_i64().unwrap())
+        .collect();
+    assert!(
+        ids.windows(2).all(|w| w[0] < w[1]),
+        "monotonic committed row ids: {name}"
+    );
+    assert_eq!(replay.snapshots.len(), replay.envelopes.len());
+    assert!(replay.schema.contains(&"harness_items".to_string()));
 }
 
 #[test]
@@ -140,6 +166,9 @@ fn release_matrix_has_no_known_failures() {
         if !observed.is_empty() {
             broken.push(format!("{}: {observed:?}", case.id));
         }
+    }
+    for name in super::handoff_recordings::NAMES {
+        verify_fixture(name);
     }
     assert!(
         broken.is_empty(),
