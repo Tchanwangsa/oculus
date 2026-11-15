@@ -219,6 +219,30 @@ pub async fn bind_session(
     Ok(())
 }
 
+/// The provider's live session in this chat is gone. One that never named
+/// itself cannot be resumed, so whatever it had seen is lost with it: its
+/// binding covers nothing, and the next send hands a new session the whole
+/// chat. `None` for `thread_id` is every chat, at startup: no session
+/// survives a restart.
+pub async fn forget_unnamed(
+    db: impl SqliteExecutor<'_>,
+    thread: Option<(i64, Provider)>,
+) -> Result<(), String> {
+    let lost = "UPDATE harness_bindings SET covered_through = 0, context_tokens = NULL
+                 WHERE native_session IS NULL AND covered_through != 0";
+    let done = match thread {
+        Some((thread_id, provider)) => {
+            sqlx::query(&format!("{lost} AND thread_id = ?1 AND provider = ?2"))
+                .bind(thread_id)
+                .bind(provider.as_str())
+                .execute(db)
+                .await
+        }
+        None => sqlx::query(lost).execute(db).await,
+    };
+    done.map(|_| ()).map_err(|e| e.to_string())
+}
+
 /// The session answering `run_id` reported its context: how much it holds
 /// and the window it has. A handoff into that session budgets against it.
 pub async fn report_usage(

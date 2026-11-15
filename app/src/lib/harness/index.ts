@@ -16,6 +16,7 @@ export * from "./oculusCli";
 export * from "./types";
 export * from "./reads";
 export * from "./runs";
+export * from "./switching";
 export * from "./threadStatus";
 export * from "./announce";
 export * from "./usageLimit";

@@ -199,6 +199,19 @@ run; a stop for a run that just finished; a stop during a slow start on all
 four bridges; a failed turn and a failed sign-in holding the queue; a stop
 and Resume around a turn the CLI started; and a waiting message held at
 startup that resumes with the options it was queued with.
+`testkit/switching.rs` checks a change of provider mid-chat on one rig
+with several recordings: `Rig::recording(name)` loads another provider's
+recording, `Rig::session_of(&recording)` registers it as that provider's
+next spawn for the chat and expects one more turn of it under any prompt
+(`Expected.any_prompt`), `Rig::prompts()` reads what was sent, and
+`Rig::say` and `Rig::select` send under a named provider. It replays
+Claude, Codex, Claude, Codex (a full handoff, then deltas into resumed
+sessions), a history too long for the budget, a message too long for any
+handoff, a crash before and after the start step took a run that carried
+one, a message queued before a switch, a model change on Claude (respawn)
+and on Codex (the next `turn/start`), a pick stored mid-turn, and the two
+refusals. A recorded Codex or opencode session names itself when the
+manager opens it, as `start_thread` and `attach_session` do.
 `testkit/queue.rs` checks queued runs: a message sent mid-turn through a
 real bridge waiting as a run and starting as the same run, the queue's
 commands, options riding the queue, a continuation's place in line, and

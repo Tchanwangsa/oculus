@@ -7,6 +7,7 @@
 use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 
+use crate::harness::handoff::store::{self as handoff, HandoffView};
 use crate::harness::store::{queue, QueuedMessage};
 
 #[derive(Serialize)]
@@ -63,6 +64,8 @@ pub struct Run {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub resolved_model: Option<String>,
+    /// The earlier conversation its first prompt carried, if any.
+    pub handoff: Option<HandoffView>,
 }
 
 pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String> {
@@ -95,6 +98,7 @@ pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String>
         run_id: r.get("run_id"),
     })
     .collect();
+    let mut handoffs = handoff::views(&mut *tx, thread_id).await?;
     let runs = sqlx::query(
         "SELECT r.id, r.execution_status, r.delivery_state, r.answer_item_id,
                 COALESCE(r.started_at, r.requested_at) AS started_at, r.ended_at,
@@ -121,6 +125,7 @@ pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String>
         model: r.get("model"),
         effort: r.get("effort"),
         resolved_model: r.get("resolved_model"),
+        handoff: handoffs.remove(&r.get::<i64, _>("id")),
     })
     .collect();
     let queued = queue::list(&mut *tx, thread_id).await?;

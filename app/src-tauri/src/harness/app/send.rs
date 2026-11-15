@@ -7,7 +7,7 @@ use sqlx::SqlitePool;
 
 use crate::harness::antigravity_rules;
 use crate::harness::core::effect::{Runtime, Start};
-use crate::harness::store;
+use crate::harness::{handoff, store};
 use crate::harness::{LectureBrief, Provider, SendError, SendOptions, StudioBrief};
 use crate::runtime::blocking::run as blocking;
 
@@ -150,6 +150,13 @@ async fn send(rt: &Runtime, start: Start) -> Result<bool, Failure> {
     )
     .await?;
     let text = super::skills::name_picked_skills(provider, &opts.skills, text);
+    // The earlier conversation this session has not seen goes first, in
+    // its marked block. One that cannot be sent fails the run here, before
+    // the provider hears anything.
+    let text = match handoff::store::outgoing(&pool, run.run_id).await? {
+        Some(block) => handoff::history::with_block(&block, &text),
+        None => text,
+    };
     // The last check before the provider hears of it: a run stopped while
     // this step prepared, or one a rewind or a delete took, is not sent.
     if !store::claim_start(&pool, &run).await? {

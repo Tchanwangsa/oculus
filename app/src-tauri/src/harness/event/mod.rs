@@ -367,6 +367,16 @@ pub enum HarnessEvent {
         model: Option<String>,
         effort: Option<String>,
     },
+    /// A run's context handoff: the earlier conversation its first prompt
+    /// carries to a session that has not seen it. Told when the run is
+    /// written (`pending`, or `failed` for one that does not fit) and again
+    /// when its start step is over (`inline` once the provider has the
+    /// prompt, `failed` when it never did).
+    Handoff {
+        run_id: i64,
+        #[serde(flatten)]
+        handoff: crate::harness::handoff::store::HandoffView,
+    },
     /// What a run is sent with: the provider, model and reasoning level of
     /// the chat's selection when it started. Told once, after the run's
     /// question; an answer's footer reads it, never the thread.

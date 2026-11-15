@@ -108,6 +108,7 @@ pub fn writes(ev: &HarnessEvent) -> bool {
             | HarnessEvent::RunSettled { .. }
             | HarnessEvent::RunSelected { .. }
             | HarnessEvent::Selected { .. }
+            | HarnessEvent::Handoff { .. }
             | HarnessEvent::DeliveryNotice { .. }
             | HarnessEvent::RateLimits { .. }
             | HarnessEvent::TurnStarted { .. }
@@ -374,6 +375,12 @@ async fn apply_rows(
                 .execute(&mut *conn)
                 .await
                 .map_err(|e| e.to_string())?;
+            // The session's own occupancy: what a handoff into it has to
+            // fit beside (`handoff/budget.rs`).
+            if let Some(owner) = owner {
+                super::bindings::report_usage(conn, owner.run_id, *context_tokens, *context_window)
+                    .await?;
+            }
             Ok(Stored::default())
         }
         HarnessEvent::ThreadTitled { title } => {
@@ -440,6 +447,7 @@ async fn apply_rows(
         | HarnessEvent::RunSettled { .. }
         | HarnessEvent::RunSelected { .. }
         | HarnessEvent::Selected { .. }
+        | HarnessEvent::Handoff { .. }
         | HarnessEvent::DeliveryNotice { .. }
         | HarnessEvent::RateLimits { .. } => Ok(Stored::default()),
     }

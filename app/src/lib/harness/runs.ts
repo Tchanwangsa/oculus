@@ -1,6 +1,6 @@
 import { sqliteUtcToMs } from "@/lib/format/format";
 import type { Provider } from "./providers";
-import type { HarnessRun, RunStatus } from "./types";
+import type { HarnessRun, RunHandoff, RunStatus } from "./types";
 
 /** A `harness_runs` row as `harnessLoad` returns it (`Run` in
  *  `harness/core/load.rs`); a run that never started reads its interval
@@ -17,6 +17,7 @@ export interface RunRow {
   model?: string | null;
   effort?: string | null;
   resolved_model?: string | null;
+  handoff?: RunHandoff | null;
 }
 
 /** The statuses of a run with a timeline row. `starting` is saved and not
@@ -38,6 +39,7 @@ export function runFromRow(row: RunRow): HarnessRun {
       : {}),
     ...(row.provider ? { provider: row.provider, model: row.model ?? null, effort: row.effort ?? null } : {}),
     ...(row.resolved_model ? { resolved_model: row.resolved_model } : {}),
+    ...(row.handoff ? { handoff: row.handoff } : {}),
   };
 }
 

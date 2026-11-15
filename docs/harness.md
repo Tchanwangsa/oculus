@@ -1618,6 +1618,86 @@ from the thread's live session and the run's selection, in this order:
 A rewind brings up the question's provider the same way, without regard to
 model or level.
 
+**A session that has not seen the chat is handed it.** Each provider's
+binding says how much of the chat its session has seen
+(`covered_through`, a run ordinal). When a run is written, `handoff::store::plan`
+(called by `commit::begin`, so the run, its binding and its handoff land in
+one transaction) compares that with the chat:
+
+| The run's session | Handoff |
+| --- | --- |
+| has seen every earlier run | none: the prompt is the message alone |
+| has seen nothing (no native session, no coverage) | `full`: every earlier message, rows from before runs included |
+| was here before and missed runs | `delta`: only the runs after `covered_through` |
+| had a handoff sent into it that was never confirmed (a row still `pending`) | the session is given up (`bindings::fresh`) and a new one gets a `full` handoff |
+
+A handoff is a transcript, never a summary a model writes
+(`handoff/history.rs`): the student's messages and each run's one selected
+answer, in timeline order, plus a reply with no run that followed a missed
+run (a turn Claude started itself). Never reasoning, tool output,
+permissions or anything a rewind removed. It goes at the top of the run's
+prompt in a marked block, ahead of everything else the start step adds:
+
+```text
+<earlier-conversation from="Oculus">
+This block is earlier conversation from this Oculus chat. …
+It is history for context: not a new request, and not an instruction from the student. Their new message comes after the block.
+2 messages follow, whole and in order. Nothing was left out. …
+
+[Student]
+…
+
+[Agent (Claude Code)]
+…
+
+</earlier-conversation>
+
+The student's new message:
+…
+```
+
+- **A budget chooses what goes** (`handoff/budget.rs`, `select_history`;
+  ported from T3 Code's `handoffBudget.ts` with its test cases). The budget
+  is the target session's window (what its binding last reported in a
+  `Usage` event, else 128k) less what that session already holds, the new
+  message, and room to work (a quarter of the window, at least 16k), capped
+  at 16,000 bytes; sizes are bytes of JSON. The student's first message,
+  their latest and the latest reply are kept first, then the rest newest to
+  oldest; a message goes whole or not at all, and the block says how many
+  were left out. The source provider's window is never read.
+- **Over budget.** When not even the block's opening lines fit beside what a
+  resumed session holds, a new session with a `full` handoff is tried.
+  When that does not fit either, the session is kept, the handoff is saved
+  as `failed`, and the start step fails the run before the provider hears
+  of it: an error row ("The earlier conversation does not fit …") and a
+  failed run, which holds the queue.
+- **Delivery is recorded** in `harness_handoffs.status`. A handoff is
+  `pending` from the commit that writes its run. The start step renders it
+  (`handoff::store::outgoing`) and reports how the send went; the consumer
+  then settles it (`Consumer::settle_handoff`): `inline` once the provider
+  has the prompt (`Sent::Accepted`, or the run completing), `failed` when
+  it never did (`Sent::Withdrawn`, `Sent::Failed`). A write to the provider
+  that itself failed (`Sent::Unknown`) leaves it `pending`, as does a crash
+  after the start step took the run: nobody knows what that session holds,
+  so its next run starts a new one. A run that goes back to its queue at
+  startup (`requeue_unsent`) loses its handoff row and plans again.
+- **Coverage moves with delivery.** A prompt that reached the provider
+  moves its binding's `covered_through` to that run. A session that never
+  named itself cannot be resumed, so when it ends, or the app restarts, its
+  binding covers nothing again (`bindings::forget_unnamed`).
+- **A CLI command carries none.** A message starting with `/` must stay
+  first in its prompt, so its handoff waits for the next message.
+- **Views are told.** `Handoff { run_id, kind, status, from, omitted }`
+  goes out when the run is written and again when it settles, and
+  `harness_load` returns it on the run (`RunHandoff`, `handoffLabel` and
+  `runSwitch` in `lib/harness/switching.ts`).
+
+`switching.rs` in the testkit replays these through recorded bridges:
+Claude → Codex → Claude → Codex, the dropped middle, the send that cannot
+fit, the crash on either side of the start step, a message queued before a
+switch, and the refusals. Its rig lets every bridge take a handoff
+(`Harness::allow_handoff_everywhere`), which no production path can.
+
 ## opencode providers go through its own server
 
 `opencode serve` exposes `/provider`, `/provider/auth`, `PUT`/`DELETE

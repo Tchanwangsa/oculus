@@ -283,6 +283,13 @@ impl Consumer {
         if reason == Release::Deleted {
             self.runs.forget(thread_id);
             self.parked.remove(&thread_id);
+        } else if let Some(pool) = &self.pool {
+            // A session that never named itself cannot be resumed: what it
+            // had seen of the chat is gone with it.
+            let lost = store::bindings::forget_unnamed(pool, Some((thread_id, provider)));
+            if let Err(e) = self.rt.block_on(lost) {
+                elog!("[oculus] harness thread {thread_id}: binding: {e}");
+            }
         }
         self.runs.end(thread_id, generation);
     }

@@ -171,3 +171,21 @@ test("a pick changes the thread's selection and leaves its runs alone", () => {
   expect(state.threads[0]).toMatchObject({ provider: "codex", model: "gpt-6.1", effort: null });
   expect(state.runs[1][7]).toMatchObject({ provider: "claude", model: "opus", effort: "high" });
 });
+
+test("a run's handoff is told as pending, then as delivered, and outlives its settlement", () => {
+  useHarnessStore.setState({ threads: [{ id: 1, status: "idle", provider: "codex" }] as HarnessThread[], items: { 1: [] }, runs: {} });
+  const apply = useHarnessStore.getState().apply;
+  apply({ threadId: 1, provider: "codex", itemId: 40, runId: 7, event: { type: "user_message", text: "hi" } });
+  apply({ threadId: 1, provider: "codex", itemId: null, runId: 7, event: { type: "handoff", run_id: 7, kind: "full", status: "pending", from: "claude", omitted: 3 } });
+  expect(useHarnessStore.getState().runs[1][7].handoff).toEqual({ kind: "full", status: "pending", from: "claude", omitted: 3 });
+  apply({ threadId: 1, provider: "codex", itemId: null, runId: 7, event: { type: "handoff", run_id: 7, kind: "full", status: "inline", from: "claude", omitted: 3 } });
+  apply({
+    threadId: 1, provider: "codex", itemId: null, runId: 7,
+    event: { type: "run_settled", answer_item_id: null, work_item_ids: [], delivery: "delivered", status: "completed" },
+  });
+  expect(useHarnessStore.getState().runs[1][7].handoff?.status).toBe("inline");
+  expect(runFromRow({
+    id: 3, execution_status: "completed", delivery_state: "delivered", answer_item_id: null, started_at: null, ended_at: null,
+    provider: "codex", handoff: { kind: "delta", status: "inline", from: "claude", omitted: 0 },
+  }).handoff?.kind).toBe("delta");
+});

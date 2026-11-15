@@ -6,3 +6,4 @@
 
 pub(in crate::harness) mod budget;
 pub(in crate::harness) mod history;
+pub(in crate::harness) mod store;

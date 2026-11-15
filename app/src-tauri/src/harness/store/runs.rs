@@ -34,6 +34,9 @@ pub struct SendIntent {
     pub model: Option<String>,
     /// The reasoning level it is sent under; `None` where the model has none.
     pub effort: Option<String>,
+    /// The binding it goes out on, when its handoff plan chose one
+    /// (`handoff::store::plan`); `None` takes the provider's current one.
+    pub binding: Option<i64>,
     pub receipt: String,
     pub text: String,
     pub at: Option<i64>,
@@ -93,9 +96,14 @@ pub async fn begin(tx: &mut SqliteConnection, send: &SendIntent) -> Result<RunSt
         }
     }
     // The provider's one current session in this chat is what it resumes.
-    let binding_id = super::bindings::current(&mut *tx, send.thread_id, send.provider)
-        .await?
-        .id;
+    let binding_id = match send.binding {
+        Some(id) => id,
+        None => {
+            super::bindings::current(&mut *tx, send.thread_id, send.provider)
+                .await?
+                .id
+        }
+    };
     sqlx::query(
         "UPDATE harness_threads SET status = 'running', updated_at = datetime('now') WHERE id = ?1",
     )
@@ -467,6 +475,11 @@ pub async fn settle(
         .execute(&mut *tx)
         .await
         .map_err(err)?;
+    // A provider that completed the turn had its prompt, whatever became of
+    // the start step's own report: the handoff it carried went in.
+    if status == "completed" {
+        crate::harness::handoff::store::delivered(&mut tx, run_id).await?;
+    }
     // A run the provider never accepted has no start; its request time stands in.
     let (started_at, ended_at): (Option<String>, Option<String>) = sqlx::query_as(
         "SELECT COALESCE(started_at, requested_at), ended_at FROM harness_runs WHERE id = ?1",

@@ -98,6 +98,7 @@ fn intent(thread: i64, card: &str, receipt: &str) -> store::SendIntent {
         provider: Provider::Codex,
         model: None,
         effort: None,
+        binding: None,
         receipt: receipt.into(),
         text: "Sync finished — continuing".into(),
         at: None,

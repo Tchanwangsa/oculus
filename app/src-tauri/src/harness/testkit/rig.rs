@@ -110,6 +110,18 @@ impl Rig {
         let card = scenario
             .continuation
             .then(|| runtime.block_on(super::continuation::seed_card(&pool, thread)));
+        // The card's reply came from a session, which a chat that holds one
+        // has: without it the reply would be history a new session is owed.
+        if card.is_some() {
+            let seeded = sqlx::query(
+                "INSERT INTO harness_bindings (thread_id, provider, native_session, current)
+                 VALUES (?1, ?2, 'seeded-session', 1)",
+            )
+            .bind(thread)
+            .bind(provider.as_str())
+            .execute(&pool);
+            runtime.block_on(seeded).unwrap();
+        }
         let mut expected = scenario.fixture.expected_outbound.clone();
         if let Some(card) = &card {
             let prompt = runtime.block_on(super::continuation::prompt_for(&pool, thread, card));
@@ -737,7 +749,20 @@ fn session(
         Provider::Antigravity => crate::harness::antigravity::replay::bridge(outbound.wire(), sink),
     };
     let handle = bridge.handle.clone();
+    // Codex and opencode name their session as it is started or resumed
+    // (`start_thread`, `attach_session`), before any turn; a recorded
+    // bridge is built already open, so the replay says it as they would.
+    let named = matches!(provider, Provider::Codex | Provider::Opencode)
+        .then(|| native_session.to_string())
+        .filter(|id| !id.is_empty());
     harness.replay_spawn(thread, provider, move |sink| {
+        if let Some(provider_session_id) = named {
+            sink(HarnessEvent::SessionStarted {
+                provider_session_id,
+                model: None,
+                cwd: String::new(),
+            });
+        }
         *opened.lock().unwrap() = Some(sink);
         handle
     });

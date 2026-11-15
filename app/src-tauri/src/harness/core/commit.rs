@@ -5,6 +5,7 @@
 
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
+use crate::harness::handoff::store::{self as handoff, HandoffView};
 use crate::harness::manager::transition::Selection;
 use crate::harness::store::{self, RunStart, SendIntent};
 use crate::harness::{Provider, SendOptions};
@@ -107,6 +108,8 @@ pub(in crate::harness) struct Began {
     /// The model and reasoning level it is sent with.
     pub model: Option<String>,
     pub effort: Option<String>,
+    /// The earlier conversation its prompt carries, if any.
+    pub handoff: Option<HandoffView>,
     pub run: RunStart,
     /// The row's text: what the student typed, or a continuation's line.
     pub text: String,
@@ -334,12 +337,17 @@ async fn begin(
     (text, options, receipt, queued): (String, SendOptions, String, Option<i64>),
 ) -> Result<Began, String> {
     let chosen = selection(&mut *tx, thread_id, &options).await?;
+    // Which session it goes out on, and what that session has to be told
+    // of the chat first: planned here, so the run, its binding and its
+    // handoff are saved together.
+    let planned = handoff::plan(&mut *tx, thread_id, &chosen, &text).await?;
     // The send's options stay on the run: its start step reads them there.
     let intent = SendIntent {
         thread_id,
         provider: chosen.provider,
         model: chosen.model,
         effort: chosen.effort,
+        binding: Some(planned.binding.id),
         receipt,
         text,
         at: options.at,
@@ -348,10 +356,18 @@ async fn begin(
         options: Some(store::queue::stored(&options)?),
     };
     let run = store::begin(&mut *tx, &intent).await?;
+    let handoff = match &planned.handoff {
+        Some(draft) => {
+            handoff::save(&mut *tx, thread_id, run.run_id, run.binding_id, draft).await?;
+            handoff::view_of(&mut *tx, run.run_id).await?
+        }
+        None => None,
+    };
     Ok(Began {
         provider: intent.provider,
         model: intent.model,
         effort: intent.effort,
+        handoff,
         run,
         text: intent.text,
         at: options.at,

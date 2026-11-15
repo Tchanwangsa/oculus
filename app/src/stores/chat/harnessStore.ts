@@ -424,6 +424,11 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         case "selected":
           touchThread({ provider: event.provider, model: event.model, effort: event.effort });
           break;
+        case "handoff": {
+          const run = runs[event.run_id];
+          if (run) setRun({ ...run, handoff: { kind: event.kind, status: event.status, from: event.from, omitted: event.omitted } });
+          break;
+        }
         case "run_selected": {
           const run = env.runId == null ? undefined : runs[env.runId];
           if (run) setRun({ ...run, provider: event.provider, model: event.model, effort: event.effort });
@@ -437,6 +442,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
               // What it was sent with outlives the settlement; a stop does not.
               ...(before?.provider ? { provider: before.provider, model: before.model, effort: before.effort } : {}),
               ...(before?.resolved_model ? { resolved_model: before.resolved_model } : {}),
+              ...(before?.handoff ? { handoff: before.handoff } : {}),
               id: env.runId,
               status: event.status ?? "completed",
               delivery: event.delivery,

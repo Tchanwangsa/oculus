@@ -9,6 +9,7 @@ use crate::harness::core::driver::{self, Calls, Step};
 use crate::harness::core::effect::Effect;
 use crate::harness::core::state::{self, Live, Takeover};
 use crate::harness::core::{receipts, Command, Kind, Outcome};
+use crate::harness::handoff::store as handoff;
 use crate::harness::store::queue::Waiting;
 use crate::harness::{store, HarnessEvent, Provider, Release, SendOptions};
 
@@ -234,6 +235,7 @@ impl Consumer {
                     provider,
                     model,
                     effort,
+                    handoff,
                     run,
                     text,
                     at,
@@ -266,6 +268,13 @@ impl Consumer {
                     effort,
                 };
                 self.event(thread_id, provider, From::App, selected, None, io);
+                if let Some(handoff) = handoff {
+                    let told = HarnessEvent::Handoff {
+                        run_id: run.run_id,
+                        handoff,
+                    };
+                    self.event(thread_id, provider, From::App, told, None, io);
+                }
             }
             Applied::Selected {
                 provider: chosen,
@@ -504,6 +513,34 @@ impl Consumer {
             .is_ok()
     }
 
+    /// Settle the handoff a run's prompt carried, and tell every view how
+    /// it stands. A run with none still has its session's coverage moved
+    /// on by a prompt that reached it.
+    fn settle_handoff(
+        &mut self,
+        thread_id: i64,
+        provider: Provider,
+        run_id: i64,
+        reached: bool,
+        io: &mut impl ConsumerIo,
+    ) {
+        let Some(pool) = self.pool.clone() else {
+            return;
+        };
+        let settled = handoff::settle(&pool, run_id, reached);
+        match self.rt.block_on(settled) {
+            Ok(Some((revision, handoff))) => {
+                if let Some(revision) = revision {
+                    self.revisions.insert(thread_id, revision);
+                }
+                let told = HarnessEvent::Handoff { run_id, handoff };
+                self.event(thread_id, provider, From::App, told, None, io);
+            }
+            Ok(None) => {}
+            Err(e) => elog!("[oculus] harness run {run_id}: handoff: {e}"),
+        }
+    }
+
     /// A run's start step reported. Accepted: the provider's turn will say
     /// the rest. Withdrawn: the run was stopped before the provider heard
     /// of it, so it ends here, interrupted. Failed: the failure is the
@@ -518,6 +555,16 @@ impl Consumer {
         io: &mut impl ConsumerIo,
     ) {
         let open = self.runs.open_run(thread_id) == Some(run_id);
+        // Whether the provider has the prompt decides its handoff, whatever
+        // has become of the run since: `None` when nobody knows.
+        let reached = match &outcome {
+            Sent::Accepted => Some(true),
+            Sent::Withdrawn | Sent::Failed(_) => Some(false),
+            Sent::Unknown(_) => None,
+        };
+        if let Some(reached) = reached {
+            self.settle_handoff(thread_id, provider, run_id, reached, io);
+        }
         let status = match outcome {
             Sent::Accepted => {
                 if open {

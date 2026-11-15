@@ -74,6 +74,9 @@ type HarnessEvent =
   /** The chat's selection changed (`harnessSelectModel`, or a send under
    *  another one): what its next send will use. Runs keep their own. */
   | { type: "selected"; provider: Provider; model: string | null; effort: string | null }
+  /** A run's context handoff, told when the run is written and again when
+   *  its start step is over (`RunHandoff`). */
+  | ({ type: "handoff"; run_id: number } & RunHandoff)
   /** What the run was sent with (the chat's selection when it started),
    *  told once after its question. */
   | { type: "run_selected"; provider: Provider; model: string | null; effort: string | null }
@@ -200,6 +203,22 @@ export interface HarnessItem {
   run_id?: number | null;
 }
 
+/** The earlier conversation a run's first prompt carried to a session that
+ *  had not seen it (`HandoffView` in `harness/handoff/store.rs`). */
+export interface RunHandoff {
+  /** `full`: the whole chat, to a provider new to it or a session that had
+   *  to start over. `delta`: only the runs a returning provider missed. */
+  kind: "full" | "delta";
+  /** `pending` until the provider has the prompt, then `inline`; `failed`
+   *  was never delivered (it did not fit, or the send never went out). */
+  status: "pending" | "inline" | "failed";
+  /** The provider that answered before, when it is another one; null for
+   *  a handoff within one provider. */
+  from: Provider | null;
+  /** How many earlier messages were left out to fit. */
+  omitted: number;
+}
+
 /** `harness_runs.execution_status`. */
 export type RunStatus = "preparing" | "starting" | "running" | "completed" | "interrupted" | "failed";
 
@@ -229,6 +248,8 @@ export interface HarnessRun {
   effort?: string | null;
   /** The model its CLI reported, where that differs from `model`. */
   resolved_model?: string | null;
+  /** Its context handoff, when its prompt carried one. */
+  handoff?: RunHandoff;
 }
 
 export interface BridgeHealth {

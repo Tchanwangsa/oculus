@@ -113,6 +113,7 @@ pub(super) fn intent(thread_id: i64, receipt: &str) -> store::SendIntent {
         provider: Provider::Claude,
         model: None,
         effort: None,
+        binding: None,
         receipt: receipt.into(),
         text: "question".into(),
         at: None,
