@@ -121,8 +121,10 @@ export const ModelPicker = memo(function ModelPicker({
     );
   }, [models, query]);
 
-  const levels = peek || unsupported || missing ? [] : selected?.reasoningEfforts ?? [];
-  const level = reasoning && levels.includes(reasoning) ? reasoning : null;
+  const offered = unsupported || missing ? [] : selected?.reasoningEfforts ?? [];
+  const level = reasoning && offered.includes(reasoning) ? reasoning : null;
+  // A locked agent's note hides the dial; the trigger still names the level.
+  const levels = peek ? [] : offered;
 
   // An id with no row (a model this list doesn't know) shows as the raw id.
   const label = selected?.label ?? model;
