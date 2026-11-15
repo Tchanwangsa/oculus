@@ -24,6 +24,7 @@ import {
 } from "@/lib/harness/attachments";
 import { attachmentKindLabel, useAttachmentNames } from "@/stores/chat/attachmentNames";
 import { useDraftStore } from "@/stores/chat/draftStore";
+import { useReferenceCheck } from "@/stores/chat/referenceStore";
 
 /** Stable empty lists, so the store selectors don't re-render forever. */
 const NO_PASTES: PastedText[] = [];
@@ -114,6 +115,8 @@ export function useAttachments(
   const shelf = useDraftStore((s) => s.shelves[draftKey] ?? NO_SHELF);
   const setShelf = useDraftStore((s) => s.setShelf);
   const names = useAttachmentNames((s) => s.names);
+  const text = useDraftStore((s) => s.drafts[draftKey] ?? "");
+  useReferenceCheck(text);
 
   const items: ShelfItem[] = shelf.map((path) => {
     const rel = attachmentPath(path) ?? path;

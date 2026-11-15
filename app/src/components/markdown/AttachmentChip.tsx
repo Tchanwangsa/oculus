@@ -4,8 +4,10 @@ import { fileIconFor } from "@/lib/files/fileTypes";
 import { fileReferenceAppearance } from "@/lib/files/referenceAppearance";
 import { attachmentPath, attachmentSrc, isImagePath } from "@/lib/harness/attachments";
 import { attachmentKindLabel, useAttachmentLabel } from "@/stores/chat/attachmentNames";
+import { useReferenceMissing } from "@/stores/chat/referenceStore";
 import { cn } from "@/lib/utils";
 import { ReferencePreview, referenceClass, referenceRestClass } from "./ReferencePreview";
+import { StruckIcon, Unresolved, unresolvedClass } from "./Unresolved";
 
 /** A label this long or shorter stays on one line, as `FileChip`'s does. */
 const ONE_LINE = 40;
@@ -23,7 +25,7 @@ export function middleTruncate(name: string, max = ONE_LINE): string {
  * `./attachments/…` path. In the composer (`onOpen` absent) it is atomic to
  * the caret and `data-attachment` is read back into the message; in a sent
  * bubble `data-path` is what a copy writes. A picture's hover shows its
- * thumbnail.
+ * thumbnail. A file gone from disk is unresolved (`referenceStore`).
  */
 export function AttachmentChip({
   path,
@@ -37,11 +39,23 @@ export function AttachmentChip({
   const rel = attachmentPath(path) ?? path;
   const dataDir = useDataDir();
   const name = useAttachmentLabel(path);
+  const unresolved = useReferenceMissing(rel);
   const picture = isImagePath(rel);
   const Icon = fileIconFor(rel);
   const { tone } = fileReferenceAppearance({ category: null, filename: rel });
   const label = middleTruncate(name);
   const where = onOpen ? { "data-path": path } : { "data-attachment": path, contentEditable: false };
+
+  if (unresolved) {
+    return (
+      <Unresolved>
+        <span {...where} className={cn("mx-px inline whitespace-nowrap box-decoration-clone", unresolvedClass)}>
+          <StruckIcon icon={Icon} />
+          {label}
+        </span>
+      </Unresolved>
+    );
+  }
 
   const icon = <Icon size="1.15em" aria-hidden className={cn("mr-[0.35em] inline align-[-0.18em]", tone)} />;
   const src = picture ? attachmentSrc(dataDir, rel) : "";

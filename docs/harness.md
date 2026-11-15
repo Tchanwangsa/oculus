@@ -1991,6 +1991,16 @@ every picture, so those look as they did. A last paragraph of only picture
 chips reads the same way and shows only in the row. The bubble's edit box
 shows the raw paths.
 
+**A reference whose file is gone stays, unresolved** (`referenceStore`):
+each bubble and each draft checks its attachments and `@` library paths in
+one batched call per kind when they change, attachments through
+`harness_attachments_exist` and library paths through the `files` table (a
+row, a parsed `.md`'s source, or any row under a folder). A missing one is
+drawn muted with its glyph struck through and the tooltip "This context is
+no longer available." — never removed from the message. A lookup that fails
+marks nothing. Each chip reads its own entry, so marking one never redraws
+the composer's text.
+
 ### Pasted text is a card, sent inline
 
 A plain-text paste of `LONG_PASTE` (1000 characters or 15 lines) or more

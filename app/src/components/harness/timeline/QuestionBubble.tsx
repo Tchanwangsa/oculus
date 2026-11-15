@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowCounterClockwise, CaretDown, PencilSimple, X } from "@phosphor-icons/react";
 import { AttachmentChip } from "@/components/markdown/AttachmentChip";
-import { FileChip } from "@/components/markdown/FileChip";
+import { CheckedFileChip } from "@/components/markdown/CheckedFileChip";
 import { LinkChip } from "@/components/markdown/LinkChip";
 import { openCitation, openLibraryPath } from "@/lib/files/openFile";
 import { attachmentSrc, splitPastedText } from "@/lib/harness/attachments";
@@ -9,6 +9,7 @@ import { parseLink, splitLinks } from "@/lib/harness/links";
 import { openLink } from "@/lib/shell/tabRouters";
 import { ImageLightbox } from "@/components/ui/lightbox/Lightbox";
 import { useDataDir } from "@/hooks/backend/useDataDir";
+import { useReferenceCheck } from "@/stores/chat/referenceStore";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -59,6 +60,8 @@ export function QuestionBubble({
   // was sent; every picture is also in the row above. Only the prose is
   // measured and folded; cards and pictures always show.
   const { pictures, prose } = useMemo(() => liftPictures(words), [words]);
+  // One batched check: a chip whose file is gone is drawn unresolved.
+  useReferenceCheck(words);
 
   useLayoutEffect(() => {
     const el = box.current;
@@ -185,7 +188,7 @@ export function QuestionBubble({
                 // A PDF or text file opens in the system's viewer.
                 if (p.kind === "attachment") return <AttachmentChip key={i} path={p.raw} onOpen={() => openLibraryPath(p.path)} />;
                 return (
-                  <FileChip
+                  <CheckedFileChip
                     key={i}
                     path={p.path}
                     cite={p.cite}

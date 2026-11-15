@@ -1,6 +1,7 @@
 import { getDb } from "./connection";
 import { likeEscape } from "./match";
 import type { DbFile } from "./types";
+import { parsedMdSource } from "@/lib/files/fileTypes";
 
 export async function upsertFile(
   subjectId: number,
@@ -159,4 +160,31 @@ export async function getFilesForSubject(subjectId: number): Promise<DbFile[]> {
     `SELECT * FROM files WHERE subject_id = $1 ORDER BY relative_path ASC`,
     [subjectId]
   );
+}
+
+/** Which of these library paths (`courses/…`) the files table still holds: a
+ *  row at the path, a parsed `.md` whose source has one, or for a folder
+ *  (`…/`) any row under it. One query for the files, one per folder. */
+export async function presentLibraryPaths(paths: readonly string[]): Promise<Set<string>> {
+  const present = new Set<string>();
+  const folders = paths.filter((p) => p.endsWith("/"));
+  const files = paths.filter((p) => !p.endsWith("/"));
+  const db = await getDb();
+  if (files.length) {
+    const candidates = [...new Set(files.flatMap((p) => [p, parsedMdSource(p) ?? p]))];
+    const rows = await db.select<{ relative_path: string }[]>(
+      `SELECT relative_path FROM files WHERE relative_path IN (${candidates.map((_, i) => `$${i + 1}`).join(", ")})`,
+      candidates,
+    );
+    const found = new Set(rows.map((r) => r.relative_path));
+    for (const p of files) if (found.has(p) || found.has(parsedMdSource(p) ?? p)) present.add(p);
+  }
+  for (const folder of folders) {
+    const rows = await db.select<{ one: number }[]>(
+      `SELECT 1 AS one FROM files WHERE relative_path LIKE $1 ESCAPE '\\' LIMIT 1`,
+      [`${likeEscape(folder)}%`],
+    );
+    if (rows.length) present.add(folder);
+  }
+  return present;
 }

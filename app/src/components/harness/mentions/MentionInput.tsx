@@ -1,6 +1,6 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
 import { AttachmentChip } from "@/components/markdown/AttachmentChip";
-import { FileChip } from "@/components/markdown/FileChip";
+import { CheckedFileChip } from "@/components/markdown/CheckedFileChip";
 import { attachableFiles } from "@/lib/harness/attachments";
 import { hasControlChars } from "@/lib/harness/controlChars";
 import {
@@ -406,7 +406,7 @@ export function MentionInput({
           ) : c.kind === "attachment" ? (
             <AttachmentChip key={i} path={c.path} />
           ) : (
-            <FileChip key={i} path={c.path} />
+            <CheckedFileChip key={i} path={c.path} />
           ),
         )}
       </div>

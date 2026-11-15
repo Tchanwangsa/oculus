@@ -5,6 +5,7 @@ import { citationText, parsedSourceOf, type Citation } from "@/lib/citations";
 import { useCitedPage } from "@/hooks/agents/useCitation";
 import { cn } from "@/lib/utils";
 import { ReferencePreview, referenceClass, referenceRestClass } from "./ReferencePreview";
+import { StruckIcon, Unresolved, unresolvedClass } from "./Unresolved";
 import { fileReferenceDetails } from "./referenceDetails";
 
 /** The chip's location suffix: a page, else a line range. */
@@ -29,6 +30,7 @@ export function FileChip({
   onClick,
   className,
   children,
+  unresolved,
 }: {
   /** The library path, `courses/<CODE>/…` — what the message says. */
   path: string;
@@ -40,6 +42,9 @@ export function FileChip({
   onClick?: (newTab: boolean) => void;
   className?: string;
   children?: ReactNode;
+  /** The file is gone from the library: muted and struck, opening nothing,
+   *  "This context is no longer available." on hover. */
+  unresolved?: boolean;
 }) {
   // A parse artifact is named for the PDF or Office file the student knows,
   // and its line becomes that file's page once `.pages.json` is read.
@@ -51,6 +56,20 @@ export function FileChip({
   const label = children ?? title;
   const load = useCallback(() => fileReferenceDetails(path), [path]);
   const icon = <Icon size="1.15em" aria-hidden className={cn("mr-[0.35em] inline align-[-0.18em]", tone)} />;
+  if (unresolved) {
+    return (
+      <Unresolved>
+        <span
+          contentEditable={onClick ? undefined : false}
+          data-path={full}
+          className={cn("mx-px inline box-decoration-clone", unresolvedClass, className)}
+        >
+          <StruckIcon icon={Icon} />
+          {label}
+        </span>
+      </Unresolved>
+    );
+  }
   return (
     <ReferencePreview icon={icon} title={title} kind={kind} detail={full} load={load}>
       <span

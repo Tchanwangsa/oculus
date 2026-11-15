@@ -296,7 +296,10 @@ themes are opt-in and keep the same structure.
   it was attached by, cut in the middle past 40 characters, with its
   thumbnail in the hover preview for a picture. The shelf of thumbnails above
   the box asks before removing a picture the sentence names, in a muted line
-  under it with Remove and Keep — never a dialog. The ⌘S stash is a "Stash"
+  under it with Remove and Keep — never a dialog. A mention or attachment whose
+  file is gone is muted, its glyph struck through, with "This context is no
+  longer available." as its tooltip (`Unresolved`), in the box and in a sent
+  bubble. The ⌘S stash is a "Stash"
   pill above the box opening a popover; its eviction notice is a line inside
   that popover, not a toast ([harness.md](./harness.md#the-empty-box-earlier-messages-and-the-stash)).
 - **The composer says a turn's state in words, not only colour**
