@@ -32,6 +32,8 @@ pub struct SendIntent {
     pub thread_id: i64,
     pub provider: Provider,
     pub model: Option<String>,
+    /// The reasoning level it is sent under; `None` where the model has none.
+    pub effort: Option<String>,
     /// The session this send resumes; `None` for a fresh one.
     pub native_session: Option<String>,
     pub receipt: String,
@@ -143,8 +145,9 @@ pub async fn begin(tx: &mut SqliteConnection, send: &SendIntent) -> Result<RunSt
             let started = sqlx::query(&format!(
                 "UPDATE harness_runs
                     SET ordinal = {NEXT_ORDINAL}, initiating_item_id = ?2, binding_id = ?3, model = ?4,
-                        execution_status = 'starting', queue_position = NULL, queue_held = 0,
-                        queued_text = ?6, queued_options = COALESCE(?7, queued_options)
+                        effort = ?8, execution_status = 'starting', queue_position = NULL,
+                        queue_held = 0, queued_text = ?6,
+                        queued_options = COALESCE(?7, queued_options)
                   WHERE id = ?5 AND thread_id = ?1 AND execution_status = 'queued'"
             ))
             .bind(send.thread_id)
@@ -154,6 +157,7 @@ pub async fn begin(tx: &mut SqliteConnection, send: &SendIntent) -> Result<RunSt
             .bind(run_id)
             .bind(&send.text)
             .bind(&send.options)
+            .bind(&send.effort)
             .execute(&mut *tx)
             .await
             .map_err(err)?
@@ -166,8 +170,8 @@ pub async fn begin(tx: &mut SqliteConnection, send: &SendIntent) -> Result<RunSt
         None => sqlx::query(&format!(
             "INSERT INTO harness_runs
                (thread_id, ordinal, origin, initiating_item_id, binding_id, model, execution_status,
-                queued_text, queued_options)
-             VALUES (?1, {NEXT_ORDINAL}, ?5, ?2, ?3, ?4, 'starting', ?6, ?7)"
+                queued_text, queued_options, effort)
+             VALUES (?1, {NEXT_ORDINAL}, ?5, ?2, ?3, ?4, 'starting', ?6, ?7, ?8)"
         ))
         .bind(send.thread_id)
         .bind(item_id)
@@ -176,6 +180,7 @@ pub async fn begin(tx: &mut SqliteConnection, send: &SendIntent) -> Result<RunSt
         .bind(origin)
         .bind(&send.text)
         .bind(&send.options)
+        .bind(&send.effort)
         .execute(&mut *tx)
         .await
         .map_err(err)?

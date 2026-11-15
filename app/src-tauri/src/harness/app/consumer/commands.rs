@@ -230,6 +230,8 @@ impl Consumer {
             Applied::Began(began) => {
                 let Began {
                     provider,
+                    model,
+                    effort,
                     run,
                     text,
                     at,
@@ -256,6 +258,12 @@ impl Consumer {
                     },
                 };
                 self.event(thread_id, provider, From::App, event, continuation, io);
+                let selected = HarnessEvent::RunSelected {
+                    provider,
+                    model,
+                    effort,
+                };
+                self.event(thread_id, provider, From::App, selected, None, io);
             }
             Applied::Queue => self.tell_queue(thread_id, provider, io),
             Applied::Cards(cards) => {

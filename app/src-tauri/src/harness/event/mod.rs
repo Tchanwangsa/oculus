@@ -360,6 +360,14 @@ pub enum HarnessEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ended_at: Option<String>,
     },
+    /// What a run is sent with: the provider, model and reasoning level of
+    /// the chat's selection when it started. Told once, after the run's
+    /// question; an answer's footer reads it, never the thread.
+    RunSelected {
+        provider: Provider,
+        model: Option<String>,
+        effort: Option<String>,
+    },
     /// A completed run whose answer, or part of it, never reached Oculus.
     /// Persisted as a row; never followed by a resend.
     DeliveryNotice {

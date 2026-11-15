@@ -1242,6 +1242,16 @@ settlement sets it back; only an unowned turn's `UnpromptedTurn` and
 `TurnFinished` set it themselves. A rewind deletes runs asked from the
 removed rows (and their gaps and drafts).
 
+**A run records what it was sent with.** `harness_runs.model` and `.effort`
+are the model and reasoning level of the send, and its binding names the
+provider; `RunSelected` tells a live view the three once, after the run's
+question, and `harness_load` returns them on each run. The model a CLI
+reports (`SessionStarted`) is written to the run it answers as
+`resolved_model`, when it differs from the one asked for; it fills the
+thread's model only for a chat that never named one. An answer's footer
+reads its run (`runModel` in `lib/harness/runs.ts`), never the thread, whose
+provider, model and effort are what the next send will use.
+
 Each bridge names what it sends. `AssistantMessage` and `Thinking` carry a
 `Source`: the provider's id for the block, its `phase` and whether it is
 `partial` (stored as `source_ref`, `native_phase`, `lifecycle`). Within an

@@ -421,11 +421,19 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           live = { ...prev, running: true };
           touchThread({ status: "running" });
           break;
+        case "run_selected": {
+          const run = env.runId == null ? undefined : runs[env.runId];
+          if (run) setRun({ ...run, provider: event.provider, model: event.model, effort: event.effort });
+          break;
+        }
         case "run_settled": {
           if (!held) break;
           if (env.runId != null) {
             const before = runs[env.runId];
             setRun({
+              // What it was sent with outlives the settlement; a stop does not.
+              ...(before?.provider ? { provider: before.provider, model: before.model, effort: before.effort } : {}),
+              ...(before?.resolved_model ? { resolved_model: before.resolved_model } : {}),
               id: env.runId,
               status: event.status ?? "completed",
               delivery: event.delivery,
@@ -577,9 +585,15 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         case "thread_titled":
           touchThread({ title: event.title });
           break;
-        case "session_started":
-          touchThread({ provider_session_id: event.provider_session_id, model: event.model ?? undefined });
+        case "session_started": {
+          // The thread's model is the student's pick for the next send; what
+          // the CLI says it is running belongs to the run it answers.
+          const known = threads.find((t) => t.id === threadId)?.model;
+          touchThread({ provider_session_id: event.provider_session_id, ...(known == null && event.model ? { model: event.model } : {}) });
+          const run = env.runId == null ? undefined : runs[env.runId];
+          if (run && event.model && event.model !== run.model) setRun({ ...run, resolved_model: event.model });
           break;
+        }
         case "exited":
           if (prev.running) {
             live = { ...IDLE, ended: prev.ended };

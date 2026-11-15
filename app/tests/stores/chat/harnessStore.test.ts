@@ -1,6 +1,6 @@
 import { beforeEach, expect, test } from "bun:test";
 import { anyRunning, useHarnessStore } from "@/stores/chat/harnessStore";
-import { lastTurnEnd, spokenStatus, type HarnessEnvelope, type HarnessItem, type HarnessThread } from "@/lib/harness";
+import { lastTurnEnd, runFromRow, runModel, spokenStatus, type HarnessEnvelope, type HarnessItem, type HarnessThread } from "@/lib/harness";
 
 const idle = { running: false, streaming: "", thinking: "", toolOutput: {} };
 beforeEach(() => {
@@ -110,4 +110,49 @@ test("a stopped run whose queue is held ends idle and Stopped, not Working", () 
   expect(state.live[1].running).toBe(false);
   expect(state.threads[0].status).toBe("idle");
   expect(spoken(1)).toBe("stopped");
+});
+
+test("a run keeps what it was sent with, and the thread keeps the student's pick", () => {
+  useHarnessStore.setState({
+    threads: [{ id: 1, status: "idle", provider: "claude", model: "opus" }] as HarnessThread[],
+    items: { 1: [] },
+    runs: {},
+  });
+  const apply = useHarnessStore.getState().apply;
+  apply({ threadId: 1, provider: "claude", itemId: 40, runId: 7, event: { type: "user_message", text: "hi" } });
+  apply({
+    threadId: 1, provider: "claude", itemId: null, runId: 7,
+    event: { type: "run_selected", provider: "claude", model: "opus", effort: "high" },
+  });
+  // The CLI names the model it resolved the alias to: the run's, not the thread's.
+  apply({
+    threadId: 1, provider: "claude", itemId: null, runId: 7,
+    event: { type: "session_started", provider_session_id: "s1", model: "claude-opus-5-5", cwd: "/" },
+  });
+  let state = useHarnessStore.getState();
+  expect(state.runs[1][7]).toMatchObject({ provider: "claude", model: "opus", effort: "high", resolved_model: "claude-opus-5-5" });
+  expect(runModel(state.runs[1][7])).toBe("claude-opus-5-5");
+  expect(state.threads[0].model).toBe("opus");
+
+  apply({
+    threadId: 1, provider: "claude", itemId: null, runId: 7,
+    event: { type: "run_settled", answer_item_id: null, work_item_ids: [], delivery: "delivered", status: "completed" },
+  });
+  state = useHarnessStore.getState();
+  expect(state.runs[1][7]).toMatchObject({ status: "completed", provider: "claude", model: "opus", effort: "high", resolved_model: "claude-opus-5-5" });
+});
+
+test("a snapshot's run carries its provider, model and effort", () => {
+  const run = runFromRow({
+    id: 3, execution_status: "completed", delivery_state: "delivered", answer_item_id: 9,
+    started_at: "2026-11-15 00:00:00", ended_at: "2026-11-15 00:00:05",
+    provider: "codex", model: "gpt-6.1", effort: null, resolved_model: null,
+  });
+  expect(run).toMatchObject({ provider: "codex", model: "gpt-6.1", effort: null });
+  expect(run.resolved_model).toBeUndefined();
+  expect(runModel(run)).toBe("gpt-6.1");
+  // A run from before the columns existed says nothing, and its footer shows none.
+  const old = runFromRow({ id: 2, execution_status: "completed", delivery_state: "delivered", answer_item_id: 9, started_at: null, ended_at: null });
+  expect(old.provider).toBeUndefined();
+  expect(runModel(old)).toBeNull();
 });

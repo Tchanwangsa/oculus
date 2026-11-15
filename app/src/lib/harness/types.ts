@@ -71,6 +71,9 @@ type HarnessEvent =
       started_at?: string | null;
       ended_at?: string | null;
     }
+  /** What the run was sent with (the chat's selection when it started),
+   *  told once after its question. */
+  | { type: "run_selected"; provider: Provider; model: string | null; effort: string | null }
   /** The row saying an answer, or part of it, did not arrive. */
   | { type: "delivery_notice"; text: string }
   | { type: "compaction"; source?: string }
@@ -212,6 +215,14 @@ export interface HarnessRun {
   /** Its CLI did not answer the stop (`stop_unresponsive`); `others` other
    *  chats have a run on the same server. */
   unresponsive?: { others: number };
+  /** What it was sent with: an answer's footer and a divider between runs
+   *  read these, never the thread, whose selection is the next send's.
+   *  Absent on a run from before they were recorded. */
+  provider?: Provider;
+  model?: string | null;
+  effort?: string | null;
+  /** The model its CLI reported, where that differs from `model`. */
+  resolved_model?: string | null;
 }
 
 export interface BridgeHealth {

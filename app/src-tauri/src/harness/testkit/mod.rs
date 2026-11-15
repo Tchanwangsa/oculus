@@ -25,4 +25,5 @@ mod scenario;
 mod snapshot;
 mod steps;
 mod stop;
+mod switching;
 mod upgrade;

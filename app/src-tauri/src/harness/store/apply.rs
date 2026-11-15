@@ -106,6 +106,7 @@ pub fn writes(ev: &HarnessEvent) -> bool {
             | HarnessEvent::CardSettled { .. }
             | HarnessEvent::Rewound { .. }
             | HarnessEvent::RunSettled { .. }
+            | HarnessEvent::RunSelected { .. }
             | HarnessEvent::DeliveryNotice { .. }
             | HarnessEvent::RateLimits { .. }
             | HarnessEvent::TurnStarted { .. }
@@ -125,8 +126,11 @@ async fn apply_rows(
             model,
             ..
         } => {
+            // The thread's model is the student's choice for the next send;
+            // a chat that never named one learns it here. What the CLI says
+            // it is running belongs to the run it answers.
             sqlx::query(
-                "UPDATE harness_threads SET provider_session_id = ?2, model = COALESCE(?3, model) WHERE id = ?1",
+                "UPDATE harness_threads SET provider_session_id = ?2, model = COALESCE(model, ?3) WHERE id = ?1",
             )
             .bind(thread_id)
             .bind(provider_session_id)
@@ -134,6 +138,16 @@ async fn apply_rows(
             .execute(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
+            if let (Some(owner), Some(model)) = (owner, model) {
+                sqlx::query(
+                    "UPDATE harness_runs SET resolved_model = ?2 WHERE id = ?1 AND model IS NOT ?2",
+                )
+                .bind(owner.run_id)
+                .bind(model)
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| e.to_string())?;
+            }
             Ok(Stored::default())
         }
         // `store::begin` wrote this question with its run, and set the
@@ -423,6 +437,7 @@ async fn apply_rows(
         | HarnessEvent::Rewound { .. }
         // The consumer writes and emits these itself, at settlement.
         | HarnessEvent::RunSettled { .. }
+        | HarnessEvent::RunSelected { .. }
         | HarnessEvent::DeliveryNotice { .. }
         | HarnessEvent::RateLimits { .. } => Ok(Stored::default()),
     }

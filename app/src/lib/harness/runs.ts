@@ -1,4 +1,5 @@
 import { sqliteUtcToMs } from "@/lib/format/format";
+import type { Provider } from "./providers";
 import type { HarnessRun, RunStatus } from "./types";
 
 /** A `harness_runs` row as `harnessLoad` returns it (`Run` in
@@ -12,6 +13,10 @@ export interface RunRow {
   started_at: string | null;
   ended_at: string | null;
   stop_requested_at?: string | null;
+  provider?: Provider;
+  model?: string | null;
+  effort?: string | null;
+  resolved_model?: string | null;
 }
 
 /** The statuses of a run with a timeline row. `starting` is saved and not
@@ -31,6 +36,8 @@ export function runFromRow(row: RunRow): HarnessRun {
     ...(row.stop_requested_at != null && row.ended_at == null
       ? { stopping: true, stop_requested_ms: sqliteUtcToMs(row.stop_requested_at) ?? null }
       : {}),
+    ...(row.provider ? { provider: row.provider, model: row.model ?? null, effort: row.effort ?? null } : {}),
+    ...(row.resolved_model ? { resolved_model: row.resolved_model } : {}),
   };
 }
 
@@ -95,3 +102,8 @@ export function lastRunStatus(runs: Record<number, HarnessRun> | undefined): Run
   for (const run of Object.values(runs ?? {})) if (!latest || run.id > latest.id) latest = run;
   return latest?.status ?? null;
 }
+
+/** The model a run's answer came from, for its footer: what the CLI said it
+ *  ran where it said so, else what was asked for. Null for a run from
+ *  before the model was recorded. */
+export const runModel = (run: HarnessRun | undefined): string | null => run?.resolved_model ?? run?.model ?? null;

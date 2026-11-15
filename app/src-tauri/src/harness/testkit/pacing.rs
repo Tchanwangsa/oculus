@@ -109,6 +109,7 @@ fn a_stop_the_cli_ignores_is_told_as_unresponsive_after_fifteen_seconds_once() {
         told,
         vec![
             ("user_message", at(0)),
+            ("run_selected", at(0)),
             ("stop_requested", at(1_000)),
             ("queue", at(1_000)),
             ("stop_unresponsive", at(16_000)),
@@ -303,6 +304,7 @@ fn a_failed_settle_is_retried_at_growing_intervals_until_it_lands() {
         told,
         vec![
             ("user_message", at(0)),
+            ("run_selected", at(0)),
             // No answer arrived in this script, which settlement says.
             ("delivery_notice", at(300)),
             ("run_settled", at(300)),

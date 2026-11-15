@@ -92,6 +92,9 @@ pub(in crate::harness) enum Applied {
 /// will hand it to its start step.
 pub(in crate::harness) struct Began {
     pub provider: Provider,
+    /// The model and reasoning level it is sent with.
+    pub model: Option<String>,
+    pub effort: Option<String>,
     pub run: RunStart,
     /// The row's text: what the student typed, or a continuation's line.
     pub text: String,
@@ -293,6 +296,7 @@ async fn begin(
         thread_id,
         provider,
         model: options.model.clone().or(model),
+        effort: options.reasoning_effort.clone(),
         native_session: row.get("provider_session_id"),
         receipt,
         text,
@@ -304,6 +308,8 @@ async fn begin(
     let run = store::begin(&mut *tx, &intent).await?;
     Ok(Began {
         provider,
+        model: intent.model,
+        effort: intent.effort,
         run,
         text: intent.text,
         at: options.at,

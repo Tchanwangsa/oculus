@@ -112,6 +112,7 @@ pub(super) fn intent(thread_id: i64, receipt: &str, session: Option<&str>) -> st
         thread_id,
         provider: Provider::Claude,
         model: None,
+        effort: None,
         native_session: session.map(String::from),
         receipt: receipt.into(),
         text: "question".into(),

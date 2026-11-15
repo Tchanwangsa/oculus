@@ -57,6 +57,12 @@ pub struct Run {
     pub ended_at: Option<String>,
     /// When the student asked it to stop, if they did.
     pub stop_requested_at: Option<String>,
+    /// What it was sent with, and the model its CLI reported where that
+    /// differs from the one asked for.
+    pub provider: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub resolved_model: Option<String>,
 }
 
 pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String> {
@@ -90,12 +96,13 @@ pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String>
     })
     .collect();
     let runs = sqlx::query(
-        "SELECT id, execution_status, delivery_state, answer_item_id,
-                COALESCE(started_at, requested_at) AS started_at, ended_at, stop_requested_at
-           FROM harness_runs
-          WHERE thread_id = ?1 AND execution_status NOT IN ('queued', 'cancelled')
-            AND initiating_item_id IS NOT NULL
-          ORDER BY id",
+        "SELECT r.id, r.execution_status, r.delivery_state, r.answer_item_id,
+                COALESCE(r.started_at, r.requested_at) AS started_at, r.ended_at,
+                r.stop_requested_at, b.provider, r.model, r.effort, r.resolved_model
+           FROM harness_runs r JOIN harness_bindings b ON b.id = r.binding_id
+          WHERE r.thread_id = ?1 AND r.execution_status NOT IN ('queued', 'cancelled')
+            AND r.initiating_item_id IS NOT NULL
+          ORDER BY r.id",
     )
     .bind(thread_id)
     .fetch_all(&mut *tx)
@@ -110,6 +117,10 @@ pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String>
         started_at: r.get("started_at"),
         ended_at: r.get("ended_at"),
         stop_requested_at: r.get("stop_requested_at"),
+        provider: r.get("provider"),
+        model: r.get("model"),
+        effort: r.get("effort"),
+        resolved_model: r.get("resolved_model"),
     })
     .collect();
     let queued = queue::list(&mut *tx, thread_id).await?;

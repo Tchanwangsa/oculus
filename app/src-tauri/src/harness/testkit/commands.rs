@@ -389,7 +389,7 @@ fn a_message_sent_while_the_provider_rewinds_waits_and_survives_it() {
     assert_eq!(bench.questions(), ["first", "meanwhile"]);
     assert_eq!(
         bench.kinds(),
-        ["queue", "rewound", "queue", "user_message"],
+        ["queue", "rewound", "queue", "user_message", "run_selected"],
         "the rows went before the waiting message's question was written"
     );
     let rewound = &bench.events()[1];
@@ -456,7 +456,7 @@ fn an_edit_rewinds_and_sends_in_one_commit() {
     );
     assert_eq!(bench.effects(), ["rewind anchor-1", "start again"]);
     assert_eq!(bench.questions(), ["again"]);
-    assert_eq!(bench.kinds(), ["rewound", "user_message"]);
+    assert_eq!(bench.kinds(), ["rewound", "user_message", "run_selected"]);
     assert_eq!(bench.events()[0]["event"]["context"], false);
     assert_eq!(bench.count("SELECT COUNT(*) FROM harness_runs"), 1);
     let receipt: i64 = bench.count("SELECT run_id FROM harness_command_receipts WHERE id = 'c2'");

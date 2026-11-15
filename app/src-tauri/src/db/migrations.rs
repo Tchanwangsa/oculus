@@ -947,6 +947,13 @@ INSERT OR IGNORE INTO task_tags (name, color, position) VALUES
             sql: include_str!("../harness/store/commands.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 57,
+            description:
+                "what each run was sent with, one current binding per provider and context handoffs",
+            sql: include_str!("../harness/store/switching.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
