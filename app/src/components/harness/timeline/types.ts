@@ -14,7 +14,11 @@ export interface QuestionActions {
   followUp: (text: string) => Promise<void>;
 }
 
+/** The waiting messages' commands. Each rejects with Rust's reason, which
+ *  the list shows beside the messages. */
 export interface PendingActions {
-  editQueued: (queueId: string, text: string) => void;
-  unqueue: (queueId: string) => void;
+  editQueued: (queueId: string, text: string) => Promise<void>;
+  unqueue: (queueId: string) => Promise<void>;
+  /** Every waiting message's id, first to go out first. */
+  reorder: (order: string[]) => Promise<void>;
 }

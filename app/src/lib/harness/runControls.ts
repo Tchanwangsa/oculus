@@ -76,6 +76,22 @@ export function queueHeld(queued: QueuedMessage[] | undefined): boolean {
   return !!queued?.some((q) => q.held);
 }
 
+/** A waiting message's state, in words beside its bubble. */
+export function queuedLabel(q: Pick<QueuedMessage, "held">): "Held" | "Waiting" {
+  return q.held ? "Held" : "Waiting";
+}
+
+/** The waiting messages' ids with `id` moved `by` places (-1 earlier, +1
+ *  later); null when it cannot move that way. */
+export function moveQueued(ids: string[], id: string, by: -1 | 1): string[] | null {
+  const from = ids.indexOf(id);
+  const to = from + by;
+  if (from < 0 || to < 0 || to >= ids.length) return null;
+  const next = [...ids];
+  [next[from], next[to]] = [next[to], next[from]];
+  return next;
+}
+
 /** A failed command's reason, for the line beside the control the student
  *  used. Tauri rejects with the Rust error's string. */
 export function commandError(e: unknown): string {

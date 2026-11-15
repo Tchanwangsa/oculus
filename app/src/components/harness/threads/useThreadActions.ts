@@ -5,6 +5,7 @@ import {
   harnessEditResend,
   harnessForceStop,
   harnessInterrupt,
+  harnessReorderQueued,
   harnessResume,
   harnessRewind,
   harnessSend,
@@ -136,13 +137,17 @@ export function useThreadActions(opts: ThreadActionsOptions) {
 
   const pending = useMemo(
     (): PendingActions => ({
-      editQueued: (queueId, text) => {
+      editQueued: async (queueId, text) => {
         const id = ref.current.threadId();
-        if (id != null) harnessEditQueued(id, queueId, text).catch(() => {});
+        if (id != null) await harnessEditQueued(id, queueId, text);
       },
-      unqueue: (queueId) => {
+      unqueue: async (queueId) => {
         const id = ref.current.threadId();
-        if (id != null) harnessUnqueue(id, queueId).catch(() => {});
+        if (id != null) await harnessUnqueue(id, queueId);
+      },
+      reorder: async (order) => {
+        const id = ref.current.threadId();
+        if (id != null) await harnessReorderQueued(id, order);
       },
     }),
     [],

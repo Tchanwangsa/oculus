@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { commandError, queueHeld, resumeLabel, runControls, type RunControlInputs } from "@/lib/harness";
+import { commandError, moveQueued, queueHeld, queuedLabel, resumeLabel, runControls, type RunControlInputs } from "@/lib/harness";
 
 const idle: RunControlInputs = {
   running: false,
@@ -106,4 +106,27 @@ test("commandError keeps Rust's words and never says nothing", () => {
   expect(commandError(new Error("gone"))).toBe("gone");
   expect(commandError(undefined)).toBe("Something went wrong");
   expect(commandError("  ")).toBe("Something went wrong");
+});
+
+test("a waiting message says whether it is held", () => {
+  expect(queuedLabel({ held: true })).toBe("Held");
+  expect(queuedLabel({ held: false })).toBe("Waiting");
+});
+
+describe("moveQueued", () => {
+  const ids = ["a", "b", "c"];
+  test("earlier and later swap with the neighbour", () => {
+    expect(moveQueued(ids, "b", -1)).toEqual(["b", "a", "c"]);
+    expect(moveQueued(ids, "b", 1)).toEqual(["a", "c", "b"]);
+    expect(moveQueued(ids, "a", 1)).toEqual(["b", "a", "c"]);
+  });
+  test("past either end, or an id that went out, moves nothing", () => {
+    expect(moveQueued(ids, "a", -1)).toBeNull();
+    expect(moveQueued(ids, "c", 1)).toBeNull();
+    expect(moveQueued(ids, "z", 1)).toBeNull();
+  });
+  test("the list it was given is left as it was", () => {
+    moveQueued(ids, "b", 1);
+    expect(ids).toEqual(["a", "b", "c"]);
+  });
 });

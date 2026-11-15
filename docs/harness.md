@@ -1070,9 +1070,14 @@ drawn by `SendControls` in every composer):
   failed run it says the last reply failed; a stop and a restart hold the
   queue alike and nothing saved tells them apart, so they share "Held after
   a stop or a restart".
+- **Waiting messages** (`Pending.tsx`, under the timeline in every chat
+  view) each say "Held" or "Waiting" in words above the bubble, and keep
+  Edit and Remove either way. With more than one, Move earlier and Move
+  later buttons send the whole new order (`moveQueued`,
+  `harness_reorder_queued`); they rest while a reorder is out.
 - **A command that fails** says why where the student acted: Stop and the
   main button's Resume on a line above the box, the notice's Resume in the
-  notice. Nothing stays pending: each control is inert only while its own
+  notice, an edit, removal or reorder under the waiting messages. Nothing stays pending: each control is inert only while its own
   command is out (`useRunCommand`).
 
 Codex never completes an interrupted message, so the
