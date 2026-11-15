@@ -24,7 +24,6 @@ function render(unscoped: boolean, placeholder?: string) {
       provider="claude"
       model="opus"
       reasoning="high"
-      providerLocked={false}
       subjects={[]}
       subjectId={null}
       subjectLocked={false}

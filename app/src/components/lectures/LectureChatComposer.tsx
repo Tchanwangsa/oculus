@@ -95,7 +95,9 @@ export function LectureChatComposer({
   subjectId,
   providers,
   provider,
-  providerLocked,
+  locked,
+  refused,
+  switchFrom,
   usage,
   rateLimits,
   model,
@@ -122,8 +124,12 @@ export function LectureChatComposer({
   subjectId: number;
   providers: PickerProvider[];
   provider: Provider;
-  /** An open thread keeps its agent; only a new one can pick. */
-  providerLocked: boolean;
+  /** The agents an open chat cannot move to (`useSwitchLock`); none for a new one. */
+  locked?: (provider: Provider) => boolean;
+  /** Rust's reason for refusing the last model pick (`pickStore`). */
+  refused?: string | null;
+  /** The agent the chat leaves with its next message (`pendingSwitch`). */
+  switchFrom?: Provider | null;
   usage: ThreadUsage | null;
   rateLimits: RateWindow[];
   model: string | null;
@@ -206,6 +212,10 @@ export function LectureChatComposer({
       <DictationFeedback dictation={dictation} />
       {att.error && <div className="px-0.5 text-[11px] text-destructive">{att.error}</div>}
       {controls.error && <div className="px-0.5 text-[11px] text-destructive">{controls.error}</div>}
+      {/* The open picker shows its own refusal; once it closes, the box does. */}
+      {refused && !tools.modelOpen && (
+        <div role="alert" className="px-0.5 text-[11px] text-destructive">{refused}</div>
+      )}
       <ThreadBanners
         threadId={threadId}
         provider={provider}
@@ -271,7 +281,9 @@ export function LectureChatComposer({
             className="-ml-1 min-w-0"
             providers={providers}
             provider={provider}
-            providerLocked={providerLocked}
+            locked={locked}
+            refused={refused}
+            switchFrom={switchFrom}
             model={model}
             reasoning={reasoning}
             onProvider={onProvider}

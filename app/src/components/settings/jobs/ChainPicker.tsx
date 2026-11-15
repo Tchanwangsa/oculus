@@ -75,7 +75,6 @@ export function ChainPicker({
     <ModelPicker
       providers={providers}
       provider={tab}
-      providerLocked={false}
       model={onCommitted ? (entry?.model ?? null) : null}
       reasoning={onCommitted ? (entry?.reasoningEffort ?? null) : null}
       onProvider={view}

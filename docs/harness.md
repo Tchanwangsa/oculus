@@ -1741,6 +1741,22 @@ The decisions are pure functions in `lib/harness/switching.ts`, tested in
   saved the same way and waits for the next send; the running run keeps
   what it was sent with. When Rust refuses, the pick is dropped and its
   sentence is kept (`refused`) until the next pick or send.
+- **The picker offers every agent for the life of a chat.**
+  `useComposerSelection` gives the Chat page, the lecture dock and Studio's
+  thread column the same four things: the selection, the refusal, the agent
+  a pending switch leaves (`pendingSwitch`), and which agents are locked
+  (`useSwitchLock`, `switchLocked` against the thread's saved provider, as
+  Rust checks it). A locked tab is dimmed and opens a note, "{agent} — start
+  a new chat to switch" (`SWITCH_LOCKED`), without being picked. Today
+  `providerHandoff` is false on every bridge, so a started chat locks every
+  other agent. A pending switch says "Switches from {agent} with your next
+  message." under the tabs, and the trigger's title ends "from your next
+  message". A refusal shows in the open picker, or above the box once it is
+  closed; never a toast. Studio's thread column locks every other agent
+  (`LOCK_OTHERS`) and still saves model and level picks.
+- **The reasoning dial reads the thread.** An open thread's level is its
+  `effort`; a thread from before levels were stored reads the session's
+  dial, which every level pick also sets.
 
 ## opencode providers go through its own server
 
