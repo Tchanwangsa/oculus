@@ -56,8 +56,7 @@ export function RequestView({ request }: { request: HarnessRequest }) {
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
           <div className="text-xs text-foreground">{detail.title}</div>
           <RequestBody detail={detail} />
-          {/* Steady, never a shimmer: nothing works until the student answers. */}
-          <p className="text-[11px] text-muted-foreground">{state.label}</p>
+          {/* The run's fold or the live tail says "Waiting for approval". */}
           {notes}
         </div>
       </div>

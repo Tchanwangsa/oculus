@@ -110,7 +110,7 @@ export function RequestBarView({
                 <CaretDown aria-hidden />
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="end" className="w-72 p-1">
+            <PopoverContent align="end" collisionPadding={8} className="w-72 max-w-[calc(100vw-16px)] p-1">
               {actions.more.map((option) => (
                 <button
                   key={option.id}

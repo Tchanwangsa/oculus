@@ -72,7 +72,7 @@ export function PermissionModeControl({ threadId, provider }: { threadId: number
           <CaretDown className="size-3 shrink-0" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={6} className="w-72 p-0">
+      <PopoverContent align="start" sideOffset={6} collisionPadding={8} className="w-72 max-w-[calc(100vw-16px)] p-0">
         <PermissionModeMenu caps={caps} mode={mode} busy={save.pending} refused={save.error} onPick={pick} />
       </PopoverContent>
     </Popover>
