@@ -499,3 +499,42 @@ fn each_mode_is_sent_on_every_turn_and_one_off_turns_never_ask() {
         );
     }
 }
+
+#[test]
+fn a_permissions_grant_on_a_glob_or_a_special_root_is_declined_unseen() {
+    let (server, written, events) = captured(PermissionMode::Ask);
+    let asks = |id: i64, path: Value| {
+        server.dispatch(serde_json::json!({
+            "id": id, "method": "item/permissions/requestApproval",
+            "params": { "threadId": "chat", "itemId": "p", "cwd": "/lib/agents",
+                "permissions": { "fileSystem": { "entries": [
+                    { "path": path, "access": "write" },
+                ]}}},
+        }));
+    };
+    asks(
+        1,
+        serde_json::json!({ "type": "special", "value": { "kind": "root" } }),
+    );
+    asks(
+        2,
+        serde_json::json!({ "type": "glob_pattern", "pattern": "/lib/**" }),
+    );
+    assert!(events.try_recv().is_err(), "neither reaches the student");
+    let replies = written.lock().unwrap().clone();
+    assert_eq!(replies.len(), 2);
+    for reply in &replies {
+        assert_eq!(
+            reply["result"],
+            serde_json::json!({ "permissions": {}, "scope": "turn" })
+        );
+    }
+    asks(
+        3,
+        serde_json::json!({ "type": "path", "path": "/elsewhere" }),
+    );
+    let HarnessEvent::RequestAsked { request, .. } = events.try_recv().unwrap() else {
+        panic!("a plain path is shown, its path checked");
+    };
+    assert_eq!(request.paths, ["/elsewhere"]);
+}

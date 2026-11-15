@@ -1640,7 +1640,9 @@ turns that name none. Outside `quiet` the thread's config also turns on
   Rust checks; a request whose item is unknown is declined unseen.
 - **Permissions** are answered with the profile asked for and `scope:
   "turn"` ("Allow for this turn"), or an empty profile to decline. The
-  write paths are checked. A grant lets later sandboxed commands reach the
+  write paths are checked; a write entry that is a glob or a special root
+  (`root`, `project_roots`, …) cannot be, so its request is declined
+  unseen. A grant lets later sandboxed commands reach the
   folder, so it is not "outside the sandbox".
 - **Callback ids** are kept as sent, number or string (`native_ref` is the
   JSON), and answered on the same id. `serverRequest/resolved` becomes

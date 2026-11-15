@@ -92,8 +92,8 @@ fn option(id: &str, label: &str, decision: Decision, scope: Option<&str>) -> Req
 }
 
 /// The request a callback stands for, from its params and what the thread
-/// has seen: `None` when it cannot be shown honestly (a file change whose
-/// paths are unknown).
+/// has seen: `None` when its paths cannot be checked (a file change whose
+/// item is unknown, a permissions grant on a glob or a special root).
 pub(super) fn request_of(
     method: &str,
     id: &Value,
@@ -137,17 +137,20 @@ pub(super) fn request_of(
                         .collect()
                 })
                 .unwrap_or_default();
-            if let Some(entries) = asked
+            let entries = asked
                 .pointer("/fileSystem/entries")
-                .and_then(|e| e.as_array())
-            {
-                paths.extend(
-                    entries
-                        .iter()
-                        .filter(|e| e["access"] != "read")
-                        .filter_map(|e| e.pointer("/path/path").and_then(|p| p.as_str()))
-                        .map(String::from),
-                );
+                .and_then(|e| e.as_array());
+            for entry in entries.into_iter().flatten() {
+                if entry["access"] == "read" || entry["access"] == "deny" {
+                    continue;
+                }
+                // A glob or a special root (`root`, `project_roots`, …)
+                // cannot be checked against the protected paths.
+                let path = entry.pointer("/path/path").and_then(|p| p.as_str());
+                match (entry.pointer("/path/type").and_then(|t| t.as_str()), path) {
+                    (Some("path"), Some(path)) => paths.push(path.to_string()),
+                    _ => return None,
+                }
             }
             let payload = json!({ "permissions": asked, "cwd": params["cwd"], "reason": reason });
             let options = vec![
@@ -215,8 +218,8 @@ impl CodexServer {
     }
 
     /// A callback: declined at once where nobody is asked (a one-off turn,
-    /// a "Don't ask" chat, a thread nobody routes, a file change whose paths
-    /// are unknown), else handed to the chat as a request.
+    /// a "Don't ask" chat, a thread nobody routes, paths that cannot be
+    /// checked), else handed to the chat as a request.
     pub(super) fn approval(&self, id: &Value, method: &str, params: &Value) {
         let decline = |server: &Self| {
             let permissions = Value::Null;
