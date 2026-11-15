@@ -28,6 +28,11 @@ pub fn protected(library: &Path, cwd: &Path, paths: &[String]) -> Option<String>
 }
 
 fn covers(library: &Path, path: &Path) -> bool {
+    // A folder that holds the library: a grant on it reaches every
+    // protected folder inside.
+    if library.starts_with(path) {
+        return true;
+    }
     let Ok(rest) = path.strip_prefix(library) else {
         return false;
     };
@@ -124,6 +129,8 @@ mod tests {
             "../courses/x.md",
             "skills/x",
             "/lib/oculus/agents/../courses/y",
+            "/lib",
+            "/",
         ] {
             assert!(check(path), "{path} is protected");
         }

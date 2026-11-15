@@ -1549,8 +1549,10 @@ before its session is released or never stored for that session. The
 CLI is told no, and the request is never shown, when:
 
 - no turn is open (a background agent asking after its turn closed);
-- it names a protected path (`requests/policy.rs` against `protected.rs`;
-  relative paths are read against `agents/`). A shell command cannot be
+- it names a protected path, or a folder that holds the library, since a
+  grant there reaches every protected folder inside (`requests/policy.rs`
+  against `protected.rs`; relative paths are read against `agents/`). A
+  shell command cannot be
   checked this way, so its payload says it runs outside the sandbox; the
   name denies and `OCULUS_AGENT` keep refusing inside an approved command;
 - its session has ended (the event arrives stale), or it cannot be saved.
