@@ -28,6 +28,10 @@ pub fn protected(library: &Path, cwd: &Path, paths: &[String]) -> Option<String>
 }
 
 fn covers(library: &Path, path: &Path) -> bool {
+    // Without case: the student's disk ignores it by default, so
+    // `Courses/` is `courses/`, existing or not.
+    let lower = |p: &Path| PathBuf::from(p.to_string_lossy().to_lowercase());
+    let (library, path) = (&lower(library), &lower(path));
     // A folder that holds the library: a grant on it reaches every
     // protected folder inside.
     if library.starts_with(path) {
@@ -131,6 +135,10 @@ mod tests {
             "/lib/oculus/agents/../courses/y",
             "/lib",
             "/",
+            "/lib/oculus/Lectures/x.md",
+            "/LIB/Oculus/COURSES",
+            "/lib/oculus/Settings.JSON",
+            "/lib/oculus/agents/Skills/x",
         ] {
             assert!(check(path), "{path} is protected");
         }
