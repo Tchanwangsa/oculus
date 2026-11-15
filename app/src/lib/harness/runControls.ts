@@ -1,0 +1,84 @@
+import type { HarnessRun, QueuedMessage } from "./types";
+
+/** What the composer's Stop button is: its words, whether it takes a click,
+ *  and the run it names (null for a turn the CLI started itself). */
+export interface StopControl {
+  label: "Stop generation" | "Stopping";
+  stopping: boolean;
+  runId: number | null;
+}
+
+/** What the composer's main button does: start or queue the draft, or lift
+ *  the hold on a queue (`resume`). */
+export interface SendControl {
+  kind: "send" | "queue" | "resume";
+  label: string;
+  disabled: boolean;
+}
+
+export interface RunControlInputs {
+  /** A turn is open on the chat (`harnessStore.live[id].running`). */
+  running: boolean;
+  /** The run on screen (`liveRunId`), or null for a turn the CLI started. */
+  liveRun: Pick<HarnessRun, "id" | "stopping"> | null;
+  /** A stop is on its way, or reached a turn that has no run to mark. */
+  stopSent: boolean;
+  /** Some waiting message is held (`queueHeld`). */
+  held: boolean;
+  /** The box holds words, pictures or pasted cards. */
+  hasDraft: boolean;
+  /** `canSend`: there is a draft and the chat's scope is chosen. */
+  ready: boolean;
+  /** Attachments are still being written to the library. */
+  writing: boolean;
+}
+
+export const RESUME = "Resume";
+export const RESUME_THREAD = "Resume thread";
+
+/** The composer's Resume, as T3 words it: with the box empty it is the main
+ *  button and resumes the thread; elsewhere (the held notice) plain Resume. */
+export function resumeLabel(draftEmpty: boolean): string {
+  return draftEmpty ? RESUME_THREAD : RESUME;
+}
+
+/**
+ * The composer's Stop and main button. Stop shows while a turn is open and
+ * reads "Stopping", inert, once the run is marked or a stop is on its way.
+ * The main button queues into an open turn, resumes a held queue when the
+ * box is empty, and otherwise sends; a draft sent past a held queue lifts
+ * the hold and goes out after the waiting messages (`docs/harness.md`).
+ */
+export function runControls(i: RunControlInputs): { stop: StopControl | null; send: SendControl | null } {
+  if (i.running) {
+    const stopping = i.stopSent || !!i.liveRun?.stopping;
+    return {
+      stop: { label: stopping ? "Stopping" : "Stop generation", stopping, runId: i.liveRun?.id ?? null },
+      // Nothing to queue: the box keeps only Stop, as it always has.
+      send: i.ready ? { kind: "queue", label: "Queue message", disabled: i.writing } : null,
+    };
+  }
+  if (i.held && !i.hasDraft) {
+    return { stop: null, send: { kind: "resume", label: resumeLabel(true), disabled: false } };
+  }
+  return {
+    stop: null,
+    send: {
+      kind: "send",
+      label: i.held ? "Send after the waiting messages" : "Send message",
+      disabled: !i.ready || i.writing,
+    },
+  };
+}
+
+/** Whether any of the chat's waiting messages is held. */
+export function queueHeld(queued: QueuedMessage[] | undefined): boolean {
+  return !!queued?.some((q) => q.held);
+}
+
+/** A failed command's reason, for the line beside the control the student
+ *  used. Tauri rejects with the Rust error's string. */
+export function commandError(e: unknown): string {
+  const text = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  return text.trim() || "Something went wrong";
+}

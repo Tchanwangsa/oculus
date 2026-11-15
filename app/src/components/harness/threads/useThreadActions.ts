@@ -7,7 +7,6 @@ import {
   harnessInterrupt,
   harnessResume,
   harnessRewind,
-  liveRunId,
   harnessSend,
   harnessUnqueue,
   type Provider,
@@ -67,21 +66,22 @@ export function useThreadActions(opts: ThreadActionsOptions) {
     [store],
   );
 
-  // Stop names the run on screen and holds the queue: waiting messages stay
-  // listed, and go out again on Resume or with the next message.
-  const onStop = useCallback(() => {
+  // Stop names the run the composer showed (`liveRunId`; null only for a
+  // turn the CLI started itself) and holds the queue: waiting messages stay
+  // listed, and go out again on Resume or with the next message. These three
+  // reject with Rust's reason, which the control that sent them shows.
+  const onStop = useCallback(async (runId: number | null) => {
     const id = ref.current.threadId();
-    if (id == null) return;
-    harnessInterrupt(id, liveRunId(store.getState().runs[id])).catch((e) => console.error("harness stop failed", e));
-  }, [store]);
-  // Offered once a stop has gone unanswered (`stopOverdue`); it names the run.
-  const onForceStop = useCallback((runId: number) => {
-    const id = ref.current.threadId();
-    if (id != null) harnessForceStop(id, runId).catch((e) => console.error("harness force stop failed", e));
+    if (id != null) await harnessInterrupt(id, runId);
   }, []);
-  const onResume = useCallback(() => {
+  // Offered once a stop has gone unanswered (`stopOverdue`); it names the run.
+  const onForceStop = useCallback(async (runId: number) => {
     const id = ref.current.threadId();
-    if (id != null) harnessResume(id).catch((e) => console.error("harness resume failed", e));
+    if (id != null) await harnessForceStop(id, runId);
+  }, []);
+  const onResume = useCallback(async () => {
+    const id = ref.current.threadId();
+    if (id != null) await harnessResume(id);
   }, []);
 
   const onProvider = useCallback((p: Provider) => store.getState().setProvider(p), [store]);

@@ -12,6 +12,7 @@ import { UsageMeter } from "@/components/harness/composer/UsageMeter";
 import { SubjectPicker } from "@/components/harness/composer/SubjectPicker";
 import { ThreadBanners } from "@/components/harness/composer/ThreadBanners";
 import { canSend, enterAction, UNSCOPED_PLACEHOLDER } from "@/components/harness/composer/sendGate";
+import { useRunControls } from "@/components/harness/composer/useRunControls";
 import { type Subject } from "@/lib/db";
 import {
   defaultSelection,
@@ -37,8 +38,9 @@ export const COMPOSER_PLACEHOLDER = "Ask anything. @ files, / skills";
 /**
  * The chat box: text, then model picker / usage / send+stop. Enter sends,
  * Shift+Enter breaks. While a turn runs a send waits as a queued run
- * (`harness/store/queue.rs`); Stop holds that queue. A rewind hands its
- * question back as `restore`.
+ * (`harness/store/queue.rs`); Stop names the run on screen and holds that
+ * queue, and with the box empty the main button resumes it. A rewind hands
+ * its question back as `restore`.
  * Scope is chosen above the box, only while the thread is new; a new Chat
  * thread chooses it in the headline (`DraftHero`) and, while it has none,
  * the box is `unscoped`: it keeps collecting but will not send. `@` mentions
@@ -67,6 +69,7 @@ export function Composer({
   onReasoning,
   onSend,
   onStop,
+  onResume,
   autoFocus,
   dropRef,
   onDropping,
@@ -102,7 +105,11 @@ export function Composer({
   onModel: (m: string | null) => void;
   onReasoning: (level: string | null) => void;
   onSend: (text: string) => void;
-  onStop: () => void;
+  /** Stop the run the box showed (null: a turn the CLI started itself). */
+  onStop: (runId: number | null) => Promise<void> | void;
+  /** Lift the hold on the open thread's queue; without it the box never
+   *  offers Resume. */
+  onResume?: () => Promise<void>;
   autoFocus?: boolean;
   /** A wider drop target than the box (the page around it), which then draws
    *  its own overlay from `onDropping`. */
@@ -164,6 +171,15 @@ export function Composer({
   }, [model, active, onModel, onReasoning]);
 
   const ready = text.trim().length > 0 || att.items.length > 0 || att.texts.length > 0;
+  const controls = useRunControls({
+    threadId,
+    running,
+    hasDraft: ready,
+    ready: canSend({ ready, unscoped }),
+    writing: att.writing,
+    onStop,
+    onResume,
+  });
 
   /** Send or queue. Pictures are written first; if that fails the box is kept as is. */
   const send = async () => {
@@ -205,6 +221,9 @@ export function Composer({
       {att.error && (
         <div className="px-0.5 text-[11px] text-destructive">{att.error}</div>
       )}
+      {controls.error && (
+        <div className="px-0.5 text-[11px] text-destructive">{controls.error}</div>
+      )}
 
       {signedOut && (
         <div className="flex items-center gap-1.5 px-0.5 text-[11px] text-muted-foreground">
@@ -233,7 +252,7 @@ export function Composer({
         />
       )}
 
-      <ThreadBanners threadId={threadId} rateLimits={rateLimits} />
+      <ThreadBanners threadId={threadId} rateLimits={rateLimits} onResume={onResume} />
 
       <div
         className={cn(
@@ -302,7 +321,13 @@ export function Composer({
           <div className="flex-1" />
           <UsageMeter usage={usage} rateLimits={rateLimits} />
           <DictationMic dictation={dictation} />
-          <SendControls running={running} ready={canSend({ ready, unscoped })} writing={att.writing} onSend={() => void send()} onStop={onStop} />
+          <SendControls
+            stop={controls.stop}
+            send={controls.send}
+            onStop={controls.stopNow}
+            onSend={() => void send()}
+            onResume={controls.resumeNow}
+          />
         </div>}
       </div>
     </div>

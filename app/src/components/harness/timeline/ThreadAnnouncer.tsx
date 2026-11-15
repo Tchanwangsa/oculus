@@ -1,13 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { createAnnouncer, spokenStatus, type HarnessRun, type RunStatus } from "@/lib/harness";
+import { createAnnouncer, lastRunStatus, spokenStatus } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
-
-/** The status of the thread's newest run, or null before its first. */
-function lastRunStatus(runs: Record<number, HarnessRun> | undefined): RunStatus | null {
-  let latest: HarnessRun | null = null;
-  for (const run of Object.values(runs ?? {})) if (!latest || run.id > latest.id) latest = run;
-  return latest?.status ?? null;
-}
 
 /**
  * One polite live region per view of a thread, for screen readers: it says

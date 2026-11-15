@@ -54,23 +54,23 @@ describe("usage limit", () => {
 describe("threadBannerItems", () => {
   const limited = [row("user"), row("error", { limit: true }, 9)];
   test("a limited run shows the notice, with the reset when known", () => {
-    const [b] = threadBannerItems(limited, [window(100, 30)], [], () => {}, NOW);
+    const [b] = threadBannerItems({ items: limited, windows: [window(100, 30)], dismissed: [], onDismiss: () => {}, now: NOW });
     expect(b.title).toBe("Usage limit reached");
     expect(b.description).toBe("Resets in 30 min");
     expect(b.id).toBe("limit:run:9");
   });
   test("without a window it says to retry by hand", () => {
-    const [b] = threadBannerItems(limited, [], [], () => {}, NOW);
+    const [b] = threadBannerItems({ items: limited, windows: [], dismissed: [], onDismiss: () => {}, now: NOW });
     expect(b.description).toBe("Reset time unavailable; retry manually");
   });
   test("dismissed per run", () => {
-    expect(threadBannerItems(limited, [], ["limit:run:9"], () => {}, NOW)).toEqual([]);
+    expect(threadBannerItems({ items: limited, windows: [], dismissed: ["limit:run:9"], onDismiss: () => {}, now: NOW })).toEqual([]);
     const next = [...limited, row("user", null, 10), row("error", { limit: true }, 10)];
-    expect(threadBannerItems(next, [], ["limit:run:9"], () => {}, NOW).map((b) => b.id)).toEqual(["limit:run:10"]);
+    expect(threadBannerItems({ items: next, windows: [], dismissed: ["limit:run:9"], onDismiss: () => {}, now: NOW }).map((b) => b.id)).toEqual(["limit:run:10"]);
   });
   test("dismissing names the notice", () => {
     let gone = "";
-    threadBannerItems(limited, [], [], (i) => (gone = i), NOW)[0].onDismiss?.();
+    threadBannerItems({ items: limited, windows: [], dismissed: [], onDismiss: (i) => (gone = i), now: NOW })[0].onDismiss?.();
     expect(gone).toBe("limit:run:9");
   });
 });

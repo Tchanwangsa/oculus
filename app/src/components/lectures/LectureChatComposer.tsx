@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ModelPicker, type PickerProvider } from "@/components/harness/composer/ModelPicker";
 import { UsageMeter } from "@/components/harness/composer/UsageMeter";
 import { ThreadBanners } from "@/components/harness/composer/ThreadBanners";
+import { useRunControls } from "@/components/harness/composer/useRunControls";
 import { AttachmentStrip } from "@/components/harness/attachments/AttachmentStrip";
 import { useAttachments } from "@/hooks/agents/useAttachments";
 import type { Provider, RateWindow, ThreadUsage } from "@/lib/harness";
@@ -85,7 +86,8 @@ const LECTURE_PLACEHOLDER = "Ask about this lecture. @ files, / skills";
  * are shared outright (`useAttachments`, `AttachmentStrip`).
  *
  * Enter sends, Shift+Enter breaks a line. While a turn runs a send is queued by
- * Rust, so stop and send sit side by side. Unsent text lives in `draftStore`,
+ * Rust, so stop and send sit side by side; Stop holds the queue and, with the
+ * box empty, the main button resumes it (`SendControls`, as Chat's). Unsent text lives in `draftStore`,
  * and so do long pastes, held as cards in the attachment strip.
  */
 export function LectureChatComposer({
@@ -108,6 +110,7 @@ export function LectureChatComposer({
   onReasoning,
   onSend,
   onStop,
+  onResume,
   dropRef,
   onDropping,
   threadId = null,
@@ -137,7 +140,10 @@ export function LectureChatComposer({
   onModel: (m: string | null) => void;
   onReasoning: (level: string | null) => void;
   onSend: (text: string) => void;
-  onStop: () => void;
+  /** Stop the run the box showed (null: a turn the CLI started itself). */
+  onStop: (runId: number | null) => Promise<void> | void;
+  /** Lift the hold on the open thread's queue. */
+  onResume?: () => Promise<void>;
   /** A wider drop target than the box (the panel around it), which then
    *  draws its own overlay from `onDropping`. */
   dropRef?: RefObject<HTMLElement | null>;
@@ -162,6 +168,7 @@ export function LectureChatComposer({
 
   /** Whether there is a message at all: words, pastes, pictures. */
   const ready = text.trim().length > 0 || att.items.length > 0 || att.texts.length > 0;
+  const controls = useRunControls({ threadId, running, hasDraft: ready, ready, writing: att.writing, onStop, onResume });
 
   // Put back before anything already typed, because it was typed first; its
   // pasted blocks go back to being cards.
@@ -198,7 +205,8 @@ export function LectureChatComposer({
       <ComposerMenu {...mentions.menu} />
       <DictationFeedback dictation={dictation} />
       {att.error && <div className="px-0.5 text-[11px] text-destructive">{att.error}</div>}
-      <ThreadBanners threadId={threadId} rateLimits={rateLimits} />
+      {controls.error && <div className="px-0.5 text-[11px] text-destructive">{controls.error}</div>}
+      <ThreadBanners threadId={threadId} rateLimits={rateLimits} onResume={onResume} />
       {stash.menu.entries.length > 0 && (
         <div className="flex justify-end px-0.5">
           <StashMenu {...stash.menu} />
@@ -267,8 +275,8 @@ export function LectureChatComposer({
             <UsageMeter usage={usage} rateLimits={rateLimits} />
             <MomentChip atRef={atRef} on={moment} onToggle={() => onMoment(!moment)} />
             <DictationMic dictation={dictation} />
-            <SendControls running={running} ready={ready} writing={att.writing}
-              onSend={() => void send()} onStop={onStop} />
+            <SendControls stop={controls.stop} send={controls.send} onStop={controls.stopNow}
+              onSend={() => void send()} onResume={controls.resumeNow} />
           </div>
         </div>}
       </div>

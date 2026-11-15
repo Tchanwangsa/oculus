@@ -79,3 +79,11 @@ export function elapsedText(ms: number): string {
   const m = Math.floor(s / 60);
   return `${m}m${s % 60 ? ` ${s % 60}s` : ""}`;
 }
+
+/** The status of the thread's newest run, or null before its first. A turn
+ *  the CLI started itself has no run, so it is not among them. */
+export function lastRunStatus(runs: Record<number, HarnessRun> | undefined): RunStatus | null {
+  let latest: HarnessRun | null = null;
+  for (const run of Object.values(runs ?? {})) if (!latest || run.id > latest.id) latest = run;
+  return latest?.status ?? null;
+}

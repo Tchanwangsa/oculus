@@ -158,7 +158,7 @@ export const LectureChatPanel = memo(function LectureChatPanel({
     [lectureId],
   );
 
-  const { send: sendTurn, onStop, onProvider, onModel, onReasoning, questions, pending } = useThreadActions({
+  const { send: sendTurn, onStop, onResume, onProvider, onModel, onReasoning, questions, pending } = useThreadActions({
     threadId: () => threadIdRef.current,
     provider: activeProvider,
     model: activeModel,
@@ -289,6 +289,7 @@ export const LectureChatPanel = memo(function LectureChatPanel({
           onReasoning={onReasoning}
           onSend={send}
           onStop={onStop}
+          onResume={onResume}
           dropRef={panelRef}
           onDropping={setDropping}
           threadId={threadId}

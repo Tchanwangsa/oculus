@@ -48,7 +48,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Earlier messages on ArrowUp, and the ⌘S stash | `app/src/lib/harness/promptHistory.ts`, `app/src/hooks/agents/usePromptHistory.ts`, `app/src/stores/chat/stashStore.ts`, `app/src/components/harness/composer/useComposerStash.ts`, `app/src/components/harness/composer/StashMenu.tsx`, `app/src/components/harness/composer/StashBadge.tsx` |
 | Studio's thread column and New video box, which use `Composer`'s `leading` (chips after the subject's) and `placeholder` | `app/src/components/studio/thread/ThreadColumn.tsx`, `app/src/components/studio/new/NewVideo.tsx` ([studio-page.md](./studio-page.md)) |
 | Voice dictation, microphone capture and cleanup job | `app/src/components/harness/dictation/`, `app/src/lib/dictation/recording.ts`, `app/src-tauri/src/harness/app/dictation.rs` |
-| Send, queue and stop controls shared by both composers | `app/src/components/harness/composer/SendControls.tsx` |
+| Send, queue, stop and resume controls shared by both composers, the rule that picks them, and the held-queue notice | `app/src/components/harness/composer/SendControls.tsx`, `app/src/lib/harness/runControls.ts`, `app/src/components/harness/composer/useRunControls.ts`, `app/src/components/harness/composer/ThreadBanners.tsx` |
 | Pictures pasted or dropped into a composer | `app/src-tauri/src/harness/attach.rs`, `app/src/hooks/agents/useAttachments.ts`, `app/src/hooks/gestures/useFileDrop.ts` |
 | Long pastes held as text cards: format, card, editor and viewer | `app/src/lib/harness/attachments.ts`, `app/src/components/harness/attachments/PastedText.tsx`, `app/src/components/harness/attachments/PastedTextEditor.tsx` |
 | Library paths in rows and prose; copy as markdown | `app/src/lib/files/openFile.ts`, `app/src/lib/markdown/selection.ts` |
@@ -545,7 +545,8 @@ still update the picker.
   The brief also bans a bare `|` in maths inside a table (the table splits the
   cell first); agents use `\lvert`/`\rvert`.
 - **Thread notices sit in one lane above the composer** (`BannerLane`, fed by
-  `ThreadBanners` for the open thread in both Chat and the lecture dock): an
+  `ThreadBanners` for the open thread in Chat, the lecture dock and a Studio
+  video's thread): an
   ordered stack of cards, each a toned glyph, a title, a muted description,
   pill actions and an optional close. Never a toast, and nothing times out.
 - **Usage is a ring of context only** (`UsageMeter.tsx`); spend is hidden, as
@@ -1049,6 +1050,30 @@ turn ending interrupted with its text kept and its queue held, and then the
 server is killed; the next send starts another. A start step still waiting
 on the killed process fails, which under a stop ends its run as interrupted
 rather than failed.
+
+**What the composer shows** (`runControls` in `lib/harness/runControls.ts`,
+drawn by `SendControls` in every composer):
+
+- **Stop** shows while a turn is open, an icon labelled "Stop generation".
+  It sends the run the composer showed (`liveRunId`), or null for a turn
+  the CLI started itself. Once the run is marked (`stopping`, from
+  `stop_requested` or a snapshot's `stop_requested_at`), or while the
+  command is out, it reads "Stopping" in words beside a spinner and takes
+  no click; for a turn with no run, a stop that went through reads the same
+  until the turn ends.
+- **Resume.** With the chat idle, a held queue and an empty box, the main
+  button is a "Resume thread" pill sending `harness_resume`. With words in
+  the box it stays the send arrow, labelled "Send after the waiting
+  messages", because that send lifts the hold and joins the back.
+- **The held notice.** An idle chat whose waiting messages are held shows
+  "2 messages waiting" in the banner lane with a Resume pill. After a
+  failed run it says the last reply failed; a stop and a restart hold the
+  queue alike and nothing saved tells them apart, so they share "Held after
+  a stop or a restart".
+- **A command that fails** says why where the student acted: Stop and the
+  main button's Resume on a line above the box, the notice's Resume in the
+  notice. Nothing stays pending: each control is inert only while its own
+  command is out (`useRunCommand`).
 
 Codex never completes an interrupted message, so the
 bridge commits the streamed text itself; Claude's closing `result` claims an
