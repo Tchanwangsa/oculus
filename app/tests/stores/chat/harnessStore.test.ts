@@ -189,3 +189,13 @@ test("a run's handoff is told as pending, then as delivered, and outlives its se
     provider: "codex", handoff: { kind: "delta", status: "inline", from: "claude", omitted: 0 },
   }).handoff?.kind).toBe("delta");
 });
+
+test("a stored pick moves the thread's selection, which the sidebar's mark draws", () => {
+  useHarnessStore.setState({
+    threads: [{ id: 1, status: "idle", provider: "claude", model: "claude-opus-5-5", effort: "high" }, { id: 2, provider: "claude" }] as HarnessThread[],
+  });
+  useHarnessStore.getState().selected(1, { provider: "codex", model: "gpt-6.1-sol", effort: "medium" });
+  const [one, two] = useHarnessStore.getState().threads;
+  expect(one).toMatchObject({ provider: "codex", model: "gpt-6.1-sol", effort: "medium" });
+  expect(two.provider).toBe("claude");
+});
