@@ -134,6 +134,7 @@ impl Bench {
             fed: fed.clone(),
             drained: waiters,
             clock: Clock::new(),
+            waiting: Vec::new(),
         };
         let consumer = std::thread::spawn(move || consume(feed, Arc::default(), &mut io));
         Bench {

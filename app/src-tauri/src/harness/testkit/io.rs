@@ -136,12 +136,16 @@ impl ConsumerIo for Io {
 /// The bus until the replay has fed everything: the bridges keep sinks alive,
 /// so the channel itself never closes. A bus left empty first delivers the
 /// wake the consumer asked for, then answers whoever asked on `drained`,
-/// which is how a gate knows the consumer has caught up.
+/// which is how a gate knows the consumer has caught up. A message that
+/// arrived with the request is handled before the answer.
 pub(super) struct Feed {
     pub rx: Receiver<BusMsg>,
     pub fed: Arc<AtomicBool>,
     pub drained: Receiver<Sender<()>>,
     pub clock: Arc<Clock>,
+    /// Whoever asked to be told when the consumer has caught up, taken off
+    /// `drained` and not answered yet.
+    pub waiting: Vec<Sender<()>>,
 }
 
 impl Iterator for Feed {
@@ -155,7 +159,18 @@ impl Iterator for Feed {
                     if self.clock.fire() {
                         return Some(BusMsg::Wake);
                     }
+                    // A waiter is answered only once the bus is empty with
+                    // the waiter already in hand: whoever asks has sent
+                    // their messages first, and one that landed between
+                    // the timeout above and here must be handled before
+                    // they are told the consumer has caught up.
                     while let Ok(waiter) = self.drained.try_recv() {
+                        self.waiting.push(waiter);
+                    }
+                    if let Ok(msg) = self.rx.try_recv() {
+                        return Some(msg);
+                    }
+                    for waiter in self.waiting.drain(..) {
                         let _ = waiter.send(());
                     }
                     if self.fed.load(Ordering::SeqCst) {

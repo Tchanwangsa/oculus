@@ -683,6 +683,7 @@ fn boot(
                 fed,
                 drained: waiters,
                 clock,
+                waiting: Vec::new(),
             };
             consume(feed, held, &mut io);
             io
