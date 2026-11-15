@@ -199,7 +199,7 @@ mod tests {
     /// webview sent comes back, and nothing the app resolves is stored.
     #[test]
     fn the_sendable_fields_survive_a_round_trip_and_the_resolved_ones_are_left_out() {
-        let sent = r#"{"model":"opus","reasoningEffort":"high","chatScope":"general","context":"the moment","at":42,"studio":{"slug":"limits","lengthSecs":90}}"#;
+        let sent = r#"{"model":"opus","reasoningEffort":"high","chatScope":"general","context":"the moment","at":42,"studio":{"slug":"limits","lengthSecs":90},"skills":["revise"]}"#;
         let mut o = opts(sent);
         o.scope = Some("COMP1".into());
         o.continuation = Some("12.0".into());
@@ -221,6 +221,7 @@ mod tests {
         assert_eq!(back.chat_scope, Some(ChatScope::General));
         assert_eq!(back.context.as_deref(), Some("the moment"));
         assert_eq!(back.at, Some(42));
+        assert_eq!(back.skills, ["revise"], "a waiting message keeps its skill");
         assert_eq!(back.studio.unwrap().length_secs, Some(90));
         assert_eq!(serde_json::to_value(ChatScope::Subject(3)).unwrap(), 3);
     }
