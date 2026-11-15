@@ -1611,7 +1611,8 @@ the saved mode as each request arrives, so a change mid-turn decides the
 turn's next request: under `quiet` it is declined unseen, under `ask` or
 `auto` it is shown. Auto's reviewer is a wire setting, so a switch to or
 from `auto` takes effect from the next turn's start. The start step
-reads it off the row (`SendOptions::permission_mode`), and it is part of
+reads it off the row (`SendOptions::permission_mode`), as does a rewind
+that respawns the session, and it is part of
 the session's reuse key ([`decide_transition`](#changing-provider-mid-chat)).
 A bridge whose `approvals` flag is false declines every request, whatever
 the mode.
