@@ -172,6 +172,14 @@ export function ThreadBanners({
     clear();
     clearForce();
   }, [threadId, clear, clearForce]);
+  // A failure belongs to the notice it was said in: a later run's stop, or
+  // a later hold, starts without it.
+  const liveId = liveRun?.id ?? null;
+  const anyHeld = queued.some((q) => q.held);
+  useEffect(() => clearForce(), [liveId, clearForce]);
+  useEffect(() => {
+    if (!anyHeld) clear();
+  }, [anyHeld, clear]);
   const resumeCommand = useMemo(
     (): BannerCommand | null => (onResume ? { onClick: () => void run(onResume), pending, error } : null),
     [onResume, run, pending, error],

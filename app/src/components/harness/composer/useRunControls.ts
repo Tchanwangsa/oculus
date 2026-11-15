@@ -41,11 +41,18 @@ export function useRunControls({
   // A stop that went through, by the run it named: a turn the CLI started
   // has no run to mark, so this is what says it is stopping.
   const [sentFor, setSentFor] = useState<{ thread: number | null; run: number | null } | null>(null);
-  useEffect(() => {
-    if (!running) setSentFor(null);
-  }, [running]);
   const { clear: clearStop } = stop;
   const { clear: clearResume } = resume;
+  // A failure is about the state it was tried in: once the turn ends, the
+  // hold lifts or the thread changes, its line goes.
+  useEffect(() => {
+    if (running) return;
+    setSentFor(null);
+    clearStop();
+  }, [running, clearStop]);
+  useEffect(() => {
+    if (!held) clearResume();
+  }, [held, clearResume]);
   useEffect(() => {
     clearStop();
     clearResume();

@@ -73,7 +73,9 @@ function Banner({ item }: { item: BannerItem }) {
           variant={a.primary ? "default" : "outline"}
           disabled={a.disabled}
           onClick={a.onClick}
-          className="shrink-0"
+          // A pending action fades while out; its own layer keeps the card's
+          // glyphs from re-snapping at a fractional zoom (`docs/ui.md`).
+          className="shrink-0 will-change-[opacity]"
         >
           {a.label}
         </Button>

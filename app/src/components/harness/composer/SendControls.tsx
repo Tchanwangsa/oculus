@@ -31,7 +31,7 @@ export function SendControls({ stop, send, onStop, onSend, onResume }: {
           </Button>
         ))}
       {send?.kind === "resume" && (
-        <Button size="xs" disabled={send.disabled} onClick={onResume} className="shrink-0">
+        <Button size="xs" disabled={send.disabled} onClick={onResume} className="shrink-0 will-change-[opacity]">
           <Play weight="fill" aria-hidden />
           {send.label}
         </Button>

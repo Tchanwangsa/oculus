@@ -163,7 +163,15 @@ function MoveButton({ label, icon: IconC, disabled, onClick }: {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button size="icon-xs" variant="ghost" aria-label={label} disabled={disabled} onClick={onClick}>
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label={label}
+          disabled={disabled}
+          onClick={onClick}
+          // Disabled fades its icon; its own layer keeps it from jittering.
+          className="will-change-[opacity]"
+        >
           <IconC />
         </Button>
       </TooltipTrigger>

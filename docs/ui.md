@@ -294,6 +294,15 @@ themes are opt-in and keep the same structure.
   `display: inline` so the line keeps its height). The ⌘S stash is a "Stash"
   pill above the box opening a popover; its eviction notice is a line inside
   that popover, not a toast ([harness.md](./harness.md#the-empty-box-earlier-messages-and-the-stash)).
+- **The composer says a turn's state in words, not only colour**
+  (`SendControls`): Stop is an icon until pressed, then a disabled "Stopping"
+  pill with a brand spinner; a held queue with an empty box turns the send
+  arrow into a filled "Resume thread" pill. Waiting messages say "Held" or
+  "Waiting" on an always-visible line above the bubble, with Move earlier and
+  Move later icon buttons, so nothing there fades in on hover. Notices about
+  a held queue or an agent ignoring Stop are `BannerLane` cards, and a failed
+  command is said in the card or on a line by the control, never in a toast
+  ([harness.md](./harness.md#one-turn-at-a-time)).
 - **A long list's rows can skip layout off screen with `skip-offscreen`**
   (`content-visibility: auto`, remembering each row's drawn height), so a
   resize lays out only what is visible. The row clips its paint to its box:
