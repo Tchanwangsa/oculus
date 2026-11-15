@@ -385,3 +385,44 @@ describe("the streaming reply's row key", () => {
     expect(streamingReply([])).toBeNull();
   });
 });
+
+describe("a mixed chat's dividers", () => {
+  const row = (id: number, kind: HarnessItem["kind"], run: number | null): HarnessItem => ({
+    id, thread_id: THREAD, kind, ref_id: null, content: kind === "assistant" ? `reply ${id}` : "x", meta: null,
+    created_at: "2026-11-15 00:00:00", run_id: run,
+  });
+  const done = (id: number, answer: number, sent: Partial<HarnessRun>): HarnessRun => ({
+    id, status: "completed", delivery: "delivered", answer_item_id: answer, started_ms: 0, ended_ms: 1, ...sent,
+  });
+  const items = [
+    row(1, "user", 1), row(2, "assistant", 1),
+    row(3, "user", 2), row(4, "assistant", 2),
+    row(5, "user", 3), row(6, "assistant", 3),
+    row(7, "user", 4), row(8, "assistant", 4),
+  ];
+  const runs: Record<number, HarnessRun> = {
+    // From before selections were recorded: no level.
+    1: done(1, 2, { provider: "claude", model: "claude-opus-5-5", effort: null }),
+    2: done(2, 4, { provider: "claude", model: "claude-opus-5-5", effort: "high" }),
+    3: done(3, 6, { provider: "codex", model: "gpt-6.1-sol", effort: "high", handoff: { kind: "full", status: "failed", from: "claude", omitted: 0 } }),
+    4: done(4, 8, { provider: "claude", model: "claude-opus-5-5", effort: "high", handoff: { kind: "delta", status: "inline", from: "codex", omitted: 0 } }),
+  };
+  const changes = () =>
+    buildRows(items, false, { runs }).flatMap((r) => (r.kind === "item" && r.item.kind === "user" ? [[r.item.id, r.change] as const] : []));
+
+  test("sit on the question of each run that switched or carried a handoff", () => {
+    const at = Object.fromEntries(changes());
+    expect(at[1]).toBeUndefined();
+    // A level first recorded is not a switch.
+    expect(at[3]).toBeUndefined();
+    expect(at[5]).toEqual({ before: runs[2], run: runs[3] });
+    expect(at[7]).toEqual({ before: runs[3], run: runs[4] });
+  });
+
+  test("a run that matches the one before draws none", () => {
+    const same = { ...runs, 4: done(4, 8, { provider: "codex", model: "gpt-6.1-sol", effort: "high" }) };
+    const rows = buildRows(items, false, { runs: same });
+    const last = rows.find((r) => r.kind === "item" && r.item.id === 7);
+    expect(last?.kind === "item" && last.change).toBeUndefined();
+  });
+});

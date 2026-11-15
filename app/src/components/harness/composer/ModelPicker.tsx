@@ -1,13 +1,23 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { CaretDown, Check, MagnifyingGlass } from "@phosphor-icons/react";
+import { CaretDown, Check, LockSimple, MagnifyingGlass } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ProviderMark } from "@/components/icons/ProviderMark";
-import { providerAvailability, providerLabel, reasoningLabel, type PickerProvider, type Provider } from "@/lib/harness";
+import {
+  providerAvailability,
+  providerLabel,
+  reasoningLabel,
+  SWITCH_LOCKED,
+  type PickerProvider,
+  type Provider,
+} from "@/lib/harness";
 import { settingsPage, type SettingsPageId } from "@/lib/search/settings";
 import { navigateActive } from "@/lib/shell/tabRouters";
 import { cn } from "@/lib/utils";
+
+/** `locked` for a picker whose chat keeps its agent whatever the bridges can do. */
+export const LOCK_OTHERS = () => true;
 
 /** Above this many models the menu grows a search box. */
 const SEARCH_THRESHOLD = 8;
@@ -20,14 +30,17 @@ export type { PickerProvider } from "@/lib/harness";
  * reasoning levels. Nothing inside closes it — agent, model and level are one
  * decision. Neither row has a "default" entry: a turn always names an explicit
  * model and level. Levels come off the model, not the provider. A provider
- * whose CLI is missing shows `NotInstalled` instead of its catalogue. Stable
- * selection props keep composer draft keystrokes outside this catalogue's
- * memo boundary.
+ * whose CLI is missing shows `NotInstalled` instead of its catalogue, and a
+ * `locked` one (a started chat it cannot take over) is dimmed but opens a
+ * note saying so, without being picked. Stable selection props keep composer
+ * draft keystrokes outside this catalogue's memo boundary.
  */
 export const ModelPicker = memo(function ModelPicker({
   providers,
   provider,
-  providerLocked,
+  locked,
+  refused,
+  switchFrom,
   model,
   reasoning,
   onProvider,
@@ -43,8 +56,13 @@ export const ModelPicker = memo(function ModelPicker({
 }: {
   providers: PickerProvider[];
   provider: Provider;
-  /** An open thread keeps its agent; only a new one may switch tabs. */
-  providerLocked: boolean;
+  /** The agents this chat cannot move to (`switchLocked`); a stable function. */
+  locked?: (provider: Provider) => boolean;
+  /** Rust's reason for refusing the last pick, shown above the models. */
+  refused?: string | null;
+  /** The agent the chat moves away from with its next message, when the
+   *  pick names another (`pendingSwitch`). */
+  switchFrom?: Provider | null;
   model: string | null;
   reasoning: string | null;
   onProvider: (p: Provider) => void;
@@ -75,6 +93,8 @@ export const ModelPicker = memo(function ModelPicker({
   };
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  /** A locked tab the student opened: its note shows, nothing is picked. */
+  const [peek, setPeek] = useState<Provider | null>(null);
 
   const active = providers.find((p) => p.id === provider);
   const availability = providerAvailability(provider);
@@ -84,12 +104,15 @@ export const ModelPicker = memo(function ModelPicker({
 
   // A stale search would silently hide rows the next time the menu opens.
   useEffect(() => {
-    if (!open) setQuery("");
+    if (!open) {
+      setQuery("");
+      setPeek(null);
+    }
   }, [open]);
 
   const missing = active?.health === "missing";
 
-  const showSearch = !unsupported && !missing && models.length > SEARCH_THRESHOLD;
+  const showSearch = !peek && !unsupported && !missing && models.length > SEARCH_THRESHOLD;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return models;
@@ -98,8 +121,10 @@ export const ModelPicker = memo(function ModelPicker({
     );
   }, [models, query]);
 
-  const levels = unsupported || missing ? [] : selected?.reasoningEfforts ?? [];
-  const level = reasoning && levels.includes(reasoning) ? reasoning : null;
+  const offered = unsupported || missing ? [] : selected?.reasoningEfforts ?? [];
+  const level = reasoning && offered.includes(reasoning) ? reasoning : null;
+  // A locked agent's note hides the dial; the trigger still names the level.
+  const levels = peek ? [] : offered;
 
   // An id with no row (a model this list doesn't know) shows as the raw id.
   const label = selected?.label ?? model;
@@ -110,6 +135,7 @@ export const ModelPicker = memo(function ModelPicker({
     levelText && `${levelText} reasoning`,
     missing && "not installed",
     unsupported && availability.note,
+    switchFrom && "from your next message",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -155,31 +181,30 @@ export const ModelPicker = memo(function ModelPicker({
         {providers.length > 1 ? (
           <div className="flex shrink-0 items-center gap-0.5 border-b border-border bg-surface px-2.5 pt-1">
             {providers.map((p) => {
-              const isActive = p.id === provider;
-              // A missing agent is dimmed but clickable: its panel says why.
+              const isActive = p.id === (peek ?? provider);
+              // A missing or locked agent is dimmed but clickable: its panel says why.
               const gone = p.health === "missing";
+              const shut = p.id !== provider && !!locked?.(p.id);
               return (
                 <button
                   key={p.id}
                   type="button"
-                  title={
-                    providerLocked && !isActive
-                      ? `${p.label} — start a new chat to switch`
-                      : gone
-                        ? `${p.label} — not installed`
-                        : p.label
-                  }
-                  disabled={providerLocked && !isActive}
+                  title={shut ? `${p.label} — ${SWITCH_LOCKED}` : gone ? `${p.label} — not installed` : p.label}
+                  aria-disabled={shut || undefined}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
-                    if (p.id !== provider) onProvider(p.id);
+                    if (shut) setPeek(p.id);
+                    else {
+                      setPeek(null);
+                      if (p.id !== provider) onProvider(p.id);
+                    }
                   }}
                   className={cn(
-                    "flex size-8 items-center justify-center border-b-2 transition-colors focus-visible:outline-none disabled:opacity-40",
+                    "flex size-8 items-center justify-center border-b-2 transition-colors focus-visible:outline-none",
                     isActive
                       ? "border-foreground text-foreground"
-                      : "border-transparent text-muted-foreground enabled:hover:text-foreground",
-                    gone && !isActive && "opacity-40",
+                      : "border-transparent text-muted-foreground hover:text-foreground",
+                    (gone || shut) && !isActive && "opacity-40",
                   )}
                 >
                   <ProviderMark provider={p.id} className="size-4" />
@@ -203,8 +228,22 @@ export const ModelPicker = memo(function ModelPicker({
           </div>
         ) : null}
 
+        {!peek && (refused || switchFrom) ? (
+          <div
+            role={refused ? "alert" : undefined}
+            className={cn(
+              "shrink-0 border-b border-border-subtle px-3 py-2 text-[11px] leading-relaxed",
+              refused ? "text-destructive" : "text-muted-foreground",
+            )}
+          >
+            {refused ?? `Switches from ${providerLabel(switchFrom!)} with your next message.`}
+          </div>
+        ) : null}
+
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 pb-1">
-          {unsupported ? (
+          {peek ? (
+            <SwitchLocked label={providers.find((p) => p.id === peek)?.label ?? providerLabel(peek)} />
+          ) : unsupported ? (
             <div className="px-2 py-3 text-xs text-muted-foreground">
               {providerLabel(provider)} — {availability.note}
             </div>
@@ -303,6 +342,18 @@ export const ModelPicker = memo(function ModelPicker({
     </Popover>
   );
 });
+
+/** Shown in place of a locked agent's catalogue: this chat cannot move to it. */
+function SwitchLocked({ label }: { label: string }) {
+  return (
+    <div className="flex items-start gap-2 px-2 py-3 text-xs text-muted-foreground">
+      <LockSimple className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+      <span>
+        {label} — {SWITCH_LOCKED}
+      </span>
+    </div>
+  );
+}
 
 /** Shown in place of the catalogue when the CLI wasn't found. Navigates via
  *  `navigateActive`, since a portalled popover has no router to `useNavigate`. */

@@ -78,7 +78,6 @@ export function NewVideo() {
               provider={provider}
               model={model}
               reasoning={reasoning}
-              providerLocked={false}
               subjects={subjects}
               subjectId={subjectId}
               onSubject={setSubjectId}

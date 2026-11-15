@@ -7,6 +7,7 @@ import { ProviderMark } from "@/components/icons/ProviderMark";
 import { JumpToLatest } from "@/components/harness/timeline/JumpToLatest";
 import { Timeline } from "@/components/harness/timeline/Timeline";
 import { useThreadActions } from "@/components/harness/threads/useThreadActions";
+import { useComposerSelection } from "@/components/harness/threads/useComposerSelection";
 import { LectureChatComposer } from "@/components/lectures/LectureChatComposer";
 import { useRateLimits } from "@/hooks/agents/useRateLimits";
 import { useProviderModels } from "@/hooks/agents/useProviderModels";
@@ -70,15 +71,14 @@ export const LectureChatPanel = memo(function LectureChatPanel({
   const items = useHarnessStore((s) => itemsFor(threadId, s.items));
   const running = useHarnessStore((s) => (threadId != null && s.live[threadId]?.running) || false);
   const storeThread = useHarnessStore((s) => s.threads.find((t) => t.id === threadId) ?? null);
-  const provider = useHarnessStore((s) => s.provider);
-  const model = useHarnessStore((s) => s.model);
-  const reasoning = useHarnessStore((s) => s.reasoning);
 
   // The store's list is what a running turn patches (`touchThread`); the
   // lecture's own list stands in until it is read, or for an older thread.
   const thread = storeThread ?? threads.find((t) => t.id === threadId) ?? null;
-  const activeProvider = thread?.provider ?? provider;
-  const activeModel = thread ? thread.model : model;
+  // What the next message uses: the thread's selection (or a pick on its way
+  // to Rust), else the session's for a new thread.
+  const { selection, refused, switchFrom, locked } = useComposerSelection(thread);
+  const activeProvider = selection.provider;
   const usage = useMemo(() => parseUsage(thread), [thread]);
   const rateLimits = useRateLimits(activeProvider);
 
@@ -131,17 +131,6 @@ export const LectureChatPanel = memo(function LectureChatPanel({
 
   const { providers: pickerProviders } = useProviderModels(activeProvider);
 
-  // No turn goes out without a model and a level: fill an empty selection once
-  // the catalogue arrives.
-  const active = pickerProviders.find((p) => p.id === activeProvider);
-  useEffect(() => {
-    if (model || !active || active.loading || active.models.length === 0) return;
-    const pick = defaultSelection(active.models);
-    if (!pick.model) return;
-    const s = store.getState();
-    s.setModel(pick.model);
-    s.setReasoning(pick.reasoning);
-  }, [model, active, store]);
 
   const empty = items.length === 0 && !running;
   const scroll = useStickToBottom(threadId, !empty, running, items);
@@ -160,14 +149,24 @@ export const LectureChatPanel = memo(function LectureChatPanel({
 
   const { send: sendTurn, onStop, onResume, onForceStop, onProvider, onModel, onReasoning, questions, pending } = useThreadActions({
     threadId: () => threadIdRef.current,
-    provider: activeProvider,
-    model: activeModel,
+    selection,
     onRestore: (text) => setRestore((r) => ({ text, n: (r?.n ?? 0) + 1 })),
     onCreated: (id) => {
       openThread(id);
       void reloadThreads();
     },
   });
+  // No turn goes out without a model and a level: fill an empty selection (a
+  // new thread's, or another agent's pick on an open one) once the catalogue
+  // arrives.
+  const active = pickerProviders.find((p) => p.id === activeProvider);
+  useEffect(() => {
+    if (selection.model || !active || active.loading || active.models.length === 0) return;
+    const pick = defaultSelection(active.models);
+    if (!pick.model) return;
+    onModel(pick.model);
+    onReasoning(pick.reasoning);
+  }, [selection.model, active, onModel, onReasoning]);
   // No moment on follow-ups: an approval is not a question about the recording.
   const send = useCallback(
     (text: string) =>
@@ -274,11 +273,13 @@ export const LectureChatPanel = memo(function LectureChatPanel({
           subjectId={subjectId}
           providers={pickerProviders}
           provider={activeProvider}
-          providerLocked={thread != null}
+          locked={locked}
+          refused={refused}
+          switchFrom={switchFrom}
           usage={usage}
           rateLimits={rateLimits}
-          model={activeModel}
-          reasoning={reasoning}
+          model={selection.model}
+          reasoning={selection.effort}
           running={running}
           atRef={atRef}
           moment={moment}

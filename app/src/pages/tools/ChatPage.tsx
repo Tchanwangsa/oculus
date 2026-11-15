@@ -9,6 +9,7 @@ import { ThreadMap } from "@/components/harness/timeline/ThreadMap";
 import { JumpToLatest } from "@/components/harness/timeline/JumpToLatest";
 import { Timeline } from "@/components/harness/timeline/Timeline";
 import { useThreadActions } from "@/components/harness/threads/useThreadActions";
+import { useComposerSelection } from "@/components/harness/threads/useComposerSelection";
 import { PageHeader, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
 import { DropOverlay } from "@/components/ui/layout/DropOverlay";
 import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
@@ -58,9 +59,6 @@ export default function ChatPage() {
   const threads = useHarnessStore((s) => s.threads);
   const threadsLoaded = useHarnessStore((s) => s.threadsLoaded);
   const items = useHarnessStore((s) => itemsFor(activeId, s.items));
-  const provider = useHarnessStore((s) => s.provider);
-  const model = useHarnessStore((s) => s.model);
-  const reasoning = useHarnessStore((s) => s.reasoning);
   const subjects = useHarnessStore((s) => s.subjects);
   const subjectsLoaded = useHarnessStore((s) => s.subjectsLoaded);
   // A new thread's scope is its draft's (`draftStore`), shared by every Chat
@@ -89,8 +87,10 @@ export default function ChatPage() {
   );
 
   const thread = threads.find((t) => t.id === activeId) ?? null;
-  const activeProvider = thread?.provider ?? provider;
-  const activeModel = thread ? thread.model : model;
+  // What the next message uses: the thread's selection (or a pick on its way
+  // to Rust), else the session's for a new thread.
+  const { selection, refused, switchFrom, locked } = useComposerSelection(thread);
+  const activeProvider = selection.provider;
   // An open thread keeps its own scope; only a new one reads the draft's.
   const activeSubject = thread ? thread.subject_id : scope == null ? null : scopeSubject(scope);
   const usage = useMemo(() => parseUsage(thread), [thread]);
@@ -160,8 +160,7 @@ export default function ChatPage() {
 
   const { send: sendTurn, onStop, onResume, onForceStop, onProvider, onModel, onReasoning, questions, pending } = useThreadActions({
     threadId: () => activeRef.current,
-    provider: activeProvider,
-    model: activeModel,
+    selection,
     onRestore: handBack,
     // The empty composer became this conversation; replace, it isn't a page
     // to go back to. The next new chat chooses its subject afresh.
@@ -242,9 +241,11 @@ export default function ChatPage() {
     <Composer
       draftKey={draftKey(activeId, "chat")}
       provider={activeProvider}
-      model={activeModel}
-      reasoning={reasoning}
-      providerLocked={thread != null}
+      model={selection.model}
+      reasoning={selection.effort}
+      locked={locked}
+      refused={refused}
+      switchFrom={switchFrom}
       subjects={subjects}
       subjectId={activeSubject}
       subjectLocked={thread != null}

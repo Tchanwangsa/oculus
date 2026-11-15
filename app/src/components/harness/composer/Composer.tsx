@@ -53,7 +53,9 @@ export function Composer({
   provider,
   model,
   reasoning,
-  providerLocked,
+  locked,
+  refused,
+  switchFrom,
   subjects,
   subjectId,
   onSubject,
@@ -84,8 +86,12 @@ export function Composer({
   model: string | null;
   /** Reasoning effort for the next turn; null leaves the flag off. */
   reasoning: string | null;
-  /** An open thread keeps its provider; only a new one can pick. */
-  providerLocked: boolean;
+  /** The agents an open chat cannot move to (`useSwitchLock`); none for a new one. */
+  locked?: (provider: Provider) => boolean;
+  /** Rust's reason for refusing the last model pick (`pickStore`). */
+  refused?: string | null;
+  /** The agent the chat leaves with its next message (`pendingSwitch`). */
+  switchFrom?: Provider | null;
   subjects: Subject[];
   /** null is the general thread — the whole library. */
   subjectId: number | null;
@@ -226,6 +232,10 @@ export function Composer({
       {controls.error && (
         <div className="px-0.5 text-[11px] text-destructive">{controls.error}</div>
       )}
+      {/* The open picker shows its own refusal; once it closes, the box does. */}
+      {refused && !tools.modelOpen && (
+        <div role="alert" className="px-0.5 text-[11px] text-destructive">{refused}</div>
+      )}
 
       {signedOut && (
         <div className="flex items-center gap-1.5 px-0.5 text-[11px] text-muted-foreground">
@@ -320,7 +330,9 @@ export function Composer({
             className="-ml-1.5"
             providers={pickerProviders}
             provider={provider}
-            providerLocked={providerLocked}
+            locked={locked}
+            refused={refused}
+            switchFrom={switchFrom}
             model={model}
             reasoning={reasoning}
             onProvider={onProvider}

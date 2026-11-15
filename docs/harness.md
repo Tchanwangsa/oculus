@@ -1530,8 +1530,9 @@ Edit, Retry and Rewind truncate at a row (`harness::store::truncate`, announced 
 `Rewound`); Edit/Retry then send in the same commit (`harness_edit_resend`,
 the `EditResend` command), Rewind returns the
 words to the composer (`harness_rewind`). No branching; idle threads only; not
-offered where the bridge's `rewind` capability is false (Antigravity). The
-provider that answered the question rewinds first
+offered where the `rewind` capability of the bridge that answered the
+question (its run's provider, `questionProvider`) is false (Antigravity),
+whichever agent the chat is on now. That provider rewinds first
 ([Changing provider mid-chat](#changing-provider-mid-chat)), resuming an
 exited session without a turn:
 
@@ -1725,6 +1726,57 @@ Claude → Codex → Claude → Codex, the dropped middle, the send that cannot
 fit, the crash on either side of the start step, a message queued before a
 switch, and the refusals. Its rig lets every bridge take a handoff
 (`Harness::allow_handoff_everywhere`), which no production path can.
+
+### In the composer and the timeline
+
+The decisions are pure functions in `lib/harness/switching.ts`, tested in
+`tests/lib/harness/switching.test.ts`.
+
+- **A pick is held until Rust has it** (`stores/chat/pickStore.ts`). The
+  composer shows the held pick over the thread's selection
+  (`threadSelection`), so the model it names is the one the next message
+  uses. Every pick one click makes (a model and the level it brings) is one
+  `harnessSelectModel`. Another provider's pick starts with no model
+  (`pickSelection`) and is saved only once the composer has filled one from
+  that provider's catalogue (`pickSaves`). A pick during a running turn is
+  saved the same way and waits for the next send; the running run keeps
+  what it was sent with. When Rust refuses, the pick is dropped and its
+  sentence is kept (`refused`) until the next pick or send.
+- **The picker offers every agent for the life of a chat.**
+  `useComposerSelection` gives the Chat page, the lecture dock and Studio's
+  thread column the same four things: the selection, the refusal, the agent
+  a pending switch leaves (`pendingSwitch`), and which agents are locked
+  (`useSwitchLock`, `switchLocked` against the thread's saved provider, as
+  Rust checks it). A locked tab is dimmed and opens a note, "{agent} — start
+  a new chat to switch" (`SWITCH_LOCKED`), without being picked. Today
+  `providerHandoff` is false on every bridge, so a started chat locks every
+  other agent. A pending switch says "Switches from {agent} with your next
+  message." under the tabs, and the trigger's title ends "from your next
+  message". A refusal shows in the open picker, or above the box once it is
+  closed; never a toast. Studio's thread column locks every other agent
+  (`LOCK_OTHERS`) and still saves model and level picks.
+- **The reasoning dial reads the thread.** An open thread's level is its
+  `effort`; a thread from before levels were stored reads the session's
+  dial, which every level pick also sets.
+- **A divider sits above a run that changed** (`buildRows` puts a
+  `RunChange` on its question row; `RunDividerRow` draws it with stage 7's
+  `SystemDivider`). `runDivider` writes one line: `{from} → {to}` naming
+  only what changed (`runSwitch`, `switchSides`: the agent where it
+  changed, the model, the level, "High reasoning → Max reasoning" when the
+  level is all that changed), then "Context handoff" or "Context handoff
+  pending" (`handoffLabel`) and how many earlier messages were left out,
+  in the danger tone when the handoff failed. A handoff with no switch (a
+  session that started over) is the handoff alone. A level is compared only
+  where both runs recorded one, so a chat's first run after levels were
+  stored draws nothing.
+- **Every answer names the model that wrote it.** Its footer, after the
+  time, shows its run's model (`answerModel`, `runModel`) with the agent's
+  mark, and agent, id and level on hover; never the thread's. A run from
+  before models were recorded shows the time alone. Footers and dividers
+  name models from the catalogues of the agents the thread's runs went to
+  (`ModelNamesProvider`, `start: false`), else by id.
+- **The sidebar's mark is the selection's.** `ThreadRow` draws
+  `thread.provider`, which `selected` and a stored pick update.
 
 ## opencode providers go through its own server
 
