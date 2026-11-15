@@ -378,6 +378,7 @@ pub fn run() {
             harness::app::suggest::document_suggest_cancel,
             harness::attach::harness_attach_image,
             harness::attach::harness_attach_file,
+            harness::attach::harness_attachments_exist,
             lectures::chapters::app::lecture_find_chapters,
             lectures::chapters::app::lecture_grab_frames,
             lectures::chapters::app::lecture_thumbnail,

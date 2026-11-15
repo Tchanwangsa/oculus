@@ -31,11 +31,14 @@ that skill from the composer's `/` menu, and the `/oculus-plan` in their words
 marks where. Read that `SKILL.md` and follow it for this message. A `/word`
 without such a line is just text the student typed.
 
-A message may also carry a picture — `./attachments/…`, in this folder. That
-is a screenshot, a photo of handwriting, or an image the student pasted or
+A message may also name a file the student attached: a backticked
+`./attachments/…` path, in this folder, standing where their sentence refers
+to it ("compare `./attachments/a.png` with `./attachments/b.png`"). It is a
+screenshot, a photo of handwriting, a PDF or a text file they pasted or
 dropped into the composer, and it is there because the question is about what
-is *in* it. Open it with your own image tool; the filename is
-a timestamp and says nothing.
+is *in* it. Read it with your own file tools; the filename is a timestamp and
+says nothing. A picture they attached without naming it comes on a line of
+paths at the end of the message.
 
 ## Chat actions
 

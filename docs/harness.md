@@ -1942,15 +1942,24 @@ with no subject chosen still stashes and restores; it still will not send.
 
 ## Attachments are files in `agents/attachments/`
 
-A CLI reads files, so a picture the student pastes or drops becomes one — in
-`agents/`, the one folder every CLI reads and writes — the moment it arrives
-(`useAttachments`), not on send, so its chip holds a real path from the start
+A CLI reads files, so a picture, PDF or text file the student pastes or
+drops becomes one — in `agents/`, the one folder every CLI reads and writes —
+the moment it arrives (`useAttachments`), not on send, so its chip holds a real path from the start
 and survives a relaunch, a stash and a thread switch. `harness_attach_image`
 (clipboard bytes, with the name the clipboard gave) and `harness_attach_file`
 (a dropped path) answer `./attachments/<name>`; a task body writes its
 pictures the same way. Nothing deletes a file whose draft was never sent.
-The claimed filename never reaches disk: bytes are sniffed, the stem is a
-timestamp, 20 MB cap. `assetProtocol.scope` in
+The claimed filename never reaches disk: `write_file` sniffs the bytes — a
+picture, `%PDF-` as `.pdf`, or UTF-8 with no control byte but tabs, line
+breaks, form feed and escape as text, which keeps
+its claimed extension only from a short list (`md`, `csv`, `json`, `py`…,
+since agents pick a reader by it) and is otherwise `.txt` — the stem is a
+timestamp and the cap is 20 MB. Anything else is refused: "Only pictures,
+PDFs and text files can be attached — use @ for a course file." A note's
+pictures go through `write_image`, which takes pictures only.
+`agents/attachments/` must itself be a folder there once links are resolved,
+or nothing is written; `harness_attachments_exist` reads only inside it,
+refusing an absolute path, a `..` and a link that leads out. `assetProtocol.scope` in
 `app/src-tauri/tauri.conf.json` must name `agents/` or every picture (and
 every page an agent made) draws broken; a dropped file is scoped by Tauri on
 delivery.
@@ -1961,7 +1970,8 @@ the name it was attached by and sent as its backticked path, so "compare
 [figure 1] with [figure 2]" reaches the agent with each path where the
 sentence names it. The names live only in `useAttachmentNames`
 (`oculus.chatAttachmentNames`, newest 500): the message carries the path, and
-a path this install never named reads as its kind ("Picture"). Two files
+a path this install never named reads as its kind ("Picture", "PDF", "Text
+file"). Two files
 with the same name are two chips with two paths. A write that lands after
 the composer moved to another draft is appended to that draft's text, not
 put in the new box.
@@ -1971,7 +1981,8 @@ put in the new box.
 attached. Deleting a chip leaves its thumbnail; removing a thumbnail the
 sentence still names asks first, in a line under the strip ("… is in your
 message. Remove it there too?"), then takes every chip of it too
-(`removeAttachment`).
+(`removeAttachment`). A PDF or text file has no thumbnail: it is its chip,
+and deleting its last chip is removing it.
 
 **Sending only assembles** (`useAttachments.prepare`, shared by the page and
 the lecture dock with `SendControls`): the typed text with its chips' paths
@@ -2000,6 +2011,12 @@ drawn muted with its glyph struck through and the tooltip "This context is
 no longer available." — never removed from the message. A lookup that fails
 marks nothing. Each chip reads its own entry, so marking one never redraws
 the composer's text.
+
+**The brief promises only the path** (`HARNESS.template.md`): a message may
+name a file at `./attachments/…` where the sentence refers to it, and the
+agent reads it with its own file tools. How each CLI reads a PDF is its own
+and no recorded turn under `fixtures/harness/` shows any of the four doing
+it yet, so the brief says nothing per bridge.
 
 ### Pasted text is a card, sent inline
 
