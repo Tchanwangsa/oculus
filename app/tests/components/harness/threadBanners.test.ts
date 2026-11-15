@@ -79,13 +79,13 @@ describe("threadBannerItems: a stop the agent ignores", () => {
   });
 
   test("once Rust says so, the notice offers Force stop for the run", () => {
-    let stopped: number | null = null;
-    const [b] = threadBannerItems({ ...base, running: true, liveRun: told(0), forceStop: force({ onClick: (id) => (stopped = id) }) });
+    const stopped: number[] = [];
+    const [b] = threadBannerItems({ ...base, running: true, liveRun: told(0), forceStop: force({ onClick: (id) => stopped.push(id) }) });
     expect(b.id).toBe("unresponsive:7");
     expect(b.title).toBe("Agent not responding to Stop");
     expect(b.actions?.[0].label).toBe("Force stop");
     b.actions?.[0].onClick();
-    expect(stopped).toBe(7);
+    expect(stopped).toEqual([7]);
   });
 
   test("on a shared server the button says what else it stops", () => {
