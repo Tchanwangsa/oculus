@@ -328,7 +328,8 @@ export const ToolRow = memo(function ToolRow({
   // A plain command is its own label; the detail is then its output alone.
   const label = !cli && command ? command : undefined;
   const lead = label ? undefined : command ?? (entries.length > 0 ? entries.map(([k, v]) => `${k}: ${v}`).join("\n") : undefined);
-  // In Auto the CLI's reviewer decided this call; said quietly, never asked.
+  // The CLI decided this call itself (Auto's reviewer, or a deny rule);
+  // said quietly, never asked.
   const review = reviewView(meta.review);
   return (
     <RowShell
@@ -364,13 +365,13 @@ export const ToolRow = memo(function ToolRow({
   );
 });
 
-/** The reviewer's decision, opened: who decided, the risk it saw, why. */
+/** The decision, opened: who decided, the risk it saw, why nobody was asked. */
 function ReviewNote({ review }: { review: NonNullable<ReturnType<typeof reviewView>> }) {
   return (
     <div className="mb-1.5 text-[11px] leading-relaxed text-muted-foreground" data-selectable>
       <p className={cn(review.tone === "danger" && "text-destructive")}>
         {[review.label, review.risk].filter(Boolean).join(" · ")}
-        {" — you were not asked (Auto)"}
+        {` — ${review.note}`}
       </p>
       {review.rationale && <p className="break-words">{review.rationale}</p>}
     </div>

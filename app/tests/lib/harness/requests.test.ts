@@ -166,10 +166,52 @@ describe("waiting requests and the sidebar's Approval", () => {
   });
 });
 
+describe("Claude's requests", () => {
+  const claude = (patch: Partial<HarnessRequest>) =>
+    request({ provider: "claude", options: [APPROVE, DECLINE], ...patch });
+
+  test("a new host: the host is what is asked, with no command", () => {
+    const d = requestDetail(claude({ action: "network", payload: { host: "example.com" } }));
+    expect(d.title).toBe("Claude Code wants to reach the network");
+    expect(d.subject).toBe("example.com");
+    expect(d.access).toEqual(["Reach example.com"]);
+    expect([d.command, d.network, d.outsideSandbox]).toEqual([null, false, false]);
+  });
+
+  test("a subagent's escape names the subagent and runs outside the sandbox", () => {
+    const d = requestDetail(claude({
+      payload: {
+        command: "touch /tmp/x", reason: "Touch it", outsideSandbox: true, tool: "toolu_1",
+        agent: { path: "wire-probe", tool: "toolu_agent", description: "Probe" },
+      },
+    }));
+    expect(d.title).toBe("Claude Code's subagent wire-probe wants to run a command");
+    expect(d.outsideSandbox).toBe(true);
+    expect(d.cwd).toBeNull();
+  });
+
+  test("approve once and decline only: nothing under More", () => {
+    const a = requestActions(claude({}));
+    expect([a.approve?.id, a.decline?.id, a.more]).toEqual(["accept", "decline", []]);
+  });
+});
+
 describe("a reviewer's decision on a command row", () => {
   test("approved, with risk and rationale", () => {
     expect(reviewView({ status: "approved", risk: "low", rationale: "Harmless.", source: "agent" }))
-      .toEqual({ label: "Reviewer approved", tone: "muted", risk: "Low risk", rationale: "Harmless." });
+      .toEqual({
+        label: "Reviewer approved", tone: "muted", risk: "Low risk", rationale: "Harmless.",
+        note: "you were not asked (Auto)",
+      });
+  });
+  test("Claude's classifier is named, and a deny rule says it holds in every mode", () => {
+    const approved = reviewView({ status: "approved", source: "classifier" });
+    expect([approved?.label, approved?.tone, approved?.risk, approved?.note])
+      .toEqual(["Approved by Claude's classifier", "muted", null, "you were not asked (Auto)"]);
+    expect(reviewView({ status: "denied", source: "classifier" })?.label).toBe("Refused by Claude's classifier");
+    const rule = reviewView({ status: "denied", source: "rule" });
+    expect([rule?.label, rule?.tone, rule?.note])
+      .toEqual(["Refused by a rule", "danger", "Oculus keeps agents out of this in every mode"]);
   });
   test("denied reads as a refusal", () => {
     const v = reviewView({ status: "denied", risk: "medium", rationale: "Too broad." });

@@ -1667,16 +1667,26 @@ What the student sees is decided in `app/src/lib/harness/requests.ts` and
 - **The mode control** (`PermissionModeControl`, after the model picker,
   for an open thread only) shows the chat's mode and opens to Ask, Auto
   and Don't ask, each with its line. Where the bridge has no reviewer
-  (`autoReview` false) Auto says it asks as Ask; where it has no
+  (`autoReview` false) Auto says it asks as Ask; on Claude it says the
+  classifier decides and commands stay sandboxed; where it has no
   `approvals` the menu says the agent cannot ask yet. A pick is saved with
   `harnessSetPermissionMode`; Rust's refusal (a request waiting) shows at
   the top of the open menu.
 - **Auto's evidence**: a tool row whose meta has a `review` says "Reviewer
-  approved" or "Reviewer denied" quietly at its right, and opened, the risk
-  and the rationale. It never becomes a request.
+  approved" or "Reviewer denied" (Codex), "Approved by Claude's classifier"
+  or "Refused by Claude's classifier" quietly at its right, and opened, the
+  risk and the rationale, with "you were not asked (Auto)". A Claude call a
+  deny rule refused (a protected path, `sqlite3`), in any mode, says "Refused
+  by a rule", and opened, that Oculus keeps agents out of it in every mode.
+  None of these ever becomes a request.
 - A reload reads the requests with the rows, so a live request comes back
   as a waiting row the bar answers, and one the restart ended as Expired
   with "The app was closed."
+- **A Claude request** reads "Claude Code wants to run a command" (or to
+  change a file, to reach the network). A command shows no folder: the
+  prompt names none. A new host is "Reach example.com". A subagent's request
+  names it by its type, "Claude Code's subagent wire-probe …". Only Approve
+  and Decline: nothing under More.
 - Antigravity's print-mode refusal is still its own `permission` row
   (`PermissionCard`); it does not go through requests.
 

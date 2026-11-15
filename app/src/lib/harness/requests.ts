@@ -30,6 +30,9 @@ export interface RequestDetail {
   outsideSandbox: boolean;
   /** The command needs the network (Codex's network escalation). */
   network: boolean;
+  /** A host the agent asks to reach with no command (Claude's
+   *  `SandboxNetworkAccess`); listed in `access` too. */
+  host: string | null;
   changes: RequestChange[];
   /** A permissions request: one line per access asked for. */
   access: string[];
@@ -102,9 +105,10 @@ export function requestDetail(request: HarnessRequest): RequestDetail {
   const who = providerLabel(request.provider);
   const agent = agentName(p);
   const changes = request.action === "file_change" ? changesOf(p) : [];
-  const access = request.action === "permissions" ? accessLines(p.permissions) : [];
   const command = request.action === "command" || request.action === "network" ? text(p.command) : null;
-  const network = request.action === "network";
+  const host = request.action === "network" ? text(p.host) : null;
+  const access = request.action === "permissions" ? accessLines(p.permissions) : host ? [`Reach ${host}`] : [];
+  const network = request.action === "network" && !host;
   const asker = agent ? `${who}'s subagent ${agent}` : who;
   let title: string;
   let subject: string;
@@ -115,7 +119,7 @@ export function requestDetail(request: HarnessRequest): RequestDetail {
       break;
     case "network":
       title = `${asker} wants to reach the network`;
-      subject = command ?? "Network access";
+      subject = command ?? host ?? "Network access";
       break;
     case "file_change":
       title = `${asker} wants to change ${changes.length === 1 ? "a file" : plural(changes.length, "file")}`;
@@ -136,6 +140,7 @@ export function requestDetail(request: HarnessRequest): RequestDetail {
     cwd: text(p.cwd),
     outsideSandbox: p.outsideSandbox === true,
     network,
+    host,
     changes,
     access,
     reason: text(p.reason),
@@ -272,30 +277,46 @@ export function awaitsApproval(requests: Record<number, HarnessRequest> | undefi
   return false;
 }
 
-/** A reviewer's decision on a tool row, as the row says it. */
+/** A decision the CLI made on a tool row without asking: Auto's reviewer
+ *  (Codex's, or Claude's classifier, `source: "classifier"`), or a deny
+ *  rule that holds in every mode (`source: "rule"`). */
 export interface ReviewView {
   label: string;
   tone: "muted" | "danger";
   /** "Low risk"; null when the reviewer gave none. */
   risk: string | null;
   rationale: string | null;
+  /** Why nobody was asked, said after the label when the row is opened. */
+  note: string;
 }
 
-export function reviewView(review: ToolReview | undefined | null): ReviewView | null {
-  if (!review || typeof review !== "object") return null;
-  const risk = text(review.risk);
-  const words: Record<string, [string, ReviewView["tone"]]> = {
+const REVIEW_WORDS: Record<string, Record<string, [string, ReviewView["tone"]]>> = {
+  classifier: {
+    approved: ["Approved by Claude's classifier", "muted"],
+    denied: ["Refused by Claude's classifier", "danger"],
+  },
+  rule: {
+    denied: ["Refused by a rule", "danger"],
+  },
+  reviewer: {
     approved: ["Reviewer approved", "muted"],
     denied: ["Reviewer denied", "danger"],
     in_progress: ["Reviewing", "muted"],
     timed_out: ["Review timed out", "danger"],
     aborted: ["Review stopped", "muted"],
-  };
-  const [label, tone] = words[review.status] ?? ["Reviewed", "muted"];
+  },
+};
+
+export function reviewView(review: ToolReview | undefined | null): ReviewView | null {
+  if (!review || typeof review !== "object") return null;
+  const risk = text(review.risk);
+  const source = review.source === "classifier" || review.source === "rule" ? review.source : "reviewer";
+  const [label, tone] = REVIEW_WORDS[source][review.status] ?? ["Reviewed", "muted"];
   return {
     label,
     tone,
     risk: risk ? `${risk.charAt(0).toUpperCase()}${risk.slice(1)} risk` : null,
     rationale: text(review.rationale),
+    note: source === "rule" ? "Oculus keeps agents out of this in every mode" : "you were not asked (Auto)",
   };
 }
