@@ -18,6 +18,7 @@ mod child;
 pub mod cli;
 mod core;
 pub mod event;
+mod handoff;
 pub mod jobs;
 mod manager;
 mod protected;
