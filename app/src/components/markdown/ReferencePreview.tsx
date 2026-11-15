@@ -14,14 +14,16 @@ export interface ReferenceDetails {
   meta?: string;
 }
 
-/** A portal keeps previews out of prose layout and the composer's editable DOM. */
-export function ReferencePreview({ children, icon, title, kind, detail, load }: {
+/** A portal keeps previews out of prose layout and the composer's editable DOM.
+ *  `media` (an attached picture's thumbnail) draws above the title. */
+export function ReferencePreview({ children, icon, title, kind, detail, load, media }: {
   children: ReactElement;
   icon: ReactNode;
   title: string;
   kind: string;
   detail: string;
   load?: () => Promise<ReferenceDetails | null>;
+  media?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -39,6 +41,7 @@ export function ReferencePreview({ children, icon, title, kind, detail, load }: 
           onClick={(e) => e.stopPropagation()}
           className="z-50 w-80 max-w-[calc(100vw-24px)] rounded-2xl border border-border bg-card p-4 text-card-foreground shadow-lg outline-none"
         >
+          {media && <span className="mb-3 block">{media}</span>}
           <PreviewBody icon={icon} title={title} kind={kind} detail={detail} load={load} />
         </HoverCard.Content>
       </HoverCard.Portal>
@@ -46,7 +49,7 @@ export function ReferencePreview({ children, icon, title, kind, detail, load }: 
   );
 }
 
-function PreviewBody({ icon, title, kind, detail, load }: Omit<React.ComponentProps<typeof ReferencePreview>, "children">) {
+function PreviewBody({ icon, title, kind, detail, load }: Omit<React.ComponentProps<typeof ReferencePreview>, "children" | "media">) {
   const [details, setDetails] = useState<ReferenceDetails | null>(null);
   useEffect(() => {
     if (!load) return;

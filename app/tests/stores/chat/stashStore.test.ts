@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { isStashKey } from "@/components/harness/composer/useComposerStash";
-import { keptAttachments, writeAttachment } from "@/lib/harness/attachments";
+import { attachmentRefs } from "@/lib/harness/attachments";
 import { MAX_STASH, pushStash, stashSnippet, useStashStore, type StashEntry } from "@/stores/chat/stashStore";
 
 const entry = (n: number): StashEntry => ({ id: `e${n}`, createdAt: n, text: `prompt ${n}`, pastes: [], pictures: [] });
@@ -40,15 +40,16 @@ describe("useStashStore", () => {
   });
 });
 
-describe("restoring a stashed picture", () => {
-  test("comes back kept, and is sent again by the same path", async () => {
-    const src = (dataDir: string, path: string) => `asset://${dataDir}/${path}`;
-    const kept = keptAttachments(["./attachments/1700-1.png", "courses/X/not-a-picture.png"], "/data", src);
-    expect(kept).toHaveLength(1);
-    expect(kept[0].source).toEqual({ kind: "kept", path: "./attachments/1700-1.png" });
-    expect(kept[0].preview).toBe("asset:///data/agents/attachments/1700-1.png");
-    // A kept picture is never written again: stashing or sending it reuses its path.
-    expect(await writeAttachment(kept[0])).toBe("./attachments/1700-1.png");
+describe("a stashed draft with attachments", () => {
+  test("keeps its chips' paths in its words and its shelf as paths, written already", () => {
+    const store = useStashStore.getState();
+    const text = "compare `./attachments/1700-1.png` with `./attachments/1700-2.pdf`";
+    store.stash({ text, pastes: [], pictures: ["./attachments/1700-1.png", "./attachments/1700-3.png"] });
+    const entry = useStashStore.getState().entries[0];
+    expect(entry.text).toBe(text);
+    expect(entry.pictures).toEqual(["./attachments/1700-1.png", "./attachments/1700-3.png"]);
+    expect(attachmentRefs(entry.text).map((r) => r.raw)).toEqual(["./attachments/1700-1.png", "./attachments/1700-2.pdf"]);
+    store.remove(entry.id);
   });
 });
 

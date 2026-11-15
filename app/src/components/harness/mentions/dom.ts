@@ -1,4 +1,4 @@
-import { splitLibraryPaths } from "@/lib/files/openFile";
+import { splitLibraryPaths } from "@/lib/files/libraryPaths";
 import { parseLink } from "@/lib/harness/links";
 import { skillText, splitSkillTokens } from "@/lib/harness/skills";
 import { chipText, linkChunks, ZWSP_RE, type Chunk } from "./chunks";
@@ -11,12 +11,12 @@ export type Point = { node: Node; offset: number };
 /** `stale`: a drawn link no longer reads as one, so the nodes need redrawing. */
 export type Reading = { text: string; caret: number | null; chunks: Chunk[]; stale: boolean };
 
-/** A mention or a picked skill, the atomic references: the caret steps over
- *  each whole and a delete key takes it whole. */
+/** A mention, an attachment or a picked skill, the atomic references: the
+ *  caret steps over each whole and a delete key takes it whole. */
 export function isChip(node: Node): boolean {
   if (node.nodeType !== Node.ELEMENT_NODE) return false;
   const el = node as HTMLElement;
-  return el.hasAttribute("data-path") || el.hasAttribute("data-skill");
+  return el.hasAttribute("data-path") || el.hasAttribute("data-attachment") || el.hasAttribute("data-skill");
 }
 
 /** A link (`ComposerLink`): editable text drawn as a link. */
@@ -73,6 +73,12 @@ export function readEditor(root: HTMLElement, point: Point | null): Reading {
       text += skillText(name);
       return;
     }
+    if (el.hasAttribute("data-attachment")) {
+      const path = el.getAttribute("data-attachment") ?? "";
+      chunks.push({ kind: "attachment", path });
+      text += chipText(path);
+      return;
+    }
     if (isChip(el)) {
       const path = el.getAttribute("data-path") ?? "";
       chunks.push({ kind: "chip", path });
@@ -126,13 +132,13 @@ export function readEditor(root: HTMLElement, point: Point | null): Reading {
 
 
 /** Text back into chunks via `splitLibraryPaths`, so a restored draft chips the
- *  same runs a sent message does, and its links draw as links. A `/name` word
- *  becomes a skill chip only when `skills` (the installed catalogue) holds it. */
+ *  same runs a sent message does, and its links draw as links. An attachment
+ *  keeps the message's spelling of its path. A `/name` word becomes a skill
+ *  chip only when `skills` (the installed catalogue) holds it. */
 export function toChunks(text: string, skills?: ReadonlySet<string>): Chunk[] {
   const paths = splitLibraryPaths(text).flatMap((p): Chunk[] => {
     if (p.kind === "path") return [{ kind: "chip", path: p.path }];
-    // A picture is not a mention the box can redraw; it stays text.
-    if (p.kind === "image") return [{ kind: "text", text: `\`${p.raw}\`` }];
+    if (p.kind === "image" || p.kind === "attachment") return [{ kind: "attachment", path: p.raw }];
     if (!skills?.size) return [{ kind: "text", text: p.text }];
     return splitSkillTokens(p.text, skills);
   });
@@ -147,7 +153,7 @@ function atEnd(el: HTMLElement, caret: Range): boolean {
   tail.setStart(caret.startContainer, caret.startOffset);
   if (tail.toString().replace(ZWSP_RE, "").replace(/\n/g, "").trim()) return false;
   const rest = tail.cloneContents();
-  if (rest.querySelector("[data-path], [data-skill], [data-link]")) return false;
+  if (rest.querySelector("[data-path], [data-attachment], [data-skill], [data-link]")) return false;
   // One break is the placeholder; more are blank lines below the caret.
   return rest.querySelectorAll("br").length + (tail.toString().match(/\n/g)?.length ?? 0) <= 1;
 }

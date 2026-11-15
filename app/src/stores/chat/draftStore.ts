@@ -14,9 +14,14 @@ type Pastes = Record<string, PastedText[]>;
 /** A new thread's chosen scope, per composer: unchosen is no entry. */
 type Scopes = Record<string, ChatScope>;
 
+/** Pictures attached to a draft, as `./attachments/…` paths: the shelf of
+ *  thumbnails. A PDF or text file is only its chip, so it is never here. */
+type Shelves = Record<string, string[]>;
+
 const KEY = "oculus.chatDrafts";
 const PASTES_KEY = "oculus.chatPastes";
 const SCOPES_KEY = "oculus.chatScopes";
+const SHELVES_KEY = "oculus.chatShelves";
 
 /** A composer's key: its thread, or the not-yet-thread it would start
  *  (`scope` tells the Chat page's new thread from each lecture's). */
@@ -59,12 +64,16 @@ const isPastes = (v: unknown): v is PastedText[] =>
       typeof (p as PastedText).text === "string",
   );
 
+const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every(isString);
+
 interface DraftState {
   drafts: Drafts;
   pastes: Pastes;
   scopes: Scopes;
+  shelves: Shelves;
   setDraft: (key: string, text: string) => void;
   setPastes: (key: string, list: PastedText[]) => void;
+  setShelf: (key: string, paths: string[]) => void;
   /** The scope chosen for a new thread's composer; null forgets the choice. */
   setScope: (key: string, scope: ChatScope | null) => void;
   /** That choice, if it still names General or a subject in `subjects`. */
@@ -75,8 +84,9 @@ interface DraftState {
  * Unsent words per composer, so switching thread, tab or lecture (which
  * unmounts a composer) never loses them. In localStorage as well, because a
  * `tauri dev` rebuild relaunches the app. Long pastes held as cards
- * (`PastedText`) are kept the same way, under the same key, and so is the
- * scope a new Chat thread will start in (`ChatScope`), until it is sent.
+ * (`PastedText`) are kept the same way, under the same key, and so are the
+ * pictures on its shelf (written to `agents/attachments/` when attached) and
+ * the scope a new Chat thread will start in (`ChatScope`), until it is sent.
  */
 export const useDraftStore = create<DraftState>((set, get) => ({
   drafts: Object.fromEntries(
@@ -86,6 +96,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
   ),
   pastes: read(PASTES_KEY, isPastes),
   scopes: storedScopes(),
+  shelves: read(SHELVES_KEY, isStrings),
   setDraft: (key, text) => {
     const prev = get().drafts;
     if ((prev[key] ?? "") === text) return;
@@ -103,6 +114,15 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     else delete next[key];
     write(PASTES_KEY, next);
     set({ pastes: next });
+  },
+  setShelf: (key, paths) => {
+    const prev = get().shelves;
+    if (!paths.length && !prev[key]) return;
+    const next = { ...prev };
+    if (paths.length) next[key] = paths;
+    else delete next[key];
+    write(SHELVES_KEY, next);
+    set({ shelves: next });
   },
   setScope: (key, scope) => {
     const prev = get().scopes;

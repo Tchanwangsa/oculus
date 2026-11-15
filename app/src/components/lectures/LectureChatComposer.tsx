@@ -161,10 +161,8 @@ export function LectureChatComposer({
   const mentions = tools.menu;
   /** The drop target: the box and its attachment strip. */
   const wrapRef = useRef<HTMLDivElement>(null);
-  /** Pictures pasted or dropped in, written on send. */
-  const att = useAttachments(dropRef ?? wrapRef, draftKey, {
-    notAPicture: "Only images can be attached — type @ for a course file.",
-  });
+  /** Files pasted or dropped in, written as they arrive and chipped at the caret. */
+  const att = useAttachments(dropRef ?? wrapRef, draftKey, { input: ref });
   useEffect(() => onDropping?.(att.dropping), [att.dropping, onDropping]);
   const history = usePromptHistory({ threadId, input: ref, text });
   const stash = useComposerStash({ input: ref, text, att });
@@ -188,8 +186,7 @@ export function LectureChatComposer({
 
   const dictation = useDictation(draftKey, putBack);
 
-  // Pictures are written before the message is assembled; if that fails the
-  // box is kept as it was.
+  // While a file is still being written the box is kept as it was.
   const send = async () => {
     if (dictation.busy) return;
     const message = await att.prepare(text);
@@ -232,6 +229,9 @@ export function LectureChatComposer({
         <AttachmentStrip
           items={att.items}
           onDetach={att.detach}
+          confirming={att.confirming}
+          onConfirmDetach={att.confirmDetach}
+          onCancelDetach={att.cancelDetach}
           texts={att.texts}
           onEditText={att.editText}
           onDetachText={att.detachText}

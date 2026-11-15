@@ -2,23 +2,18 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { blobToBase64 as base64 } from "@/lib/encoding/base64";
 
 /**
- * A picture on its way into a message. A CLI agent reads files, so on send it
- * is written to `agents/attachments/` and its path goes into the message (see
- * `docs/harness.md`). Until then it lives only in memory, so a discarded paste
- * leaves nothing on disk.
+ * A file on its way into `agents/attachments/`, where a CLI agent can read it
+ * (see `docs/harness.md`). The chat composer writes it the moment it is
+ * attached, so its chip holds a real path from the start; a task body or a
+ * revision field writes a picture on arrival too.
  */
 export interface PendingAttachment {
   id: string;
-  /** Alt text and tooltip only; Rust names the file on disk. */
+  /** The name the student knows it by; Rust names the file on disk. */
   name: string;
   /** A blob URL for pasted bytes, an asset URL for a file on disk. */
   preview: string;
-  source:
-    | { kind: "bytes"; file: File }
-    | { kind: "path"; path: string }
-    /** Already in `agents/attachments/`, handed back by a rewind;
-     *  `path` is the message's own spelling and is sent as it is. */
-    | { kind: "kept"; path: string };
+  source: { kind: "bytes"; file: File } | { kind: "path"; path: string };
 }
 
 /** Picture extensions, for a drop's paths and the open panel's filter; Rust
@@ -36,6 +31,15 @@ export const isImagePath = (path: string) => IMAGE_EXT.test(path);
 export function imageFiles(list: FileList | null | undefined): File[] {
   if (!list) return [];
   return Array.from(list).filter((f) => f.type.startsWith("image/"));
+}
+
+/** What a chat composer takes from a clipboard: pictures, PDFs and text
+ *  files. Rust sniffs the bytes and refuses anything else. */
+export function attachableFiles(list: FileList | null | undefined): File[] {
+  if (!list) return [];
+  return Array.from(list).filter(
+    (f) => f.type.startsWith("image/") || f.type.startsWith("text/") || f.type === "application/pdf" || f.type === "application/json",
+  );
 }
 
 /** The same filter for a native drop, which hands over paths. */
@@ -61,34 +65,6 @@ export function pendingFromPath(path: string): PendingAttachment {
   };
 }
 
-/** A picture a sent message carried, back as a pending one. Null when `path`
- *  is not an attachment path. */
-export function pendingFromKept(
-  path: string,
-  dataDir: string,
-  src: (dataDir: string, path: string) => string = attachmentSrc,
-): PendingAttachment | null {
-  const rel = attachmentPath(path);
-  if (!rel) return null;
-  return {
-    id: nextId(),
-    name: rel.slice(rel.lastIndexOf("/") + 1),
-    preview: src(dataDir, rel),
-    source: { kind: "kept", path },
-  };
-}
-
-/** Pictures already in `agents/attachments/` (handed back, or restored from
- *  the stash) as pending ones, sent again by the same path; a path that is
- *  not an attachment's is dropped. */
-export function keptAttachments(
-  paths: readonly string[],
-  dataDir: string,
-  src: (dataDir: string, path: string) => string = attachmentSrc,
-): PendingAttachment[] {
-  return paths.flatMap((p) => pendingFromKept(p, dataDir, src) ?? []);
-}
-
 export function releaseAttachment(a: PendingAttachment): void {
   if (a.source.kind === "bytes") URL.revokeObjectURL(a.preview);
 }
@@ -96,19 +72,20 @@ export function releaseAttachment(a: PendingAttachment): void {
 /** A `File` as base64 for IPC (`lib/encoding/base64.ts`). */
 export { base64 };
 
-/** Write one pending picture, returning `./attachments/<name>` — relative to
- *  `agents/`, every thread's working directory. */
+/** Write one pending file, returning `./attachments/<name>` — relative to
+ *  `agents/`, every thread's working directory. A picture, PDF or text file;
+ *  the name only lets Rust keep a text file's extension. */
 export async function writeAttachment(a: PendingAttachment): Promise<string> {
-  if (a.source.kind === "kept") return a.source.path;
   if (a.source.kind === "path") {
     return invoke<string>("harness_attach_file", { path: a.source.path });
   }
-  return invoke<string>("harness_attach_image", { data: await base64(a.source.file) });
+  return invoke<string>("harness_attach_image", { data: await base64(a.source.file), name: a.name });
 }
 
 /** An attachment path in either spelling agents write (agent- or
- *  data-dir-relative); not a `courses/` path, so not part of `libraryPath`. */
-const ATTACHMENT_PATH = /^(?:\.\/)?(?:\.\.\/)?(?:agents\/)?attachments\/([A-Za-z0-9._-]+)$/;
+ *  data-dir-relative); not a `courses/` path, so not part of `libraryPath`.
+ *  The name never starts with a dot, so `attachments/..` is not one. */
+const ATTACHMENT_PATH = /^(?:\.\/)?(?:\.\.\/)?(?:agents\/)?attachments\/([A-Za-z0-9_-][A-Za-z0-9._-]*)$/;
 
 /** The data-directory-relative path a fenced attachment stands for, or null. */
 export function attachmentPath(raw: string): string | null {
@@ -207,19 +184,106 @@ export function splitPastedText(message: string): { text: string; pasted: string
 }
 
 /** The text, then the pictures' paths on their own line, backtick-fenced like
- *  a mention so `splitLibraryPaths` finds them. */
+ *  a mention so `splitLibraryPaths` finds them. A picture the student
+ *  attached but never referenced in the sentence goes here (`withShelf`). */
 export function withAttachments(text: string, paths: string[]): string {
   return [text, paths.map((p) => `\`${p}\``).join(" ")].filter(Boolean).join("\n\n");
 }
 
 /** `withAttachments` undone: the message without its trailing line of picture
- *  paths, and those paths. A last paragraph holding anything else is text. */
+ *  paths, and those paths. A last paragraph holding anything else, a PDF or
+ *  text file among them, is text: its paths are chips in the sentence. Older
+ *  messages carried every picture this way. */
 export function splitAttachments(message: string): { text: string; paths: string[] } {
   const cut = message.lastIndexOf("\n\n");
   const tail = message.slice(cut < 0 ? 0 : cut + 2).trim();
   const fenced = tail.match(/`[^`\s]+`/g);
   if (!fenced || fenced.join(" ") !== tail) return { text: message, paths: [] };
   const paths = fenced.map((f) => f.slice(1, -1));
-  if (!paths.every((p) => attachmentPath(p))) return { text: message, paths: [] };
+  if (!paths.every((p) => isImagePath(attachmentPath(p) ?? ""))) return { text: message, paths: [] };
   return { text: cut < 0 ? "" : message.slice(0, cut), paths };
+}
+
+const FENCED = /`([^`\n]+)`/g;
+
+/** An attachment the text names in place: `raw` as the message spells it,
+ *  `path` data-directory-relative. */
+export interface AttachmentRef {
+  raw: string;
+  path: string;
+  picture: boolean;
+}
+
+/** Every attachment fenced in the text, in order, repeats included. The same
+ *  test `splitLibraryPaths` applies first, so the two agree. */
+export function attachmentRefs(text: string): AttachmentRef[] {
+  const refs: AttachmentRef[] = [];
+  for (const m of text.matchAll(FENCED)) {
+    const path = attachmentPath(m[1]);
+    if (path) refs.push({ raw: m[1], path, picture: isImagePath(path) });
+  }
+  return refs;
+}
+
+/** Whether the text names the attachment `raw` (in any spelling). */
+export function refersTo(text: string, raw: string): boolean {
+  const path = attachmentPath(raw);
+  return path != null && attachmentRefs(text).some((r) => r.path === path);
+}
+
+/** The shelf's pictures, distinct, in the order they arrived. */
+export function distinctPaths(paths: readonly string[]): string[] {
+  const seen = new Set<string>();
+  return paths.filter((p) => {
+    const key = attachmentPath(p) ?? p;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** The message as sent: every chip's path is already in place, so only the
+ *  shelf's pictures with no chip are added, on the trailing line, so nothing
+ *  attached is dropped. */
+export function withShelf(text: string, shelf: readonly string[]): string {
+  const named = new Set(attachmentRefs(text).map((r) => r.path));
+  return withAttachments(text, distinctPaths(shelf).filter((p) => !named.has(attachmentPath(p) ?? p)));
+}
+
+/** Paths added after the text on its last line, a space between: where an
+ *  attachment lands when its composer has moved to another draft. */
+export function appendAttachmentRefs(text: string, paths: readonly string[]): string {
+  const fenced = paths.map((p) => `\`${p}\``).join(" ");
+  if (!fenced) return text;
+  const head = text.replace(/[ \t]+$/, "");
+  return head && !head.endsWith("\n") ? `${head} ${fenced}` : `${head}${fenced}`;
+}
+
+/** The text with every attachment taken out, one space closing each gap:
+ *  what ArrowUp recalls, since the files went with the message. */
+export function stripAttachmentRefs(text: string): string {
+  let out = "";
+  let at = 0;
+  for (const m of text.matchAll(FENCED)) {
+    if (!attachmentPath(m[1])) continue;
+    const i = m.index ?? 0;
+    let head = out + text.slice(at, i);
+    at = i + m[0].length;
+    const next = text[at];
+    if ((next === undefined || next === " " || next === "\n") && head.endsWith(" ")) head = head.slice(0, -1);
+    else if (next === " " && (!head || head.endsWith("\n"))) at++;
+    out = head;
+  }
+  return out + text.slice(at);
+}
+
+/** Handed-back words (a stop, a rewind) split for the box: the text with its
+ *  chips' paths in place, its pasted blocks (for cards), and every picture it
+ *  carried (for the shelf) — those on a trailing line and those named in the
+ *  sentence, distinct. */
+export function splitHandedBack(message: string): { text: string; pasted: string[]; pictures: string[] } {
+  const { text: unpictured, paths } = splitAttachments(message);
+  const { text, pasted } = splitPastedText(unpictured);
+  const inline = attachmentRefs(text).filter((r) => r.picture).map((r) => r.raw);
+  return { text, pasted, pictures: distinctPaths([...paths, ...inline]) };
 }

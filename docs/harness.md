@@ -49,9 +49,9 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Studio's thread column and New video box, which use `Composer`'s `leading` (chips after the subject's) and `placeholder` | `app/src/components/studio/thread/ThreadColumn.tsx`, `app/src/components/studio/new/NewVideo.tsx` ([studio-page.md](./studio-page.md)) |
 | Voice dictation, microphone capture and cleanup job | `app/src/components/harness/dictation/`, `app/src/lib/dictation/recording.ts`, `app/src-tauri/src/harness/app/dictation.rs` |
 | Send, queue, stop and resume controls shared by both composers, the rule that picks them, and the held-queue notice | `app/src/components/harness/composer/SendControls.tsx`, `app/src/lib/harness/runControls.ts`, `app/src/components/harness/composer/useRunControls.ts`, `app/src/components/harness/composer/ThreadBanners.tsx` |
-| Pictures pasted or dropped into a composer | `app/src-tauri/src/harness/attach.rs`, `app/src/hooks/agents/useAttachments.ts`, `app/src/hooks/gestures/useFileDrop.ts` |
+| Files pasted or dropped into a composer: writing them, their chips, the shelf, their names | `app/src-tauri/src/harness/attach.rs`, `app/src/hooks/agents/useAttachments.ts`, `app/src/hooks/gestures/useFileDrop.ts`, `app/src/components/markdown/AttachmentChip.tsx`, `app/src/components/harness/attachments/AttachmentStrip.tsx`, `app/src/stores/chat/attachmentNames.ts` |
 | Long pastes held as text cards: format, card, editor and viewer | `app/src/lib/harness/attachments.ts`, `app/src/components/harness/attachments/PastedText.tsx`, `app/src/components/harness/attachments/PastedTextEditor.tsx` |
-| Library paths in rows and prose; copy as markdown | `app/src/lib/files/openFile.ts`, `app/src/lib/markdown/selection.ts` |
+| Library paths and attachments in rows and prose (`splitLibraryPaths`); copy as markdown | `app/src/lib/files/libraryPaths.ts`, `app/src/lib/files/openFile.ts`, `app/src/lib/markdown/selection.ts` |
 | Timeline window, off-screen layout, scroll anchoring, the expand protocol | `app/src/components/harness/timeline/useRowWindow.ts`, `app/src/components/harness/timeline/rowWindow.ts`, `app/src/components/harness/timeline/useRowVisibility.ts`, `app/src/components/harness/timeline/RetainedRow.tsx`, `app/src/hooks/ui/useStickToBottom.ts`, `app/src/lib/ui/followTimeline.ts`, `app/src/lib/ui/scrollAnchor.ts`, `app/src/lib/ui/expandable.ts` |
 | The lecture dock's chat | `app/src/components/lectures/LectureChatPanel.tsx`, `app/src/components/lectures/LectureChatComposer.tsx`, `lecture_grab_frames` in `app/src-tauri/src/lectures/chapters/app.rs` |
 
@@ -1924,16 +1924,16 @@ box; an edit to the recalled text ends the walk and gives the arrows back to
 the caret. The `@`/`/` menu's keys come first.
 
 **⌘S stashes a draft** (`useComposerStash`, `stores/chat/stashStore.ts`):
-with anything in the box, its text, its pasted cards and its pictures are set
-aside and the box empties. Pictures are written to `agents/attachments/` then
-(`useAttachments.setAside`), so an entry is text and paths, kept in
-localStorage (`oculus.chatStash`) and shared by every composer. ⌘S on an empty
+with anything in the box, its text (chips as their paths), its pasted cards
+and its shelf are set aside and the box empties (`useAttachments.setAside`).
+Every attachment was written when it arrived, so an entry is text and paths,
+kept in localStorage (`oculus.chatStash`) and shared by every composer. ⌘S on an empty
 box restores the only entry or opens the menu. The badge above the box
 ("Stash" and the count) opens "Stashed prompts" (`StashMenu`): newest first,
 each row its words (or "(empty)", or what it holds), a picture count, its age
 and "Delete stashed prompt"; a click restores it ("Restore stashed prompt:
-…"), its words after anything typed, its pastes as cards and its pictures as
-kept attachments, sent again by the same path. The stash holds 20; a 21st
+…"), its words after anything typed with their chips, its pastes as cards and
+its pictures back on the shelf, sent again by the same path. The stash holds 20; a 21st
 removes the oldest and the menu says so until it next closes — never a toast.
 The composer takes ⌘S on its own keydown and stops it there, since a note
 open in another pane takes ⌘S on `document` (`useNoteShortcuts`). A new chat
@@ -1941,21 +1941,44 @@ with no subject chosen still stashes and restores; it still will not send.
 
 ## Attachments are files in `agents/attachments/`
 
-The page and lecture dock share `SendControls` for send/queue/stop controls
-and `useAttachments.prepare` for message assembly. Preparation writes pictures
-before clearing the composer; a failed write keeps the draft and attachments.
-A message reads: the typed text, each pasted text's block, then the pictures'
-paths, blank-line separated.
-
-A CLI reads files, so a picture becomes one — in `agents/`, the one folder
-every CLI reads and writes. `harness_attach_image` (clipboard bytes) and
-`harness_attach_file` (dropped path) write it on send (a task body, having no
-send, writes on arrival) and answer `./attachments/<name>`, appended fenced.
+A CLI reads files, so a picture the student pastes or drops becomes one — in
+`agents/`, the one folder every CLI reads and writes — the moment it arrives
+(`useAttachments`), not on send, so its chip holds a real path from the start
+and survives a relaunch, a stash and a thread switch. `harness_attach_image`
+(clipboard bytes, with the name the clipboard gave) and `harness_attach_file`
+(a dropped path) answer `./attachments/<name>`; a task body writes its
+pictures the same way. Nothing deletes a file whose draft was never sent.
 The claimed filename never reaches disk: bytes are sniffed, the stem is a
-timestamp, non-images are refused, 20 MB cap. `assetProtocol.scope` in
+timestamp, 20 MB cap. `assetProtocol.scope` in
 `app/src-tauri/tauri.conf.json` must name `agents/` or every picture (and
 every page an agent made) draws broken; a dropped file is scoped by Tauri on
 delivery.
+
+**The attachment is a chip at the caret** (`insertAttachments` on the box's
+handle, at the end when the box has no caret), drawn by `AttachmentChip` with
+the name it was attached by and sent as its backticked path, so "compare
+[figure 1] with [figure 2]" reaches the agent with each path where the
+sentence names it. The names live only in `useAttachmentNames`
+(`oculus.chatAttachmentNames`, newest 500): the message carries the path, and
+a path this install never named reads as its kind ("Picture"). Two files
+with the same name are two chips with two paths. A write that lands after
+the composer moved to another draft is appended to that draft's text, not
+put in the new box.
+
+**A picture also sits on the draft's shelf** (`AttachmentStrip`, the
+`draftStore` `shelves` map, `oculus.chatShelves`), the inventory of what is
+attached. Deleting a chip leaves its thumbnail; removing a thumbnail the
+sentence still names asks first, in a line under the strip ("… is in your
+message. Remove it there too?"), then takes every chip of it too
+(`removeAttachment`).
+
+**Sending only assembles** (`useAttachments.prepare`, shared by the page and
+the lecture dock with `SendControls`): the typed text with its chips' paths
+in place, each pasted text's block, then any shelf picture no chip names on
+a trailing line of paths (`withShelf`), blank-line separated, so nothing
+attached is dropped. A send waits while a file is still being written. An
+`unscoped` box still collects chips and shelf pictures and still refuses to
+send.
 
 ### Pasted text is a card, sent inline
 
@@ -1963,7 +1986,7 @@ A plain-text paste of `LONG_PASTE` (1000 characters or 15 lines) or more
 becomes a card in `AttachmentStrip` instead of text in the box; a clipboard
 picture still wins. Cards are kept in `draftStore` under the draft key (a
 second map, `oculus.chatPastes`), so they outlive a thread switch and a
-relaunch like typed words; pictures stay in memory. Clicking one opens
+relaunch like typed words, as the shelf's pictures do. Clicking one opens
 `PastedTextEditor`, the text as a markdown document on `NoteField` (read
 through its `onChange`, so the buttons never wait on a blur): Done keeps the
 edits (as do Escape and the overlay), Remove drops the card, and Put in
@@ -1981,10 +2004,11 @@ front. The question bubble lifts the blocks out as the same cards, in the
 row above the words ahead of the pictures, and only the remaining prose is
 measured and folded; a sent card opens `PastedTextViewer` (rendered markdown
 and Copy), and a copied selection across one takes its block (`data-md`).
-Words handed back by Stop or a rewind go through `useAttachments.takeBack`,
-so their blocks return as cards, their pictures as thumbnails (kept
-attachments, sent again by the same path rather than copied) and only the rest
-lands in the box. The bubble's own edit box still shows the raw blocks, as it
+Words handed back by Stop or a rewind go through `useAttachments.takeBack`
+(`splitHandedBack`), so their blocks return as cards, every picture they
+carried (on a trailing line or named in the sentence) returns to the shelf,
+sent again by the same path rather than copied, and the rest lands in the
+box with its chips in place. The bubble's own edit box still shows the raw blocks, as it
 shows picture paths.
 
 ### File drop

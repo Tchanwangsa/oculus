@@ -21,6 +21,8 @@ test("a last paragraph of anything else is text", () => {
     "see `./attachments/a.png` here",
     "words\n\n`courses/MAST10006/files/a.pdf`",
     "words\n\n`./attachments/a.png` and more",
+    // A PDF or text file is a chip in the sentence, never a lifted line.
+    "words\n\n`./attachments/a.png` `./attachments/b.pdf`",
     "no pictures",
   ]) {
     expect(splitAttachments(message)).toEqual({ text: message, paths: [] });

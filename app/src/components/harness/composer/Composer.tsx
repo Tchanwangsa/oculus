@@ -134,9 +134,9 @@ export function Composer({
   const mentions = tools.menu;
   /** The drop target for attachments: the whole box, not just the editor. */
   const wrapRef = useRef<HTMLDivElement>(null);
-  /** Pasted/dropped pictures, in memory until send writes them to the library;
-   *  long pastes as text cards. */
-  const att = useAttachments(dropRef ?? wrapRef, draftKey);
+  /** Pasted/dropped files, written to the library as they arrive and put in
+   *  the sentence as chips; pictures also on the shelf; long pastes as cards. */
+  const att = useAttachments(dropRef ?? wrapRef, draftKey, { input: ref });
   useEffect(() => onDropping?.(att.dropping), [att.dropping, onDropping]);
   const history = usePromptHistory({ threadId, input: ref, text });
   const stash = useComposerStash({ input: ref, text, att });
@@ -184,7 +184,7 @@ export function Composer({
     onResume,
   });
 
-  /** Send or queue. Pictures are written first; if that fails the box is kept as is. */
+  /** Send or queue; while a file is still being written the box is kept as is. */
   const send = async () => {
     if (dictation.busy || unscoped) return;
     const message = await att.prepare(text);
@@ -273,6 +273,9 @@ export function Composer({
           <AttachmentStrip
             items={att.items}
             onDetach={att.detach}
+            confirming={att.confirming}
+            onConfirmDetach={att.confirmDetach}
+            onCancelDetach={att.cancelDetach}
             texts={att.texts}
             onEditText={att.editText}
             onDetachText={att.detachText}

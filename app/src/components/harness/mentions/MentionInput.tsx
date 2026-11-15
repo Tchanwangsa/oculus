@@ -1,12 +1,15 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
+import { AttachmentChip } from "@/components/markdown/AttachmentChip";
 import { FileChip } from "@/components/markdown/FileChip";
-import { imageFiles } from "@/lib/harness/attachments";
+import { attachableFiles } from "@/lib/harness/attachments";
 import { hasControlChars } from "@/lib/harness/controlChars";
 import {
   caretChunk,
   chunkText,
   chunksText,
   domOffset,
+  dropAttachment,
+  insertAt,
   linkChunks,
   maskedText,
   normalize,
@@ -33,11 +36,12 @@ const drawnText = (text: string, last: boolean) => (last && text.endsWith(" ") ?
 const isBlank = (text: string) => text.replace(/[\r\n]/g, "") === "";
 
 /**
- * A contenteditable whose `@` mentions and picked skills are inline
- * `contenteditable="false"` references and whose web links are text drawn as
- * links (`ComposerLink`). Drawn and sent text differ: `readEditor` turns each
- * mention back into its backticked library path, so the agent never sees a
- * display name, each skill into `/name`, and each link into the text as
+ * A contenteditable whose `@` mentions, attachments and picked skills are
+ * inline `contenteditable="false"` references and whose web links are text
+ * drawn as links (`ComposerLink`). Drawn and sent text differ: `readEditor`
+ * turns each mention back into its backticked library path and each
+ * attachment into its backticked `./attachments/…` path, so the agent never
+ * sees a display name, each skill into `/name`, and each link into the text as
  * written. A link is drawn when pasted, or when the space after it is typed,
  * and stops being one when an edit leaves no link. Only Shift+Enter and
  * chip-eating Backspace/Delete are intercepted.
@@ -66,7 +70,8 @@ export function MentionInput({
   /** `masked` is `text` with each picked skill's characters masked, for
    *  finding a `/` trigger without matching a chip. */
   onEdit: (text: string, caret: number, masked: string) => void;
-  /** Pasted pictures; they never enter the editor's nodes. */
+  /** Pasted pictures, PDFs and text files; the caller writes them and puts
+   *  their chips back through `insertAttachments`. */
   onFiles?: (files: File[]) => void;
   /** Offered a plain-text paste first; true means it was taken (as a card). */
   onPasteText?: (text: string) => boolean;
@@ -225,6 +230,20 @@ export function MentionInput({
     insertSkill(start, name) {
       splice(start, [{ kind: "skill", name }]);
     },
+    insertAttachments(paths) {
+      const el = box.current;
+      if (!el || !paths.length) return;
+      const r = readEditor(el, point(el));
+      const next = insertAt(r.chunks, r.caret ?? r.text.length, paths.map((path) => ({ kind: "attachment" as const, path })));
+      commit(next.chunks, next.caret, true);
+    },
+    removeAttachment(path) {
+      const el = box.current;
+      if (!el) return;
+      const r = readEditor(el, point(el));
+      const next = dropAttachment(r.chunks, path, r.caret ?? r.text.length);
+      if (next.chunks !== r.chunks) commit(next.chunks, next.caret);
+    },
     removeToken(start) {
       splice(start, []);
     },
@@ -362,11 +381,12 @@ export function MentionInput({
         onBlur={onBlur}
         onPaste={(e) => {
           // Plain text only (rich fragments bring their own elements); a
-          // clipboard image wins over any text flavour it carries.
+          // clipboard file (a picture, PDF or text file) wins over any text
+          // flavour it carries.
           e.preventDefault();
-          const pictures = onFiles ? imageFiles(e.clipboardData.files) : [];
-          if (pictures.length) {
-            onFiles?.(pictures);
+          const files = onFiles ? attachableFiles(e.clipboardData.files) : [];
+          if (files.length) {
+            onFiles?.(files);
             return;
           }
           const plain = e.clipboardData.getData("text/plain");
@@ -383,6 +403,8 @@ export function MentionInput({
             <ComposerLink key={i} raw={c.raw} />
           ) : c.kind === "skill" ? (
             <SkillChip key={i} name={c.name} />
+          ) : c.kind === "attachment" ? (
+            <AttachmentChip key={i} path={c.path} />
           ) : (
             <FileChip key={i} path={c.path} />
           ),

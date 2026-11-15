@@ -4,7 +4,6 @@ import { openBeside, openLink } from "@/lib/shell/tabRouters";
 import { displayCode, humanizeSlug } from "@/lib/format/format";
 import { isLessonAsset, isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath, parsedMdSource } from "@/lib/files/fileTypes";
 import { getFileByRelativePath, getLecture, markFileAccessed, type DbFile } from "@/lib/db";
-import { attachmentPath } from "@/lib/harness/attachments";
 import { isWebUrl } from "@/lib/browser";
 import { libraryLinkTarget } from "@/lib/files/libraryLinks";
 import { readCourseFile } from "@/lib/files/courseFiles";
@@ -128,37 +127,7 @@ export function libraryPath(raw: string | null | undefined): string | null {
 
 export { pathFile } from "@/lib/files/pathCategory";
 
-/** Prose, a fenced library path, or an attached picture (`image.path` is
- *  already `<img>`-loadable; see `app/src/lib/harness/attachments.ts`). */
-export type TextPart =
-  | { kind: "text"; text: string }
-  | { kind: "path"; path: string; cite: Citation }
-  | { kind: "image"; path: string; raw: string };
-
-const FENCED = /`([^`\n]+)`/g;
-
-/** Splits text into prose and backtick-fenced library paths — the one rule
- *  composer and bubble share. Only a fence that is *wholly* a path counts;
- *  any other fence stays prose, backticks and all. */
-export function splitLibraryPaths(text: string): TextPart[] {
-  const parts: TextPart[] = [];
-  let at = 0;
-  for (const m of text.matchAll(FENCED)) {
-    const picture = attachmentPath(m[1]);
-    const cite = picture ? null : fullCitation(m[1]);
-    const i = m.index ?? 0;
-    if (!picture && !cite) continue;
-    if (i > at) parts.push({ kind: "text", text: text.slice(at, i) });
-    parts.push(
-      picture
-        ? { kind: "image", path: picture, raw: m[1] }
-        : { kind: "path", path: cite!.path, cite: cite! },
-    );
-    at = i + m[0].length;
-  }
-  if (at < text.length) parts.push({ kind: "text", text: text.slice(at) });
-  return parts;
-}
+export { splitLibraryPaths, type TextPart } from "@/lib/files/libraryPaths";
 
 /** Opens a file the agent named; see `openCitation`. */
 export function openLibraryPath(path: string, newTab = false): void {

@@ -10,7 +10,8 @@ export function isStashKey(e: { key: string; metaKey: boolean; ctrlKey: boolean;
 
 /**
  * The composer's side of the stash (`stashStore`): ⌘S with anything in the box
- * sets it aside, pictures written first; ⌘S on an empty box restores the only
+ * sets it aside, chips and all (their files are already written); ⌘S on an
+ * empty box restores the only
  * entry or opens the menu. Handled on the box's own keydown and stopped there,
  * so a note open in another pane, which takes ⌘S on `document`, never sees it.
  */
@@ -35,15 +36,15 @@ export function useComposerStash({
 
   const holding = text.trim().length > 0 || att.items.length > 0 || att.texts.length > 0;
 
-  async function stash() {
-    const aside = await att.setAside();
+  function stash() {
+    const aside = att.setAside();
     if (!aside) return;
     useStashStore.getState().stash({ text, ...aside });
     input.current?.clear();
   }
 
-  /** Back into the box: words after any typed, pastes as cards, pictures as
-   *  kept attachments; the entry leaves the stash. */
+  /** Back into the box: words after any typed with their chips, pastes as
+   *  cards, pictures on the shelf; the entry leaves the stash. */
   function restore(entry: StashEntry) {
     useStashStore.getState().remove(entry.id);
     att.bringBack(entry);
@@ -56,7 +57,7 @@ export function useComposerStash({
     if (!isStashKey(e)) return;
     e.preventDefault();
     e.stopPropagation();
-    if (holding) void stash();
+    if (holding) stash();
     else if (entries.length === 1) restore(entries[0]);
     else if (entries.length > 1) setOpen(true);
   }

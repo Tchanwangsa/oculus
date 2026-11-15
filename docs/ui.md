@@ -291,7 +291,12 @@ themes are opt-in and keep the same structure.
   are a glyph, a name, a muted description and, for a skill, an Oculus or
   Personal pill badge; a search or empty state is one muted line inside it. A
   picked skill is an inline chip in the sentence (`SkillChip`, brand-tinted,
-  `display: inline` so the line keeps its height). The ⌘S stash is a "Stash"
+  `display: inline` so the line keeps its height). An attached file is a chip
+  too (`AttachmentChip`), drawn as a mention is: its file glyph and the name
+  it was attached by, cut in the middle past 40 characters, with its
+  thumbnail in the hover preview for a picture. The shelf of thumbnails above
+  the box asks before removing a picture the sentence names, in a muted line
+  under it with Remove and Keep — never a dialog. The ⌘S stash is a "Stash"
   pill above the box opening a popover; its eviction notice is a line inside
   that popover, not a toast ([harness.md](./harness.md#the-empty-box-earlier-messages-and-the-stash)).
 - **The composer says a turn's state in words, not only colour**

@@ -7,6 +7,11 @@ export interface MentionInputHandle {
   insertMention(start: number, path: string): void;
   /** Swap the `/…` token starting at `start` for a skill chip plus a space. */
   insertSkill(start: number, name: string): void;
+  /** Attachment chips (each a `./attachments/…` path) at the caret, or at the
+   *  end when the box has no caret; the caret lands after them. */
+  insertAttachments(paths: string[]): void;
+  /** Every chip of this attachment taken out of the box. */
+  removeAttachment(path: string): void;
   /** Drop the token from `start` to the caret (a command that sends nothing). */
   removeToken(start: number): void;
   /** The names of the skill chips in the box, in order. */
