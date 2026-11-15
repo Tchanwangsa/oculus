@@ -17,6 +17,7 @@ use crate::harness::app::{BusMsg, Envelope};
 use crate::harness::core::decide::Answer;
 use crate::harness::core::effect::{Effect, Start};
 use crate::harness::core::{load, Command, Kind, Outcome};
+use crate::harness::providers::capabilities::{self, Capabilities};
 use crate::harness::{jobs, store, HarnessEvent, Provider, Release, SendOptions};
 
 use super::io::{Clock, Feed};
@@ -40,6 +41,7 @@ pub(super) struct Bench {
     record: Arc<Mutex<Record>>,
     /// Whether the provider says its context went back, per rewind asked.
     rewinds: Arc<AtomicBool>,
+    handoff: Arc<AtomicBool>,
     fed: Arc<AtomicBool>,
     drained: Sender<Sender<()>>,
     consumer: Option<JoinHandle<()>>,
@@ -58,9 +60,17 @@ struct Io {
     bus: Sender<BusMsg>,
     record: Arc<Mutex<Record>>,
     rewinds: Arc<AtomicBool>,
+    /// Every bridge takes a handoff, as a replay's rig lets them.
+    handoff: Arc<AtomicBool>,
 }
 
 impl ConsumerIo for Io {
+    fn capabilities(&self, provider: Provider) -> Capabilities {
+        Capabilities {
+            provider_handoff: self.handoff.load(Ordering::SeqCst),
+            ..capabilities::of(provider)
+        }
+    }
     fn open_pool(&mut self, _: &tokio::runtime::Runtime) -> Option<SqlitePool> {
         Some(self.pool.clone())
     }
@@ -73,6 +83,7 @@ impl ConsumerIo for Io {
             Effect::Interrupt { .. } => "interrupt".to_string(),
             Effect::ForceStop { .. } => "force stop".to_string(),
             Effect::Release { reason, .. } => format!("release {reason:?}"),
+            Effect::Forget { provider, .. } => format!("forget {}", provider.as_str()),
         });
         match effect {
             Effect::Rewind { command, ask } => {
@@ -122,12 +133,14 @@ impl Bench {
         let (drained, waiters) = std::sync::mpsc::channel();
         let record: Arc<Mutex<Record>> = Arc::default();
         let rewinds = Arc::new(AtomicBool::new(true));
+        let handoff = Arc::new(AtomicBool::new(false));
         let fed = Arc::new(AtomicBool::new(false));
         let mut io = Io {
             pool: pool.clone(),
             bus: bus.clone(),
             record: record.clone(),
             rewinds: rewinds.clone(),
+            handoff: handoff.clone(),
         };
         let feed = Feed {
             rx,
@@ -145,6 +158,7 @@ impl Bench {
             bus,
             record,
             rewinds,
+            handoff,
             fed,
             drained,
             consumer: Some(consumer),
@@ -162,6 +176,11 @@ impl Bench {
         waiting
             .recv_timeout(std::time::Duration::from_secs(10))
             .expect("the consumer caught up");
+    }
+
+    /// From now on every bridge takes a handoff.
+    pub(super) fn allow_handoff(&self) {
+        self.handoff.store(true, Ordering::SeqCst);
     }
 
     /// Whether the provider will say its context went back with a rewind.

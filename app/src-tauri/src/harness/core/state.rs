@@ -4,6 +4,7 @@
 use sqlx::SqlitePool;
 
 use crate::harness::manager::policy::{Active, Chat};
+use crate::harness::store::bindings::Holder;
 use crate::harness::store::{self, Question, ThreadRow};
 use crate::harness::Provider;
 
@@ -63,8 +64,9 @@ pub(in crate::harness) struct State {
     pub question: Option<Question>,
     /// The newest question's anchor, which Claude needs to rewind past it.
     pub newest_anchor: Option<String>,
-    /// The native session a rewind would ask to forget the question.
-    pub session: Option<String>,
+    /// The provider session that holds that question, which a rewind asks
+    /// to forget it: its own run's, whatever the chat has switched to since.
+    pub holder: Option<Holder>,
     /// How many runs wait in the chat's queue, and how many of those are
     /// held.
     pub waiting: i64,
@@ -130,7 +132,7 @@ pub(in crate::harness) async fn read(
         live,
         question: None,
         newest_anchor: None,
-        session: None,
+        holder: None,
         waiting,
         held,
         open,
@@ -140,11 +142,7 @@ pub(in crate::harness) async fn read(
     {
         state.question = Some(store::user_item(pool, thread_id, *item_id).await?);
         state.newest_anchor = store::newest_anchor(pool, thread_id).await.ok().flatten();
-        if let Some(row) = &state.thread {
-            state.session = store::bindings::find(pool, thread_id, row.provider)
-                .await?
-                .and_then(|binding| binding.native_session);
-        }
+        state.holder = store::bindings::holder(pool, thread_id, *item_id).await?;
     }
     Ok(state)
 }

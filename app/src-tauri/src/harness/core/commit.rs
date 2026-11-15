@@ -97,6 +97,9 @@ pub(in crate::harness) enum Applied {
     Truncated {
         item_id: i64,
         context: bool,
+        /// The providers whose session held rows that went, and was given
+        /// up for it (`bindings::rewound`).
+        stale: Vec<Provider>,
     },
     Deleted,
 }
@@ -241,8 +244,13 @@ pub(in crate::harness) async fn run(
             }
             Change::Truncate { item_id, context } => {
                 let thread_id = thread.ok_or("a rewind with no thread")?;
+                let stale = store::bindings::rewound(&mut tx, thread_id, item_id).await?;
                 store::truncate(&mut tx, thread_id, item_id).await?;
-                applied.push(Applied::Truncated { item_id, context });
+                applied.push(Applied::Truncated {
+                    item_id,
+                    context,
+                    stale,
+                });
             }
             Change::DeleteThread => {
                 let thread_id = thread.ok_or("a delete with no thread")?;

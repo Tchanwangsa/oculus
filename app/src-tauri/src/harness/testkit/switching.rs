@@ -4,8 +4,11 @@
 
 use sqlx::Row;
 
-use crate::harness::core::load;
-use crate::harness::{store, Provider, SendOptions};
+use crate::harness::app::BusMsg;
+use crate::harness::core::{load, Kind};
+use crate::harness::{store, HarnessEvent, Provider, SendOptions};
+
+use super::commands::{ended, Bench};
 
 use super::rig::Rig;
 use super::scenario::Scenario;
@@ -623,9 +626,7 @@ fn a_crash_between_pending_and_inline_forces_a_fresh_session_with_the_whole_chat
         .run
         .unwrap();
     assert_ne!(fifth.binding_id, second.binding_id, "a fresh session");
-    let fresh = binding(&rig, Provider::Codex);
-    assert_eq!(fresh.id, fifth.binding_id);
-    assert_eq!(fresh.native_session, None, "nothing to resume");
+    assert_eq!(binding(&rig, Provider::Codex).id, fifth.binding_id);
     let prompts = rig.prompts();
     let (block, message) = split(prompts.last().unwrap());
     assert_eq!(message, "Again.");
@@ -677,7 +678,7 @@ fn a_crash_before_the_start_step_leaves_no_handoff_behind() {
     rig.command(crate::harness::core::Command {
         id: "resume".into(),
         thread_id: Some(rig.thread),
-        kind: crate::harness::core::Kind::Resume,
+        kind: Kind::Resume,
     })
     .unwrap();
     rig.drain();
@@ -770,7 +771,7 @@ fn a_send_the_provider_never_heard_leaves_its_handoff_undelivered() {
     rig.command(crate::harness::core::Command {
         id: "stop".into(),
         thread_id: Some(rig.thread),
-        kind: crate::harness::core::Kind::Stop {
+        kind: Kind::Stop {
             run_id: Some(lost.run_id),
         },
     })
@@ -800,4 +801,219 @@ fn a_send_the_provider_never_heard_leaves_its_handoff_undelivered() {
     assert!(block.contains("[Student]\nNever arrives."));
     assert_eq!(handoffs(&rig)[1].2, "inline");
     rig.finish();
+}
+
+/// A whole turn on the scripted bus under `provider`: the question, its
+/// session naming itself and the question's anchor, an answer, the end.
+fn turn(bench: &Bench, id: &str, provider: Provider, text: &str) -> Vec<BusMsg> {
+    let kind = Kind::Send {
+        provider,
+        text: text.into(),
+        options: SendOptions::default(),
+        mode: Default::default(),
+    };
+    let session = HarnessEvent::SessionStarted {
+        provider_session_id: format!("{}-session", provider.as_str()),
+        model: None,
+        cwd: String::new(),
+    };
+    let anchor = HarnessEvent::TurnAnchor {
+        anchor: format!("anchor-{id}"),
+    };
+    let said = HarnessEvent::AssistantMessage {
+        text: format!("answer to {text}"),
+        source: None,
+    };
+    vec![
+        bench.command(id, kind).0,
+        bench.session(session),
+        bench.session(anchor),
+        bench.session(said),
+        bench.app(ended("completed")),
+    ]
+}
+
+/// Each binding of the bench's chat: provider, session, current, coverage.
+fn bench_bindings(bench: &Bench) -> Vec<(String, Option<String>, i64, i64)> {
+    let rows = sqlx::query_as(
+        "SELECT provider, native_session, current, covered_through FROM harness_bindings ORDER BY id",
+    )
+    .fetch_all(&bench.pool);
+    bench.runtime.block_on(rows).unwrap()
+}
+
+fn bench_handoffs(bench: &Bench) -> Vec<(String, String, i64, i64, String)> {
+    let rows = sqlx::query_as(
+        "SELECT kind, status, covered_from, covered_to, items FROM harness_handoffs ORDER BY id",
+    )
+    .fetch_all(&bench.pool);
+    bench.runtime.block_on(rows).unwrap()
+}
+
+/// Claude, Codex, Claude, each one run, on the scripted bus.
+fn three_runs(name: &str) -> Bench {
+    let mut bench = Bench::new(name);
+    bench.allow_handoff();
+    bench.play(turn(&bench, "c1", Provider::Claude, "first"));
+    bench.play(turn(&bench, "c2", Provider::Codex, "second"));
+    bench.play(turn(&bench, "c3", Provider::Claude, "third"));
+    assert_eq!(
+        bench_bindings(&bench),
+        vec![
+            ("claude".into(), Some("claude-session".into()), 1, 3),
+            ("codex".into(), Some("codex-session".into()), 1, 2),
+        ]
+    );
+    let handed: Vec<(String, String, i64, i64)> = bench_handoffs(&bench)
+        .into_iter()
+        .map(|(kind, status, from, to, _)| (kind, status, from, to))
+        .collect();
+    assert_eq!(
+        handed,
+        vec![
+            ("full".into(), "inline".into(), 1, 1),
+            ("delta".into(), "inline".into(), 2, 2),
+        ]
+    );
+    bench.clear();
+    bench
+}
+
+fn question(bench: &Bench, text: &str) -> i64 {
+    let id =
+        sqlx::query_scalar("SELECT id FROM harness_items WHERE kind = 'user' AND content = ?1")
+            .bind(text)
+            .fetch_one(&bench.pool);
+    bench.runtime.block_on(id).unwrap()
+}
+
+/// Rewinding to a question Codex answered, with the chat back on Claude
+/// since. Codex's own session is asked to forget it and is left knowing
+/// nothing of the chat (its handoff went with the question). Claude's
+/// session saw that question and what followed, none of which exists any
+/// more: it is given up, and Claude's next run starts fresh with the chat
+/// as it now stands.
+#[test]
+fn a_rewind_past_a_switch_leaves_no_session_holding_what_went() {
+    let mut bench = three_runs("rewind-past-switch");
+    let second = question(&bench, "second");
+    let (rewind, answer) = bench.command("r1", Kind::Rewind { item_id: second });
+    bench.play(vec![rewind]);
+    assert_eq!(bench.got(answer).unwrap().text.as_deref(), Some("second"));
+    assert_eq!(
+        bench.effects(),
+        ["rewind anchor-c2", "forget claude"],
+        "Codex's rewind, by the question's own anchor; Claude's session ended"
+    );
+    assert_eq!(bench.questions(), ["first"]);
+    assert_eq!(
+        bench_bindings(&bench),
+        vec![
+            ("claude".into(), None, 1, 0),
+            ("codex".into(), Some("codex-session".into()), 1, 0),
+        ]
+    );
+    assert!(
+        bench_handoffs(&bench).is_empty(),
+        "they went with their runs"
+    );
+
+    // Claude again: a new session, handed the one exchange that is left.
+    bench.play(turn(&bench, "c4", Provider::Claude, "again"));
+    let handed = bench_handoffs(&bench);
+    assert_eq!(handed.len(), 1);
+    let (kind, status, from, to, items) = &handed[0];
+    assert_eq!((kind.as_str(), status.as_str()), ("full", "inline"));
+    assert_eq!((*from, *to), (1, 1));
+    let items: Vec<i64> = serde_json::from_str(items).unwrap();
+    assert_eq!(items.len(), 2, "the first question and its answer");
+    assert_eq!(items[0], question(&bench, "first"));
+    // Codex, later: its session is still its own, and has the chat to learn.
+    bench.play(turn(&bench, "c5", Provider::Codex, "and Codex"));
+    let (kind, _, from, to, _) = &bench_handoffs(&bench)[1];
+    assert_eq!((kind.as_str(), *from, *to), ("delta", 1, 2));
+    assert_eq!(
+        bench_bindings(&bench)[1],
+        ("codex".into(), Some("codex-session".into()), 1, 3)
+    );
+}
+
+/// Rewinding to a question whose own prompt carried a handoff: the
+/// provider's rewind takes the handoff back with the question, so its
+/// session is marked as having seen only what it had before, and its next
+/// run is handed the missed runs again. The other provider saw nothing
+/// that went, and keeps its session.
+#[test]
+fn a_rewind_to_a_run_that_carried_a_handoff_hands_it_over_again() {
+    let mut bench = three_runs("rewind-handoff-run");
+    let third = question(&bench, "third");
+    let (rewind, answer) = bench.command("r1", Kind::Rewind { item_id: third });
+    bench.play(vec![rewind]);
+    bench.got(answer).unwrap();
+    assert_eq!(
+        bench.effects(),
+        ["rewind anchor-c3"],
+        "nobody else is ended"
+    );
+    assert_eq!(
+        bench_bindings(&bench),
+        vec![
+            ("claude".into(), Some("claude-session".into()), 1, 1),
+            ("codex".into(), Some("codex-session".into()), 1, 2),
+        ]
+    );
+    assert_eq!(bench_handoffs(&bench).len(), 1, "run 2's stays");
+
+    bench.play(turn(&bench, "c4", Provider::Claude, "third, again"));
+    let handed = bench_handoffs(&bench);
+    let (kind, status, from, to, items) = &handed[1];
+    assert_eq!((kind.as_str(), status.as_str()), ("delta", "inline"));
+    assert_eq!((*from, *to), (2, 2));
+    let items: Vec<i64> = serde_json::from_str(items).unwrap();
+    assert_eq!(items[0], question(&bench, "second"));
+    assert_eq!(bench_bindings(&bench)[0].3, 3);
+}
+
+/// An edit sent under another provider rewinds the question's own session
+/// and starts the new run on the provider the composer showed, in one
+/// commit.
+#[test]
+fn an_edit_under_another_provider_rewinds_and_switches_in_one_commit() {
+    let mut bench = Bench::new("edit-switch");
+    bench.allow_handoff();
+    bench.play(turn(&bench, "c1", Provider::Claude, "first"));
+    bench.play(turn(&bench, "c2", Provider::Claude, "second"));
+    bench.clear();
+    let kind = Kind::EditResend {
+        item_id: question(&bench, "second"),
+        text: "second, for Codex".into(),
+        options: SendOptions::default(),
+        provider: Some(Provider::Codex),
+    };
+    let (edit, answer) = bench.command("e1", kind);
+    bench.play(vec![edit]);
+    bench.got(answer).unwrap();
+    assert_eq!(bench.effects()[0], "rewind anchor-c2");
+    let start = bench.starts().pop().expect("the edit's run goes out");
+    assert_eq!(start.provider, Provider::Codex);
+    assert_eq!(start.text, "second, for Codex");
+    assert_eq!(bench.questions(), ["first", "second, for Codex"]);
+    let (kind, status, from, to, _) = bench_handoffs(&bench).remove(0);
+    assert_eq!((kind.as_str(), status.as_str()), ("full", "pending"));
+    assert_eq!((from, to), (1, 1));
+    let kinds: Vec<String> = bench
+        .events()
+        .iter()
+        .map(|e| e["event"]["type"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "rewound",
+            "selected",
+            "user_message",
+            "run_selected",
+            "handoff"
+        ]
+    );
 }

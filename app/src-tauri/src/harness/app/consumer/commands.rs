@@ -305,12 +305,23 @@ impl Consumer {
                 let stopping = HarnessEvent::StopRequested { run_id };
                 self.event(thread_id, provider, From::App, stopping, None, io);
             }
-            Applied::Truncated { item_id, context } => {
+            Applied::Truncated {
+                item_id,
+                context,
+                stale,
+            } => {
                 let rewound = HarnessEvent::Rewound {
                     from_item_id: item_id,
                     context,
                 };
                 self.event(thread_id, provider, From::App, rewound, None, io);
+                // A session that had seen the rows that went is not kept.
+                for provider in stale {
+                    io.perform(Effect::Forget {
+                        thread_id,
+                        provider,
+                    });
+                }
             }
             Applied::Deleted => {
                 // Whatever its session still says is nobody's: the rows are

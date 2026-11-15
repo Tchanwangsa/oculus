@@ -43,18 +43,24 @@ pub(super) fn decide(
             if let Some(reason) = target.and_then(|to| select::refusal(state, to)) {
                 return Err(reason);
             }
-            if let (Some(anchor), Some(resume)) = (question.anchor.clone(), state.session.clone()) {
+            // The session that answered the question is the one asked to
+            // forget it, whichever provider the chat is on now.
+            let held = state.holder.as_ref().and_then(|holder| {
+                let session = holder.session.clone()?;
+                Some((holder, session, question.anchor.clone()?))
+            });
+            if let Some((holder, resume, anchor)) = held {
                 return Ok(Decision::Ask(Ask::Rewind(Box::new(RewindAsk {
                     thread_id: row.id,
-                    provider: row.provider,
+                    provider: holder.provider,
                     anchor,
                     last_seen: state.newest_anchor.clone(),
                     resume,
-                    // A respawn for the rewind runs under the chat's own
-                    // model and level, whatever the edit goes out under.
+                    // A respawn for the rewind runs under what the question
+                    // was sent with, whatever the edit goes out under.
                     options: SendOptions {
-                        model: row.model.clone(),
-                        reasoning_effort: row.effort.clone(),
+                        model: holder.model.clone(),
+                        reasoning_effort: holder.effort.clone(),
                         ..SendOptions::default()
                     },
                 }))));
@@ -90,6 +96,7 @@ mod tests {
     use super::super::super::state::Live;
     use super::*;
     use crate::harness::core::Kind;
+    use crate::harness::store::bindings::Holder;
     use crate::harness::store::{Question, ThreadRow};
     use crate::harness::Provider;
 
@@ -112,7 +119,12 @@ mod tests {
                 anchor: anchor.map(String::from),
             }),
             newest_anchor: Some("newest".into()),
-            session: session.map(String::from),
+            holder: Some(Holder {
+                provider: Provider::Claude,
+                session: session.map(String::from),
+                model: Some("opus".into()),
+                effort: Some("low".into()),
+            }),
             waiting: 0,
             held: 0,
             open: None,
@@ -165,8 +177,11 @@ mod tests {
         };
         assert_eq!((ask.anchor.as_str(), ask.resume.as_str()), ("a", "s"));
         assert_eq!(ask.last_seen.as_deref(), Some("newest"));
-        assert_eq!(ask.options.model.as_deref(), Some("gpt"), "the row's model");
-        assert_eq!(ask.options.reasoning_effort.as_deref(), Some("high"));
+        // The chat is on Codex now; the question was Claude's, and it is
+        // Claude's session that is asked, under what that run was sent with.
+        assert_eq!(ask.provider, Provider::Claude);
+        assert_eq!(ask.options.model.as_deref(), Some("opus"));
+        assert_eq!(ask.options.reasoning_effort.as_deref(), Some("low"));
     }
 
     #[test]

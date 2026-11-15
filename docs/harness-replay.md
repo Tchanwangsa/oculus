@@ -212,7 +212,10 @@ handoff, a crash before and after the start step took a run that carried
 one, a message queued before a switch, a model change on Claude (respawn)
 and on Codex (the next `turn/start`), a pick stored mid-turn, and the two
 refusals. A recorded Codex or opencode session names itself when the
-manager opens it, as `start_thread` and `attach_session` do.
+manager opens it, as `start_thread` and `attach_session` do. On the
+scripted bus (`Bench::allow_handoff`) it checks a rewind to a question
+another provider answered, a rewind to a run that carried a handoff, and an
+edit sent under another provider.
 `testkit/queue.rs` checks queued runs: a message sent mid-turn through a
 real bridge waiting as a run and starting as the same run, the queue's
 commands, options riding the queue, a continuation's place in line, and

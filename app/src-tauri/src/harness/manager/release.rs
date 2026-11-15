@@ -68,6 +68,21 @@ impl Harness {
         }
     }
 
+    /// End the thread's session if it is `provider`'s, as replaced: its
+    /// context no longer matches the chat, and the next send starts another.
+    pub fn release_provider(&self, thread_id: i64, provider: Provider) {
+        let live = {
+            let mut live = self.live.lock().unwrap();
+            match live.get(&thread_id) {
+                Some(session) if session.selection.provider == provider => live.remove(&thread_id),
+                _ => None,
+            }
+        };
+        if let Some(live) = live {
+            live.end(Release::Replaced);
+        }
+    }
+
     /// End the thread's session, if it has one. The thread row stays; the
     /// next send resumes it by session id, as a new generation.
     pub fn release(&self, thread_id: i64, reason: Release) {

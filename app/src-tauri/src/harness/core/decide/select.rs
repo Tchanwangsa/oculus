@@ -88,7 +88,7 @@ mod tests {
             },
             question: None,
             newest_anchor: None,
-            session: None,
+            holder: None,
             waiting: 0,
             held: 0,
             open: None,

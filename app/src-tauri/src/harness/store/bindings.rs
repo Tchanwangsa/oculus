@@ -145,10 +145,10 @@ pub async fn of_run(db: impl SqliteExecutor<'_>, run_id: i64) -> Result<Option<B
 }
 
 /// The provider named the session answering `run_id`. A binding learns its
-/// first one. A different one is a new conversation on the provider's
-/// side: the run moves to a new binding, which takes the old one's place
-/// as current and its coverage, since the provider carried the context
-/// over itself.
+/// first one. A different one is the same conversation under a new id on
+/// the provider's side: a new binding takes the old one's place as
+/// current, with its coverage and every run it answered, so a rewind to
+/// one of them still finds the session that holds it.
 pub async fn bind_session(
     tx: &mut SqliteConnection,
     run_id: i64,
@@ -204,11 +204,12 @@ pub async fn bind_session(
             .map_err(err)?
             .last_insert_rowid();
             for sql in [
-                "UPDATE harness_runs SET binding_id = ?2 WHERE id = ?1",
-                "UPDATE harness_handoffs SET to_binding_id = ?2 WHERE run_id = ?1",
+                "UPDATE harness_runs SET binding_id = ?2 WHERE binding_id = ?1",
+                "UPDATE harness_handoffs SET to_binding_id = ?2 WHERE to_binding_id = ?1",
+                "UPDATE harness_handoffs SET from_binding_id = ?2 WHERE from_binding_id = ?1",
             ] {
                 sqlx::query(sql)
-                    .bind(run_id)
+                    .bind(old)
                     .bind(id)
                     .execute(&mut *tx)
                     .await
@@ -217,6 +218,143 @@ pub async fn bind_session(
         }
     }
     Ok(())
+}
+
+/// The binding whose session holds the question `item_id`: its run's, or,
+/// for a question from before runs, the chat's first. With the model and
+/// reasoning level that run was sent under.
+pub struct Holder {
+    pub provider: Provider,
+    /// The native session to rewind; `None` when the binding has none, or
+    /// has since been given up for a fresh one.
+    pub session: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+pub async fn holder(
+    pool: &sqlx::SqlitePool,
+    thread_id: i64,
+    item_id: i64,
+) -> Result<Option<Holder>, String> {
+    let err = |e: sqlx::Error| e.to_string();
+    let own = sqlx::query(
+        "SELECT b.provider, b.native_session, b.current, r.model, r.effort
+           FROM harness_items i
+           JOIN harness_runs r ON r.id = i.run_id
+           JOIN harness_bindings b ON b.id = r.binding_id
+          WHERE i.id = ?1 AND i.thread_id = ?2",
+    )
+    .bind(item_id)
+    .bind(thread_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(err)?;
+    let row = match own {
+        Some(row) => Some(row),
+        None => sqlx::query(
+            "SELECT b.provider, b.native_session, b.current, t.model, t.effort
+               FROM harness_bindings b JOIN harness_threads t ON t.id = b.thread_id
+              WHERE b.thread_id = ?1 ORDER BY b.id LIMIT 1",
+        )
+        .bind(thread_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(err)?,
+    };
+    Ok(row.and_then(|row| {
+        let provider = Provider::parse(&row.get::<String, _>("provider"))?;
+        let current = row.get::<i64, _>("current") != 0;
+        Some(Holder {
+            provider,
+            session: row
+                .get::<Option<String>, _>("native_session")
+                .filter(|_| current),
+            model: row.get("model"),
+            effort: row.get("effort"),
+        })
+    }))
+}
+
+/// The rows from `item_id` on are about to leave the chat. The binding
+/// that holds that question keeps its session, which the provider's own
+/// rewind takes back, and is marked as having seen only what came before
+/// it. Every other binding that has seen anything from that question on
+/// holds context that no longer exists: its session is given up and it
+/// covers nothing, so its next use starts fresh with the whole chat.
+/// Returns the providers whose current session was given up.
+pub async fn rewound(
+    tx: &mut SqliteConnection,
+    thread_id: i64,
+    item_id: i64,
+) -> Result<Vec<Provider>, String> {
+    let err = |e: sqlx::Error| e.to_string();
+    // The question's own run, the binding that holds it and what that
+    // binding had seen before the run: what its handoff started from, or
+    // every earlier run when it carried none.
+    let own: Option<(i64, i64, Option<i64>)> = sqlx::query_as(
+        "SELECT r.ordinal, r.binding_id,
+                (SELECT h.covered_from FROM harness_handoffs h
+                  WHERE h.run_id = r.id AND h.status = 'inline')
+           FROM harness_items i JOIN harness_runs r ON r.id = i.run_id
+          WHERE i.id = ?1 AND i.thread_id = ?2 AND r.ordinal > 0",
+    )
+    .bind(item_id)
+    .bind(thread_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(err)?;
+    // A question from before runs: everything any session has seen goes.
+    let (ordinal, holder, before) = match own {
+        Some((ordinal, binding, from)) => (ordinal, Some(binding), from.unwrap_or(ordinal) - 1),
+        None => {
+            let first: Option<i64> = sqlx::query_scalar(
+                "SELECT id FROM harness_bindings WHERE thread_id = ?1 ORDER BY id LIMIT 1",
+            )
+            .bind(thread_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(err)?;
+            (0, first, 0)
+        }
+    };
+    // Only a current binding is kept: one given up earlier is not used again.
+    let kept: i64 = sqlx::query_scalar(
+        "UPDATE harness_bindings SET covered_through = MIN(covered_through, ?2)
+          WHERE id = ?1 AND current = 1 RETURNING id",
+    )
+    .bind(holder)
+    .bind(before.max(0))
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(err)?
+    .unwrap_or(-1);
+    let stale = "thread_id = ?1 AND id != ?2 AND covered_through >= ?3
+                 AND (covered_through > 0 OR native_session IS NOT NULL)";
+    let gone: Vec<String> = sqlx::query_scalar(&format!(
+        "SELECT provider FROM harness_bindings WHERE {stale} AND current = 1"
+    ))
+    .bind(thread_id)
+    .bind(kept)
+    .bind(ordinal)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(err)?;
+    sqlx::query(&format!(
+        "UPDATE harness_bindings
+            SET native_session = NULL, covered_through = 0, context_tokens = NULL
+          WHERE {stale}"
+    ))
+    .bind(thread_id)
+    .bind(kept)
+    .bind(ordinal)
+    .execute(&mut *tx)
+    .await
+    .map_err(err)?;
+    Ok(gone
+        .iter()
+        .filter_map(|provider| Provider::parse(provider))
+        .collect())
 }
 
 /// The provider's live session in this chat is gone. One that never named

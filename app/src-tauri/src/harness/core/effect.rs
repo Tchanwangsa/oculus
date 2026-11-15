@@ -27,6 +27,9 @@ pub(in crate::harness) enum Effect {
     ForceStop { thread_id: i64 },
     /// End the thread's session.
     Release { thread_id: i64, reason: Release },
+    /// End the thread's session if it is `provider`'s: a rewind took rows
+    /// that session had seen.
+    Forget { thread_id: i64, provider: Provider },
 }
 
 #[derive(Clone)]
@@ -92,5 +95,9 @@ pub(in crate::harness) async fn run(rt: &Runtime, effect: Effect) {
         }
         Effect::ForceStop { thread_id } => rt.harness.force_stop(thread_id),
         Effect::Release { thread_id, reason } => rt.harness.release(thread_id, reason),
+        Effect::Forget {
+            thread_id,
+            provider,
+        } => rt.harness.release_provider(thread_id, provider),
     }
 }

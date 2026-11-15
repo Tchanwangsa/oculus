@@ -90,7 +90,7 @@ mod tests {
             live: Live::default(),
             question: None,
             newest_anchor: None,
-            session: None,
+            holder: None,
             waiting: 0,
             held: 0,
             open: busy.then_some(OpenRun {

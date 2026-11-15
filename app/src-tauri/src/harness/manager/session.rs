@@ -12,6 +12,7 @@ use crate::harness::codex::{self, CodexThreadOpts};
 use crate::harness::discover;
 use crate::harness::event::Bound;
 use crate::harness::opencode::{self, OpencodeSessionOpts};
+use crate::harness::providers::capabilities::Capabilities;
 use crate::harness::Provider;
 
 use super::handle::{Handle, Live, RewindTo};
@@ -60,7 +61,8 @@ impl Harness {
         // send and Stop, this thread's Stop included.
         let (handle, generation, sinks) = {
             let mut live = self.live.lock().unwrap();
-            self.ensure(&mut live, thread_id, provider, resume, opts, sinks)
+            let caps = self.capabilities(provider);
+            self.ensure(&mut live, thread_id, (provider, caps), resume, opts, sinks)
                 .map_err(SendError::Unsent)?;
             let session = live
                 .get(&thread_id)
@@ -106,7 +108,13 @@ impl Harness {
             // session gives way, as it would for a send.
             let up = |l: &Live| l.is_alive() && l.selection.provider == provider;
             if !live.get(&thread_id).is_some_and(up) {
-                self.ensure(&mut live, thread_id, provider, resume, opts, sinks)?;
+                // The question's own provider takes its session back: no
+                // handoff is involved, so its bridge need not take one.
+                let caps = Capabilities {
+                    provider_handoff: true,
+                    ..self.capabilities(provider)
+                };
+                self.ensure(&mut live, thread_id, (provider, caps), resume, opts, sinks)?;
             }
             live.get(&thread_id).ok_or("no session")?.handle.clone()
         };
@@ -123,7 +131,7 @@ impl Harness {
         &self,
         live: &mut HashMap<i64, Live>,
         thread_id: i64,
-        provider: Provider,
+        (provider, caps): (Provider, Capabilities),
         resume: Option<&str>,
         opts: &SendOptions,
         sinks: &Arc<dyn Sinks>,
@@ -140,7 +148,7 @@ impl Harness {
                 background: l.handle.has_background_work(),
             }),
             &target,
-            &self.capabilities(provider),
+            &caps,
         );
         match transition {
             Transition::Reuse => return Ok(()),
