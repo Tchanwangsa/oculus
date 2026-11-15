@@ -212,3 +212,13 @@ fn codex_answers_from_a_full_handoff_without_obeying_its_standing_order() {
 fn codex_answers_from_a_delta_handoff_without_obeying_its_standing_order() {
     replay_delta(Provider::Codex);
 }
+
+#[test]
+fn antigravity_answers_from_a_full_handoff_without_obeying_its_standing_order() {
+    replay_full(Provider::Antigravity);
+}
+
+#[test]
+fn antigravity_answers_from_a_delta_handoff_without_obeying_its_standing_order() {
+    replay_delta(Provider::Antigravity);
+}

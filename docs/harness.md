@@ -1587,9 +1587,9 @@ A thread's `provider`, `model` and `effort` (`harness_threads`) are its
 with ([Each send is a run](#each-send-is-a-run)), so changing the selection
 changes nothing already written.
 
-Claude Code and Codex accept a context handoff (`provider_handoff`); opencode
-and Antigravity refuse it. The direct CLI recordings
-`handoff-{claude,codex}-{full,delta}.ndjson` under
+Claude Code, Codex and print-mode Antigravity accept a context handoff
+(`provider_handoff`); opencode refuses it. The direct CLI recordings
+`handoff-{claude,codex,antigravity}-{full,delta}.ndjson` under
 `app/src-tauri/fixtures/harness/` show recall of the supplied facts without
 following a historical standing order. These establish target behavior, not
 a live Oculus switch or permission transfer.

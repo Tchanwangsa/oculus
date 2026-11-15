@@ -216,7 +216,7 @@ scripted bus (`Bench::allow_handoff`) it checks a rewind to a question
 another provider answered, a rewind to a run that carried a handoff, and an
 edit sent under another provider.
 `testkit/handoff_recordings.rs` seeds three synthetic earlier exchanges and
-replays `handoff-claude-full` and `handoff-codex-full` as the first target run after a provider
+replays the Claude, Codex and print-mode Antigravity `handoff-*-full` fixtures as the first target run after a provider
 switch, with its exact outbound prompt checked by `Rig::session_checked`.
 Their `delta` recordings include a real warmup turn and then the missed
 conversation in the same native session; the replay inserts source runs
@@ -227,6 +227,8 @@ scratch folders with normal sign-in; they do not drive the live Oculus
 runtime. Their manifests include launch settings and every stdout frame. Codex replay
 restores the spawn model from the next expected turn because it substitutes
 for `thread/start`.
+Antigravity's manifest pins equal before/after settings checksums: direct
+print-mode recording does not install the Oculus bridge's global rules.
 Rejected wording probes live under
 `app/src-tauri/fixtures/harness/handoff-rejected/` and never enable a flag.
 The optional `export_the_production_handoff_prompts` test writes the prompts
