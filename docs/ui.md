@@ -325,7 +325,11 @@ themes are opt-in and keep the same structure.
   Move later icon buttons, so nothing there fades in on hover. Notices about
   a held queue or an agent ignoring Stop are `BannerLane` cards, and a failed
   command is said in the card or on a line by the control, never in a toast
-  ([harness.md](./harness.md#one-turn-at-a-time)).
+  ([harness.md](./harness.md#one-turn-at-a-time)). An agent's request is
+  answered from a card of the same look just above the box (`RequestBar`:
+  Decline, Approve, More), its refusal on a line inside it; the run then
+  reads "Waiting for approval", steady, never shimmering
+  ([harness.md](./harness.md#in-the-chat)).
 - **A long list's rows can skip layout off screen with `skip-offscreen`**
   (`content-visibility: auto`, remembering each row's drawn height), so a
   resize lays out only what is visible. The row clips its paint to its box:

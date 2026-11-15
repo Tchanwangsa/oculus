@@ -70,3 +70,22 @@ test("a reviewer's decision lands on its tool row's meta", async () => {
   expect(meta.review).toEqual(review);
   expect(meta.kind).toBe("bash");
 });
+
+test("a reload restores a live request as one the composer answers, and an ended one as settled", async () => {
+  const { requestActions, requestState, waitingRequests } = await import("@/lib/harness");
+  const row = { id: 12, thread_id: THREAD, kind: "request" as const, ref_id: "3", content: null, meta: null, created_at: "", run_id: 1 };
+  answer = async () => ({
+    revision: 7, items: [row], runs: [], queued: [],
+    requests: [request(), request({ id: 4, item_id: 20, status: "expired", responder: "not_resumable", reason: "The app was closed." })],
+  });
+  await useHarnessStore.getState().load(THREAD);
+  const s = useHarnessStore.getState();
+  expect(s.items[THREAD][0].ref_id).toBe("3");
+  const live = s.requests[THREAD][3];
+  expect(requestState(live).kind).toBe("waiting");
+  expect(requestActions(live).approve?.id).toBe("accept");
+  expect(waitingRequests(s.requests[THREAD]).map((r) => r.id)).toEqual([3]);
+  const ended = s.requests[THREAD][4];
+  expect(requestState(ended)).toMatchObject({ kind: "expired", notes: ["The app was closed."] });
+  expect(requestActions(ended).approve).toBeNull();
+});

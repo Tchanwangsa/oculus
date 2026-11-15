@@ -11,10 +11,13 @@ import { ModelPicker } from "@/components/harness/composer/ModelPicker";
 import { UsageMeter } from "@/components/harness/composer/UsageMeter";
 import { SubjectPicker } from "@/components/harness/composer/SubjectPicker";
 import { ThreadBanners } from "@/components/harness/composer/ThreadBanners";
-import { canSend, enterAction, UNSCOPED_PLACEHOLDER } from "@/components/harness/composer/sendGate";
+import { RequestBar } from "@/components/harness/composer/RequestBar";
+import { PermissionModeControl } from "@/components/harness/composer/PermissionModeControl";
+import { canSend, enterAction, UNSCOPED_PLACEHOLDER, WAITING_PLACEHOLDER } from "@/components/harness/composer/sendGate";
 import { useRunControls } from "@/components/harness/composer/useRunControls";
 import { type Subject } from "@/lib/db";
 import {
+  awaitsApproval,
   defaultSelection,
   providerLabel,
   scopeSubject,
@@ -26,6 +29,7 @@ import { useProviderModels } from "@/hooks/agents/useProviderModels";
 import { useAttachments } from "@/hooks/agents/useAttachments";
 import { AttachmentStrip } from "@/components/harness/attachments/AttachmentStrip";
 import { useDraftStore } from "@/stores/chat/draftStore";
+import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { signInState, useSignInStatus } from "@/hooks/agents/useSignInStatus";
 import { SignInDialog, useSignIn } from "@/components/harness/SignInDialog";
 import { useDictation } from "@/components/harness/dictation/useDictation";
@@ -179,6 +183,9 @@ export function Composer({
     onReasoning(pick.reasoning);
   }, [model, active, onModel, onReasoning]);
 
+  // A request waits on the student: a message sent now queues behind it.
+  const asking = useHarnessStore((s) => threadId != null && awaitsApproval(s.requests[threadId]));
+
   const ready = text.trim().length > 0 || att.items.length > 0 || att.texts.length > 0;
   const controls = useRunControls({
     threadId,
@@ -272,6 +279,8 @@ export function Composer({
         onForceStop={onForceStop}
       />
 
+      <RequestBar threadId={threadId} />
+
       <div
         className={cn(
           "flex flex-col gap-4 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25",
@@ -317,7 +326,9 @@ export function Composer({
               if (action === "send") void send();
             }}
             placeholder={
-              running
+              asking
+                ? WAITING_PLACEHOLDER
+                : running
                 ? "Working… your next message waits its turn"
                 : unscoped
                   ? UNSCOPED_PLACEHOLDER
@@ -341,6 +352,7 @@ export function Composer({
             open={tools.modelOpen}
             onOpenChange={tools.setModelOpen}
           />
+          <PermissionModeControl threadId={threadId} provider={provider} />
           <div className="flex-1" />
           <UsageMeter usage={usage} rateLimits={rateLimits} />
           <DictationMic dictation={dictation} />

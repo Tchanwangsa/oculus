@@ -47,3 +47,12 @@ describe("StatusPill", () => {
     expect(renderToStaticMarkup(<StatusPill status="input" />)).toContain("text-brand");
   });
 });
+
+describe("Approval in the sidebar", () => {
+  test("a waiting request outranks working and failed", () => {
+    expect(threadRowStatus(thread({ status: "error" }), true, true)).toBe("approval");
+  });
+  test("no waiting request, no Approval", () => {
+    expect(threadRowStatus(thread({}), true, false)).toBe("working");
+  });
+});

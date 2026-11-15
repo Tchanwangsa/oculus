@@ -9,7 +9,7 @@ import {
 import { chatHref, type HarnessThread } from "@/lib/harness";
 import { cn } from "@/lib/utils";
 import { ConfirmDelete } from "./parts";
-import { STATUS_LOOK, StatusPill, threadRowStatus } from "./StatusPill";
+import { STATUS_LOOK, StatusPill, useThreadRowStatus } from "./StatusPill";
 
 /** A thread as a nav row: its provider's mark is the icon a fold leaves. Its
  *  status (Working, Failed, Done…) is a pill at the right, and a dot in that
@@ -33,7 +33,7 @@ export function ThreadRow({
   onDelete: (id: number) => void;
 }) {
   const title = t.title?.trim() || "Untitled";
-  const status = threadRowStatus(t, running);
+  const status = useThreadRowStatus(t, running);
   return (
     <div
       className={cn(
@@ -62,7 +62,7 @@ export function ThreadRow({
       </button>
       <div className={cn("flex shrink-0 items-center pr-1.5 pl-1", SIDE_NAV_FOLDS)}>
         {status && <StatusPill status={status} className="mr-1" />}
-        {status === "working" ? null : confirming ? (
+        {running ? null : confirming ? (
           <ConfirmDelete
             label="Yes"
             onConfirm={() => {

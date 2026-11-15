@@ -6,7 +6,7 @@ import type { Subject } from "@/lib/db";
 import { displayCode, displayName, sqliteUtcToMs } from "@/lib/format/format";
 import { chatHref, getThreadPreviews, PROVIDERS, type HarnessThread } from "@/lib/harness";
 import { relativeTime } from "@/lib/activity/recents";
-import { StatusPill, threadRowStatus } from "./StatusPill";
+import { StatusPill, useThreadRowStatus } from "./StatusPill";
 
 /** Rows shown; the nav column lists every thread. */
 const SHOWN = 3;
@@ -81,7 +81,7 @@ function Row({
   onOpen: (id: number) => void;
 }) {
   const ms = sqliteUtcToMs(t.updated_at);
-  const status = threadRowStatus(t, running);
+  const status = useThreadRowStatus(t, running);
   return (
     // The pad keeps the hover pill off the hairlines.
     <div className="py-1">
