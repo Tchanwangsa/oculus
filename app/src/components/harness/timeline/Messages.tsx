@@ -8,8 +8,10 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { fmtClock, sqliteUtcToMs } from "@/lib/format/format";
-import { messageAt, questionProvider, unpromptedAfter, type HarnessItem, type Provider } from "@/lib/harness";
+import { answerModel, messageAt, questionProvider, unpromptedAfter, type HarnessItem, type Provider } from "@/lib/harness";
 import { useCapabilities } from "@/hooks/agents/useCapabilities";
+import { ProviderMark } from "@/components/icons/ProviderMark";
+import { useModelName } from "./ModelNames";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { Action, Assistant, CopyAction, MessageActions } from "./MessageActions";
 import { QuestionBubble } from "./QuestionBubble";
@@ -104,6 +106,7 @@ export const Reply = memo(function Reply({
       </WidgetRow.Provider>
       {!stream && (
         <MessageActions when={fmtClock(sqliteUtcToMs(item.created_at))} side="left">
+          {item.run_id != null && <AnswerModel thread={item.thread_id} run={item.run_id} />}
           {settled && <CopyAction text={text} />}
           {settled && retry && asked && !busy && (
             <Action
@@ -115,6 +118,22 @@ export const Reply = memo(function Reply({
         </MessageActions>
       )}
     </div>
+  );
+});
+
+/** The model that wrote an answer, after its time: its own run's
+ *  (`answerModel`), never the chat's, which may have moved on. Nothing for a
+ *  run from before models were recorded. */
+const AnswerModel = memo(function AnswerModel({ thread, run }: { thread: number; run: number }) {
+  const sent = useHarnessStore((s) => s.runs[thread]?.[run]);
+  const name = useModelName();
+  const model = answerModel(sent, name);
+  if (!model || !sent?.provider) return null;
+  return (
+    <span title={model.title} className="-ml-1 flex min-w-0 items-center gap-1 pr-1.5">
+      <ProviderMark provider={sent.provider} className="size-3 shrink-0" />
+      <span className="min-w-0 truncate">{model.label}</span>
+    </span>
   );
 });
 

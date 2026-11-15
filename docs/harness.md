@@ -1758,6 +1758,25 @@ The decisions are pure functions in `lib/harness/switching.ts`, tested in
 - **The reasoning dial reads the thread.** An open thread's level is its
   `effort`; a thread from before levels were stored reads the session's
   dial, which every level pick also sets.
+- **A divider sits above a run that changed** (`buildRows` puts a
+  `RunChange` on its question row; `RunDividerRow` draws it with stage 7's
+  `SystemDivider`). `runDivider` writes one line: `{from} → {to}` naming
+  only what changed (`runSwitch`, `switchSides`: the agent where it
+  changed, the model, the level, "High reasoning → Max reasoning" when the
+  level is all that changed), then "Context handoff" or "Context handoff
+  pending" (`handoffLabel`) and how many earlier messages were left out,
+  in the danger tone when the handoff failed. A handoff with no switch (a
+  session that started over) is the handoff alone. A level is compared only
+  where both runs recorded one, so a chat's first run after levels were
+  stored draws nothing.
+- **Every answer names the model that wrote it.** Its footer, after the
+  time, shows its run's model (`answerModel`, `runModel`) with the agent's
+  mark, and agent, id and level on hover; never the thread's. A run from
+  before models were recorded shows the time alone. Footers and dividers
+  name models from the catalogues of the agents the thread's runs went to
+  (`ModelNamesProvider`, `start: false`), else by id.
+- **The sidebar's mark is the selection's.** `ThreadRow` draws
+  `thread.provider`, which `selected` and a stored pick update.
 
 ## opencode providers go through its own server
 

@@ -3,6 +3,7 @@ import {
   describeOculusCli,
   elapsedText,
   runEnded,
+  runSwitch,
   parseToolMeta,
   thoughtLabel,
   thoughtMs,
@@ -33,10 +34,18 @@ export interface WorkFold {
   endedMs: number | null;
 }
 
+/** A run that changed agent, model or level from the run before it, or
+ *  carried a context handoff: its question draws a divider above it. */
+export interface RunChange {
+  before?: HarnessRun;
+  run: HarnessRun;
+}
+
 export type ViewRow =
   /** `asked`: for a reply, the student's question it answers (Retry).
-   *  `key`: a run's reply is keyed by its place in the run (`replyKey`). */
-  | { kind: "item"; item: HarnessItem; dim: boolean; role?: ReplyRole; asked?: HarnessItem; key?: string }
+   *  `key`: a run's reply is keyed by its place in the run (`replyKey`).
+   *  `change`: on a run's question, what it was sent with that differs. */
+  | { kind: "item"; item: HarnessItem; dim: boolean; role?: ReplyRole; asked?: HarnessItem; key?: string; change?: RunChange }
   | { kind: "bundle"; id: string; items: HarnessItem[] }
   | WorkFold
   /** The widget fences of a folded reply, drawn once outside its fold. */
@@ -92,6 +101,7 @@ export interface RowContext {
 function runRows(
   segment: HarnessItem[],
   run: HarnessRun | undefined,
+  before: HarnessRun | undefined,
   live: boolean,
   streaming: boolean,
   out: ViewRow[],
@@ -110,7 +120,8 @@ function runRows(
   }
   const work = rest.filter((i) => i !== answer && (i.kind === "tool" || i.kind === "thinking" || i.kind === "assistant"));
   const folded = new Set(work);
-  if (head) out.push({ kind: "item", item: head, dim: false });
+  const change = run && (run.handoff || runSwitch(before, run)) ? { before, run } : undefined;
+  if (head) out.push({ kind: "item", item: head, dim: false, ...(change && { change }) });
   if (work.length) {
     out.push({
       kind: "work",
@@ -152,7 +163,8 @@ export function streamingReply(items: HarnessItem[]): { run: number; ordinal: nu
 }
 
 /**
- * The thread as rows. Each run's contiguous rows become: its question, one
+ * The thread as rows. Each run's contiguous rows become: its question (with
+ * a divider above it where the run switched or carried a handoff), one
  * fold of its work, the widget fences of folded replies, then its answer and
  * outcome rows (notice, stop, error, refusal, compaction) in order. Rows with
  * no run keep the step bundles. `running` is the thread's: only its last run
@@ -161,6 +173,7 @@ export function streamingReply(items: HarnessItem[]): { run: number; ordinal: nu
 export function buildRows(items: HarnessItem[], running: boolean, ctx: RowContext = {}): ViewRow[] {
   const out: ViewRow[] = [];
   const runs = ctx.runs ?? {};
+  let before: HarnessRun | undefined;
   let i = 0;
   while (i < items.length) {
     const runId = items[i].run_id;
@@ -170,7 +183,8 @@ export function buildRows(items: HarnessItem[], running: boolean, ctx: RowContex
       stepRows(items.slice(i, j), running && j === items.length, out);
     } else {
       while (j < items.length && items[j].run_id === runId) j++;
-      runRows(items.slice(i, j), runs[runId], running && j === items.length, !!ctx.streaming, out);
+      runRows(items.slice(i, j), runs[runId], before, running && j === items.length, !!ctx.streaming, out);
+      before = runs[runId] ?? before;
     }
     i = j;
   }

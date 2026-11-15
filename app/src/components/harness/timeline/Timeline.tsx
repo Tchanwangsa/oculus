@@ -14,6 +14,7 @@ import type { PendingActions, QuestionActions } from "./types";
 import { useRowWindow } from "./useRowWindow";
 import { useRowVisibility } from "./useRowVisibility";
 import { RetainedRow } from "./RetainedRow";
+import { ModelNamesProvider, RunDividerRow } from "./ModelNames";
 import { ThreadAnnouncer } from "./ThreadAnnouncer";
 import { AssistantSend } from "@/components/markdown/openui/assistant";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
@@ -99,6 +100,7 @@ export const Timeline = memo(function Timeline({
   const shown = start ? rows.slice(start) : rows;
   return (
     <AssistantSend.Provider value={running ? null : questions?.followUp ?? null}>
+      <ModelNamesProvider threadId={threadId}>
       <div
         ref={rootRef}
         {...{ [EXPANDABLE]: "" }}
@@ -122,6 +124,7 @@ export const Timeline = memo(function Timeline({
             </RetainedRow>
           ) : (
             <RetainedRow key={r.key ?? r.item.id} className={ROW} questionId={r.item.kind === "user" ? r.item.id : undefined}>
+              {r.change && <RunDividerRow change={r.change} />}
               <Item
                 item={r.item}
                 dim={r.dim}
@@ -160,6 +163,7 @@ export const Timeline = memo(function Timeline({
           />
         )}
       </div>
+      </ModelNamesProvider>
     </AssistantSend.Provider>
   );
 });
