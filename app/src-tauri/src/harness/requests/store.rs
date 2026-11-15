@@ -325,6 +325,20 @@ pub async fn reconcile(conn: &mut SqliteConnection) -> Result<u64, String> {
     Ok(expired)
 }
 
+/// How many of the thread's requests wait on the student: pending, with a
+/// session that can still take the answer. The thread list counts the same
+/// (`app/src/lib/harness/reads.ts`).
+pub async fn waiting(pool: &SqlitePool, thread_id: i64) -> Result<u32, String> {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM harness_requests
+          WHERE thread_id = ?1 AND status = 'pending' AND responder = 'live'",
+    )
+    .bind(thread_id)
+    .fetch_one(pool)
+    .await
+    .map_err(err)
+}
+
 /// The chat's permission mode, `ask` for a chat that is gone.
 pub async fn mode(pool: &SqlitePool, thread_id: i64) -> Result<super::PermissionMode, String> {
     let mode: Option<String> =

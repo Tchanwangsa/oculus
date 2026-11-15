@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   accessLines,
-  approvalKey,
   awaitsApproval,
   changeKindLabel,
   diffLines,
@@ -164,15 +163,6 @@ describe("waiting requests and the sidebar's Approval", () => {
     expect(awaitsApproval(rs, 5)).toBe(true);
     expect(awaitsApproval(rs, 6)).toBe(false);
     expect(awaitsApproval(rs)).toBe(true);
-  });
-  test("a thread reads Approval only while a request waits", () => {
-    const requests = {
-      9: byId(request({ id: 1 })),
-      4: byId(request({ id: 2, thread_id: 4, status: "resolved", response: "accept" })),
-      2: byId(request({ id: 3, thread_id: 2 })),
-    };
-    expect(approvalKey(requests)).toBe("2,9");
-    expect(approvalKey({})).toBe("");
   });
 });
 

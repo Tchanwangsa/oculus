@@ -85,8 +85,10 @@ type HarnessEvent =
   | { type: "run_selected"; provider: Provider; model: string | null; effort: string | null }
   /** A request saved with its row (`env.itemId`), and every later change
    *  to it: answered, its answer's delivery learned, or ended unanswered. */
-  | { type: "request_opened"; request: HarnessRequest }
-  | { type: "request_updated"; request: HarnessRequest }
+  /** `waiting`: the thread's requests waiting on the student once this one
+   *  is saved. */
+  | { type: "request_opened"; request: HarnessRequest; waiting: number }
+  | { type: "request_updated"; request: HarnessRequest; waiting: number }
   /** How the chat asks from its next run on (`harnessSetPermissionMode`). */
   | { type: "permission_mode"; mode: PermissionMode }
   /** The row saying an answer, or part of it, did not arrive. */
@@ -153,6 +155,9 @@ export interface HarnessThread {
   settled_at?: string | null;
   /** How the chat asks for what its sandbox blocks; `ask` when absent. */
   permission_mode?: PermissionMode;
+  /** Its requests waiting on the student: read with the list (`reads.ts`),
+   *  then the `waiting` of each request event. The sidebar's Approval. */
+  pending_requests?: number;
 }
 
 /** `ask` shows each request; `quiet` ("Don't ask") declines without one;

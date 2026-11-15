@@ -423,6 +423,15 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           threads[i] = { ...threads[i], ...patch, updated_at: new Date().toISOString() };
         }
       };
+      // The list's Approval, for every thread, loaded or not; it does not
+      // reorder the list.
+      const waiting = (count: number) => {
+        const i = threads.findIndex((t) => t.id === threadId);
+        if (i >= 0 && threads[i].pending_requests !== count) {
+          threads = [...threads];
+          threads[i] = { ...threads[i], pending_requests: count };
+        }
+      };
 
       switch (event.type) {
         case "user_message":
@@ -453,9 +462,11 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           // The row holds the id only; the request is in `requests`.
           push({ ...rowFrom(env, "request", ""), ref_id: String(event.request.id), content: null });
           setRequest(event.request);
+          waiting(event.waiting);
           break;
         case "request_updated":
           setRequest(event.request);
+          waiting(event.waiting);
           break;
         case "handoff": {
           const run = runs[event.run_id];

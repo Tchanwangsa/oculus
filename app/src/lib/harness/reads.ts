@@ -9,8 +9,14 @@ const SETTLED_AT =
   "(SELECT MAX(r.ended_at) FROM harness_runs r WHERE r.thread_id = t.id" +
   " AND r.execution_status IN ('completed', 'interrupted', 'failed') AND r.initiating_item_id IS NOT NULL) AS settled_at";
 
+/** A thread's `pending_requests`: those waiting on the student, counted as
+ *  Rust counts them for each request event (`requests::store::waiting`). */
+const PENDING_REQUESTS =
+  "(SELECT COUNT(*) FROM harness_requests q WHERE q.thread_id = t.id" +
+  " AND q.status = 'pending' AND q.responder = 'live') AS pending_requests";
+
 /** The thread list's read, newest first; `$1` is the limit. */
-export const THREADS_SQL = `SELECT t.*, ${SETTLED_AT} FROM harness_threads t ORDER BY t.updated_at DESC, t.id DESC LIMIT $1`;
+export const THREADS_SQL = `SELECT t.*, ${SETTLED_AT}, ${PENDING_REQUESTS} FROM harness_threads t ORDER BY t.updated_at DESC, t.id DESC LIMIT $1`;
 
 export async function getHarnessThreads(limit = 100): Promise<HarnessThread[]> {
   const db = await getDb();
@@ -22,7 +28,7 @@ export async function getHarnessThreads(limit = 100): Promise<HarnessThread[]> {
 export async function getLectureThreads(lectureId: string, limit = 100): Promise<HarnessThread[]> {
   const db = await getDb();
   return db.select<HarnessThread[]>(
-    `SELECT t.*, ${SETTLED_AT} FROM harness_threads t WHERE t.lecture_id = $1
+    `SELECT t.*, ${SETTLED_AT}, ${PENDING_REQUESTS} FROM harness_threads t WHERE t.lecture_id = $1
       ORDER BY t.updated_at DESC, t.id DESC LIMIT $2`,
     [lectureId, limit],
   );

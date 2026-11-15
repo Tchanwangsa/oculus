@@ -8,6 +8,8 @@ sqlite.run(`CREATE TABLE harness_threads (id INTEGER PRIMARY KEY, title TEXT, up
 sqlite.run(`CREATE TABLE harness_items (id INTEGER PRIMARY KEY, thread_id INTEGER, kind TEXT, content TEXT, run_id INTEGER)`);
 sqlite.run(`CREATE TABLE harness_runs (id INTEGER PRIMARY KEY, thread_id INTEGER, execution_status TEXT,
   initiating_item_id INTEGER, answer_item_id INTEGER, ended_at TEXT)`);
+sqlite.run(`CREATE TABLE harness_requests (id INTEGER PRIMARY KEY, thread_id INTEGER, status TEXT NOT NULL DEFAULT 'pending',
+  responder TEXT NOT NULL DEFAULT 'live')`);
 afterAll(() => sqlite.close());
 
 const all = <T,>(sql: string, bindings: number[]) => sqlite.query(sql.replace(/\$(\d+)/g, "?$1")).all(...bindings) as T[];
@@ -23,6 +25,15 @@ test("a thread settles when a run that ran ends, never for one that waits or lef
   const threads = all<{ id: number; settled_at: string | null }>(THREADS_SQL, [10]);
   const settled = Object.fromEntries(threads.map((t) => [t.id, t.settled_at]));
   expect(settled).toEqual({ 1: "2026-11-15 01:00:00", 2: null, 3: null });
+});
+
+test("a thread counts the requests that wait on the student, not those answered or ended", () => {
+  sqlite.run(`INSERT INTO harness_requests (id, thread_id, status, responder) VALUES
+    (1, 1, 'pending', 'live'), (2, 1, 'pending', 'live'), (3, 1, 'resolved', 'live'),
+    (4, 2, 'expired', 'not_resumable'), (5, 2, 'pending', 'not_resumable')`);
+  const threads = all<{ id: number; pending_requests: number }>(THREADS_SQL, [10]);
+  const pending = Object.fromEntries(threads.map((t) => [t.id, t.pending_requests]));
+  expect(pending).toEqual({ 1: 2, 2: 0, 3: 0 });
 });
 
 test("a preview is the newest answer of a run that ran, beside runs that only wait", () => {

@@ -272,17 +272,6 @@ export function awaitsApproval(requests: Record<number, HarnessRequest> | undefi
   return false;
 }
 
-/** The loaded threads with a request waiting, as a stable comma key (the
- *  sidebar reads it without re-rendering per store write). A thread whose
- *  rows were never loaded is not here: Rust's thread list does not say. */
-export function approvalKey(requests: Record<number, Record<number, HarnessRequest>>): string {
-  return Object.keys(requests)
-    .map(Number)
-    .filter((id) => awaitsApproval(requests[id]))
-    .sort((a, b) => a - b)
-    .join(",");
-}
-
 /** A reviewer's decision on a tool row, as the row says it. */
 export interface ReviewView {
   label: string;

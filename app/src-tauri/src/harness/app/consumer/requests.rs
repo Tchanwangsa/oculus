@@ -93,12 +93,14 @@ impl Consumer {
         }
         self.requests
             .insert(opened.request.id, thread_id, generation, route);
+        let waiting = self.waiting(thread_id);
         let stored = Stored {
             thread_id,
             provider,
             from,
             ev: HarnessEvent::RequestOpened {
                 request: opened.request,
+                waiting,
             },
             card: None,
             tags: self.runs.tags(thread_id, None),
@@ -170,7 +172,8 @@ impl Consumer {
             .cloned();
         let route = self.requests.answerable(request.id);
         let request_id = request.id;
-        let updated = HarnessEvent::RequestUpdated { request };
+        let waiting = self.waiting(thread_id);
+        let updated = HarnessEvent::RequestUpdated { request, waiting };
         self.event(thread_id, provider, From::App, updated, None, io);
         match (route, option) {
             (Some(route), Some(option)) => {
@@ -308,9 +311,10 @@ impl Consumer {
                 if revision > 0 {
                     self.revisions.insert(thread_id, revision);
                 }
+                let waiting = self.waiting(thread_id);
                 changed
                     .into_iter()
-                    .map(|request| (HarnessEvent::RequestUpdated { request }, None))
+                    .map(|request| (HarnessEvent::RequestUpdated { request, waiting }, None))
                     .collect()
             }
             Err(e) => {
@@ -348,12 +352,28 @@ impl Consumer {
                 if revision > 0 {
                     self.revisions.insert(thread_id, revision);
                 }
+                let waiting = self.waiting(thread_id);
                 for request in requests {
-                    let updated = HarnessEvent::RequestUpdated { request };
+                    let updated = HarnessEvent::RequestUpdated { request, waiting };
                     self.event(thread_id, provider, From::App, updated, None, io);
                 }
             }
             Err(e) => elog!("[oculus] harness thread {thread_id}: requests: {e}"),
+        }
+    }
+
+    /// The thread's requests waiting on the student, read after a change
+    /// is saved; 0 when it cannot be read.
+    fn waiting(&self, thread_id: i64) -> u32 {
+        let Some(pool) = self.pool.as_ref() else {
+            return 0;
+        };
+        match self.rt.block_on(requests::store::waiting(pool, thread_id)) {
+            Ok(n) => n,
+            Err(e) => {
+                elog!("[oculus] harness thread {thread_id}: waiting requests: {e}");
+                0
+            }
         }
     }
 }

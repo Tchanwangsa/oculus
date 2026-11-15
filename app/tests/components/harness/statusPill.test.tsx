@@ -50,9 +50,10 @@ describe("StatusPill", () => {
 
 describe("Approval in the sidebar", () => {
   test("a waiting request outranks working and failed", () => {
-    expect(threadRowStatus(thread({ status: "error" }), true, true)).toBe("approval");
+    expect(threadRowStatus(thread({ status: "error", pending_requests: 1 }), true)).toBe("approval");
   });
   test("no waiting request, no Approval", () => {
-    expect(threadRowStatus(thread({}), true, false)).toBe("working");
+    expect(threadRowStatus(thread({ pending_requests: 0 }), true)).toBe("working");
+    expect(threadRowStatus(thread({}), true)).toBe("working");
   });
 });

@@ -246,6 +246,28 @@ fn an_answer_the_request_does_not_offer_or_a_message_with_it_is_refused() {
 }
 
 #[test]
+fn each_request_event_says_how_many_of_its_threads_requests_wait() {
+    let mut bench = turn_open("request-waiting");
+    let (_, a) = ask(&bench, json!(0), &[]);
+    let (_, b) = ask(&bench, json!(1), &[]);
+    bench.play(vec![a, b]);
+    let waiting = |bench: &Bench, kind: &str| -> Vec<Value> {
+        let events = bench.events().into_iter();
+        let events = events.filter(|e| e["event"]["type"] == kind);
+        events.map(|e| e["event"]["waiting"].clone()).collect()
+    };
+    assert_eq!(waiting(&bench, "request_opened"), [json!(1), json!(2)]);
+    let first = told(&bench, "request_opened")[0]["id"].as_i64().unwrap();
+    answer(&mut bench, "answer", first, "accept").unwrap();
+    // Sent, then acknowledged: one still waits either way.
+    assert_eq!(waiting(&bench, "request_updated"), [json!(1), json!(1)]);
+    bench.clear();
+    let stop = bench.command("stop", Kind::Stop { run_id: None }).0;
+    bench.play(vec![stop, bench.app(ended("interrupted"))]);
+    assert_eq!(waiting(&bench, "request_updated"), [json!(0)]);
+}
+
+#[test]
 fn stop_while_a_request_waits_cancels_it_with_the_turn() {
     let mut bench = turn_open("request-stop");
     let (fake, asked) = ask(&bench, json!(0), &[]);

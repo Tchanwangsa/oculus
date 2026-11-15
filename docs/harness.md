@@ -898,9 +898,9 @@ writes it into the draft once and drops it from the route.
   wins: Approval (warning), Input (brand), Working (a brand spinner), Failed
   (destructive: the thread's last run failed, until its next one), Done
   (success: unread). Approval is a request of the thread waiting on the
-  student (`useThreadRowStatus`, from `harnessStore.requests`); only a thread
-  whose rows are loaded has its requests, since the thread list carries no
-  "a request waits" flag. Input is not raised yet. The pill sits at
+  student: the row's `pending_requests`, read with the list and kept by
+  each request event's `waiting` ([Requests](#requests)), so a thread never
+  opened shows it too. Input is not raised yet. The pill sits at
   a thread row's right and folds with the label; folded, the provider mark's
   corner dot takes its tone. The recent list shows it in place of the age.
 - **Unread** is `settled_at > viewed_at`. `settled_at` is read with the list
@@ -1619,7 +1619,11 @@ the mode.
 
 `harness_load` returns the thread's requests (`requests`), and the webview
 keeps them per thread (`requests` in `harnessStore`), replaced by each
-`request_opened` and `request_updated`.
+`request_opened` and `request_updated`. Each of those also carries
+`waiting`, the thread's requests still pending with a live responder once
+the change is saved (`store::waiting`). The thread list reads the same
+count as `pending_requests` (`reads.ts`) and takes each event's `waiting`
+for every listed thread, open or not, without reordering the list.
 
 ### In the chat
 

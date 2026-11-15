@@ -31,12 +31,12 @@ beforeEach(() => {
 test("a request's row holds its id and its state follows every update", async () => {
   await useHarnessStore.getState().load(THREAD);
   const { fold } = useHarnessStore.getState();
-  fold(told(2, 12, { type: "request_opened", request: request() }));
+  fold(told(2, 12, { type: "request_opened", request: request(), waiting: 1 }));
   const rows = useHarnessStore.getState().items[THREAD];
   expect(rows.map((r) => [r.id, r.kind, r.ref_id])).toEqual([[12, "request", "3"]]);
   expect(useHarnessStore.getState().requests[THREAD][3].status).toBe("pending");
-  fold(told(3, null, { type: "request_updated", request: request({ status: "resolved", response: "accept", delivery: "sending" }) }));
-  fold(told(4, null, { type: "request_updated", request: request({ status: "resolved", response: "accept", delivery: "acknowledged" }) }));
+  fold(told(3, null, { type: "request_updated", request: request({ status: "resolved", response: "accept", delivery: "sending" }), waiting: 0 }));
+  fold(told(4, null, { type: "request_updated", request: request({ status: "resolved", response: "accept", delivery: "acknowledged" }), waiting: 0 }));
   expect(useHarnessStore.getState().requests[THREAD][3].delivery).toBe("acknowledged");
   expect(useHarnessStore.getState().items[THREAD].length).toBe(1);
 });
@@ -50,6 +50,22 @@ test("a reload reads the requests and a rewind takes those whose rows went", asy
   expect(Object.keys(useHarnessStore.getState().requests[THREAD])).toEqual(["3", "4"]);
   useHarnessStore.getState().fold(told(6, null, { type: "rewound", from_item_id: 15, context: true }));
   expect(Object.keys(useHarnessStore.getState().requests[THREAD])).toEqual(["3"]);
+});
+
+test("a listed thread's waiting count follows each request event, opened or not, without reordering the list", () => {
+  const updated_at = "2026-11-16 00:00:00";
+  useHarnessStore.setState({ threads: [{ id: THREAD, provider: "codex", pending_requests: 0, updated_at } as never] });
+  const { fold } = useHarnessStore.getState();
+  const thread = () => useHarnessStore.getState().threads[0];
+  fold(told(2, 12, { type: "request_opened", request: request(), waiting: 1 }));
+  fold(told(3, 13, { type: "request_opened", request: request({ id: 4, item_id: 13 }), waiting: 2 }));
+  expect(thread().pending_requests).toBe(2);
+  expect(THREAD in useHarnessStore.getState().items).toBe(false);
+  fold(told(4, null, { type: "request_updated", request: request({ status: "resolved", response: "accept", delivery: "sending" }), waiting: 1 }));
+  expect(thread().pending_requests).toBe(1);
+  fold(told(5, null, { type: "request_updated", request: request({ id: 4, status: "cancelled", responder: "not_resumable" }), waiting: 0 }));
+  expect(thread().pending_requests).toBe(0);
+  expect(thread().updated_at).toBe(updated_at);
 });
 
 test("the chat's permission mode follows its event", () => {
