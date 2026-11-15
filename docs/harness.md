@@ -877,7 +877,7 @@ writes it into the draft once and drops it from the route.
   column answers it too. Its resize handle goes with it, so it can't clash with a
   side panel's; the toggle or ⌘⌥B brings it back.
 - Bare `/chat` is a new thread: the composer docked at the bottom as in a
-  thread, and above it the headline that picks the subject (`DraftHero`) over
+  thread, and above it the headline that names the subject (`DraftHero`) over
   the three latest threads (`RecentThreads`) — provider mark, title, a chip
   naming its subject or General, age, and the last reply flattened to one
   muted line (`getThreadPreviews`, one read for the list). The list stays
@@ -1773,17 +1773,26 @@ rule rather than carrying separate versions of it.
 it, because every CLI binds appended instructions at session start. It is not
 a sandbox; it appends the course folder and `agents/memories/<CODE>/`.
 
-**A new Chat thread chooses it in its headline** (`composer/DraftHero.tsx`):
+**A new Chat thread asks for it in a dialog** (`threads/NewThreadDialog.tsx`),
+which New thread in the conversations column opens. It is the ⌘K palette's
+frame over a search field and two lists: General and this term's subjects
+under "New thread in", then past terms' (newest first) under "Past subjects",
+matched by code and name. A row is a `SubjectIcon`, the short code and the
+full name under it; General reads "The whole library". Arrows move, Enter
+picks, and it opens on the choice so far. Picking sets the choice, opens the
+new thread if another was open, and puts the caret in the composer; Escape
+changes nothing and leaves the open thread where it was.
+
+**The new thread's headline names the choice** (`composer/DraftHero.tsx`):
 "What should we work on in [MAST20004]?", or "[Choose a subject] to start"
-until one is chosen. The picker drops under "What should we work on?" when
-the one-line sentence is wider than the column ([ui.md](./ui.md)). An open
-thread's header has no picker. `SubjectPicker` is a searchable popover:
-General first, then this term's subjects, then past terms' (newest first)
-under a fold that a search or a past choice opens, matched by code and name,
-each row a `SubjectIcon` and short code with the full name as its tooltip and
-label. Arrows move, Enter picks, Escape closes back to the trigger. It has the
-headline's trigger and a compact chip, which Studio's New video shows above
-its composer for a subject of its own.
+until one is chosen. The subject is a pill that opens the same dialog, and it
+drops under "What should we work on?" when the one-line sentence is wider
+than the column ([ui.md](./ui.md)). An open thread's header has no pill.
+
+`SubjectPicker` is the compact chip Studio's New video shows above its
+composer for a subject of its own: a searchable popover of the same rows,
+past terms' under a fold that a search or a past choice opens, each row's
+full name as its tooltip and label.
 
 **Until then the composer is `unscoped`**: words, pictures and pasted cards
 collect, but Enter and the send button do nothing and the placeholder reads
@@ -1793,8 +1802,8 @@ subject id, never null, so no entry is unchosen and General is a choice of
 its own). It outlives a thread switch and a relaunch, a deleted subject's id
 reads as unchosen, and creating the thread forgets it, so the next new chat
 asks again. Every Chat tab's new thread shares one draft key, and so one
-choice. An entry point names the scope in the route instead: a group's "+"
-opens `/chat?s=<id|general>`, and a revision artifact's Ask about this
+choice. An entry point names the scope in the route instead, with no dialog:
+a group's "+" opens `/chat?s=<id|general>`, and a revision artifact's Ask about this
 `/chat?s=<id>` when the artifact has a subject. The lecture dock is always
 its lecture's subject and Studio's threads their video's; neither shows the
 headline.
@@ -1816,9 +1825,24 @@ own top-level folders (`pages/`, `files/`, `uploads/`…), or in a General
 thread each subject's folder, read off the files table and most recently
 opened first. A folder's chip holds its path with a trailing `/`, which the
 agent lists itself. Then up to eight readable files, which for a bare `@` are
-the most recently opened. A lookup slower than 150 ms says "Searching the
-library…"; a one-word query with nothing says "No matching files or
-folders.", while a longer one closes quietly, being more likely prose.
+the most recently opened.
+
+**A folder opens in place, like a file tree.** Its arrow, or ArrowRight on its
+row, reads one level (`listMentionFolder`): its own subfolders, then the
+readable files directly in it, sorted by name with numbers in order (`Week_2`
+before `Week_10`) and indented under it; each subfolder opens the same way.
+ArrowRight on an open folder steps into it, ArrowLeft closes it, and
+ArrowLeft on a row inside steps out to its folder. Enter or a click still
+picks the highlighted row, a folder as a whole or one file inside it. A folder
+lists at most 100 files and then says how many more there are, since typing a
+name finds them; one holding nothing readable says "Nothing here to
+mention.". Open folders stay open while the query changes and are forgotten
+when the menu shuts. The tree is rows in `menuContent`, each with its `depth`,
+so the highlight and the keys run over one flat list.
+
+A lookup slower than 150 ms says "Searching the library…"; a one-word query
+with nothing says "No matching files or folders.", while a longer one closes
+quietly, being more likely prose.
 
 **A mention is a glyph and a name on screen and a path on the wire**
 (`FileChip`, built from the path alone, drawn as a note draws a reference:

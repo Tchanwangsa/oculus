@@ -102,10 +102,7 @@ fn an_api_404_checks_the_session_and_is_sent_again_once_keyd_signed_in() {
         "/api/v1/courses/5/tabs" => answer(200, &[], b"[]"),
         _ => answer(200, &[], br#"{"name":"A"}"#),
     });
-    assert_eq!(
-        r.canvas.get_json("/api/v1/courses/5/tabs").unwrap(),
-        json!([])
-    );
+    assert_eq!(r.canvas.get_json("/api/v1/courses/5/tabs").unwrap(), json!([]));
     assert_eq!(
         r.paths(),
         [

@@ -135,6 +135,71 @@ export function mentionFoldersQuery(
   };
 }
 
+/** What an opened `@` folder shows under it. */
+export interface MentionFolderContents {
+  /** Its own subfolders, by name. */
+  folders: MentionFolder[];
+  /** The files directly in it the agent can read, by name, up to
+   *  `MENTION_FOLDER_FILES`. */
+  files: MentionFile[];
+  /** How many readable files the cap left out. */
+  more: number;
+}
+
+/** The most files one opened folder lists; the rest are found by typing. */
+export const MENTION_FOLDER_FILES = 100;
+
+const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+/**
+ * One level of a folder (`path` ends in `/`), for an `@` folder opened in the
+ * menu: subfolders holding any file, as `searchMentionFolders` offers them,
+ * then the readable files directly inside (`searchMentionFiles`' rule).
+ * Sorted as a listing, so `Week_2` comes before `Week_10`.
+ */
+export async function listMentionFolder(path: string): Promise<MentionFolderContents> {
+  const db = await getDb();
+  const q = mentionFolderQueries(path);
+  const [folders, files] = await Promise.all([
+    db.select<MentionFolder[]>(q.folders, q.params),
+    db.select<MentionFile[]>(q.files, q.params),
+  ]);
+  folders.sort((a, b) => byName.compare(a.name, b.name));
+  files.sort((a, b) => byName.compare(a.filename, b.filename));
+  return {
+    folders,
+    files: files.slice(0, MENTION_FOLDER_FILES),
+    more: Math.max(0, files.length - MENTION_FOLDER_FILES),
+  };
+}
+
+/** `listMentionFolder`'s two statements. The prefix is compared with `substr`,
+ *  not `LIKE`, whose `_` wildcard nearly every path holds. */
+export function mentionFolderQueries(path: string): { folders: string; files: string; params: string[] } {
+  const inside = `FROM files f
+       JOIN subjects s ON s.id = f.subject_id
+       WHERE substr(f.relative_path, 1, length($1)) = $1`;
+  return {
+    folders: `WITH d AS (
+       SELECT f.subject_id, s.code AS subject_code,
+              substr(f.relative_path, length($1) + 1) AS rest
+       ${inside}
+     )
+     SELECT $1 || substr(rest, 1, instr(rest, '/')) AS path,
+            substr(rest, 1, instr(rest, '/') - 1) AS name,
+            subject_id, subject_code
+     FROM d
+     WHERE instr(rest, '/') > 0
+     GROUP BY path`,
+    files: `SELECT f.id, f.subject_id, s.code AS subject_code, f.filename,
+            f.relative_path, f.category
+     ${inside}
+       AND instr(substr(f.relative_path, length($1) + 1), '/') = 0
+       AND (f.file_type = 'md' OR f.parse_status = 'quality')`,
+    params: [path],
+  };
+}
+
 /** A file a note's `@` offers, with its subject's code for the menu. */
 export type NoteLinkFile = DbFile & { subject_code: string };
 

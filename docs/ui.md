@@ -279,17 +279,32 @@ themes are opt-in and keep the same structure.
   column widths; `GridTable`'s optional `minWidth` keeps header and rows together.
 - **A new chat's headline** (`DraftHero`) takes Studio's hero type
   (`font-display`, 26px, semibold, as New video's question) with the subject
-  picker as a pill inside the sentence. Whether the sentence fits on one line
+  as a pill inside the sentence. Whether the sentence fits on one line
   is measured from a hidden copy against the column's own box with a
   `ResizeObserver`, never against `window` or a viewport breakpoint, which page
-  zoom and a split pane make wrong; when it does not, the picker drops to a
+  zoom and a split pane make wrong; when it does not, the pill drops to a
   line of its own.
+- **Choosing from a list in a modal takes the ⌘K palette's frame**: a dialog
+  hung from the top (`top-[14%]`, no padding, no close button), a 44px search
+  field under a hairline, muted section headings over two-line rows with the
+  highlight on `accent`, and a footer of `KeyHint` key caps
+  (`app/src/components/search/KeyHint.tsx`). `NewThreadDialog` asks for a new
+  thread's subject this way.
 - **The composer's `@` and `/` menu hangs off its trigger character**
   (`ComposerMenu`): a `fixed` popover portalled to the body, measured over the
   range from the `@` or `/` to the caret (a collapsed range can measure zero
-  in WebKit) and clamped to the root element's box, never `window` sizes. Rows
+  in WebKit) and clamped to the root element's box, never `window` sizes. It
+  opens below when the full menu fits there, otherwise on the roomier side;
+  filtering to a loading or empty line keeps that placement. Its
+  class names one position: `cn` keeps the last of two, so a `relative` after
+  `fixed` puts the popup in the page's flow, under the window. Rows
   are a glyph, a name, a muted description and, for a skill, an Oculus or
-  Personal pill badge; a search or empty state is one muted line inside it. A
+  Personal pill badge. An `@` folder row leads with a disclosure arrow, a
+  `span` since the row is itself a button; opened, its glyph is the open
+  folder and what it holds sits under it, each level 14px further in, with
+  file rows leaving the arrow's column blank so glyphs line up. The arrow
+  swaps between two icons and never rotates, so nothing transitions. A search
+  or empty state is one muted line inside it. A
   picked skill is an inline chip in the sentence (`SkillChip`, brand-tinted,
   `display: inline` so the line keeps its height). An attached file is a chip
   too (`AttachmentChip`), drawn as a mention is: its file glyph and the name

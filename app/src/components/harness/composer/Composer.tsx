@@ -42,7 +42,7 @@ export const COMPOSER_PLACEHOLDER = "Ask anything. @ files, / skills";
  * queue, and with the box empty the main button resumes it. A rewind hands
  * its question back as `restore`.
  * Scope is chosen above the box, only while the thread is new; a new Chat
- * thread chooses it in the headline (`DraftHero`) and, while it has none,
+ * thread chooses it in `NewThreadDialog` and, while it has none,
  * the box is `unscoped`: it keeps collecting but will not send. `@` mentions
  * insert library paths (drawn as chips by `MentionInput`), never file content.
  * Unsent text lives in `draftStore` under `draftKey`, so it outlives the box;
@@ -203,7 +203,6 @@ export function Composer({
         <div className="flex items-center gap-1.5 px-0.5">
           {!subjectLocked && onSubject && (
             <SubjectPicker
-              variant="chip"
               subjects={subjects}
               value={subjectId ?? "general"}
               onChange={(scope) => onSubject(scopeSubject(scope))}

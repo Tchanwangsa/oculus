@@ -15,10 +15,25 @@ const inert = { addEventListener: () => {}, removeEventListener: () => {} };
 globals.window ??= inert;
 globals.document ??= { ...inert, documentElement: { style: {} } };
 const { toChunks } = await import("@/components/harness/mentions/dom");
-const { menuContent } = await import("@/components/harness/mentions/useComposerMenu");
+const { menuContent, menuDirection, pickable } = await import("@/components/harness/mentions/useComposerMenu");
 Object.assign(globals, before);
 
 const at = (text: string) => detectTrigger(text, text.length);
+
+describe("menuDirection", () => {
+  test("a bottom composer opens up even when its empty-state line would fit below", () => {
+    expect(menuDirection({ left: 200, top: 760, bottom: 780 }, 880)).toBe("up");
+  });
+
+  test("a mid-page composer opens down when a full menu fits", () => {
+    expect(menuDirection({ left: 200, top: 400, bottom: 420 }, 880)).toBe("down");
+  });
+
+  test("when neither side fits a full menu, it uses the roomier side", () => {
+    expect(menuDirection({ left: 20, top: 170, bottom: 190 }, 300)).toBe("up");
+    expect(menuDirection({ left: 20, top: 100, bottom: 120 }, 300)).toBe("down");
+  });
+});
 
 describe("detectTrigger", () => {
   test.each(["1/2", "/usr/bin", "a/b", "$x$", "and/or", "see /etc/hosts", "https://example.com/review", "Use /review "])(
@@ -105,7 +120,7 @@ describe("menuContent", () => {
 
   test("groups commands then skills", () => {
     const { groups, note } = menuContent({ trigger: { kind: "slash", query: "", start: 0 }, library: null, slow: false, commands, skills: [skill("oculus-plan")] });
-    expect(groups.map((g) => [g.label, g.items.length])).toEqual([["Commands", 1], ["Skills", 1]]);
+    expect(groups.map((g) => [g.label, g.rows.length])).toEqual([["Commands", 1], ["Skills", 1]]);
     expect(note).toBeNull();
   });
 
@@ -120,7 +135,28 @@ describe("menuContent", () => {
   test("lists folders before files on @", () => {
     const folder = { path: "courses/M/pages/", name: "pages", subject_id: 1, subject_code: "M" };
     const { groups } = menuContent({ trigger: { kind: "mention", query: "", start: 0 }, library: { folders: [folder], files: [file], unparsed: 0 }, slow: false, commands, skills: [] });
-    expect(groups[0].items.map((i) => i.kind)).toEqual(["folder", "file"]);
+    expect(groups[0].rows.map((i) => i.kind)).toEqual(["folder", "file"]);
+  });
+
+  test("an opened folder shows its subfolders, then its files, one level in", () => {
+    const folder = (path: string, name: string) => ({ path, name, subject_id: 1, subject_code: "M" });
+    const files = folder("courses/M/files/", "files");
+    const week = folder("courses/M/files/Week_1/", "Week_1");
+    const inside = { ...file, id: 2, relative_path: "courses/M/files/syllabus.pdf" };
+    const deep = { ...file, id: 3, relative_path: "courses/M/files/Week_1/notes.pdf" };
+    const rows = (opened: Map<string, { folders: (typeof files)[]; files: MentionFile[]; more: number }>) =>
+      menuContent({ trigger: { kind: "mention", query: "", start: 0 }, library: { folders: [files], files: [file], unparsed: 0 }, slow: false, commands, skills: [], opened })
+        .groups[0].rows.map((r) => (r.kind === "line" ? `${r.depth} ${r.text}` : r.kind === "folder" ? `${r.depth} ${r.folder.name}${r.open ? " open" : ""}` : r.kind === "file" ? `${r.depth} #${r.file.id}` : ""));
+
+    expect(rows(new Map())).toEqual(["0 files", "0 #1"]);
+    const one = new Map([[files.path, { folders: [week], files: [inside], more: 0 }]]);
+    expect(rows(one)).toEqual(["0 files open", "1 Week_1", "1 #2", "0 #1"]);
+    const two = new Map(one).set(week.path, { folders: [], files: [deep], more: 40 });
+    expect(rows(two)).toEqual(["0 files open", "1 Week_1 open", "2 #3", "2 40 more. Type a name to find one.", "1 #2", "0 #1"]);
+    const empty = new Map([[files.path, { folders: [], files: [], more: 0 }]]);
+    expect(rows(empty)).toEqual(["0 files open", "1 Nothing here to mention.", "0 #1"]);
+    // A line is never picked: the highlight and Enter move over the rest.
+    expect(pickable(menuContent({ trigger: { kind: "mention", query: "", start: 0 }, library: { folders: [files], files: [file], unparsed: 0 }, slow: false, commands, skills: [], opened: empty }).groups[0].rows)).toHaveLength(2);
   });
 
   test("says it is searching only once a lookup is slow", () => {

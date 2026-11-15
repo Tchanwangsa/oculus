@@ -2,10 +2,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import type { MentionInputHandle } from "@/components/harness/mentions/MentionInput";
 import {
   countUnparsedMentionMatches,
+  listMentionFolder,
   searchMentionFiles,
   searchMentionFolders,
   type MentionFile,
   type MentionFolder,
+  type MentionFolderContents,
 } from "@/lib/db";
 import { searchSlashItems, type ComposerCommand, type ComposerCommandId } from "@/lib/harness/composerCommands";
 import type { Skill } from "@/lib/harness/skills";
@@ -13,6 +15,7 @@ import { detectTrigger, type ComposerTrigger } from "./trigger";
 
 /** Pixel gap from the anchor line and viewport edge; `./ComposerMenu.tsx` uses it too. */
 export const MENU_GAP = 8;
+export const MENU_MAX_H = 288;
 
 /** How long a library lookup may take before the menu says it is searching,
  *  so a fast one never flashes the line. */
@@ -25,17 +28,53 @@ export interface MenuAnchor {
   bottom: number;
 }
 
-/** One pickable row. */
+/** Reserve room for the full list so filtering to one line cannot flip it. */
+export function menuDirection(anchor: MenuAnchor, height: number): "up" | "down" {
+  const below = height - anchor.bottom - MENU_GAP * 2;
+  const above = anchor.top - MENU_GAP * 2;
+  return below >= MENU_MAX_H || below >= above ? "down" : "up";
+}
+
+/** One pickable row. `depth` is how many opened folders an `@` row sits
+ *  under; `open` is a folder showing what it holds. */
 export type MenuItem =
-  | { kind: "folder"; folder: MentionFolder }
-  | { kind: "file"; file: MentionFile }
+  | { kind: "folder"; folder: MentionFolder; depth: number; open: boolean }
+  | { kind: "file"; file: MentionFile; depth: number }
   | { kind: "command"; command: ComposerCommand }
   | { kind: "skill"; skill: Skill };
+
+/** A row as drawn: a pickable item, or a line under an opened folder that
+ *  says it is empty or how many files it left out. */
+export type MenuRow = MenuItem | { kind: "line"; key: string; text: string; depth: number };
 
 /** Rows under an optional label; the `/` menu has "Commands" then "Skills". */
 export interface MenuGroup {
   label: string | null;
-  items: MenuItem[];
+  rows: MenuRow[];
+}
+
+/** The folders opened in the `@` menu, by path, each with what it holds. */
+export type OpenedFolders = ReadonlyMap<string, MentionFolderContents>;
+
+const NONE_OPENED: OpenedFolders = new Map();
+
+/** The rows a group's highlight and Enter move over. */
+export const pickable = (rows: readonly MenuRow[]): MenuItem[] =>
+  rows.filter((row): row is MenuItem => row.kind !== "line");
+
+/** A folder's row and, when it is opened, what it holds one level in:
+ *  subfolders (each opening the same way), then files, then a line if there
+ *  is nothing or more than was listed. */
+function folderRows(folder: MentionFolder, depth: number, opened: OpenedFolders): MenuRow[] {
+  const inside = opened.get(folder.path);
+  const rows: MenuRow[] = [{ kind: "folder", folder, depth, open: inside != null }];
+  if (!inside) return rows;
+  for (const sub of inside.folders) rows.push(...folderRows(sub, depth + 1, opened));
+  for (const file of inside.files) rows.push({ kind: "file", file, depth: depth + 1 });
+  const line = (text: string): MenuRow => ({ kind: "line", key: `${folder.path}#line`, text, depth: depth + 1 });
+  if (inside.folders.length + inside.files.length === 0) rows.push(line("Nothing here to mention."));
+  else if (inside.more > 0) rows.push(line(`${inside.more} more. Type a name to find one.`));
+  return rows;
 }
 
 /**
@@ -88,29 +127,31 @@ export function menuContent(input: {
   commands: readonly ComposerCommand[];
   /** Null while the catalogue loads. */
   skills: readonly Skill[] | null;
+  /** The `@` folders opened so far; none when left out. */
+  opened?: OpenedFolders;
 }): { groups: MenuGroup[]; note: string | null; unparsed: number } {
-  const { trigger, library, slow, commands, skills } = input;
+  const { trigger, library, slow, commands, skills, opened = NONE_OPENED } = input;
   if (!trigger) return { groups: [], note: null, unparsed: 0 };
 
   if (trigger.kind === "slash") {
     const found = searchSlashItems(commands, skills ?? [], trigger.query);
     const groups: MenuGroup[] = [];
     if (found.commands.length) {
-      groups.push({ label: "Commands", items: found.commands.map((command) => ({ kind: "command", command })) });
+      groups.push({ label: "Commands", rows: found.commands.map((command) => ({ kind: "command", command })) });
     }
     if (found.skills.length) {
-      groups.push({ label: "Skills", items: found.skills.map((skill) => ({ kind: "skill", skill })) });
+      groups.push({ label: "Skills", rows: found.skills.map((skill) => ({ kind: "skill", skill })) });
     }
     const note = skills == null ? "Searching skills…" : groups.length ? null : "No matching command.";
     return { groups, note, unparsed: 0 };
   }
 
   if (!library) return { groups: [], note: slow ? "Searching the library…" : null, unparsed: 0 };
-  const items: MenuItem[] = [
-    ...library.folders.map((folder): MenuItem => ({ kind: "folder", folder })),
-    ...library.files.map((file): MenuItem => ({ kind: "file", file })),
+  const rows: MenuRow[] = [
+    ...library.folders.flatMap((folder) => folderRows(folder, 0, opened)),
+    ...library.files.map((file): MenuRow => ({ kind: "file", file, depth: 0 })),
   ];
-  if (items.length) return { groups: [{ label: null, items }], note: null, unparsed: 0 };
+  if (rows.length) return { groups: [{ label: null, rows }], note: null, unparsed: 0 };
   if (library.unparsed > 0) return { groups: [], note: null, unparsed: library.unparsed };
   // A query that has run on past one word is more likely prose than a filename.
   const words = trigger.query.trim().split(/\s+/).filter(Boolean).length;
@@ -128,6 +169,8 @@ export interface ComposerMenuProps {
   index: number;
   onIndex: (i: number) => void;
   onPick: (item: MenuItem) => void;
+  /** Opens or closes an `@` folder under its row. */
+  onToggle: (folder: MentionFolder) => void;
   /** Null when nothing could be measured or nothing is open; the menu then draws nothing. */
   anchor: MenuAnchor | null;
   drop: "up" | "down";
@@ -139,7 +182,9 @@ export interface ComposerMenuProps {
 
 /**
  * The composer's one menu: `@` for library files and folders, `/` at the
- * start of a word for commands and skills. The list itself is
+ * start of a word for commands and skills. An `@` folder opens in place
+ * (ArrowRight, or its arrow) to show what it holds, and ArrowLeft closes it
+ * or steps out to it. The list itself is
  * `./ComposerMenu.tsx`; what the box does with its text is the caller's.
  * `keyDown` runs first in the box's key handler and `preventDefault`s what it
  * claims, so the caller's Enter checks `defaultPrevented`.
@@ -165,6 +210,9 @@ export function useComposerMenu({
   /** Beside `trigger`, not in it, so a re-measure doesn't re-run the lookup. */
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
   const [library, setLibrary] = useState<{ folders: MentionFolder[]; files: MentionFile[]; unparsed: number } | null>(null);
+  const [opened, setOpened] = useState<OpenedFolders>(NONE_OPENED);
+  /** Bumped when the `@` menu shuts, so a listing still on its way is dropped. */
+  const openedFor = useRef(0);
   const [slow, setSlow] = useState(false);
   const [index, setIndex] = useState(0);
   const [drop, setDrop] = useState<"up" | "down">("down");
@@ -180,6 +228,8 @@ export function useComposerMenu({
       latest.current = "";
       setLibrary(null);
       setSlow(false);
+      openedFor.current += 1;
+      setOpened(NONE_OPENED);
       return;
     }
     const token = `${subjectId ?? ""} ${mention}`;
@@ -221,10 +271,10 @@ export function useComposerMenu({
   }, [trigger]);
 
   const content = useMemo(
-    () => menuContent({ trigger, library, slow, commands, skills }),
-    [trigger, library, slow, commands, skills],
+    () => menuContent({ trigger, library, slow, commands, skills, opened }),
+    [trigger, library, slow, commands, skills, opened],
   );
-  const items = useMemo(() => content.groups.flatMap((g) => g.items), [content]);
+  const items = useMemo(() => content.groups.flatMap((g) => pickable(g.rows)), [content]);
   const shown = trigger !== null && (items.length > 0 || content.note !== null || content.unparsed > 0);
 
   // A new `/` query re-ranks the rows, so the highlight goes back to the top.
@@ -232,16 +282,12 @@ export function useComposerMenu({
   useEffect(() => setIndex(0), [slash]);
   const at = Math.min(index, Math.max(0, items.length - 1));
 
-  // Open down unless the list's measured height won't fit under the trigger's
-  // line (the composer sits mid-page and at the bottom). Before paint, so it
-  // never flashes. The root element's box is the viewport the popup lives in.
+  // Choose from the available room, independent of results or status lines.
+  // Before paint, so even an initially empty menu opens on the correct side.
   useLayoutEffect(() => {
-    const menu = menuRef.current;
-    if (!shown || !menu || !anchor) return;
-    const needed = menu.offsetHeight + MENU_GAP;
-    const height = document.documentElement.clientHeight;
-    setDrop(height - anchor.bottom >= needed || anchor.top < needed ? "down" : "up");
-  }, [shown, items.length, content.note, anchor]);
+    if (!shown || !anchor) return;
+    setDrop(menuDirection(anchor, document.documentElement.clientHeight));
+  }, [shown, anchor]);
 
   /** The editor's `onEdit`. The anchor is measured here, inside the event, so the
    *  selection is live and the menu lands placed in the same commit. `commit`'s
@@ -263,6 +309,24 @@ export function useComposerMenu({
   function close() {
     setTrigger(null);
     setAnchor(null);
+  }
+
+  /** Opens a folder under its row, reading one level; closes an open one. */
+  function toggle(folder: MentionFolder) {
+    if (opened.has(folder.path)) {
+      setOpened((prev) => {
+        const next = new Map(prev);
+        next.delete(folder.path);
+        return next;
+      });
+      return;
+    }
+    const session = openedFor.current;
+    listMentionFolder(folder.path)
+      .then((inside) => {
+        if (openedFor.current === session) setOpened((prev) => new Map(prev).set(folder.path, inside));
+      })
+      .catch(() => {});
   }
 
   function pick(item: MenuItem) {
@@ -300,6 +364,32 @@ export function useComposerMenu({
       setIndex((at - 1 + items.length) % items.length);
       return;
     }
+    const row = items[at];
+    const plain = !e.shiftKey && !e.metaKey && !e.altKey && !e.ctrlKey;
+    // A folder tree's keys: right opens, then steps in; left closes, or steps
+    // out to the folder a row is under. Elsewhere the arrows move the caret.
+    if (plain && e.key === "ArrowRight" && row.kind === "folder") {
+      e.preventDefault();
+      if (!row.open) toggle(row.folder);
+      else setIndex(Math.min(at + 1, items.length - 1));
+      return;
+    }
+    if (plain && e.key === "ArrowLeft" && row.kind === "folder" && row.open) {
+      e.preventDefault();
+      toggle(row.folder);
+      return;
+    }
+    if (plain && e.key === "ArrowLeft" && (row.kind === "folder" || row.kind === "file") && row.depth > 0) {
+      e.preventDefault();
+      for (let i = at - 1; i >= 0; i -= 1) {
+        const above = items[i];
+        if (above.kind === "folder" && above.depth < row.depth) {
+          setIndex(i);
+          break;
+        }
+      }
+      return;
+    }
     if (e.key === "Enter" || e.key === "Tab") {
       e.preventDefault();
       pick(items[at]);
@@ -321,6 +411,7 @@ export function useComposerMenu({
       index: at,
       onIndex: setIndex,
       onPick: pick,
+      onToggle: toggle,
       anchor: shown ? anchor : null,
       drop,
       subjectId,

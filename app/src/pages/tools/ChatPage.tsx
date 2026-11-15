@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Composer } from "@/components/harness/composer/Composer";
 import { DraftHero } from "@/components/harness/composer/DraftHero";
+import { NewThreadDialog } from "@/components/harness/threads/NewThreadDialog";
 import { RecentThreads } from "@/components/harness/threads/RecentThreads";
 import { THREAD_LIST_PANEL, ThreadList } from "@/components/harness/threads/ThreadList";
 import { ThreadMap } from "@/components/harness/timeline/ThreadMap";
@@ -33,8 +34,9 @@ import { draftKey, useDraftStore } from "@/stores/chat/draftStore";
  * Chat with a CLI agent running from the library's `agents/` folder
  * (`docs/harness.md`): the conversations column (`ThreadList`) beside a thread.
  * `?t=<id>` is that thread's timeline; bare `/chat` is a new thread: its
- * headline picks the subject (`DraftHero`), the recent threads
- * (`RecentThreads`) below it. The composer is docked at the bottom of both,
+ * headline names the subject (`DraftHero`), the recent threads
+ * (`RecentThreads`) below it. New thread and the headline's pill ask for the
+ * subject in `NewThreadDialog`. The composer is docked at the bottom of both,
  * and a new thread's will not send until a subject or General is chosen.
  *
  * Subscribes slice by slice: `live` is written many times a second mid-turn,
@@ -188,15 +190,35 @@ export default function ChatPage() {
     },
     [store, navigate],
   );
+  const [choosing, setChoosing] = useState(false);
+  const onChoose = useCallback(() => setChoosing(true), []);
   const onNew = useCallback(
     (subject?: ChatScope) => {
-      // A group header's `+` names its scope; plain New thread keeps the choice.
-      const leaving = activeRef.current != null;
-      if (subject !== undefined) navigate(chatHref(null, null, { subject }), { replace: !leaving });
-      else if (leaving) navigate(chatHref(null));
+      // A group header's `+` names its scope; plain New thread asks for one,
+      // and leaves the open thread only once it is chosen.
+      if (subject !== undefined) navigate(chatHref(null, null, { subject }), { replace: activeRef.current == null });
+      else setChoosing(true);
     },
     [navigate],
   );
+  const onChosen = useCallback(
+    (next: ChatScope) => {
+      useDraftStore.getState().setScope(newKey, next);
+      setChoosing(false);
+      if (activeRef.current != null) navigate(chatHref(null));
+    },
+    [newKey, navigate],
+  );
+  const composerRef = useRef<HTMLDivElement>(null);
+  const focusComposer = useCallback(() => {
+    const box = composerRef.current?.querySelector<HTMLElement>('[role="textbox"]');
+    if (!box) return;
+    box.focus();
+    // WebKit focuses a contenteditable with the caret at its start.
+    const sel = window.getSelection();
+    sel?.selectAllChildren(box);
+    sel?.collapseToEnd();
+  }, []);
   const onDelete = useCallback(
     (id: number) => {
       harnessDeleteThread(id)
@@ -211,7 +233,6 @@ export default function ChatPage() {
     },
     [store],
   );
-  const onScope = useCallback((next: ChatScope) => useDraftStore.getState().setScope(newKey, next), [newKey]);
   const onRestored = useCallback(() => setRestore(null), []);
   /** Pictures drop anywhere on the conversation, not only on the box. */
   const columnRef = useRef<HTMLDivElement>(null);
@@ -272,7 +293,7 @@ export default function ChatPage() {
         {fresh ? (
           <div ref={recentScroll} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6">
             <div className="mx-auto w-full max-w-[760px]">
-              {subjectsLoaded && <DraftHero subjects={subjects} scope={scope} onScope={onScope} className="pt-10 pb-8" />}
+              {subjectsLoaded && <DraftHero subjects={subjects} scope={scope} onChoose={onChoose} className="pt-10 pb-8" />}
               <RecentThreads threads={threads} subjects={subjects} runningIds={runningIds} onOpen={onOpen} />
             </div>
           </div>
@@ -295,11 +316,19 @@ export default function ChatPage() {
             <ThreadMap scrollRef={scroll.outer} contentRef={scroll.inner} markers={markers} />
           </div>
         )}
-        <div className="shrink-0 px-6 pb-4">
+        <div ref={composerRef} className="shrink-0 px-6 pb-4">
           <div className="mx-auto max-w-[760px]">{composer}</div>
         </div>
 
         <DropOverlay show={dropping} label="Drop to attach a picture" />
+        <NewThreadDialog
+          open={choosing}
+          onOpenChange={setChoosing}
+          subjects={subjects}
+          value={scope}
+          onPick={onChosen}
+          focusAfterPick={focusComposer}
+        />
       </div>
     </SideNavShell>
   );

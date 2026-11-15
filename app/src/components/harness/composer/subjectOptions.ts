@@ -2,7 +2,8 @@ import type { Subject } from "@/lib/db";
 import { displayCode, displayName } from "@/lib/format/format";
 import { GENERAL_SCOPE, type ChatScope } from "@/lib/harness/scope";
 
-/** One row of `SubjectPicker`: General, or a subject by its short code. */
+/** One subject choice, in `SubjectPicker` and the new-thread dialog: General,
+ *  or a subject by its short code. */
 export interface SubjectOption {
   scope: ChatScope;
   /** What the row shows: "General" or the short code (`displayCode`). */
@@ -51,4 +52,13 @@ export function subjectOptions(
     listed: [GENERAL_OPTION, ...subjects.filter((s) => s.is_current).map(option)].filter(keep),
     past: past.filter(keep),
   };
+}
+
+/** The row a scope names; null when it names none (unchosen, or a subject
+ *  that is gone). */
+export function subjectOption(subjects: readonly Subject[], scope: ChatScope | null): SubjectOption | null {
+  if (scope == null) return null;
+  if (scope === GENERAL_SCOPE) return GENERAL_OPTION;
+  const subject = subjects.find((s) => s.id === scope);
+  return subject ? option(subject) : null;
 }

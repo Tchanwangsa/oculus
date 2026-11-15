@@ -3,7 +3,7 @@ import { Books, CaretDown, Check, MagnifyingGlass } from "@phosphor-icons/react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { FilterFold } from "@/components/ui/filter/FilterFold";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import { subjectOptions, type SubjectOption } from "@/components/harness/composer/subjectOptions";
+import { subjectOption, subjectOptions, type SubjectOption } from "@/components/harness/composer/subjectOptions";
 import type { Subject } from "@/lib/db";
 import type { ChatScope } from "@/lib/harness/scope";
 import { cn } from "@/lib/utils";
@@ -11,23 +11,20 @@ import { cn } from "@/lib/utils";
 /**
  * A thread's scope: one subject, or General (the whole library). Not a sandbox
  * — it narrows the `@` menu and names the course folder in the agent's
- * instructions (`docs/harness.md`). A searchable popover: General, this term's
- * subjects, then past ones under a fold; arrows move, Enter picks, Escape
- * closes back to the trigger. `heading` is the new chat's headline pill, in
- * the heading's own type; `chip` is the small pill above a composer (Studio's
- * New video). `value` null is unchosen, which only the heading shows.
+ * instructions (`docs/harness.md`). The small pill above a composer (Studio's
+ * New video) over a searchable popover: General, this term's subjects, then
+ * past ones under a fold; arrows move, Enter picks, Escape closes back to the
+ * trigger. A new Chat thread chooses in `NewThreadDialog` instead.
  */
 export function SubjectPicker({
   subjects,
   value,
   onChange,
-  variant,
   className,
 }: {
   subjects: readonly Subject[];
-  value: ChatScope | null;
+  value: ChatScope;
   onChange: (scope: ChatScope) => void;
-  variant: "heading" | "chip";
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -39,7 +36,7 @@ export function SubjectPicker({
   const listId = useId();
 
   const { listed, past } = useMemo(() => subjectOptions(subjects, query), [subjects, query]);
-  const chosen = useMemo(() => chosenOption(subjects, value), [subjects, value]);
+  const chosen = useMemo(() => subjectOption(subjects, value), [subjects, value]);
   // The fold never hides the choice, and a search shows every match.
   const pastChosen = past.some((o) => o.scope === value);
   const foldOpen = pastOpen || pastChosen || query.trim() !== "";
@@ -96,7 +93,7 @@ export function SubjectPicker({
     />
   );
 
-  const title = chosen ? chosen.title : "Choose a subject, or General for the whole library";
+  const title = chosen ? chosen.title : "General — the whole library";
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -106,17 +103,17 @@ export function SubjectPicker({
           title={title}
           aria-label={`Subject: ${title}`}
           className={cn(
-            faceClass(variant, chosen),
-            "cursor-pointer transition-[color,background-color,border-color] outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/25 data-[state=open]:bg-accent",
-            variant === "chip" && "hover:text-foreground",
+            "inline-flex h-6 max-w-[200px] min-w-0 cursor-pointer items-center gap-1.5 rounded-full border border-border/70 bg-card px-2 text-[11px] text-muted-foreground transition-[color,background-color,border-color] outline-none hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/25 data-[state=open]:bg-accent",
             className,
           )}
         >
-          <Face option={chosen} variant={variant} />
+          {chosen && <SubjectOptionGlyph option={chosen} size={12} />}
+          <span className="min-w-0 truncate">{chosen ? chosen.label : "General"}</span>
+          <CaretDown size={12} className="shrink-0 text-muted-foreground" />
         </button>
       </PopoverTrigger>
       <PopoverContent
-        align={variant === "heading" ? "center" : "start"}
+        align="start"
         className="flex max-h-[min(var(--radix-popover-content-available-height),24rem)] w-64 flex-col overflow-hidden p-0"
         onOpenAutoFocus={(e) => {
           e.preventDefault();
@@ -167,53 +164,8 @@ export function SubjectPicker({
   );
 }
 
-function chosenOption(subjects: readonly Subject[], value: ChatScope | null): SubjectOption | null {
-  const all = subjectOptions(subjects, "");
-  return [...all.listed, ...all.past].find((o) => o.scope === value) ?? null;
-}
-
-function faceClass(variant: "heading" | "chip", chosen: SubjectOption | null): string {
-  return cn(
-    "inline-flex min-w-0 max-w-full items-center rounded-full border bg-card",
-    variant === "heading"
-      ? "gap-2 border-border px-3 py-0.5 align-middle leading-tight shadow-xs"
-      : "h-6 max-w-[200px] gap-1.5 border-border/70 px-2 text-[11px] text-muted-foreground",
-    variant === "heading" && !chosen && "border-dashed text-brand",
-  );
-}
-
-/** The trigger's glyph, label and caret. */
-function Face({ option, variant }: { option: SubjectOption | null; variant: "heading" | "chip" }) {
-  const heading = variant === "heading";
-  return (
-    <>
-      {option && <OptionGlyph option={option} size={heading ? 22 : 12} />}
-      <span className="min-w-0 truncate">{option ? option.label : heading ? "Choose a subject" : "General"}</span>
-      <CaretDown size={heading ? 16 : 12} weight={heading ? "bold" : "regular"} className="shrink-0 text-muted-foreground" />
-    </>
-  );
-}
-
-/** The trigger's exact box with nothing behind it, for a layout to measure
- *  (`DraftHero` sizes its sentence with one). */
-export function SubjectPickerFace({
-  subjects,
-  value,
-  variant,
-}: {
-  subjects: readonly Subject[];
-  value: ChatScope | null;
-  variant: "heading" | "chip";
-}) {
-  const chosen = chosenOption(subjects, value);
-  return (
-    <span className={faceClass(variant, chosen)}>
-      <Face option={chosen} variant={variant} />
-    </span>
-  );
-}
-
-function OptionGlyph({ option, size }: { option: SubjectOption; size: number }) {
+/** A choice's glyph: the subject's own icon, or the library's for General. */
+export function SubjectOptionGlyph({ option, size }: { option: SubjectOption; size: number }) {
   return option.subject ? (
     <SubjectIcon code={option.subject.code} size={size} className="shrink-0" />
   ) : (
@@ -255,7 +207,7 @@ function OptionRow({
         active && "bg-accent",
       )}
     >
-      <OptionGlyph option={option} size={13} />
+      <SubjectOptionGlyph option={option} size={13} />
       <span className="min-w-0 flex-1 truncate">{option.label}</span>
       {selected && <Check size={12} weight="bold" className="shrink-0 text-brand" />}
     </button>

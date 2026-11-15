@@ -7,6 +7,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { KeyHint } from "@/components/search/KeyHint";
 import {
   SearchGlyph,
   SearchList,
@@ -217,16 +218,16 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       <div className="flex items-center gap-3 border-t border-border-subtle px-4 py-2 text-[11px] text-muted-foreground">
         {draft ? (
           <>
-            <Hint keys="↵" label="Add filter" />
-            <Hint keys="tab" label="Complete" />
+            <KeyHint keys="↵" label="Add filter" />
+            <KeyHint keys="tab" label="Complete" />
           </>
         ) : (
           <>
-            <Hint keys="↵" label="Open" />
-            <Hint keys={shortcut("mod+Enter")} label="Open in new tab" />
+            <KeyHint keys="↵" label="Open" />
+            <KeyHint keys={shortcut("mod+Enter")} label="Open in new tab" />
           </>
         )}
-        <Hint keys="esc" label="Close" />
+        <KeyHint keys="esc" label="Close" />
       </div>
     </div>
   );
@@ -287,17 +288,6 @@ function DraftChip({
           className="col-start-1 row-start-1 w-full min-w-0 bg-transparent text-foreground outline-none placeholder:text-muted-foreground/60"
         />
       </span>
-    </span>
-  );
-}
-
-function Hint({ keys, label }: { keys: string; label: string }) {
-  return (
-    <span className="flex items-center gap-1.5">
-      <kbd className="rounded border border-border bg-surface px-1 py-0.5 text-[10px] leading-none text-muted-foreground">
-        {keys}
-      </kbd>
-      {label}
     </span>
   );
 }
