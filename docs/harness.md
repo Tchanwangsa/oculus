@@ -1980,6 +1980,16 @@ attached is dropped. A send waits while a file is still being written. An
 `unscoped` box still collects chips and shelf pictures and still refuses to
 send.
 
+**The sent bubble draws the same chips in its prose** (`liftPictures`,
+`QuestionBubble`): a click opens a picture in the lightbox and a PDF or text
+file in the system's viewer, and a copy writes the path. Every picture is
+also in the row above the words, as T3's transcript keeps every image. A
+trailing line of nothing but picture paths is lifted out of the prose
+instead: it is a shelf picture no chip named, and how older messages carried
+every picture, so those look as they did. A last paragraph of only picture
+chips reads the same way and shows only in the row. The bubble's edit box
+shows the raw paths.
+
 ### Pasted text is a card, sent inline
 
 A plain-text paste of `LONG_PASTE` (1000 characters or 15 lines) or more

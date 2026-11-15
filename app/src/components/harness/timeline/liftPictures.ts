@@ -1,35 +1,27 @@
-import type { TextPart } from "@/lib/files/openFile";
+import { splitLibraryPaths, type TextPart } from "@/lib/files/libraryPaths";
+import { attachmentPath, distinctPaths, splitAttachments } from "@/lib/harness/attachments";
 
 /**
- * A question's attached pictures, lifted out to draw above the words, and the
- * prose with the gaps they left closed up. Swept here, not in
- * `splitLibraryPaths`, which the composer shares and must round-trip exactly.
+ * A question's pictures, to draw in a row above the words, and its prose. A
+ * picture or file the sentence names stays in the prose as a chip, and its
+ * picture is in the row too; a trailing line of picture paths (a shelf
+ * picture no chip named, and how older messages carried every picture) is
+ * lifted out of the prose entirely, its edges closed up as before. Swept
+ * here, not in `splitLibraryPaths`, which the composer shares and must
+ * round-trip exactly. Pictures are data-directory-relative, in order, once.
  */
-export function liftPictures(parts: TextPart[]): [Extract<TextPart, { kind: "image" }>[], TextPart[]] {
-  const pictures = parts.filter((p) => p.kind === "image");
-  if (!pictures.length) return [pictures, parts];
+export function liftPictures(words: string): { pictures: string[]; prose: TextPart[] } {
+  const { text, paths } = splitAttachments(words);
+  const parts = splitLibraryPaths(text);
+  const inline = parts.flatMap((p) => (p.kind === "image" ? [p.path] : []));
+  const trailing = paths.flatMap((p) => attachmentPath(p) ?? []);
+  const pictures = distinctPaths([...inline, ...trailing]);
+  if (!trailing.length) return { pictures, prose: parts };
 
-  // Prose split only by a picture joins with one space, or none across a break.
-  const body: TextPart[] = [];
-  for (const p of parts) {
-    if (p.kind === "image") continue;
-    const last = body[body.length - 1];
-    if (p.kind === "text" && last?.kind === "text") {
-      const left = last.text.replace(/[ \t]+$/, "");
-      const right = p.text.replace(/^[ \t]+/, "");
-      const gap = !left || !right || /\n\s*$/.test(left) || /^\s*\n/.test(right) ? "" : " ";
-      body[body.length - 1] = { kind: "text", text: left + gap + right };
-    } else {
-      body.push(p);
-    }
-  }
-
-  // The composer writes attachment paths on their own trailing line.
-  const first = body[0];
-  if (first?.kind === "text") body[0] = { kind: "text", text: first.text.replace(/^\s+/, "") };
-  const last = body[body.length - 1];
-  if (last?.kind === "text")
-    body[body.length - 1] = { kind: "text", text: last.text.replace(/\s+$/, "") };
-
-  return [pictures, body.filter((p) => p.kind !== "text" || p.text.length > 0)];
+  const prose = [...parts];
+  const first = prose[0];
+  if (first?.kind === "text") prose[0] = { kind: "text", text: first.text.replace(/^\s+/, "") };
+  const last = prose[prose.length - 1];
+  if (last?.kind === "text") prose[prose.length - 1] = { kind: "text", text: last.text.replace(/\s+$/, "") };
+  return { pictures, prose: prose.filter((p) => p.kind !== "text" || p.text.length > 0) };
 }

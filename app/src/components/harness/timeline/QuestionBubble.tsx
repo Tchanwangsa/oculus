@@ -1,8 +1,9 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowCounterClockwise, CaretDown, PencilSimple, X } from "@phosphor-icons/react";
+import { AttachmentChip } from "@/components/markdown/AttachmentChip";
 import { FileChip } from "@/components/markdown/FileChip";
 import { LinkChip } from "@/components/markdown/LinkChip";
-import { openCitation, splitLibraryPaths } from "@/lib/files/openFile";
+import { openCitation, openLibraryPath } from "@/lib/files/openFile";
 import { attachmentSrc, splitPastedText } from "@/lib/harness/attachments";
 import { parseLink, splitLinks } from "@/lib/harness/links";
 import { openLink } from "@/lib/shell/tabRouters";
@@ -54,10 +55,10 @@ export function QuestionBubble({
   const { text: words, pasted } = useMemo(() => splitPastedText(text), [text]);
   const [body, long] = useOverflows(words, editing === null);
   const box = useRef<HTMLTextAreaElement>(null);
-  // Mentions draw as chips rather than the paths the agent was sent.
-  const parts = useMemo(() => splitLibraryPaths(words), [words]);
-  // Only the prose is measured and folded; cards and pictures always show.
-  const [pictures, prose] = useMemo(() => liftPictures(parts), [parts]);
+  // Mentions and attachments draw as chips rather than the paths the agent
+  // was sent; every picture is also in the row above. Only the prose is
+  // measured and folded; cards and pictures always show.
+  const { pictures, prose } = useMemo(() => liftPictures(words), [words]);
 
   useLayoutEffect(() => {
     const el = box.current;
@@ -131,7 +132,7 @@ export function QuestionBubble({
                 key={i}
                 type="button"
                 aria-label="Open the attached picture"
-                onClick={() => setShown(attachmentSrc(dataDir, p.path))}
+                onClick={() => setShown(attachmentSrc(dataDir, p))}
                 className={cn(
                   "cursor-pointer overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-ring",
                   pictures.length === 1
@@ -140,7 +141,7 @@ export function QuestionBubble({
                 )}
               >
                 <img
-                  src={attachmentSrc(dataDir, p.path)}
+                  src={attachmentSrc(dataDir, p)}
                   alt="Attached picture"
                   className={cn(
                     "block",
@@ -178,7 +179,11 @@ export function QuestionBubble({
                     l.kind === "text" ? l.text : <LinkChip key={`${i}-${j}`} raw={l.raw} onClick={(newTab) => void openLink(parseLink(l.raw)?.href ?? l.raw, newTab)} />,
                   );
                 }
-                if (p.kind !== "path") return null;
+                if (p.kind === "image") {
+                  return <AttachmentChip key={i} path={p.raw} onOpen={() => setShown(attachmentSrc(dataDir, p.path))} />;
+                }
+                // A PDF or text file opens in the system's viewer.
+                if (p.kind === "attachment") return <AttachmentChip key={i} path={p.raw} onOpen={() => openLibraryPath(p.path)} />;
                 return (
                   <FileChip
                     key={i}
