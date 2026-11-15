@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { elapsedText } from "@/lib/harness";
 
+/** A run whose request waits on the student, said in place of its clock,
+ *  steady like it: nothing shimmers while the student is the one to act. */
+export const WAITING = "Waiting for approval";
+
 /** "Working for 8s", ticking; "Working" with no start. Its own component, so
  *  the second hand re-renders this line and nothing else. Steady text: the
  *  run's live step is what shimmers. */

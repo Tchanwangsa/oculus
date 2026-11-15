@@ -1,6 +1,6 @@
 import { memo, useMemo, useState } from "react";
 import { copyAsMarkdown, dragAsMarkdown } from "@/lib/markdown/selection";
-import type { HarnessItem, Provider } from "@/lib/harness";
+import { waitingRequests, type HarnessItem, type Provider } from "@/lib/harness";
 import { useSignInStatus } from "@/hooks/agents/useSignInStatus";
 import { ANCHOR_ROW } from "@/hooks/ui/useStickToBottom";
 import { EXPANDABLE } from "@/lib/ui/expandable";
@@ -95,7 +95,9 @@ export const Timeline = memo(function Timeline({
   }, [items]);
   // Every view of a thread (a Chat tab, the lecture dock) draws it here.
   useThreadViewed(threadId);
-  const { start, rootRef, sentinelRef } = useRowWindow(rows, threadId);
+  // The oldest waiting request's row stays mounted, wherever it sits.
+  const waitingRow = useHarnessStore((s) => (threadId == null ? null : waitingRequests(s.requests[threadId])[0]?.item_id ?? null));
+  const { start, rootRef, sentinelRef } = useRowWindow(rows, threadId, waitingRow);
   useRowVisibility(rootRef, threadId);
   const shown = start ? rows.slice(start) : rows;
   return (

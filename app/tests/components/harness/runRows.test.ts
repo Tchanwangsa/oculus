@@ -426,3 +426,35 @@ describe("a mixed chat's dividers", () => {
     expect(last?.kind === "item" && last.change).toBeUndefined();
   });
 });
+
+describe("a request's row", () => {
+  const row = (id: number, kind: HarnessItem["kind"], run: number | null): HarnessItem => ({
+    id, thread_id: THREAD, kind, ref_id: kind === "request" ? "40" : null, content: kind === "request" ? null : "x",
+    meta: kind === "tool" ? JSON.stringify({ kind: "bash", ok: null }) : null, created_at: "2026-11-16 00:00:00", run_id: run,
+  });
+  const shape = (rows: ViewRow[]) => rows.map((r) => (r.kind === "work" ? `work:${r.items.map((i) => i.id).join(",")}` : `${r.kind}:${rowItems(r)[0].id}`));
+
+  test("stays outside the run's fold while the run works", () => {
+    const items = [row(1, "user", 1), row(2, "tool", 1), row(3, "request", 1), row(4, "tool", 1)];
+    const runs: Record<number, HarnessRun> = { 1: { id: 1, status: "running", delivery: "sending", answer_item_id: null, started_ms: 0, ended_ms: null } as HarnessRun };
+    expect(shape(buildRows(items, true, { runs }))).toEqual(["item:1", "work:2,4", "item:3"]);
+  });
+
+  test("and once the run has settled, above its answer, with the fold closed", () => {
+    const items = [row(1, "user", 1), row(2, "tool", 1), row(3, "request", 1), row(4, "assistant", 1)];
+    const runs: Record<number, HarnessRun> = { 1: { id: 1, status: "completed", delivery: "delivered", answer_item_id: 4, started_ms: 0, ended_ms: 1 } as HarnessRun };
+    expect(shape(buildRows(items, false, { runs }))).toEqual(["item:1", "work:2", "item:3", "item:4"]);
+  });
+
+  test("in a turn with no run it is never bundled with the steps around it", () => {
+    const items = [row(1, "tool", null), row(2, "request", null), row(3, "tool", null), row(4, "tool", null)];
+    expect(shape(buildRows(items, false))).toEqual(["item:1", "item:2", "bundle:3"]);
+  });
+
+  test("a waiting request far up the thread is mounted", () => {
+    const many = Array.from({ length: 80 }, (_, i) => row(i + 1, i === 4 ? "request" : "user", null));
+    const rows = buildRows(many, false);
+    const from = includeId(rows, initialFrom(rows), 5);
+    expect(rows.slice(windowStart(rows, from)).some((r) => rowItems(r)[0].id === 5)).toBe(true);
+  });
+});
