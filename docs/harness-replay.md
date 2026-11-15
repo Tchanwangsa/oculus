@@ -12,7 +12,7 @@ and release gate for the agent turn model rebuild.
 | Replay runner (`replay.rs`), its step-by-step runtime (`rig.rs`, `io.rs`), scratch guard and assertions | `app/src-tauri/src/harness/testkit/` |
 | Process transport substitution | `app/src-tauri/src/harness/transport.rs` |
 | Provider constructors and inbound runners | `app/src-tauri/src/harness/providers/claude/replay.rs`, `app/src-tauri/src/harness/providers/codex/replay.rs`, `app/src-tauri/src/harness/providers/opencode/replay.rs`, `app/src-tauri/src/harness/providers/antigravity/replay.rs` |
-| Shared ordered consumer and injected external effects | `app/src-tauri/src/harness/app/consumer.rs` |
+| Shared ordered consumer and injected external effects | `app/src-tauri/src/harness/app/consumer/` |
 | Headless frontend store and row projection | `app/tests/harness/project-replay.ts` |
 | Replay output the timeline's own tests fold | `app/tests/fixtures/turn-model/`, `app/tests/components/harness/runRows.test.ts` |
 
@@ -323,6 +323,6 @@ folding needs superseded attempts. No mutation proves protocol support.
 - Every recording ends with its bridge's production EOF path (`Bridge::eof`), as a closed transport would; a `restart` scenario skips it, restarts the rig and runs the startup gate instead.
 - After a restart the checks read the reloaded rows (`Replay::restarted`), since a reload is the app's only view then.
 - The load-race projection strips `sequence`: its fresh store replays a stream whose sequence numbers the first pass already consumed.
-- A bridge's repeated terminal names a turn that is already over and is dropped whatever the thread holds. Only the app's own terminal, which names no turn, goes by the claim: with no run open it releases the thread's claim, and with neither it is dropped.
+- A bridge's repeated terminal names a turn that is already over and is dropped whatever the thread holds. Only the app's own terminal, which names no turn, ends whatever is open: the open run settles, and with none open it is a turn's end with no run (`Terminal::Claim`). A session's terminal that names no turn, with nothing open, is dropped.
 - A Codex manifest answers `turn/start` with the recorded turn's own id, as the server does. The run is bound to that id, so a placeholder would leave the recording's `turn/completed` naming a turn nobody sent.
 - Run only the named offline release gate with `--ignored`, by its full path; the bridge suite also contains ignored live provider tests (a real opencode thread spends OpenRouter credit). Cargo ORs a filter before `--` with one after it, so `cargo test harness:: -- --ignored release_matrix` runs every ignored `harness::` test.

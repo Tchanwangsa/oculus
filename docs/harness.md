@@ -1219,9 +1219,9 @@ neither ever an answer.
 ### One answer per run
 
 `store::settle_run` runs on the run's `TurnFinished`, in one transaction, and
-only once: a repeated terminal settles nothing. A `TurnFinished` with no run
-or unprompted turn open and no queue claim on the thread is dropped before it
-is stored, so it cannot release a queued message twice. Settlement:
+only once: a repeated terminal settles nothing. A session's `TurnFinished`
+with no run or unprompted turn open on the thread is dropped before it
+is stored, so it cannot end a turn twice. Settlement:
 
 1. Closes the attempt and run as `completed`, `interrupted` or `failed`, and
    sets the thread `idle` (`error` for a failed run).
@@ -1273,8 +1273,8 @@ restart nor a reload can bring a committed message back a second time.
 The settle is the one write that may not be lost: a run left `running`
 after its terminal would be relabelled as cut off by the next startup. When
 `store::settle_run` fails, the consumer parks the terminal
-(`Consumer::retry`): nothing of it is told to the webview, the run stays
-open and the thread stays claimed, so the chat's next message waits. The
+(`Consumer::retry`): nothing of it is told to the webview and the run stays
+open (its row is still `running`), so the chat's next message waits. The
 write is tried again after 100 ms, then at doubling intervals up to 30 s,
 until it lands; then the settlement and the `TurnFinished` go out as they
 would have. Meanwhile any other terminal for that run is ignored, and a

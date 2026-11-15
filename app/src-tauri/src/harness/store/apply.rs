@@ -136,7 +136,7 @@ async fn apply_rows(
             .map_err(|e| e.to_string())?;
             Ok(Stored::default())
         }
-        // `store::begin_run` wrote this question with its run, and set the
+        // `store::begin` wrote this question with its run, and set the
         // thread running; the consumer makes no question without one.
         HarnessEvent::UserMessage { run, .. } => run
             .map(|run| Stored {
@@ -150,7 +150,7 @@ async fn apply_rows(
                 ..Stored::default()
             })
             .ok_or_else(|| "a continuation with no run".to_string()),
-        // `begin_run` or `UnpromptedTurn` already set the thread running.
+        // `store::begin` or `UnpromptedTurn` already set the thread running.
         HarnessEvent::TurnStarted { .. } => Ok(Stored::default()),
         // A row, so a reload still shows why the agent went on unasked.
         HarnessEvent::UnpromptedTurn { after } => {
