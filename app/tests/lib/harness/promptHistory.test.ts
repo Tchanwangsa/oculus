@@ -13,6 +13,13 @@ describe("recallablePrompt", () => {
   test("a message of only pictures or pastes has nothing to recall", () => {
     expect(recallablePrompt(withAttachments("", ["./attachments/1.png"]))).toBe("");
     expect(recallablePrompt(pastedBlock("only a paste"))).toBe("");
+    expect(recallablePrompt("`./attachments/1.png` `./attachments/2.pdf`")).toBe("");
+  });
+
+  test("strips attachment chips from the sentence, closing each gap, and keeps mentions", () => {
+    const sent = "compare `./attachments/1.png` with `./attachments/2.png` in `courses/MAST20004/pages/week-1.md`";
+    expect(recallablePrompt(sent)).toBe("compare with in `courses/MAST20004/pages/week-1.md`");
+    expect(recallablePrompt("`./attachments/3.pdf` summarise this\nthen `./attachments/4.md`")).toBe("summarise this\nthen");
   });
 });
 

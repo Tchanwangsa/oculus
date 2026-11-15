@@ -1,4 +1,4 @@
-import { splitAttachments, splitPastedText } from "./attachments";
+import { splitAttachments, splitPastedText, stripAttachmentRefs } from "./attachments";
 
 /**
  * Recalling earlier messages into an empty composer with ArrowUp and
@@ -19,12 +19,13 @@ export interface PromptHistoryPosition {
   recalled: string;
 }
 
-/** A sent message as the box would take it back: its pasted blocks and its
- *  line of picture paths are dropped (they were cards and thumbnails, not
- *  words), library mentions and skills stay. */
+/** A sent message as the box would take it back: its pasted blocks, its
+ *  line of picture paths and every attachment chip in its sentence are
+ *  dropped (they were cards, thumbnails and files, not words, as T3 strips
+ *  its references), library mentions and skills stay. */
 export function recallablePrompt(message: string): string {
   const { text: unpictured } = splitAttachments(message);
-  return splitPastedText(unpictured).text.trim();
+  return stripAttachmentRefs(splitPastedText(unpictured).text).trim();
 }
 
 /** The thread's user rows, oldest first, as entries: blank ones (a message of

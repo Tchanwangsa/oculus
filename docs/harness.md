@@ -1917,9 +1917,10 @@ New video and thread column pass their own.
 **ArrowUp in an empty box recalls earlier messages** of the open thread
 (`usePromptHistory`, `lib/harness/promptHistory.ts`, after T3's
 `composerPromptHistory`): its user rows only, oldest to newest, a repeat of
-the one before collapsed, each with its pasted blocks (`splitPastedText`) and
-picture line (`splitAttachments`) dropped and its mentions and skills kept as
-chips. ArrowUp walks back, ArrowDown forward and past the newest to an empty
+the one before collapsed, each with its pasted blocks (`splitPastedText`),
+picture line (`splitAttachments`) and attachment chips (`stripAttachmentRefs`,
+as T3 strips its references; the files went with that message) dropped and
+its mentions and skills kept as chips. ArrowUp walks back, ArrowDown forward and past the newest to an empty
 box; an edit to the recalled text ends the walk and gives the arrows back to
 the caret. The `@`/`/` menu's keys come first.
 
