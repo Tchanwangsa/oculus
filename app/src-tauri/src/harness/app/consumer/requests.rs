@@ -6,7 +6,8 @@
 
 use crate::harness::core::effect::{Effect, Reply as ReplyEffect};
 use crate::harness::requests::{
-    self, policy, reasons, Delivery, LiveRoute, NewRequest, Reply, RequestView, Status,
+    self, policy, reasons, Delivery, LiveRoute, NewRequest, PermissionMode, Reply, RequestView,
+    Status,
 };
 use crate::harness::{Generation, HarnessEvent, Provider, Release};
 
@@ -15,8 +16,9 @@ use super::{Consumer, ConsumerIo, Stored};
 
 impl Consumer {
     /// A bridge's CLI is waiting on the student. Declined at once, and
-    /// never shown, when no turn is open to show it in, when it names a
-    /// protected path, or when it cannot be saved.
+    /// never shown, when no turn is open to show it in, when the chat is
+    /// saved as "Don't ask" now (whatever its turn started under), when it
+    /// names a protected path, or when it cannot be saved.
     pub(super) fn request_asked(
         &mut self,
         thread_id: i64,
@@ -47,6 +49,22 @@ impl Consumer {
                 routes: vec![route],
             });
         };
+        match self.rt.block_on(requests::store::mode(&pool, thread_id)) {
+            Ok(PermissionMode::Quiet) => {
+                return decline(
+                    thread_id,
+                    &request,
+                    "the chat is set to Don't ask",
+                    route,
+                    io,
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                let why = format!("its chat's mode could not be read: {e}");
+                return decline(thread_id, &request, &why, route, io);
+            }
+        }
         self.flush_draft(thread_id, io.now());
         let asked = HarnessEvent::RequestAsked {
             request: request.clone(),

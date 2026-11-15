@@ -104,8 +104,10 @@ struct ThreadState {
     partial_message: String,
     /// The streaming message's item id.
     partial_item: Option<String>,
-    /// How this thread asks, as its last `turn/start` said.
-    mode: PermissionMode,
+    /// A one-off turn's thread: nobody is there to answer, so its callbacks
+    /// are declined here. A chat's are decided by its saved mode when they
+    /// arrive (`app/consumer/requests.rs`).
+    one_off: bool,
     /// Each `fileChange` item's changes, by item id: its approval request
     /// names the item, not the paths (`approvals.rs`).
     changes: HashMap<String, serde_json::Value>,

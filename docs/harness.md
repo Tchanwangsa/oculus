@@ -1553,6 +1553,8 @@ before its session is released or never stored for that session. The
 CLI is told no, and the request is never shown, when:
 
 - no turn is open (a background agent asking after its turn closed);
+- the chat is saved as "Don't ask" when the callback arrives, whatever its
+  turn started under;
 - it names a protected path, or a folder that holds the library, since a
   grant there reaches every protected folder inside (`requests/policy.rs`
   against `protected.rs`; relative paths are read against `agents/`). A
@@ -1604,7 +1606,11 @@ always are) or `auto` (the CLI's own reviewer decides and the student is
 never asked; a bridge with no reviewer, `auto_review` false, asks as `ask`).
 `SetPermissionMode` (`harness_set_permission_mode`) stores it at once and
 tells `PermissionMode`; it is refused while a request waits ("Answer the
-waiting request before changing how this chat asks."). The start step
+waiting request before changing how this chat asks."). The consumer reads
+the saved mode as each request arrives, so a change mid-turn decides the
+turn's next request: under `quiet` it is declined unseen, under `ask` or
+`auto` it is shown. Auto's reviewer is a wire setting, so a switch to or
+from `auto` takes effect from the next turn's start. The start step
 reads it off the row (`SendOptions::permission_mode`), and it is part of
 the session's reuse key ([`decide_transition`](#changing-provider-mid-chat)).
 A bridge whose `approvals` flag is false declines every request, whatever
@@ -1676,7 +1682,9 @@ by `testkit/codex_requests.rs`). `providers/codex/approvals.rs`:
 | `quiet`, and one-off turns | `approvalPolicy: never`, no reviewer |
 
 The reviewer goes on every turn because a reviewer set once stays for later
-turns that name none. Outside `quiet` the thread's config also turns on
+turns that name none. The bridge declines a callback itself only on a
+one-off turn's thread; a chat's goes to the consumer, which decides by the
+saved mode. Outside `quiet` the thread's config also turns on
 `features.request_permissions_tool`, the tool that asks for more access.
 
 - **Commands** (`item/commandExecution/requestApproval`): the payload has

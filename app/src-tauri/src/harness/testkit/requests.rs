@@ -532,18 +532,18 @@ fn the_mode_and_the_provider_stay_while_a_request_waits() {
         bench.play(vec![msg]);
         bench.got(got)
     };
-    set(&mut bench, "quiet", PermissionMode::Quiet).unwrap();
+    set(&mut bench, "auto", PermissionMode::Auto).unwrap();
     assert_eq!(
-        bench.count("SELECT COUNT(*) FROM harness_threads WHERE permission_mode = 'quiet'"),
+        bench.count("SELECT COUNT(*) FROM harness_threads WHERE permission_mode = 'auto'"),
         1
     );
     assert!(bench
         .events()
         .iter()
-        .any(|e| e["event"]["type"] == "permission_mode" && e["event"]["mode"] == "quiet"));
+        .any(|e| e["event"]["type"] == "permission_mode" && e["event"]["mode"] == "auto"));
     let (_, asked) = ask(&bench, json!(0), &[]);
     bench.play(vec![asked]);
-    let refused = set(&mut bench, "auto", PermissionMode::Auto).unwrap_err();
+    let refused = set(&mut bench, "quiet", PermissionMode::Quiet).unwrap_err();
     assert_eq!(refused, respond::MODE_WHILE_PENDING);
     let kind = Kind::SelectModel {
         provider: Provider::Codex,

@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 
 use crate::harness::child::str_of as s;
 use crate::harness::requests::{
-    Action, Decision, LiveRoute, NewRequest, PermissionMode, Reply, RequestOption, Route,
+    Action, Decision, LiveRoute, NewRequest, Reply, RequestOption, Route,
 };
 use crate::harness::HarnessEvent;
 
@@ -218,8 +218,8 @@ impl CodexServer {
     }
 
     /// A callback: declined at once where nobody is asked (a one-off turn,
-    /// a "Don't ask" chat, a thread nobody routes, paths that cannot be
-    /// checked), else handed to the chat as a request.
+    /// a thread nobody routes, paths that cannot be checked), else handed to
+    /// the chat, whose saved mode decides whether it is shown.
     pub(super) fn approval(&self, id: &Value, method: &str, params: &Value) {
         let decline = |server: &Self| {
             let permissions = Value::Null;
@@ -230,7 +230,7 @@ impl CodexServer {
         };
         let request = {
             let state = route.state.lock().unwrap();
-            if state.mode == PermissionMode::Quiet {
+            if state.one_off {
                 None
             } else {
                 request_of(method, id, params, &state, agent.as_deref())

@@ -303,10 +303,10 @@ fn another_turns_end_leaves_the_open_turn_as_it_is() {
     assert!(st.active_turn.is_none());
 }
 
-/// A server whose writes are captured, with one routed chat (`chat`) in
-/// `mode`, and what that chat's sink receives.
+/// A server whose writes are captured, with one routed thread (`chat`), a
+/// one-off turn's when `one_off`, and what its sink receives.
 fn captured(
-    mode: PermissionMode,
+    one_off: bool,
 ) -> (
     std::sync::Arc<CodexServer>,
     std::sync::Arc<std::sync::Mutex<Vec<Value>>>,
@@ -337,12 +337,8 @@ fn captured(
             let _ = tx.send(event);
         }),
         false,
+        one_off,
     );
-    server.routes.lock().unwrap()["chat"]
-        .state
-        .lock()
-        .unwrap()
-        .mode = mode;
     (server, written, events)
 }
 
@@ -356,7 +352,7 @@ fn ask(server: &CodexServer, id: Value, params: Value) {
 
 #[test]
 fn a_string_callback_id_is_kept_as_sent_and_answered_on_it() {
-    let (server, written, events) = captured(PermissionMode::Ask);
+    let (server, written, events) = captured(false);
     ask(
         &server,
         serde_json::json!("call-7"),
@@ -395,8 +391,8 @@ fn a_string_callback_id_is_kept_as_sent_and_answered_on_it() {
 }
 
 #[test]
-fn a_dont_ask_chat_and_an_unrouted_thread_are_declined_without_a_request() {
-    let (server, written, events) = captured(PermissionMode::Quiet);
+fn a_one_off_turn_and_an_unrouted_thread_are_declined_without_a_request() {
+    let (server, written, events) = captured(true);
     ask(
         &server,
         serde_json::json!(1),
@@ -415,7 +411,7 @@ fn a_dont_ask_chat_and_an_unrouted_thread_are_declined_without_a_request() {
 
 #[test]
 fn a_file_change_whose_item_is_unknown_is_declined_and_a_known_one_names_its_paths() {
-    let (server, written, events) = captured(PermissionMode::Ask);
+    let (server, written, events) = captured(false);
     server.dispatch(serde_json::json!({
         "id": 3, "method": "item/fileChange/requestApproval",
         "params": { "threadId": "chat", "itemId": "unseen" },
@@ -443,7 +439,7 @@ fn a_file_change_whose_item_is_unknown_is_declined_and_a_known_one_names_its_pat
 
 #[test]
 fn a_childs_request_reaches_its_parents_chat_with_its_agent_path() {
-    let (server, _, events) = captured(PermissionMode::Ask);
+    let (server, _, events) = captured(false);
     server.handle_notification(
         "item/started",
         &serde_json::json!({ "threadId": "chat", "item": {
@@ -502,7 +498,7 @@ fn each_mode_is_sent_on_every_turn_and_one_off_turns_never_ask() {
 
 #[test]
 fn a_permissions_grant_on_a_glob_or_a_special_root_is_declined_unseen() {
-    let (server, written, events) = captured(PermissionMode::Ask);
+    let (server, written, events) = captured(false);
     let asks = |id: i64, path: Value| {
         server.dispatch(serde_json::json!({
             "id": id, "method": "item/permissions/requestApproval",
@@ -541,7 +537,7 @@ fn a_permissions_grant_on_a_glob_or_a_special_root_is_declined_unseen() {
 
 #[test]
 fn a_patch_that_grows_after_its_item_started_has_every_path_checked() {
-    let (server, _, events) = captured(PermissionMode::Ask);
+    let (server, _, events) = captured(false);
     let change = |path: &str, diff: &str| serde_json::json!({ "path": path, "kind": { "type": "update", "move_path": null }, "diff": diff });
     server.handle_notification(
         "item/started",

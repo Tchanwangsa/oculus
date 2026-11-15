@@ -284,11 +284,12 @@ impl CodexServer {
         p
     }
 
-    pub(super) fn route(&self, thread_id: &str, sink: Sink, resumed: bool) {
+    pub(super) fn route(&self, thread_id: &str, sink: Sink, resumed: bool, one_off: bool) {
         let route = Arc::new(ThreadRoute {
             sink,
             state: Mutex::new(ThreadState {
                 ignore_usage_until_turn: resumed,
+                one_off,
                 ..Default::default()
             }),
         });
@@ -304,7 +305,7 @@ impl CodexServer {
         p["ephemeral"] = json!(opts.ephemeral);
         let r = self.request("thread/start", p)?;
         let id = thread_id_of(&r).ok_or("thread/start: no thread id")?;
-        self.route(&id, sink.clone(), false);
+        self.route(&id, sink.clone(), false, opts.ephemeral);
         sink(HarnessEvent::SessionStarted {
             provider_session_id: id.clone(),
             model: r
@@ -328,7 +329,7 @@ impl CodexServer {
         p["excludeTurns"] = json!(true);
         let r = self.request("thread/resume", p)?;
         let id = thread_id_of(&r).unwrap_or_else(|| thread_id.to_string());
-        self.route(&id, sink.clone(), true);
+        self.route(&id, sink.clone(), true, opts.ephemeral);
         sink(HarnessEvent::SessionStarted {
             provider_session_id: id,
             model: r
@@ -373,9 +374,6 @@ impl CodexServer {
     ) -> Result<(), String> {
         let p = Self::turn_params(thread_id, text, opts);
         let route = self.routes.lock().unwrap().get(thread_id).cloned();
-        if let Some(route) = &route {
-            route.state.lock().unwrap().mode = opts.mode;
-        }
         let bound = bound.clone();
         let started = move |r: &Value| {
             let Some(id) = r.pointer("/turn/id").and_then(|s| s.as_str()) else {

@@ -7,7 +7,7 @@
 use serde_json::{json, Value};
 
 use crate::harness::core::{Command, Kind};
-use crate::harness::requests::reasons;
+use crate::harness::requests::{reasons, PermissionMode};
 
 use super::replay::Replay;
 use super::rig::Rig;
@@ -401,6 +401,79 @@ fn a_thread_started_under_auto_review_asks_the_student_once_its_turn_names_the_u
     assert_eq!(requests(&rig)[0].3.as_deref(), Some("decline"));
     assert_eq!(tools(&rig)[0]["ok"], false);
     rig.finish();
+}
+
+/// The chat's mode saved mid-turn, as the composer's control saves it.
+fn set_mode(rig: &mut Rig, mode: PermissionMode) {
+    let thread = rig.thread;
+    rig.command(Command {
+        id: format!("mode-{}", mode.as_str()),
+        thread_id: Some(thread),
+        kind: Kind::SetPermissionMode { mode },
+    })
+    .unwrap();
+    rig.drain();
+}
+
+fn asked(frame: &Value) -> bool {
+    method(frame, "item/commandExecution/requestApproval")
+}
+
+#[test]
+fn dont_ask_saved_mid_turn_declines_the_next_callback_unseen() {
+    // The turn started under Ask; the recording's client declined, which is
+    // what the consumer now writes on its own.
+    let scenario = Scenario::recorded("codex-approval-decline").gate("asked", asked);
+    let mut rig = Rig::start(scenario);
+    rig.open();
+    rig.until("asked");
+    set_mode(&mut rig, PermissionMode::Quiet);
+    rig.resume();
+    rig.close();
+    rig.drain();
+    assert!(requests(&rig).is_empty(), "nobody was asked");
+    assert!(!rig
+        .envelopes()
+        .iter()
+        .any(|e| e["event"]["type"] == "request_opened"));
+    assert_eq!(tools(&rig)[0]["ok"], false);
+    assert_eq!(run_status(&rig), "completed");
+    let replay = rig.finish();
+    assert_eq!(replay.outbound[1]["result"]["decision"], "decline");
+}
+
+#[test]
+fn ask_saved_mid_turn_shows_the_next_callback() {
+    // The turn starts under Don't ask (`never`); Ask is saved before the
+    // callback arrives, so the student is asked and the answer goes back.
+    let mut scenario = Scenario::recorded("codex-approval-command")
+        .gate("asked", asked)
+        .gate("resolved", resolved);
+    scenario.fixture.permission_mode = Some(PermissionMode::Quiet);
+    let start = &mut scenario.fixture.expected_outbound[0].frame["params"];
+    start["approvalPolicy"] = json!("never");
+    start.as_object_mut().unwrap().remove("approvalsReviewer");
+    let mut rig = Rig::start(scenario);
+    rig.open();
+    rig.until("asked");
+    assert!(requests(&rig).is_empty());
+    set_mode(&mut rig, PermissionMode::Ask);
+    rig.until("resolved");
+    let pending = requests(&rig);
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].2, "pending");
+    respond(&mut rig, "answer", pending[0].0, "accept").unwrap();
+    rig.resume();
+    rig.close();
+    rig.drain();
+    let row = requests(&rig).remove(0);
+    assert_eq!(
+        (row.2.as_str(), row.3.as_deref(), row.4.as_str()),
+        ("resolved", Some("accept"), "acknowledged")
+    );
+    assert_eq!(tools(&rig)[0]["ok"], true);
+    let replay = rig.finish();
+    assert_eq!(replay.outbound[0]["params"]["approvalPolicy"], "never");
 }
 
 #[test]
