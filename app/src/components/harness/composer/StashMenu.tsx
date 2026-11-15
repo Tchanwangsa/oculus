@@ -3,6 +3,7 @@ import { Image } from "@phosphor-icons/react";
 import { ChipRemove } from "@/components/ui/ChipRemove";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { fmtAgo } from "@/lib/format/format";
+import { useAttachmentNames } from "@/stores/chat/attachmentNames";
 import { MAX_STASH, stashSnippet, type StashEntry } from "@/stores/chat/stashStore";
 import { StashBadge } from "./StashBadge";
 
@@ -33,6 +34,8 @@ export function StashMenu({
   /** A restore puts the caret in the box; the popover must not take it back
    *  to the badge as it closes. */
   const restored = useRef(false);
+  /** An attachment chip in a row's words reads as its name. */
+  const names = useAttachmentNames((s) => s.names);
   if (!entries.length) return null;
 
   function move(e: KeyboardEvent<HTMLUListElement>) {
@@ -66,7 +69,7 @@ export function StashMenu({
         )}
         <ul ref={listRef} aria-label="Stashed prompts" onKeyDown={move}>
           {entries.map((entry) => {
-            const snippet = stashSnippet(entry);
+            const snippet = stashSnippet(entry, 90, (path) => names[path]);
             return (
               <li key={entry.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent focus-within:bg-accent">
                 <button

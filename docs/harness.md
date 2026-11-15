@@ -1931,7 +1931,8 @@ Every attachment was written when it arrived, so an entry is text and paths,
 kept in localStorage (`oculus.chatStash`) and shared by every composer. ⌘S on an empty
 box restores the only entry or opens the menu. The badge above the box
 ("Stash" and the count) opens "Stashed prompts" (`StashMenu`): newest first,
-each row its words (or "(empty)", or what it holds), a picture count, its age
+each row its words, an attachment chip as its name (or "(empty)", or what it
+holds), a picture count, its age
 and "Delete stashed prompt"; a click restores it ("Restore stashed prompt:
 …"), its words after anything typed with their chips, its pastes as cards and
 its pictures back on the shelf, sent again by the same path. The stash holds 20; a 21st

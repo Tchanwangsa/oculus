@@ -188,3 +188,10 @@ test("a long attachment name is cut in the middle, keeping its extension", async
   expect(cut.endsWith("afternoon.png")).toBe(true);
   expect(cut).toContain("…");
 });
+
+test("a stash entry's words come back with their attachment chips", () => {
+  const stashed = `compare \`${A}\` with \`${PDF}\``;
+  const chunks = toChunks(stashed);
+  expect(chunks.filter((c) => c.kind === "attachment")).toEqual([att(A), att(PDF)]);
+  expect(chunksText(chunks)).toBe(stashed);
+});

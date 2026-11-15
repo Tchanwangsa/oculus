@@ -1,5 +1,8 @@
 import { create } from "zustand";
 
+import { attachmentPath } from "@/lib/harness/attachments";
+import { attachmentKindLabel } from "@/stores/chat/attachmentNames";
+
 /** The most prompts the stash keeps; a 21st pushes the oldest out. */
 export const MAX_STASH = 20;
 
@@ -82,9 +85,18 @@ export const useStashStore = create<{
   clearEvicted: () => set({ evicted: false }),
 }));
 
-/** An entry's one-line label: its words, or what it holds when it has none. */
-export function stashSnippet(entry: Pick<StashEntry, "text" | "pastes" | "pictures">, max = 90): string {
-  const words = entry.text.trim().replace(/\s+/g, " ");
+/** An entry's one-line label: its words, each attachment chip as its name
+ *  (`label`, else its kind), or what it holds when it has none. */
+export function stashSnippet(
+  entry: Pick<StashEntry, "text" | "pastes" | "pictures">,
+  max = 90,
+  label: (path: string) => string | undefined = () => undefined,
+): string {
+  const named = entry.text.replace(/`([^`\n]+)`/g, (fence, raw: string) => {
+    const path = attachmentPath(raw);
+    return path ? (label(path) ?? attachmentKindLabel(path)) : fence;
+  });
+  const words = named.trim().replace(/\s+/g, " ");
   if (words) return words.length > max ? `${words.slice(0, max)}…` : words;
   const parts = [
     entry.pictures.length && `${entry.pictures.length} picture${entry.pictures.length === 1 ? "" : "s"}`,
