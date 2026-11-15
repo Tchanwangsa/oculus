@@ -259,6 +259,7 @@ fn stop_while_a_request_waits_cancels_it_with_the_turn() {
     let late = answer(&mut bench, "late", request, "accept").unwrap_err();
     assert!(late.contains(reasons::STOPPED), "{late}");
     assert!(fake.replies().is_empty());
+    assert_eq!(fake.withdrawn(), 0, "an interrupt retires it in the CLI");
     // The CLI retires its own callback after an interrupt, after the
     // terminal: that changes nothing now.
     bench.clear();
@@ -267,6 +268,24 @@ fn stop_while_a_request_waits_cancels_it_with_the_turn() {
     };
     bench.play(vec![bench.session(retired)]);
     assert!(told(&bench, "request_updated").is_empty());
+}
+
+#[test]
+fn a_turn_that_ends_with_a_request_waiting_cancels_it_and_tells_its_cli_no() {
+    // A spawned child can still be waiting when its parent's turn ends.
+    let mut bench = turn_open("request-turn-end");
+    let (fake, asked) = ask(&bench, json!(0), &[]);
+    bench.play(vec![asked]);
+    let request = told(&bench, "request_opened")[0]["id"].as_i64().unwrap();
+    bench.play(vec![bench.session(ended("completed"))]);
+    assert!(!bench.open());
+    let (_, status, _, _, reason) = requests(&bench).remove(0);
+    assert_eq!(status, "cancelled");
+    assert_eq!(reason.as_deref(), Some(reasons::TURN_ENDED));
+    assert_eq!(fake.withdrawn(), 1, "the CLI is told no, once");
+    let late = answer(&mut bench, "late", request, "accept").unwrap_err();
+    assert!(late.contains(reasons::TURN_ENDED), "{late}");
+    assert_eq!(fake.withdrawn(), 1);
 }
 
 #[test]

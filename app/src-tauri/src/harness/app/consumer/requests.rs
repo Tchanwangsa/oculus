@@ -250,7 +250,9 @@ impl Consumer {
     }
 
     /// A run's turn finished with requests still waiting: they belonged to
-    /// it, so they end with it. The CLI retires their callbacks itself.
+    /// it, so they end with it. After an interrupt the CLI retires their
+    /// callbacks itself; a turn that ended otherwise may leave one still
+    /// listening (a spawned child's), which is told no.
     pub(super) fn requests_left_by(
         &mut self,
         thread_id: i64,
@@ -271,8 +273,10 @@ impl Consumer {
                 return Vec::new();
             }
         };
-        for id in &ids {
-            self.requests.remove(*id);
+        let routes = ids.iter().filter_map(|id| self.requests.remove(*id));
+        let routes: Vec<LiveRoute> = routes.collect();
+        if status != "interrupted" {
+            self.withdrawals.extend(routes);
         }
         let why = match status {
             "interrupted" => reasons::STOPPED,
@@ -293,6 +297,14 @@ impl Consumer {
                 elog!("[oculus] harness thread {thread_id}: requests: {e}");
                 Vec::new()
             }
+        }
+    }
+
+    /// Tell no to the callbacks a step gave up where it had no way to.
+    pub(super) fn withdraw_left(&mut self, io: &mut impl ConsumerIo) {
+        if !self.withdrawals.is_empty() {
+            let routes = std::mem::take(&mut self.withdrawals);
+            io.perform(Effect::Withdraw { routes });
         }
     }
 

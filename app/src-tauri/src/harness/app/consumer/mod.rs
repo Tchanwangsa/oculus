@@ -86,10 +86,12 @@ pub(in crate::harness) fn consume(
         asked: HashSet::new(),
         stops: HashMap::new(),
         requests: Registry::default(),
+        withdrawals: Vec::new(),
     };
     for msg in rx {
         consumer.handle(msg, io);
         consumer.due(io);
+        consumer.withdraw_left(io);
     }
     let waiting = consumer.drafts.waiting();
     consumer.store_drafts(waiting);
@@ -124,6 +126,9 @@ struct Consumer {
     stops: HashMap<i64, Stopping>,
     /// The live routes of the requests saved here (`requests.rs`).
     requests: Registry,
+    /// Routes of requests a turn's end gave up, to be told no once the
+    /// step that ended them is done (`requests_left_by`).
+    withdrawals: Vec<crate::harness::requests::LiveRoute>,
 }
 
 impl Consumer {
