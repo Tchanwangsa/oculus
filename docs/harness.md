@@ -1530,8 +1530,9 @@ Edit, Retry and Rewind truncate at a row (`harness::store::truncate`, announced 
 `Rewound`); Edit/Retry then send in the same commit (`harness_edit_resend`,
 the `EditResend` command), Rewind returns the
 words to the composer (`harness_rewind`). No branching; idle threads only; not
-offered where the bridge's `rewind` capability is false (Antigravity). The
-provider that answered the question rewinds first
+offered where the `rewind` capability of the bridge that answered the
+question (its run's provider, `questionProvider`) is false (Antigravity),
+whichever agent the chat is on now. That provider rewinds first
 ([Changing provider mid-chat](#changing-provider-mid-chat)), resuming an
 exited session without a turn:
 

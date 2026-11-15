@@ -160,5 +160,7 @@ export function answerModel(run: HarnessRun | undefined, name: ModelName): { lab
 
 /** The provider whose `rewind` gates a question's Edit, Rewind and Retry:
  *  its own run's, since Rust rewinds that session. A question with no
- *  recorded provider (rows from before runs) reads the chat's. */
-export const questionProvider = (run: HarnessRun | undefined, chat: Provider): Provider => run?.provider ?? chat;
+ *  recorded provider (rows from before runs) reads the chat's; null when
+ *  neither is known. */
+export const questionProvider = (run: HarnessRun | undefined, chat: Provider | undefined): Provider | null =>
+  run?.provider ?? chat ?? null;

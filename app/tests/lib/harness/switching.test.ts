@@ -144,4 +144,5 @@ test("a pick mid-turn waits for the next send, and the running run keeps its own
 test("a question's actions follow its own run's provider", () => {
   expect(questionProvider(run(1, "codex", "gpt-6.1-sol", null), "claude")).toBe("codex");
   expect(questionProvider(undefined, "claude")).toBe("claude");
+  expect(questionProvider(undefined, undefined)).toBeNull();
 });

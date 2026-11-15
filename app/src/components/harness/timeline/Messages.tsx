@@ -8,7 +8,8 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { fmtClock, sqliteUtcToMs } from "@/lib/format/format";
-import { messageAt, unpromptedAfter, type HarnessItem } from "@/lib/harness";
+import { messageAt, questionProvider, unpromptedAfter, type HarnessItem, type Provider } from "@/lib/harness";
+import { useCapabilities } from "@/hooks/agents/useCapabilities";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { Action, Assistant, CopyAction, MessageActions } from "./MessageActions";
 import { QuestionBubble } from "./QuestionBubble";
@@ -18,6 +19,21 @@ import type { ReplyRole } from "./rows";
 import { mayHoldWidget } from "@/components/markdown/openui/remarkWidgets";
 import { WidgetRow } from "@/components/markdown/openui/state";
 import { WidgetStream } from "@/components/markdown/widget/stream/context";
+
+/** Whether a question can be taken back (Edit, Rewind, Retry): Rust asks its
+ *  own run's provider to forget it, so that bridge's `rewind` decides, not
+ *  the chat's current agent. Undefined `question` (a reply with no question)
+ *  cannot. */
+function useRewinds(question: HarnessItem | undefined): boolean {
+  const provider = useHarnessStore((s): Provider | null => {
+    if (!question) return null;
+    const chat = s.threads.find((t) => t.id === question.thread_id)?.provider;
+    return questionProvider(question.run_id == null ? undefined : s.runs[question.thread_id]?.[question.run_id], chat);
+  });
+  // Hooks are unconditional: a missing provider reads one and ignores it.
+  const rewind = useCapabilities(provider ?? "claude").rewind;
+  return provider != null && rewind;
+}
 
 /** Busy is read from the store here, not passed in: it changes twice a turn,
  *  and a prop would re-render every committed row. */
@@ -29,9 +45,10 @@ export const User = memo(function User({
   actions?: QuestionActions;
 }) {
   const busy = useHarnessStore((s) => s.live[item.thread_id]?.running ?? false);
+  const rewinds = useRewinds(item);
   const text = item.content ?? "";
-  const edit = busy ? undefined : actions?.edit;
-  const rewind = busy ? undefined : actions?.rewind;
+  const edit = busy || !rewinds ? undefined : actions?.edit;
+  const rewind = busy || !rewinds ? undefined : actions?.rewind;
   return (
     <QuestionBubble
       msgId={item.id}
@@ -70,7 +87,7 @@ export const Reply = memo(function Reply({
   // Null for every committed reply, so none re-renders per token.
   const streamed = useHarnessStore((s) => (stream ? (s.live[item.thread_id]?.streaming ?? "") : null));
   const text = streamed ?? item.content ?? "";
-  const retry = actions?.retry;
+  const retry = useRewinds(asked) ? actions?.retry : undefined;
   const settled = role !== "provisional";
   const widgetRow = useMemo(() => (stream ? null : { thread: item.thread_id, row: item.id }), [stream, item.thread_id, item.id]);
   const widgetStream = useMemo(
