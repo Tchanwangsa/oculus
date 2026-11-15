@@ -18,6 +18,8 @@ export * from "./reads";
 export * from "./runs";
 export * from "./switching";
 export * from "./threadStatus";
+export * from "./requests";
+export * from "./permissionModes";
 export * from "./announce";
 export * from "./usageLimit";
 export * from "./commands";

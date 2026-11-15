@@ -4,6 +4,7 @@ import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { CLI_ICON, ErrorRow, RowShell, ThinkingRow, ToolRow, TOOL_ICON } from "./WorkRow";
 import { Compacted, Continued, DeliveryNotice, FoldedReply, Reply, Stopped, Unprompted, User } from "./Messages";
 import { PermissionCard } from "./PermissionCard";
+import { RequestRow } from "./request/RequestRow";
 import { bundleLabel, type ReplyRole } from "./rows";
 import type { QuestionActions } from "./types";
 
@@ -71,6 +72,8 @@ export const Item = memo(function Item({
       return <Compacted />;
     case "permission":
       return <PermissionCard item={item} actionable={!!latest} onFollowUp={actions?.followUp} />;
+    case "request":
+      return <RequestRow item={item} />;
   }
 });
 

@@ -10,16 +10,19 @@ import { includeId, pageEarlier, settleFrom, windowStart, type From } from "./ro
  * Mounts the newest rows of a thread (`rowWindow.ts`) and earlier pages as a
  * sentinel above them nears the scroller's top; `useStickToBottom` holds the
  * view still as they land. Keyed by thread: a tab's `Timeline` outlives a
- * thread switch. `rootRef` takes `expandWithin` requests (find, Select All, a
+ * thread switch. `keep` names an item whose row must stay mounted (a
+ * request waiting on the student). `rootRef` takes `expandWithin` requests (find, Select All, a
  * rail jump), and once expanded a thread stays expanded.
  */
-export function useRowWindow(rows: ViewRow[], threadId: number | null) {
+export function useRowWindow(rows: ViewRow[], threadId: number | null, keep: number | null = null) {
   const [win, setWin] = useState<{ thread: number | null; from: From | undefined }>({
     thread: threadId,
     from: undefined,
   });
   const stored = win.thread === threadId ? win.from : undefined;
-  const from = settleFrom(rows, stored);
+  // `keep` (a waiting request's row) is always mounted, however far up.
+  const settled = settleFrom(rows, stored);
+  const from = keep != null && settled != null ? includeId(rows, settled, keep) : settled;
   // Adjusting state while rendering: React re-renders before committing.
   if (win.thread !== threadId || from !== stored) setWin({ thread: threadId, from });
   const start = windowStart(rows, from);

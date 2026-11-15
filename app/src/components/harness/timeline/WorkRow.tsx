@@ -35,6 +35,7 @@ import {
   latestThought,
   parseToolMeta,
   providerLabel,
+  reviewView,
   summariseOculusCli,
   thoughtLabel,
   toolVerb,
@@ -327,6 +328,8 @@ export const ToolRow = memo(function ToolRow({
   // A plain command is its own label; the detail is then its output alone.
   const label = !cli && command ? command : undefined;
   const lead = label ? undefined : command ?? (entries.length > 0 ? entries.map(([k, v]) => `${k}: ${v}`).join("\n") : undefined);
+  // In Auto the CLI's reviewer decided this call; said quietly, never asked.
+  const review = reviewView(meta.review);
   return (
     <RowShell
       icon={cli ? CLI_ICON[cli.icon] : TOOL_ICON[kind]}
@@ -335,15 +338,23 @@ export const ToolRow = memo(function ToolRow({
       em={label ? undefined : cli ? cli.em : (item.content ?? undefined)}
       live={!!cli && !done}
       dim={dim && done}
-      expandable={entries.length > 0 || output.length > 0}
+      expandable={entries.length > 0 || output.length > 0 || !!review}
       trailing={
-        cli && !done ? null : !done ? (
-          <CircleNotch size={12} className="shrink-0 animate-spin" />
-        ) : failed ? (
-          <span className="shrink-0 text-[11px] text-destructive">failed</span>
-        ) : null
+        <>
+          {review && (
+            <span className={cn("shrink-0 text-[11px]", review.tone === "danger" ? "text-destructive" : "text-muted-foreground")}>
+              {review.label}
+            </span>
+          )}
+          {cli && !done ? null : !done ? (
+            <CircleNotch size={12} className="shrink-0 animate-spin" />
+          ) : failed && !review ? (
+            <span className="shrink-0 text-[11px] text-destructive">failed</span>
+          ) : null}
+        </>
       }
     >
+      {review && <ReviewNote review={review} />}
       {picture ? (
         <ReadPicture path={picture} onFail={() => setPictureFailed(true)} />
       ) : lead || output ? (
@@ -352,6 +363,19 @@ export const ToolRow = memo(function ToolRow({
     </RowShell>
   );
 });
+
+/** The reviewer's decision, opened: who decided, the risk it saw, why. */
+function ReviewNote({ review }: { review: NonNullable<ReturnType<typeof reviewView>> }) {
+  return (
+    <div className="mb-1.5 text-[11px] leading-relaxed text-muted-foreground" data-selectable>
+      <p className={cn(review.tone === "danger" && "text-destructive")}>
+        {[review.label, review.risk].filter(Boolean).join(" · ")}
+        {" — you were not asked (Auto)"}
+      </p>
+      {review.rationale && <p className="break-words">{review.rationale}</p>}
+    </div>
+  );
+}
 
 /** The thought itself, opened: rendered markdown under the row's label
  *  (past the 14px icon and its gap), with no rule beside it. */

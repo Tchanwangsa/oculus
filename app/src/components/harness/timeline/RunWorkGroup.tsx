@@ -3,9 +3,11 @@ import { flushSync } from "react-dom";
 import { CaretRight } from "@phosphor-icons/react";
 import { EXPANDABLE, onExpand } from "@/lib/ui/expandable";
 import { cn } from "@/lib/utils";
+import { awaitsApproval } from "@/lib/harness";
 import { chooseFold, foldChoice } from "@/stores/chat/runFolds";
+import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { Bundle, Item } from "./ItemRows";
-import { Working } from "./Working";
+import { WAITING, Working } from "./Working";
 import { foldFindText, foldLabel, foldMatches, foldOpens, foldRows, type WorkFold } from "./rows";
 
 /**
@@ -19,6 +21,8 @@ import { foldFindText, foldLabel, foldMatches, foldOpens, foldRows, type WorkFol
 export const RunWorkGroup = memo(
   function RunWorkGroup({ fold }: { fold: WorkFold }) {
     const live = fold.state === "running";
+    // A request of this run waits on the student: the run is not working.
+    const waiting = useHarnessStore((s) => live && awaitsApproval(s.requests[fold.thread], fold.run));
     const [chosen, setChosen] = useState(() => foldChoice(fold.thread, fold.run));
     const [found, setFound] = useState(false);
     const open = found || (chosen ?? foldOpens(fold.state));
@@ -63,7 +67,7 @@ export const RunWorkGroup = memo(
           >
             {/* Steady while the run works: only its live step shimmers. */}
             <span className="min-w-0 truncate tabular-nums">
-              {live ? <Working since={fold.startedMs} /> : foldLabel(fold)}
+              {waiting ? WAITING : live ? <Working since={fold.startedMs} /> : foldLabel(fold)}
             </span>
             <CaretRight
               size={11}

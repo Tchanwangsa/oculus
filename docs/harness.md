@@ -29,6 +29,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
 | Provider table (`PROVIDERS`), platform capabilities, types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/availability.ts`, `app/src/lib/harness/` |
 | What an agent asks mid-turn: the request table, its live routes, the protected-path check, the `Respond` and permission-mode commands | `app/src-tauri/src/harness/requests/`, `app/src-tauri/src/harness/core/decide/respond.rs`, `app/src-tauri/src/harness/app/consumer/requests.rs`, `app/src-tauri/src/harness/app/requests.rs` |
+| …their frontend: the row, the answer bar, the mode control, what each shows | `app/src/components/harness/timeline/request/`, `app/src/components/harness/composer/RequestBar.tsx`, `app/src/components/harness/composer/PermissionModeControl.tsx`, `app/src/lib/harness/requests.ts`, `app/src/lib/harness/permissionModes.ts` |
 | A thread's selection, what a send does to its session (`decide_transition`), and the context handoff | `app/src-tauri/src/harness/core/decide/select.rs`, `app/src-tauri/src/harness/manager/transition.rs`, `app/src-tauri/src/harness/handoff/`, `app/src-tauri/src/harness/store/bindings.rs`, `app/src-tauri/src/harness/store/switching.sql` |
 | What each bridge can do (Stop, rewind, steering, switching), declared in Rust and read by the webview | `app/src-tauri/src/harness/providers/capabilities.rs`, `app/src/lib/harness/capabilities.ts`, `app/src/hooks/agents/useCapabilities.ts` |
 | Live state and event folding | `app/src/stores/chat/harnessStore.ts`, `app/src/hooks/backend/useBackendEvents.ts` |
@@ -896,7 +897,10 @@ writes it into the draft once and drops it from the route.
   `threadStatus` in `app/src/lib/harness/threadStatus.ts`), first match
   wins: Approval (warning), Input (brand), Working (a brand spinner), Failed
   (destructive: the thread's last run failed, until its next one), Done
-  (success: unread). Approval and Input are not raised yet. The pill sits at
+  (success: unread). Approval is a request of the thread waiting on the
+  student (`useThreadRowStatus`, from `harnessStore.requests`); only a thread
+  whose rows are loaded has its requests, since the thread list carries no
+  "a request waits" flag. Input is not raised yet. The pill sits at
   a thread row's right and folds with the label; folded, the provider mark's
   corner dot takes its tone. The recent list shows it in place of the age.
 - **Unread** is `settled_at > viewed_at`. `settled_at` is read with the list
@@ -1609,6 +1613,55 @@ the mode.
 `harness_load` returns the thread's requests (`requests`), and the webview
 keeps them per thread (`requests` in `harnessStore`), replaced by each
 `request_opened` and `request_updated`.
+
+### In the chat
+
+What the student sees is decided in `app/src/lib/harness/requests.ts` and
+`permissionModes.ts` (tested without a DOM) and drawn by
+`components/harness/timeline/request/` and two composer pieces.
+
+- **The row** (`RequestRow`, the `request` item) reads its request from the
+  store. While it waits it is a card: "Codex wants to run a command" (or
+  to change files, more access, the network; a child agent's request names
+  it, "Codex's subagent child_probe …"), then per action the whole command
+  with its folder, each file with its kind and diff (`DiffBlock`, Show more
+  past 240px), or one line per access asked for, the agent's reason, and
+  "Runs outside the sandbox" only where the payload's `outsideSandbox` is
+  true. Settled, it is one work-row line: Approved, Always allowed,
+  Declined, Expired or Cancelled with what was asked, and under it Rust's
+  reason, an option's scope, "Sending your answer…" or the delivery
+  uncertain warning; opened, the whole request. It is not work, so
+  `buildRows` keeps it outside the run's fold, and the oldest waiting one's
+  row is always inside the mounted window (`useRowWindow`'s `keep`).
+- **The answer** is given beside the composer (`RequestBar`, in `Composer`
+  and the lecture dock's box): what is asked in one line, "1 of 2" when
+  more wait, Decline and Approve, and an option that reaches past the call
+  (Codex's "Always allow this exact command") under More with its scope.
+  It answers the oldest waiting request; a click sends one
+  `harnessRespond` and the bar is inert until it returns. A refusal is
+  Rust's sentence under the bar. A delivery that failed comes back pending
+  with "Your answer did not reach Codex. Answer again." on its row.
+- **While a request waits** the run's fold and the live tail read "Waiting
+  for approval", steady, where they would say "Working for 8s"; the
+  announcer says "Needs approval" and the sidebar shows Approval. The box
+  stays usable: its hint says a message waits its turn, and a send queues
+  behind the request as any send during a run does. There is no
+  decline-with-message: Rust refuses feedback.
+- **The mode control** (`PermissionModeControl`, after the model picker,
+  for an open thread only) shows the chat's mode and opens to Ask, Auto
+  and Don't ask, each with its line. Where the bridge has no reviewer
+  (`autoReview` false) Auto says it asks as Ask; where it has no
+  `approvals` the menu says the agent cannot ask yet. A pick is saved with
+  `harnessSetPermissionMode`; Rust's refusal (a request waiting) shows at
+  the top of the open menu.
+- **Auto's evidence**: a tool row whose meta has a `review` says "Reviewer
+  approved" or "Reviewer denied" quietly at its right, and opened, the risk
+  and the rationale. It never becomes a request.
+- A reload reads the requests with the rows, so a live request comes back
+  as a waiting row the bar answers, and one the restart ended as Expired
+  with "The app was closed."
+- Antigravity's print-mode refusal is still its own `permission` row
+  (`PermissionCard`); it does not go through requests.
 
 ### Codex asks over its callbacks
 

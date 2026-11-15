@@ -22,3 +22,7 @@ export function enterAction(
   if (e.key !== "Enter" || e.shiftKey) return null;
   return unscoped ? "hold" : "send";
 }
+
+/** The box's hint while a request waits for an answer above it: the box
+ *  stays usable, and a send queues behind the request. */
+export const WAITING_PLACEHOLDER = "Waiting for your approval… a message waits its turn";

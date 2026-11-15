@@ -1,6 +1,6 @@
 import { memo, useMemo, useState } from "react";
 import { copyAsMarkdown, dragAsMarkdown } from "@/lib/markdown/selection";
-import type { HarnessItem, Provider } from "@/lib/harness";
+import { waitingRequests, type HarnessItem, type Provider } from "@/lib/harness";
 import { useSignInStatus } from "@/hooks/agents/useSignInStatus";
 import { ANCHOR_ROW } from "@/hooks/ui/useStickToBottom";
 import { EXPANDABLE } from "@/lib/ui/expandable";
@@ -84,9 +84,14 @@ export const Timeline = memo(function Timeline({
     return { key: replyKey(at.run, at.ordinal), item };
   }, [streamsWidget, threadId, items]);
   const rows = useMemo(() => buildRows(items, running, { runs, streaming }), [items, running, runs, streaming]);
+  // The oldest waiting request's row: always mounted (`useRowWindow`).
+  const waitingRow = useHarnessStore((s) => (threadId == null ? null : waitingRequests(s.requests[threadId])[0]?.item_id ?? null));
   const last = rows[rows.length - 1];
   // A working fold already says so; the tail's "Working…" would repeat it.
-  const folding = last?.kind === "work" && last.state === "running";
+  // A waiting request's row sits below its run's fold, which then says
+  // "Waiting for approval" for both.
+  const folding = (last?.kind === "work" && last.state === "running") ||
+    (waitingRow != null && rows.some((r) => r.kind === "work" && r.state === "running"));
   // Only the newest refusal is still a question; the ones above it are what
   // happened. Allowing is idempotent, so this is tidiness, not safety.
   const latestPermission = useMemo(() => {
@@ -95,7 +100,7 @@ export const Timeline = memo(function Timeline({
   }, [items]);
   // Every view of a thread (a Chat tab, the lecture dock) draws it here.
   useThreadViewed(threadId);
-  const { start, rootRef, sentinelRef } = useRowWindow(rows, threadId);
+  const { start, rootRef, sentinelRef } = useRowWindow(rows, threadId, waitingRow);
   useRowVisibility(rootRef, threadId);
   const shown = start ? rows.slice(start) : rows;
   return (

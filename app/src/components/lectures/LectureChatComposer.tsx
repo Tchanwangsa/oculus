@@ -15,13 +15,17 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ModelPicker, type PickerProvider } from "@/components/harness/composer/ModelPicker";
 import { UsageMeter } from "@/components/harness/composer/UsageMeter";
 import { ThreadBanners } from "@/components/harness/composer/ThreadBanners";
+import { RequestBar } from "@/components/harness/composer/RequestBar";
+import { PermissionModeControl } from "@/components/harness/composer/PermissionModeControl";
+import { WAITING_PLACEHOLDER } from "@/components/harness/composer/sendGate";
 import { useRunControls } from "@/components/harness/composer/useRunControls";
 import { AttachmentStrip } from "@/components/harness/attachments/AttachmentStrip";
 import { useAttachments } from "@/hooks/agents/useAttachments";
-import type { Provider, RateWindow, ThreadUsage } from "@/lib/harness";
+import { awaitsApproval, type Provider, type RateWindow, type ThreadUsage } from "@/lib/harness";
 import { fmtClockSecs } from "@/lib/lectures/media";
 import { cn } from "@/lib/utils";
 import { useDraftStore } from "@/stores/chat/draftStore";
+import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { useTabActive } from "@/components/tabs/TabContext";
 
 /**
@@ -173,6 +177,9 @@ export function LectureChatComposer({
   const history = usePromptHistory({ threadId, input: ref, text });
   const stash = useComposerStash({ input: ref, text, att });
 
+  // A request waits on the student: a message sent now queues behind it.
+  const asking = useHarnessStore((s) => threadId != null && awaitsApproval(s.requests[threadId]));
+
   /** Whether there is a message at all: words, pastes, pictures. */
   const ready = text.trim().length > 0 || att.items.length > 0 || att.texts.length > 0;
   const controls = useRunControls({ threadId, running, hasDraft: ready, ready, writing: att.writing, onStop, onResume });
@@ -223,6 +230,7 @@ export function LectureChatComposer({
         onResume={onResume}
         onForceStop={onForceStop}
       />
+      <RequestBar threadId={threadId ?? null} />
       {stash.menu.entries.length > 0 && (
         <div className="flex justify-end px-0.5">
           <StashMenu {...stash.menu} />
@@ -274,7 +282,7 @@ export function LectureChatComposer({
               void send();
             }
           }}
-          placeholder={running ? "Working…" : LECTURE_PLACEHOLDER}
+          placeholder={asking ? WAITING_PLACEHOLDER : running ? "Working…" : LECTURE_PLACEHOLDER}
         />
         {dictation.busy ? <DictationBar dictation={dictation} /> : <div className="flex items-center gap-1">
           <ModelPicker
@@ -292,6 +300,7 @@ export function LectureChatComposer({
             open={tools.modelOpen}
             onOpenChange={tools.setModelOpen}
           />
+          <PermissionModeControl threadId={threadId ?? null} provider={provider} />
           <div className="ml-auto flex shrink-0 items-center gap-1">
             <UsageMeter usage={usage} rateLimits={rateLimits} />
             <MomentChip atRef={atRef} on={moment} onToggle={() => onMoment(!moment)} />
