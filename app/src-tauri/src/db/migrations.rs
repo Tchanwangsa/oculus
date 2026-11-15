@@ -1050,6 +1050,61 @@ mod tests {
         );
     }
 
+    /// 58 applies over chats at 57: each asks (`ask`), and a request can
+    /// name their runs, attempts, bindings and rows, and goes with its chat.
+    #[tokio::test]
+    async fn existing_chats_ask_and_take_requests() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let (before, after): (Vec<_>, Vec<_>) = super::all()
+            .into_iter()
+            .partition(|migration| migration.version < 58);
+        for migration in before {
+            sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+        }
+        sqlx::raw_sql(
+            "INSERT INTO harness_threads (id, provider, status) VALUES
+               (1, 'codex', 'idle'), (2, 'claude', 'idle');
+             INSERT INTO harness_bindings (id, thread_id, provider, native_session) VALUES
+               (10, 1, 'codex', 's1');
+             INSERT INTO harness_runs (id, thread_id, ordinal, origin, binding_id, execution_status)
+               VALUES (20, 1, 1, 'student', 10, 'running');
+             INSERT INTO harness_attempts (id, run_id, ordinal, reason, status)
+               VALUES (30, 20, 1, 'initial', 'running');
+             INSERT INTO harness_items (id, thread_id, kind) VALUES (40, 1, 'user');",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for migration in after {
+            sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+        }
+        let modes: Vec<String> =
+            sqlx::query_scalar("SELECT permission_mode FROM harness_threads ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(modes, ["ask", "ask"]);
+        sqlx::raw_sql(
+            "PRAGMA foreign_keys = ON;
+             INSERT INTO harness_requests (thread_id, run_id, attempt_id, binding_id, item_id,
+                 provider, kind, action, payload, options, responder, generation, native_ref)
+               VALUES (1, 20, 30, 10, 40, 'codex', 'approval', 'command', '{}', '[]', 'live', 1, '0');
+             DELETE FROM harness_threads WHERE id = 1;",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM harness_requests")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
+    }
+
     /// 55 adds `viewed_at`, stamping threads that already exist as seen
     /// without touching the `updated_at` that orders the list.
     #[tokio::test]
