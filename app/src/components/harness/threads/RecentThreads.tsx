@@ -6,15 +6,15 @@ import type { Subject } from "@/lib/db";
 import { displayCode, displayName, sqliteUtcToMs } from "@/lib/format/format";
 import { chatHref, getThreadPreviews, PROVIDERS, type HarnessThread } from "@/lib/harness";
 import { relativeTime } from "@/lib/activity/recents";
-import { StatusPill, threadRowStatus } from "./StatusPill";
+import { runStartedMs, StatusPill, threadRowStatus } from "./StatusPill";
 
 /** Rows shown; the nav column lists every thread. */
 const SHOWN = 3;
 
 /**
  * Bare `/chat`'s way back into a conversation: the latest threads above the
- * empty composer, each with its subject (or General), age and last reply on
- * one muted line. `threads` is the store's list, newest first.
+ * empty composer, each with its subject (or General), age and newest message
+ * (either side's) on one muted line. `threads` is the store's list, newest first.
  */
 export const RecentThreads = memo(function RecentThreads({
   threads,
@@ -115,7 +115,7 @@ function Row({
               )}
             </span>
             {status ? (
-              <StatusPill status={status} />
+              <StatusPill status={status} since={status === "working" ? runStartedMs(t) : null} />
             ) : (
               ms != null && (
                 <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{relativeTime(ms)}</span>

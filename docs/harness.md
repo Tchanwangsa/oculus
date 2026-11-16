@@ -862,30 +862,60 @@ writes it into the draft once and drops it from the route.
   empty timeline.
 - A route naming a thread missing from the list walks back to bare `/chat` —
   only after the list has loaded, or a restored tab drops its thread.
-- The conversations column (`ThreadList`) is a `SideNav`, the subject page's
-  column ([ui.md](./ui.md)): New thread on top, lit while no thread is open,
-  then threads grouped by subject. It resizes, and ⌘⌥B or the toggle in the
-  page header beside the title (`ChatPage` owns the panel state) folds it
-  away entirely. The chord acts only in the tab in front, since the subject
-  column answers it too. Its resize handle goes with it, so it can't clash with a
-  side panel's; the toggle or ⌘⌥B brings it back.
+- The conversations column (`ThreadList`, its bodies in `threads/list/`) is
+  a `SideNav`, the subject page's column ([ui.md](./ui.md)), 284px by
+  default. Its header row is the view switch, two tabs with icons (Status,
+  pulse; Subject, book) remembered per device (`oculus-chat-list-view`),
+  and the new-chat button at its right, lit while no thread is open. It
+  resizes, and ⌘⌥B or the toggle in the page header beside the title
+  (`ChatPage` owns the panel state) folds it away entirely. The chord acts
+  only in the tab in front, since the subject column answers it too. Its
+  resize handle goes with it, so it can't clash with a side panel's; the
+  toggle or ⌘⌥B brings it back.
+- **Status view** (T3's frame, `StatusBody`): every thread not at work,
+  newest first by `updated_at` with no headings (Approval, Question and
+  Failed in place by time; nothing jumps to the top), then "Working" with
+  its count, folding, in a `margin-top: auto` block of `SideNav`'s `fill`
+  column, so it rests at the column's foot while the list is short and
+  follows it when long. Its fold is kept with the subject groups' folds.
+  **Subject view** (`SubjectBody`): threads grouped by subject, groups in
+  dragged order, each folding, five rows then Show more; a group header is
+  the subject's glyph and short code, so its rows drop their subject line.
+- **A thread row is three lines** (`ThreadRow`): the subject's glyph and
+  `displayCode` (General for none) with the status or the age at the right
+  ("25m", `shortAge`); the title, with the lecture glyph; and the newest
+  message from either side, flattened, with the provider mark at the
+  right. The Subject view moves the right slot onto the title's line. Line
+  three is the thread's question while it asks one (`getPendingQuestions`),
+  and while it works, what the run is doing if a view holds its rows
+  (`activityLine`: "Reading week-7.pdf", "Thinking"). Previews are one read
+  for the list (`useThreadPreviews`), redone when a listed thread's
+  `updated_at` or waiting-question count changes, never per token. A
+  title is bright and medium while the thread is Done, Approval, Question
+  or Failed, muted otherwise. Hover shows a ⋯ menu (open in a new tab,
+  delete, which arms the row's inline confirm). While the column folds,
+  the subject glyph stays longest with the status dot on its corner.
 - Bare `/chat` is a new thread: the composer docked at the bottom as in a
   thread, and above it the headline that names the subject (`DraftHero`) over
   the three latest threads (`RecentThreads`) — provider mark, title, a chip
-  naming its subject or General, age, and the last reply flattened to one
+  naming its subject or General, age, and the newest message flattened to one
   muted line (`getThreadPreviews`, one read for the list). The list stays
   because it is the empty chat's only way back to a recent thread. The page
   has its own scroller, since a thread's follows its bottom.
 - **Each listed thread shows one status** (`StatusPill` in `threads/`, from
   `threadStatus` in `app/src/lib/harness/threadStatus.ts`), first match
-  wins: Approval (warning), Input (brand), Working (a brand spinner), Failed
+  wins: Approval (warning), Question (warning, question-mark glyph), Working
+  (brand, T3's dashed ring turning slowly, still under reduced motion, and
+  the run's elapsed time ticking in its own leaf, `Elapsed`), Failed
   (destructive: the thread's last run failed, until its next one), Done
-  (success: unread). Approval is a request of the thread waiting on the
+  (success: unread). Brand means Working only. The timer counts from
+  `run_started_at`, the run in flight's start read with the list and kept
+  by the store's run events; without it the pill says only "Working". Approval is a request of the thread waiting on the
   student: the row's `pending_requests`, read with the list and kept by
   each request event's `waiting` ([Requests](#requests)), so a thread never
-  opened shows it too. Input is not raised yet. The pill sits at
-  a thread row's right and folds with the label; folded, the provider mark's
-  corner dot takes its tone. The recent list shows it in place of the age.
+  opened shows it too. The pill takes the age's place at a thread row's
+  right; folding, the subject glyph's corner dot takes its tone. The recent
+  list shows it in place of the age too.
 - **Unread** is `settled_at > viewed_at`. `settled_at` is read with the list
   (the latest `harness_runs.ended_at`) and set on `turn_finished`; `viewed_at`
   (migration 55) is written by `harness_thread_viewed`
@@ -1521,9 +1551,10 @@ The consumer then emits `DeliveryNotice` (with its row) and `RunSettled`
 (answer id, work ids, delivery, the run's status and its stored
 `started_at`/`ended_at`) before the terminal's envelope, and only then
 releases the queue. The webview sets `display_role` and the thread's run
-(`harnessStore.runs`) from `RunSettled`. Previews (`getThreadPreviews`) and
-thread naming (`claim_naming`) read a thread's newest answer: a run's
-`answer_item_id`, or a reply with no run. One-off turns and `run_once` jobs,
+(`harnessStore.runs`) from `RunSettled`. Thread naming (`claim_naming`)
+reads a thread's newest answer: a run's `answer_item_id`, or a reply with no
+run; previews (`getThreadPreviews`) take that or the student's newest
+message, whichever is newer. One-off turns and `run_once` jobs,
 which have no rows, pick from their replies by the same rule, and the same
 source again replaces its text.
 
@@ -1831,7 +1862,7 @@ the change is saved (`store::waiting`). The thread list reads the same
 count as `pending_requests` (`reads.ts`) and takes each event's `waiting`
 for every listed thread, open or not, without reordering the list.
 `waiting_questions` is the question subset; the list reads it as
-`pending_questions`, so questions show Input and approvals retain priority.
+`pending_questions`, so questions show Question and approvals retain priority.
 
 ### Questions keep their native keys
 
@@ -1949,7 +1980,7 @@ What the student sees is decided in `app/src/lib/harness/requests.ts`,
   for approval", or "Waiting for your answer" for a question, steady, where
   they would say "Working for 8s" (`runWaitingOn`, an approval first); the
   announcer says "Needs approval" or "Needs your input" and the sidebar
-  shows Approval or Input. While only an approval waits the box stays
+  shows Approval or Question. While only an approval waits the box stays
   usable. Where a send would steer, it declines the request and steers
   with the words ([Steering from the composer](#steering-from-the-composer)); elsewhere it
   queues behind the request. `harnessRespond` carries no feedback: Rust
@@ -2754,7 +2785,7 @@ it, because every CLI binds appended instructions at session start. It is not
 a sandbox; it appends the course folder and `agents/memories/<CODE>/`.
 
 **A new Chat thread asks for it in a dialog** (`threads/NewThreadDialog.tsx`),
-which New thread in the conversations column opens. It is the ⌘K palette's
+which the new-chat button in the conversations column opens. It is the ⌘K palette's
 frame over a search field and two lists: General and this term's subjects
 under "New thread in", then past terms' (newest first) under "Past subjects",
 matched by code and name. A row is a `SubjectIcon`, the short code and the

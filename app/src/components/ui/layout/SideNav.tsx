@@ -30,6 +30,7 @@ export function SideNav({
   width,
   collapsed = false,
   animate = false,
+  fill = false,
   children,
   "aria-label": ariaLabel,
 }: {
@@ -39,6 +40,9 @@ export function SideNav({
   collapsed?: boolean;
   /** Ease width changes (a fold); off while dragging. */
   animate?: boolean;
+  /** Children in a flex column at least the scroller's height, so a section
+   *  with `margin-top: auto` sits at the bottom while the list is short. */
+  fill?: boolean;
   children: ReactNode;
   "aria-label"?: string;
 }) {
@@ -65,7 +69,7 @@ export function SideNav({
         className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 pt-1 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {/* One wrapper: the fade's ResizeObserver watches the first child. */}
-        <div>{children}</div>
+        <div className={cn(fill && "flex min-h-full flex-col")}>{children}</div>
       </div>
     </nav>
   );

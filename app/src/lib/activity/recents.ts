@@ -62,14 +62,22 @@ export function recordRecent(
 
 /** "just now" / "2h ago" / "Aug 12". */
 export function relativeTime(ts: number): string {
-  const secs = Math.floor((Date.now() - ts) / 1000);
-  if (secs < 60) return "just now";
+  const age = shortAge(ts);
+  if (age === "now") return "just now";
+  // Past a week the age is a date, which takes no "ago".
+  return Date.now() - ts < 7 * 86_400_000 ? `${age} ago` : age;
+}
+
+/** The same age without "ago", for a narrow column: "now" / "2h" / "Aug 12". */
+export function shortAge(ts: number, now = Date.now()): string {
+  const secs = Math.floor((now - ts) / 1000);
+  if (secs < 60) return "now";
   const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60) return `${mins}m`;
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
+  if (days < 7) return `${days}d`;
   return new Date(ts).toLocaleDateString(displayLocale, {
     day: "numeric",
     month: "short",

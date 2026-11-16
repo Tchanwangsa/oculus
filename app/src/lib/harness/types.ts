@@ -163,6 +163,9 @@ export interface HarnessThread {
   pending_requests?: number;
   /** The question subset of pending_requests, including message responders. */
   pending_questions?: number;
+  /** When the run in flight started, read with the list (`reads.ts`) and
+   *  kept by the store's run events; null while none is. */
+  run_started_at?: string | null;
 }
 
 /** `ask` shows each request; `quiet` ("Don't ask") declines without one;

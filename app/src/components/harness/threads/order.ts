@@ -1,11 +1,16 @@
 export const COLLAPSED_KEY = "oculus-chat-groups-collapsed";
 export const ORDER_KEY = "oculus-chat-groups-order";
+/** The column's view, Status or Subject, beside its width and folds. */
+export const VIEW_KEY = "oculus-chat-list-view";
+/** The Status view's Working section, folded with the subject groups (whose
+ *  keys are subject ids and "general", so this cannot collide). */
+export const WORKING_FOLD = "status:working";
 
 /** The column's width bounds; folded, it is gone entirely. `ChatPage` owns the
  *  panel so its header can hold the fold toggle. */
 export const THREAD_LIST_PANEL = {
-  defaultWidth: 224,
-  minWidth: 168,
+  defaultWidth: 284,
+  minWidth: 200,
   maxWidth: 420,
   collapsedWidth: 0,
   storageKey: "oculus-chat-list-width",

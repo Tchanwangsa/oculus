@@ -440,6 +440,9 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           threads[i] = { ...threads[i], ...patch, updated_at: new Date().toISOString() };
         }
       };
+      // The list's Working timer: a run already in flight (a steer, a queued
+      // message going out under the same spinner) keeps its start.
+      const runStarted = () => threads.find((t) => t.id === threadId)?.run_started_at ?? new Date().toISOString();
       // The list's Approval and Input, for every thread, loaded or not; it does not
       // reorder the list.
       const waiting = (count: number, questions = 0) => {
@@ -459,7 +462,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
             setRun({ id: env.runId, active_attempt_id: env.attemptId ?? null, status: "running", delivery: "unknown", answer_item_id: null, started_ms: Date.now(), ended_ms: null });
           }
           live = { ...prev, running: true };
-          touchThread({ status: "running" });
+          touchThread({ status: "running", run_started_at: runStarted() });
           break;
         case "continued":
           push(rowFrom(env, "continuation", event.text, { proposal: event.proposal }));
@@ -467,7 +470,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
             setRun({ id: env.runId, active_attempt_id: env.attemptId ?? null, status: "running", delivery: "unknown", answer_item_id: null, started_ms: Date.now(), ended_ms: null });
           }
           live = { ...prev, running: true };
-          touchThread({ status: "running" });
+          touchThread({ status: "running", run_started_at: runStarted() });
           break;
         case "selected":
           touchThread({ provider: event.provider, model: event.model, effort: event.effort });
@@ -569,11 +572,11 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         case "unprompted_turn":
           push(rowFrom(env, "unprompted", "", { after: event.after }));
           live = { ...prev, running: true };
-          touchThread({ status: "running" });
+          touchThread({ status: "running", run_started_at: runStarted() });
           break;
         case "turn_started":
           live = { ...prev, running: true };
-          touchThread({ status: "running" });
+          touchThread({ status: "running", run_started_at: runStarted() });
           break;
         case "assistant_message":
           push(rowFrom(env, "assistant", event.text));
@@ -689,6 +692,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           touchThread({
             status: event.status === "failed" ? "error" : more ? "running" : "idle",
             settled_at: new Date().toISOString(),
+            run_started_at: more ? new Date().toISOString() : null,
           });
           break;
         }
@@ -707,7 +711,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         case "exited":
           if (prev.running) {
             live = { ...IDLE, ended: prev.ended };
-            touchThread({ status: "idle" });
+            touchThread({ status: "idle", run_started_at: null });
           }
           break;
       }

@@ -32,7 +32,7 @@ export function threadStatus(i: ThreadStatusInputs): ThreadStatus | null {
 
 export const THREAD_STATUS_LABEL: Record<ThreadStatus, string> = {
   approval: "Approval",
-  input: "Input",
+  input: "Question",
   working: "Working",
   failed: "Failed",
   done: "Done",

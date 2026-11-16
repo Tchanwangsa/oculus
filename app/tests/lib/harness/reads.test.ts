@@ -1,15 +1,15 @@
 import { afterAll, expect, test } from "bun:test";
 import { Database as SQLite } from "bun:sqlite";
-import { previewsSql, THREADS_SQL } from "@/lib/harness/reads";
+import { flattenPreview, previewsSql, questionsSql, THREADS_SQL } from "@/lib/harness/reads";
 
 /** The columns the two reads touch, as the migrations leave them. */
 const sqlite = new SQLite(":memory:");
 sqlite.run(`CREATE TABLE harness_threads (id INTEGER PRIMARY KEY, title TEXT, updated_at TEXT NOT NULL DEFAULT '2026-11-15 00:00:00')`);
 sqlite.run(`CREATE TABLE harness_items (id INTEGER PRIMARY KEY, thread_id INTEGER, kind TEXT, content TEXT, run_id INTEGER)`);
 sqlite.run(`CREATE TABLE harness_runs (id INTEGER PRIMARY KEY, thread_id INTEGER, execution_status TEXT,
-  initiating_item_id INTEGER, answer_item_id INTEGER, ended_at TEXT)`);
+  initiating_item_id INTEGER, answer_item_id INTEGER, requested_at TEXT, started_at TEXT, ended_at TEXT)`);
 sqlite.run(`CREATE TABLE harness_requests (id INTEGER PRIMARY KEY, thread_id INTEGER, status TEXT NOT NULL DEFAULT 'pending',
-  responder TEXT NOT NULL DEFAULT 'live', kind TEXT NOT NULL DEFAULT 'approval')`);
+  responder TEXT NOT NULL DEFAULT 'live', kind TEXT NOT NULL DEFAULT 'approval', payload TEXT NOT NULL DEFAULT '{}')`);
 afterAll(() => sqlite.close());
 
 const all = <T,>(sql: string, bindings: number[]) => sqlite.query(sql.replace(/\$(\d+)/g, "?$1")).all(...bindings) as T[];
@@ -49,4 +49,37 @@ test("a detached question counts as Input and an ended question does not", () =>
     (3, 'question', 'pending', 'message'), (3, 'question', 'cancelled', 'not_resumable')`);
   const row = all<{ id: number; pending_requests: number; pending_questions: number }>(THREADS_SQL, [10]).find((t) => t.id === 3);
   expect(row).toMatchObject({ pending_requests: 1, pending_questions: 1 });
+});
+
+test("a preview is the newest message from either side: the student's question beats an older answer", () => {
+  sqlite.run(`INSERT INTO harness_threads (id, title) VALUES (20, 'asked again'), (21, 'answered last')`);
+  sqlite.run(`INSERT INTO harness_runs (id, thread_id, execution_status, initiating_item_id, answer_item_id) VALUES
+    (20, 20, 'completed', 200, 201), (21, 20, 'running', 202, NULL), (22, 21, 'completed', 210, 211)`);
+  sqlite.run(`INSERT INTO harness_items (id, thread_id, kind, content, run_id) VALUES
+    (200, 20, 'user', 'first question', 20), (201, 20, 'assistant', 'first answer', 20),
+    (202, 20, 'user', 'a follow-up', 21), (203, 20, 'assistant', 'commentary mid-run', 21),
+    (210, 21, 'user', 'why?', 22), (211, 21, 'assistant', 'because', 22), (212, 21, 'tool', 'ls', 22)`);
+  const previews = all<{ thread_id: number; content: string }>(previewsSql(2), [20, 21]);
+  expect(Object.fromEntries(previews.map((p) => [p.thread_id, p.content]))).toEqual({ 20: "a follow-up", 21: "because" });
+});
+
+test("a thread's question line is its newest waiting question's first question", () => {
+  const payload = (text: string) => JSON.stringify({ questions: [{ id: "a", text }, { id: "b", text: "second" }] });
+  sqlite.run(`INSERT INTO harness_requests (thread_id, kind, status, responder, payload) VALUES
+    (20, 'question', 'resolved', 'live', ?1), (20, 'question', 'pending', 'live', ?2), (21, 'question', 'pending', 'not_resumable', ?3)`,
+    [payload("answered already"), payload("Proof or intuition?"), payload("gone")]);
+  const rows = all<{ thread_id: number; content: string }>(questionsSql(2), [20, 21]);
+  expect(rows).toEqual([{ thread_id: 20, content: "Proof or intuition?" }]);
+});
+
+test("the list reads when the run in flight started, and nothing once none is", () => {
+  sqlite.run(`UPDATE harness_runs SET requested_at = '2026-11-15 05:00:00', started_at = '2026-11-15 05:00:02' WHERE id = 21`);
+  const rows = all<{ id: number; run_started_at: string | null }>(THREADS_SQL, [50]);
+  const started = Object.fromEntries(rows.map((t) => [t.id, t.run_started_at]));
+  expect(started[20]).toBe("2026-11-15 05:00:02");
+  expect(started[21]).toBeNull();
+});
+
+test("a preview reads as one plain line", () => {
+  expect(flattenPreview("## Plan\n- **Read** [week 7](/x.pdf)\n\n```py\nx\n```\nthen `run` it")).toBe("Plan Read week 7 then run it");
 });

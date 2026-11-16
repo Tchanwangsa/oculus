@@ -34,17 +34,24 @@ describe("threadRowStatus", () => {
 });
 
 describe("StatusPill", () => {
-  test("working is a brand spinner", () => {
+  test("working is a brand dashed ring, turning only when motion is welcome", () => {
     const html = renderToStaticMarkup(<StatusPill status="working" />);
     expect(html).toContain("text-brand");
-    expect(html).toContain("animate-spin");
+    expect(html).toContain("border-dashed");
+    expect(html).toContain("motion-safe:animate-");
     expect(html).toContain("Working");
+  });
+  test("working with a start shows its elapsed time; without one, only the word", () => {
+    const since = Date.now() - 64_000;
+    expect(renderToStaticMarkup(<StatusPill status="working" since={since} />)).toMatch(/Working<span class="tabular-nums">1m [45]s<\/span>/);
+    expect(renderToStaticMarkup(<StatusPill status="working" />)).not.toContain("tabular-nums");
   });
   test("each status takes its tone", () => {
     expect(renderToStaticMarkup(<StatusPill status="failed" />)).toContain("text-destructive");
     expect(renderToStaticMarkup(<StatusPill status="done" />)).toContain("text-success");
     expect(renderToStaticMarkup(<StatusPill status="approval" />)).toContain("text-warning");
-    expect(renderToStaticMarkup(<StatusPill status="input" />)).toContain("text-brand");
+    expect(renderToStaticMarkup(<StatusPill status="input" />)).toContain("text-warning");
+    expect(renderToStaticMarkup(<StatusPill status="input" />)).toContain("Question");
   });
 });
 
@@ -58,7 +65,7 @@ describe("Approval in the sidebar", () => {
   });
 });
 
-test("a question shows Input; an approval alongside it retains Approval priority", () => {
+test("a question shows Question; an approval alongside it retains Approval priority", () => {
   expect(threadRowStatus(thread({ pending_requests: 1, pending_questions: 1 }), true)).toBe("input");
   expect(threadRowStatus(thread({ pending_requests: 2, pending_questions: 1 }), true)).toBe("approval");
   expect(threadRowStatus(thread({ pending_requests: 1, pending_questions: 1 }), false)).toBe("input");
