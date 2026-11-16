@@ -960,6 +960,12 @@ INSERT OR IGNORE INTO task_tags (name, color, position) VALUES
             sql: include_str!("../harness/requests/requests.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 59,
+            description: "student answers to agent questions",
+            sql: include_str!("../harness/requests/questions.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

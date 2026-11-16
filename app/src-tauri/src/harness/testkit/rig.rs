@@ -655,7 +655,7 @@ impl Rig {
 pub(super) struct Recording {
     pub provider: Provider,
     pub frames: Vec<Value>,
-    expected: Vec<super::outbound::Expected>,
+    pub expected: Vec<super::outbound::Expected>,
     native_session: String,
 }
 

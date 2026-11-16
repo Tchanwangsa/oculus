@@ -1,0 +1,67 @@
+{
+  "provider": "codex",
+  "cli_version": "0.169.0",
+  "protocol": "app-server JSON-RPC experimental requestUserInput",
+  "model": "gpt-6.1-sol",
+  "capture_date": "2026-11-15",
+  "source": "codex/15-question-withdraw.jsonl lines 16-40; inbound frames",
+  "source_sha256": "5420c51874d95248028a40a416e1c0577c1ff41fc076c0d49b3455d7f736369c",
+  "redaction": "Inbound turn frames only. Home paths become /Users/student; scratch suffixes become XXXXXX. Expected outbound uses the production bridge's send envelope. Derived, not recorded: the probe redacted isSecret to a string; false is substituted as a non-secret test input, not evidence of its recorded value.",
+  "scenario": "codex-question-withdraw",
+  "evidence": "derived, not recorded",
+  "frames": 22,
+  "sha256": "e261a2dafa547ac469059ed18c320838e2f8a95cb8e6cc3a9146bb32abca6add",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1dd46-6743-7323-9cd5-c7154724a1ec",
+          "input": [
+            {
+              "type": "text",
+              "text": "Replay request",
+              "text_elements": []
+            }
+          ],
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "user",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": true,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+          }
+        }
+      },
+      "response": {
+        "turn": {
+          "id": "01a1dd46-6786-79f1-9f81-eb5df42fcfa6"
+        }
+      }
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "turn/interrupt",
+        "params": {
+          "threadId": "01a1dd46-6743-7323-9cd5-c7154724a1ec",
+          "turnId": "01a1dd46-6786-79f1-9f81-eb5df42fcfa6"
+        }
+      },
+      "response": {}
+    }
+  ],
+  "input": "../codex-question-withdraw.ndjson",
+  "native_session": "01a1dd46-6743-7323-9cd5-c7154724a1ec",
+  "permission_mode": "ask",
+  "settings": {
+    "question_answers": [],
+    "stop": true,
+    "derivation": "Derived, not recorded: the probe redacted isSecret to a string; false is substituted as a non-secret test input, not evidence of its recorded value."
+  }
+}

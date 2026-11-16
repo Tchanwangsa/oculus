@@ -19,6 +19,7 @@ mod matrix;
 pub(in crate::harness) mod outbound;
 mod pacing;
 mod projection;
+mod questions;
 mod queue;
 mod recovery;
 mod reload;

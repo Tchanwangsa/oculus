@@ -5,6 +5,7 @@ import type { Provider } from "./providers";
  *  what one bridge can do. Rust is the authority; nothing here is compiled in. */
 export interface Capabilities {
   provider: Provider;
+  questions: boolean;
   /** Stop ends the running turn. */
   interrupt: boolean;
   /** The CLI can drop a question from its own context: gates Rewind, Edit and Retry. */
@@ -38,7 +39,7 @@ export interface Capabilities {
 /** What a provider is taken to do until Rust has answered: nothing optional. */
 function unknown(provider: Provider): Capabilities {
   return {
-    provider, interrupt: false, rewind: false, sharedProcess: false, activeSteering: false, steerByRestart: false,
+    questions: false, provider, interrupt: false, rewind: false, sharedProcess: false, activeSteering: false, steerByRestart: false,
     modelSwitchInSession: false, providerHandoff: false, approvals: false, autoReview: false,
     sessionGrants: false, modeSwitchInSession: false,
   };

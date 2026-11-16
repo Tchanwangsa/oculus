@@ -1,0 +1,85 @@
+{
+  "provider": "codex",
+  "cli_version": "0.169.0",
+  "protocol": "app-server JSON-RPC experimental requestUserInput",
+  "model": "gpt-6.1-sol",
+  "capture_date": "2026-11-15",
+  "source": "codex/24-question-plan-blocking.jsonl lines 17-60; inbound frames",
+  "source_sha256": "7ca6124811da0126cef481f1211eb60e4891351b52990f2936e0ec9ecc6d9a07",
+  "redaction": "Inbound turn frames only. Home paths become /Users/student; scratch suffixes become XXXXXX. Expected outbound uses the production bridge's send envelope. ",
+  "scenario": "codex-question-typed-blocking",
+  "evidence": "recorded",
+  "frames": 40,
+  "sha256": "f4c5c1c756a36f4ff276397ba9251981982f023e55d5eefdfa61cc558330db43",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1dd47-7fc8-7461-b0e3-6358e0161b79",
+          "input": [
+            {
+              "type": "text",
+              "text": "Replay request",
+              "text_elements": []
+            }
+          ],
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "user",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": true,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+          }
+        }
+      },
+      "response": {
+        "turn": {
+          "id": "01a1dd47-801b-7893-8da6-43298127eabb"
+        }
+      }
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+          "answers": {
+            "note": {
+              "answers": [
+                "A typed answer instead of a listed option"
+              ]
+            }
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../codex-question-typed-blocking.ndjson",
+  "native_session": "01a1dd47-7fc8-7461-b0e3-6358e0161b79",
+  "permission_mode": "ask",
+  "settings": {
+    "question_answers": [
+      {
+        "native": "0",
+        "option": "answer",
+        "answers": [
+          {
+            "questionId": "note",
+            "answers": [
+              "A typed answer instead of a listed option"
+            ],
+            "dismissed": false
+          }
+        ]
+      }
+    ],
+    "stop": false,
+    "derivation": ""
+  }
+}

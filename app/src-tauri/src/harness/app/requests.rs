@@ -20,6 +20,7 @@ pub async fn harness_respond(
     request_id: i64,
     option_id: String,
     feedback: Option<String>,
+    answers: Option<Vec<crate::harness::requests::QuestionAnswer>>,
 ) -> Result<(), String> {
     let answered = state.command(Command {
         id: command_id,
@@ -28,6 +29,7 @@ pub async fn harness_respond(
             request_id,
             option_id,
             feedback,
+            answers,
         },
     });
     answered.await.map(|_| ())

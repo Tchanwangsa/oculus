@@ -1,0 +1,97 @@
+{
+  "provider": "codex",
+  "cli_version": "0.169.0",
+  "protocol": "app-server JSON-RPC experimental requestUserInput",
+  "model": "gpt-6.1-sol",
+  "capture_date": "2026-11-15",
+  "source": "codex/13-question-two.jsonl lines 16-55; inbound frames",
+  "source_sha256": "176f1a00817cc061083209e68a5ae95b1dc169935eedaaf9768a857beaf7e6df",
+  "redaction": "Inbound turn frames only. Home paths become /Users/student; scratch suffixes become XXXXXX. Expected outbound uses the production bridge's send envelope. Derived, not recorded: the probe redacted isSecret to a string; false is substituted as a non-secret test input, not evidence of its recorded value.",
+  "scenario": "codex-question-two",
+  "evidence": "derived, not recorded",
+  "frames": 36,
+  "sha256": "3d248c7b144399e84d04e0e1aceccca1d66b10dc9f3bcf243caa25d6a8a221f2",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1dd46-09d3-7700-b8f5-5d7361cd34d4",
+          "input": [
+            {
+              "type": "text",
+              "text": "Replay request",
+              "text_elements": []
+            }
+          ],
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "user",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": true,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+          }
+        }
+      },
+      "response": {
+        "turn": {
+          "id": "01a1dd46-0a27-7540-9ab5-87ee4fe572a0"
+        }
+      }
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+          "answers": {
+            "color": {
+              "answers": [
+                "Red"
+              ]
+            },
+            "size": {
+              "answers": [
+                "Small"
+              ]
+            }
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../codex-question-two.ndjson",
+  "native_session": "01a1dd46-09d3-7700-b8f5-5d7361cd34d4",
+  "permission_mode": "ask",
+  "settings": {
+    "question_answers": [
+      {
+        "native": "0",
+        "option": "answer",
+        "answers": [
+          {
+            "questionId": "color",
+            "answers": [
+              "Red"
+            ],
+            "dismissed": false
+          },
+          {
+            "questionId": "size",
+            "answers": [
+              "Small"
+            ],
+            "dismissed": false
+          }
+        ]
+      }
+    ],
+    "stop": false,
+    "derivation": "Derived, not recorded: the probe redacted isSecret to a string; false is substituted as a non-secret test input, not evidence of its recorded value."
+  }
+}

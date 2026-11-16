@@ -1,0 +1,85 @@
+{
+  "provider": "codex",
+  "cli_version": "0.169.0",
+  "protocol": "app-server JSON-RPC experimental requestUserInput",
+  "model": "gpt-6.1-sol",
+  "capture_date": "2026-11-15",
+  "source": "codex/14-question-nonblocking.jsonl lines 16-78; inbound frames",
+  "source_sha256": "0a3bd5a56c79ae7aaee4efa999043a69bb487f205d823c86eeeca166944afe9c",
+  "redaction": "Inbound turn frames only. Home paths become /Users/student; scratch suffixes become XXXXXX. Expected outbound uses the production bridge's send envelope. Derived, not recorded: the probe redacted isSecret to a string; false is substituted as a non-secret test input, not evidence of its recorded value.",
+  "scenario": "codex-question-nonblocking",
+  "evidence": "derived, not recorded",
+  "frames": 59,
+  "sha256": "86d6719c8ca033e3d3bfe712b929bfe57abeeb2df4cebb7fd1593ca09f2b1588",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1dd46-23cd-7ab3-b158-8d25ad18799e",
+          "input": [
+            {
+              "type": "text",
+              "text": "Replay request",
+              "text_elements": []
+            }
+          ],
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "user",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": true,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+          }
+        }
+      },
+      "response": {
+        "turn": {
+          "id": "01a1dd46-241e-7b72-8838-8e2dea7693cb"
+        }
+      }
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+          "answers": {
+            "color": {
+              "answers": [
+                "Red"
+              ]
+            }
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../codex-question-nonblocking.ndjson",
+  "native_session": "01a1dd46-23cd-7ab3-b158-8d25ad18799e",
+  "permission_mode": "ask",
+  "settings": {
+    "question_answers": [
+      {
+        "native": "0",
+        "option": "answer",
+        "answers": [
+          {
+            "questionId": "color",
+            "answers": [
+              "Red"
+            ],
+            "dismissed": false
+          }
+        ]
+      }
+    ],
+    "stop": false,
+    "derivation": "Derived, not recorded: the probe redacted isSecret to a string; false is substituted as a non-secret test input, not evidence of its recorded value."
+  }
+}

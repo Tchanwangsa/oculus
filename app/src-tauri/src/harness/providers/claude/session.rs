@@ -30,7 +30,7 @@ fn configure_thinking(cmd: &mut Command, one_off: bool) {
 /// prompts, and the tools it may never call. A chat's prompts come to the
 /// host (`approvals.rs`); Auto hands them to the CLI's classifier first. A
 /// one-off turn has nobody to ask, so its prompts are denied by the CLI.
-/// `AskUserQuestion` stays out of a chat until questions are answered in it.
+/// A chat may ask questions; one-off turns have no tools.
 pub(super) fn permission_args(one_off: bool, mode: PermissionMode) -> Vec<&'static str> {
     if one_off {
         // `default` auto-allows no tool, and the turn has none anyway.
@@ -52,8 +52,6 @@ pub(super) fn permission_args(one_off: bool, mode: PermissionMode) -> Vec<&'stat
         "host",
         "--permission-prompt-tool",
         "stdio",
-        "--disallowedTools",
-        "AskUserQuestion",
     ]
 }
 

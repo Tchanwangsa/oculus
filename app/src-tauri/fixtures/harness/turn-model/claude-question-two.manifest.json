@@ -1,0 +1,181 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.325",
+  "protocol": "print stream-json host permission prompts",
+  "model": "claude-haiku-5-5",
+  "capture_date": "2026-11-15",
+  "source": "claude/09-question-two.jsonl lines 3-174; inbound frames",
+  "source_sha256": "d303b828d3e6ffa477e30ca6820aa43231dc9da30f47d3ad4f30cd20784d8fc4",
+  "redaction": "Inbound turn frames only. Home paths become /Users/student; scratch suffixes become XXXXXX. Expected outbound uses the production bridge's send envelope. ",
+  "scenario": "claude-question-two",
+  "evidence": "recorded",
+  "frames": 170,
+  "sha256": "91c4daf22ae9161f6bf563fe0034601e8768b88f1fb4a54ed49f44db8ddb4c21",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "0c08827c-2175-4788-9d22-3b52051b552a",
+          "response": {
+            "behavior": "allow",
+            "updatedInput": {
+              "questions": [
+                {
+                  "question": "Choose color?",
+                  "header": "Color",
+                  "options": [
+                    {
+                      "label": "Red",
+                      "description": "Warm, bold color"
+                    },
+                    {
+                      "label": "Blue",
+                      "description": "Cool, calm color"
+                    }
+                  ],
+                  "multiSelect": false
+                },
+                {
+                  "question": "Choose tags?",
+                  "header": "Tags",
+                  "options": [
+                    {
+                      "label": "X",
+                      "description": "Tag option X"
+                    },
+                    {
+                      "label": "Y",
+                      "description": "Tag option Y"
+                    }
+                  ],
+                  "multiSelect": true
+                }
+              ],
+              "answers": {
+                "Choose color?": "Red",
+                "Choose tags?": "X, Y"
+              }
+            }
+          }
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "d27253ca-61bb-44f2-a617-9fc679137553",
+          "response": {
+            "behavior": "allow",
+            "updatedInput": {
+              "questions": [
+                {
+                  "question": "Choose color?",
+                  "header": "Color",
+                  "options": [
+                    {
+                      "label": "Red",
+                      "description": "Warm, bold color"
+                    },
+                    {
+                      "label": "Blue",
+                      "description": "Cool, calm color"
+                    }
+                  ],
+                  "multiSelect": false
+                },
+                {
+                  "question": "Choose tags?",
+                  "header": "Tags",
+                  "options": [
+                    {
+                      "label": "X",
+                      "description": "Tag option X"
+                    },
+                    {
+                      "label": "Y",
+                      "description": "Tag option Y"
+                    }
+                  ],
+                  "multiSelect": true
+                }
+              ],
+              "answers": {
+                "Choose color?": "Red",
+                "Choose tags?": "X, Y"
+              }
+            }
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-question-two.ndjson",
+  "native_session": "",
+  "permission_mode": "ask",
+  "settings": {
+    "question_answers": [
+      {
+        "native": "\"0c08827c-2175-4788-9d22-3b52051b552a\"",
+        "option": "answer",
+        "answers": [
+          {
+            "questionId": "Choose color?",
+            "answers": [
+              "Red"
+            ],
+            "dismissed": false
+          },
+          {
+            "questionId": "Choose tags?",
+            "answers": [
+              "X",
+              "Y"
+            ],
+            "dismissed": false
+          }
+        ]
+      },
+      {
+        "native": "\"d27253ca-61bb-44f2-a617-9fc679137553\"",
+        "option": "answer",
+        "answers": [
+          {
+            "questionId": "Choose color?",
+            "answers": [
+              "Red"
+            ],
+            "dismissed": false
+          },
+          {
+            "questionId": "Choose tags?",
+            "answers": [
+              "X",
+              "Y"
+            ],
+            "dismissed": false
+          }
+        ]
+      }
+    ],
+    "stop": false,
+    "derivation": ""
+  }
+}

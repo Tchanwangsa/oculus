@@ -103,7 +103,15 @@ pub(in crate::harness) fn decide(
             request_id,
             option_id,
             feedback,
-        } => respond::decide(state, *request_id, option_id, feedback.as_ref()),
+            answers,
+        } => respond::decide(
+            state,
+            command,
+            *request_id,
+            option_id,
+            feedback.as_ref(),
+            answers.as_deref(),
+        ),
         Kind::SetPermissionMode { mode } => respond::mode(state, *mode),
     }
 }

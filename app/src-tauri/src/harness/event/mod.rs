@@ -415,6 +415,8 @@ pub enum HarnessEvent {
         /// saved: what the thread list's Approval reads.
         #[serde(default)]
         waiting: u32,
+        #[serde(default)]
+        waiting_questions: u32,
     },
     /// A request changed: answered, its answer's delivery learned, or ended
     /// without one.
@@ -423,6 +425,8 @@ pub enum HarnessEvent {
         /// As on [`Self::RequestOpened`], once this change is saved.
         #[serde(default)]
         waiting: u32,
+        #[serde(default)]
+        waiting_questions: u32,
     },
     /// The provider retired a callback (`native_ref`): after an answer it
     /// has it; with none, it withdrew the request. From a bridge only.

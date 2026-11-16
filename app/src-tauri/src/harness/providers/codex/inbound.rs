@@ -40,6 +40,7 @@ impl CodexServer {
     /// server asks is refused rather than left hanging.
     fn handle_server_request(&self, id: &Value, method: &str, params: &Value) {
         match method {
+            super::questions::METHOD => self.question(id, params),
             COMMAND | FILE_CHANGE | PERMISSIONS => self.approval(id, method, params),
             _ => self.respond_error(id, -32601, &format!("oculus does not handle {method}")),
         }

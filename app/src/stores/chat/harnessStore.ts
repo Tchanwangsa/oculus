@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { readQuestionDrafts, saveQuestionDrafts, pruneQuestionDrafts, type QuestionDraft, type QuestionDrafts } from "./questionDrafts";
 import {
   DEFAULT_CHAT_PROVIDER,
   defaultSelectionFor,
@@ -79,6 +80,9 @@ interface HarnessState {
   /** Threads where a rewind could not reach the agent. Never cleared: the
    *  agent's context still holds what left the screen. */
   contextDrift: Record<number, boolean>;
+  questionDrafts: QuestionDrafts;
+  setQuestionDraft: (thread: number, request: number, question: string, draft: QuestionDraft) => void;
+  clearQuestionDraft: (thread: number, request: number) => void;
 
   loadThreads: () => Promise<void>;
   /** A view put this thread on screen: count it, and read its rows if nobody
@@ -170,6 +174,14 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   queued: {},
   requests: {},
   contextDrift: {},
+  questionDrafts: readQuestionDrafts(),
+  setQuestionDraft: (thread, request, question, draft) => set((s) => {
+    const asked = s.requests[thread]?.[request];
+    const questions = asked?.payload.questions as { id: string; secret: boolean }[] | undefined;
+    if (asked?.kind !== "question" || asked.status !== "pending" || !questions?.some((q) => q.id === question && !q.secret)) return s;
+    return { questionDrafts: saveQuestionDrafts({ ...s.questionDrafts, [thread]: { ...s.questionDrafts[thread], [request]: { ...s.questionDrafts[thread]?.[request], [question]: draft } } }) };
+  }),
+  clearQuestionDraft: (thread, request) => set((s) => ({ questionDrafts: pruneQuestionDrafts(s.questionDrafts, thread, (id) => id !== request) })),
   provider: DEFAULT_CHAT_PROVIDER,
   subjects: [],
   subjectsLoaded: false,
@@ -233,6 +245,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
       runs: { ...s.runs, [id]: runs },
       queued: { ...s.queued, [id]: waiting },
       requests: { ...s.requests, [id]: asked },
+      questionDrafts: pruneQuestionDrafts(s.questionDrafts, id, (request) => asked[request]?.status === "pending" || asked[request]?.delivery === "sending"),
     }));
     // Only what the snapshot does not hold yet: `fold` skips the rest by revision.
     for (const env of during) get().fold(env, true);
@@ -316,6 +329,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         live,
         holds,
         contextDrift,
+        questionDrafts: pruneQuestionDrafts(s.questionDrafts, id, () => false),
       };
     });
   },
@@ -406,8 +420,10 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         if (held) runs = { ...runs, [run.id]: run };
       };
       let asked = s.requests[threadId] ?? NO_REQUESTS;
+      let questionDrafts = s.questionDrafts;
       const setRequest = (request: HarnessRequest) => {
         if (held) asked = { ...asked, [request.id]: request };
+        if (request.status !== "pending" && request.delivery !== "sending") questionDrafts = pruneQuestionDrafts(questionDrafts, threadId, (id) => id !== request.id);
       };
 
       // A row Rust updated in place (the same provider message again) replaces its copy.
@@ -423,13 +439,13 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           threads[i] = { ...threads[i], ...patch, updated_at: new Date().toISOString() };
         }
       };
-      // The list's Approval, for every thread, loaded or not; it does not
+      // The list's Approval and Input, for every thread, loaded or not; it does not
       // reorder the list.
-      const waiting = (count: number) => {
+      const waiting = (count: number, questions = 0) => {
         const i = threads.findIndex((t) => t.id === threadId);
-        if (i >= 0 && threads[i].pending_requests !== count) {
+        if (i >= 0 && (threads[i].pending_requests !== count || threads[i].pending_questions !== questions)) {
           threads = [...threads];
-          threads[i] = { ...threads[i], pending_requests: count };
+          threads[i] = { ...threads[i], pending_requests: count, pending_questions: questions };
         }
       };
 
@@ -462,11 +478,11 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           // The row holds the id only; the request is in `requests`.
           push({ ...rowFrom(env, "request", ""), ref_id: String(event.request.id), content: null });
           setRequest(event.request);
-          waiting(event.waiting);
+          waiting(event.waiting, event.waiting_questions);
           break;
         case "request_updated":
           setRequest(event.request);
-          waiting(event.waiting);
+          waiting(event.waiting, event.waiting_questions);
           break;
         case "handoff": {
           const run = runs[event.run_id];
@@ -610,6 +626,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           );
           return {
             contextDrift: drift,
+            questionDrafts: pruneQuestionDrafts(questionDrafts, threadId, (id) => id in stay),
             ...(held
               ? {
                   items: { ...s.items, [threadId]: kept },
@@ -670,6 +687,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         items: held && rows !== s.items[threadId] ? { ...s.items, [threadId]: rows } : s.items,
         runs: held && runs !== (s.runs[threadId] ?? NO_RUNS) ? { ...s.runs, [threadId]: runs } : s.runs,
         requests: held && asked !== (s.requests[threadId] ?? NO_REQUESTS) ? { ...s.requests, [threadId]: asked } : s.requests,
+        questionDrafts,
         threads: rowsOnly ? s.threads : threads,
         live: live && !rowsOnly ? { ...s.live, [threadId]: live } : s.live,
       };

@@ -6,8 +6,8 @@
 
 use crate::harness::core::effect::{Effect, Reply as ReplyEffect};
 use crate::harness::requests::{
-    self, policy, reasons, Delivery, LiveRoute, NewRequest, PermissionMode, Reply, RequestView,
-    Status,
+    self, policy, reasons, Action, Delivery, LiveRoute, NewRequest, PermissionMode, Reply,
+    RequestView, Status,
 };
 use crate::harness::{Generation, HarnessEvent, Provider, Release};
 
@@ -38,6 +38,11 @@ impl Consumer {
         if self.runs.open_run(thread_id).is_none() && !self.runs.own_open(thread_id) {
             return decline(thread_id, &request, "no turn is open", route, io);
         }
+        if request.action == Action::Question
+            && requests::QuestionPayload::read(&request.payload).is_err()
+        {
+            return decline(thread_id, &request, "invalid or secret question", route, io);
+        }
         let library = io.library();
         let cwd = crate::agents::agents_dir(&library);
         if let Some(path) = policy::protected(&library, &cwd, &request.paths) {
@@ -50,7 +55,7 @@ impl Consumer {
             });
         };
         match self.rt.block_on(requests::store::mode(&pool, thread_id)) {
-            Ok(PermissionMode::Quiet) => {
+            Ok(PermissionMode::Quiet) if request.action != Action::Question => {
                 return decline(
                     thread_id,
                     &request,
@@ -101,6 +106,7 @@ impl Consumer {
             ev: HarnessEvent::RequestOpened {
                 request: opened.request,
                 waiting,
+                waiting_questions: self.waiting_questions(thread_id),
             },
             card: None,
             tags: self.runs.tags(thread_id, None),
@@ -165,6 +171,8 @@ impl Consumer {
         request: RequestView,
         io: &mut impl ConsumerIo,
     ) {
+        let message = request.responder == "message";
+        let answers = request.answers.clone().unwrap_or_default();
         let option = request
             .options
             .iter()
@@ -173,8 +181,15 @@ impl Consumer {
         let route = self.requests.answerable(request.id);
         let request_id = request.id;
         let waiting = self.waiting(thread_id);
-        let updated = HarnessEvent::RequestUpdated { request, waiting };
+        let updated = HarnessEvent::RequestUpdated {
+            request,
+            waiting,
+            waiting_questions: self.waiting_questions(thread_id),
+        };
         self.event(thread_id, provider, From::App, updated, None, io);
+        if message {
+            return;
+        }
         match (route, option) {
             (Some(route), Some(option)) => {
                 self.requests.sending(request_id, true);
@@ -184,6 +199,7 @@ impl Consumer {
                     request_id,
                     route,
                     option,
+                    answers,
                 })));
             }
             // The decider found the route a moment ago, on this thread.
@@ -288,7 +304,7 @@ impl Consumer {
         let left = self
             .rt
             .block_on(requests::store::left_by(&pool, thread_id, run_id));
-        let ids = match left {
+        let mut ids = match left {
             Ok(ids) if !ids.is_empty() => ids,
             Ok(_) => return Vec::new(),
             Err(e) => {
@@ -296,6 +312,18 @@ impl Consumer {
                 return Vec::new();
             }
         };
+        if status == "failed" {
+            ids.retain(|id| {
+                self.rt
+                    .block_on(async {
+                        let mut conn = pool.acquire().await.map_err(|e| e.to_string())?;
+                        requests::store::get(&mut conn, *id).await
+                    })
+                    .ok()
+                    .flatten()
+                    .is_none_or(|r| r.kind != "question")
+            });
+        }
         let routes = ids.iter().filter_map(|id| self.requests.remove(*id));
         let routes: Vec<LiveRoute> = routes.collect();
         if status != "interrupted" {
@@ -314,7 +342,16 @@ impl Consumer {
                 let waiting = self.waiting(thread_id);
                 changed
                     .into_iter()
-                    .map(|request| (HarnessEvent::RequestUpdated { request, waiting }, None))
+                    .map(|request| {
+                        (
+                            HarnessEvent::RequestUpdated {
+                                request,
+                                waiting,
+                                waiting_questions: self.waiting_questions(thread_id),
+                            },
+                            None,
+                        )
+                    })
                     .collect()
             }
             Err(e) => {
@@ -354,12 +391,27 @@ impl Consumer {
                 }
                 let waiting = self.waiting(thread_id);
                 for request in requests {
-                    let updated = HarnessEvent::RequestUpdated { request, waiting };
+                    let updated = HarnessEvent::RequestUpdated {
+                        request,
+                        waiting,
+                        waiting_questions: self.waiting_questions(thread_id),
+                    };
                     self.event(thread_id, provider, From::App, updated, None, io);
                 }
             }
             Err(e) => elog!("[oculus] harness thread {thread_id}: requests: {e}"),
         }
+    }
+
+    /// The thread's questions waiting on the student, read after a change
+    /// is saved; 0 when it cannot be read.
+    fn waiting_questions(&self, thread_id: i64) -> u32 {
+        let Some(pool) = &self.pool else {
+            return 0;
+        };
+        self.rt
+            .block_on(requests::store::waiting_questions(pool, thread_id))
+            .unwrap_or_default()
     }
 
     /// The thread's requests waiting on the student, read after a change

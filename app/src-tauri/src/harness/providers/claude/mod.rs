@@ -14,6 +14,7 @@
 
 mod approvals;
 mod models;
+mod questions;
 mod session;
 mod settings;
 mod skill;

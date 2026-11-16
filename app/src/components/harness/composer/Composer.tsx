@@ -12,6 +12,9 @@ import { UsageMeter } from "@/components/harness/composer/UsageMeter";
 import { SubjectPicker } from "@/components/harness/composer/SubjectPicker";
 import { ThreadBanners } from "@/components/harness/composer/ThreadBanners";
 import { RequestBar } from "@/components/harness/composer/RequestBar";
+import { QuestionPanel } from "@/components/harness/composer/QuestionPanel";
+import { QuestionEditor } from "@/components/harness/composer/QuestionEditor";
+import { useQuestionComposer } from "@/components/harness/composer/useQuestionComposer";
 import { PermissionModeControl } from "@/components/harness/composer/PermissionModeControl";
 import { canSend, enterAction, UNSCOPED_PLACEHOLDER, WAITING_PLACEHOLDER } from "@/components/harness/composer/sendGate";
 import { useRunControls } from "@/components/harness/composer/useRunControls";
@@ -139,7 +142,10 @@ export function Composer({
   const text = useDraftStore((s) => s.drafts[draftKey] ?? "");
   const setDraft = useDraftStore((s) => s.setDraft);
   const ref = useRef<MentionInputHandle>(null);
-  const dictation = useDictation(draftKey, (transcript) => ref.current?.append(transcript));
+  /** A waiting question's typed answer: its own editor, so attachments and
+   *  the stash keep to the message while dictation reaches the answer. */
+  const answerRef = useRef<MentionInputHandle>(null);
+  const dictation = useDictation(draftKey, (transcript) => (answerRef.current ?? ref.current)?.append(transcript));
   const tools = useComposerTools({ subjectId, input: ref });
   const mentions = tools.menu;
   /** The drop target for attachments: the whole box, not just the editor. */
@@ -185,6 +191,8 @@ export function Composer({
 
   // A request waits on the student: a message sent now queues behind it.
   const asking = useHarnessStore((s) => threadId != null && awaitsApproval(s.requests[threadId]));
+  // A question waits: the box is its typed answer, and Enter answers it.
+  const question = useQuestionComposer(threadId, draftKey);
 
   const ready = text.trim().length > 0 || att.items.length > 0 || att.texts.length > 0;
   const controls = useRunControls({
@@ -280,6 +288,7 @@ export function Composer({
       />
 
       <RequestBar threadId={threadId} />
+      {question && <QuestionPanel flow={question} />}
 
       <div
         className={cn(
@@ -288,53 +297,59 @@ export function Composer({
         )}
       >
         <div className="flex flex-col gap-2">
-          <AttachmentStrip
-            items={att.items}
-            onDetach={att.detach}
-            confirming={att.confirming}
-            onConfirmDetach={att.confirmDetach}
-            onCancelDetach={att.cancelDetach}
-            texts={att.texts}
-            onEditText={att.editText}
-            onDetachText={att.detachText}
-            onPutBack={(t) => ref.current?.append(t)}
-            subjectId={subjectId}
-          />
-          {/* Keyed: the editor reads its text once, at mount. */}
-          <MentionInput
-            key={draftKey}
-            ref={ref}
-            initialText={text}
-            skills={tools.skillNames}
-            autoFocus={autoFocus}
-            onEdit={(next, caret, masked) => {
-              setDraft(draftKey, next);
-              mentions.track(next, caret, masked);
-            }}
-            onFiles={att.attach}
-            onPasteText={att.attachText}
-            onBlur={mentions.close}
-            onKeyDown={(e) => {
-              // The menu's claimed keys come back prevented, so a pick never sends.
-              mentions.keyDown(e);
-              if (e.defaultPrevented) return;
-              stash.keyDown(e);
-              history.keyDown(e);
-              if (e.defaultPrevented) return;
-              const action = enterAction(e, unscoped);
-              if (action) e.preventDefault();
-              if (action === "send") void send();
-            }}
-            placeholder={
-              asking
-                ? WAITING_PLACEHOLDER
-                : running
-                ? "Working… your next message waits its turn"
-                : unscoped
-                  ? UNSCOPED_PLACEHOLDER
-                  : (placeholder ?? COMPOSER_PLACEHOLDER)
-            }
-          />
+          {question ? (
+            <QuestionEditor flow={question} inputRef={answerRef} />
+          ) : (
+            <>
+              <AttachmentStrip
+                items={att.items}
+                onDetach={att.detach}
+                confirming={att.confirming}
+                onConfirmDetach={att.confirmDetach}
+                onCancelDetach={att.cancelDetach}
+                texts={att.texts}
+                onEditText={att.editText}
+                onDetachText={att.detachText}
+                onPutBack={(t) => ref.current?.append(t)}
+                subjectId={subjectId}
+              />
+              {/* Keyed: the editor reads its text once, at mount. */}
+              <MentionInput
+                key={draftKey}
+                ref={ref}
+                initialText={text}
+                skills={tools.skillNames}
+                autoFocus={autoFocus}
+                onEdit={(next, caret, masked) => {
+                  setDraft(draftKey, next);
+                  mentions.track(next, caret, masked);
+                }}
+                onFiles={att.attach}
+                onPasteText={att.attachText}
+                onBlur={mentions.close}
+                onKeyDown={(e) => {
+                  // The menu's claimed keys come back prevented, so a pick never sends.
+                  mentions.keyDown(e);
+                  if (e.defaultPrevented) return;
+                  stash.keyDown(e);
+                  history.keyDown(e);
+                  if (e.defaultPrevented) return;
+                  const action = enterAction(e, unscoped);
+                  if (action) e.preventDefault();
+                  if (action === "send") void send();
+                }}
+                placeholder={
+                  asking
+                    ? WAITING_PLACEHOLDER
+                    : running
+                    ? "Working… your next message waits its turn"
+                    : unscoped
+                      ? UNSCOPED_PLACEHOLDER
+                      : (placeholder ?? COMPOSER_PLACEHOLDER)
+                }
+              />
+            </>
+          )}
         </div>
         {dictation.busy ? <DictationBar dictation={dictation} /> : <div className="flex items-center gap-1">
           <ModelPicker
@@ -358,9 +373,9 @@ export function Composer({
           <DictationMic dictation={dictation} />
           <SendControls
             stop={controls.stop}
-            send={controls.send}
+            send={question ? { kind: "send", label: question.primaryLabel, disabled: !question.ready || question.busy } : controls.send}
             onStop={controls.stopNow}
-            onSend={() => void send()}
+            onSend={question ? question.primary : () => void send()}
             onResume={controls.resumeNow}
           />
         </div>}

@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Provider } from "./providers";
 import type { ChatScope } from "./scope";
 import type { RunRow } from "./runs";
-import type { BridgeHealth, HarnessItem, HarnessRequest, PermissionMode, QueuedMessage } from "./types";
+import type { BridgeHealth, HarnessItem, HarnessRequest, QuestionAnswer, PermissionMode, QueuedMessage } from "./types";
 import type { StudioSend } from "@/lib/studio/videos";
 import { openNotebookContext } from "@/lib/canvas/openNotebooks";
 import { takePickedSkills } from "./skills";
@@ -94,8 +94,8 @@ export function harnessSelectModel(threadId: number, provider: Provider, model: 
 /** Answer a request with one of its options. Rejects with the reason to
  *  show when it was already answered, has ended or its agent has gone; the
  *  answer's delivery follows on `request_updated`. */
-export function harnessRespond(threadId: number, requestId: number, optionId: string): Promise<void> {
-  return invoke("harness_respond", { commandId: commandId(), threadId, requestId, optionId, feedback: null });
+export function harnessRespond(threadId: number, requestId: number, optionId: string, answers?: QuestionAnswer[]): Promise<void> {
+  return invoke("harness_respond", { commandId: commandId(), threadId, requestId, optionId, answers: answers ?? null, feedback: null });
 }
 
 /** How the chat asks from its next run on. Rejects while a request waits. */

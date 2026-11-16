@@ -207,7 +207,7 @@ pub(super) fn request_of(
 impl CodexServer {
     /// The route a thread's callbacks go to: its own, or for a child agent
     /// its parent chat's, with the child's path.
-    fn asker(&self, thread: &str) -> Option<(Arc<ThreadRoute>, Option<String>)> {
+    pub(super) fn asker(&self, thread: &str) -> Option<(Arc<ThreadRoute>, Option<String>)> {
         let routes = self.routes.lock().unwrap();
         if let Some(route) = routes.get(thread) {
             return Some((route.clone(), None));

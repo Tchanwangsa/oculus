@@ -564,3 +564,73 @@ fn a_patch_that_grows_after_its_item_started_has_every_path_checked() {
         "the latest diff is shown"
     );
 }
+
+fn question_frame() -> Value {
+    serde_json::json!({"method":"item/tool/requestUserInput","id":"question-callback","params":{
+        "threadId":"chat","turnId":"turn","itemId":"tool","isBlocking":false,"autoResolutionMs":null,
+        "questions":[{"id":"native","header":"Color","question":"Choose?","isOther":true,"isSecret":false,"options":[{"label":"Red","description":"Warm"}]}]
+    }})
+}
+
+#[test]
+fn experimental_questions_reject_unknown_or_secret_shapes_and_one_off_calls() {
+    let (server, written, events) = captured(false);
+    for mutation in ["secret", "new-field", "multi", "missing-options"] {
+        let mut frame = question_frame();
+        match mutation {
+            "secret" => frame["params"]["questions"][0]["isSecret"] = serde_json::json!(true),
+            "new-field" => frame["params"]["newProtocolField"] = serde_json::json!(true),
+            "multi" => frame["params"]["questions"][0]["multiSelect"] = serde_json::json!(true),
+            _ => {
+                frame["params"]["questions"][0]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("options");
+            }
+        }
+        server.dispatch(frame);
+        assert!(
+            matches!(events.recv().unwrap(), HarnessEvent::Error { message, .. } if message.contains("0.169.0"))
+        );
+    }
+    assert_eq!(written.lock().unwrap().len(), 4);
+    assert!(written
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|f| f["error"]["code"] == -32602));
+    assert!(!server.has_pending_request("chat"));
+    let (server, written, events) = captured(true);
+    server.dispatch(question_frame());
+    assert!(events.try_iter().next().is_none());
+    assert_eq!(written.lock().unwrap()[0]["error"]["code"], -32602);
+}
+
+#[test]
+fn question_feature_is_on_for_chats_only_in_every_permission_mode() {
+    for mode in [
+        PermissionMode::Ask,
+        PermissionMode::Auto,
+        PermissionMode::Quiet,
+    ] {
+        let mut opts = CodexThreadOpts {
+            cwd: "/scratch".into(),
+            writable_roots: vec![],
+            model: None,
+            reasoning_effort: None,
+            instructions: String::new(),
+            ephemeral: false,
+            mode,
+            library: "/library".into(),
+        };
+        assert_eq!(
+            CodexServer::thread_params(&opts)["config"]["features.default_mode_request_user_input"],
+            true
+        );
+        opts.ephemeral = true;
+        assert_eq!(
+            CodexServer::thread_params(&opts)["config"]["features.default_mode_request_user_input"],
+            false
+        );
+    }
+}

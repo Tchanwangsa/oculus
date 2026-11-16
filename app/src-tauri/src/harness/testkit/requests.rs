@@ -115,6 +115,7 @@ fn answer(bench: &mut Bench, id: &str, request: i64, option: &str) -> super::com
         request_id: request,
         option_id: option.into(),
         feedback: None,
+        answers: None,
     };
     let (msg, got) = bench.command(id, kind);
     bench.play(vec![msg]);
@@ -234,6 +235,7 @@ fn an_answer_the_request_does_not_offer_or_a_message_with_it_is_refused() {
         request_id: request,
         option_id: "decline".into(),
         feedback: Some("do it differently".into()),
+        answers: None,
     };
     let (msg, got) = bench.command("feedback", kind);
     bench.play(vec![msg]);
@@ -607,4 +609,58 @@ fn a_reload_reads_each_request_with_its_state() {
     assert_eq!(loaded[0]["options"][0]["id"], "accept");
     let last = told(&bench, "request_updated").pop().unwrap();
     assert_eq!(loaded[0], last, "a reload reads what the last event told");
+}
+
+#[test]
+fn secret_questions_are_declined_before_storage_and_ordinary_questions_ignore_approval_mode() {
+    for secret in [true, false] {
+        let mut bench = turn_open(if secret {
+            "secret-question"
+        } else {
+            "quiet-question"
+        });
+        bench
+            .runtime
+            .block_on(
+                sqlx::query("UPDATE harness_threads SET permission_mode = 'quiet'")
+                    .execute(&bench.pool),
+            )
+            .unwrap();
+        let fake = Arc::new(Fake::default());
+        let mut request = command_request(json!("question"), &[]);
+        request.action = Action::Question;
+        request.options = vec![
+            option("answer", Decision::Accept),
+            option("dismiss", Decision::Decline),
+        ];
+        request.payload = json!({"questions":[{"id":"native","text":"Choose?","header":"Color","options":[{"label":"Red","description":"Warm"}],"multi":false,"allowsTypedAnswer":false,"secret":secret}]});
+        let asked = bench.session(HarnessEvent::RequestAsked {
+            request,
+            route: Some(LiveRoute(fake.clone())),
+        });
+        bench.play(vec![asked]);
+        assert_eq!(requests(&bench).len(), usize::from(!secret));
+        assert_eq!(fake.withdrawn(), usize::from(secret));
+        if !secret {
+            let id = requests(&bench)[0].0;
+            for (receipt, text, valid) in [("typed", "typed", false), ("listed", "Red", true)] {
+                let (msg, got) = bench.command(
+                    receipt,
+                    Kind::Respond {
+                        request_id: id,
+                        option_id: "answer".into(),
+                        feedback: None,
+                        answers: Some(vec![crate::harness::requests::QuestionAnswer {
+                            question_id: "native".into(),
+                            answers: vec![text.into()],
+                            dismissed: false,
+                        }]),
+                    },
+                );
+                bench.play(vec![msg]);
+                assert_eq!(bench.got(got).is_ok(), valid);
+            }
+            assert_eq!(fake.replies(), ["answer"]);
+        }
+    }
 }

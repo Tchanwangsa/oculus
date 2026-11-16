@@ -174,6 +174,7 @@ fn respond(rig: &mut Rig, id: &str, request: i64, option: &str) -> Result<(), St
             request_id: request,
             option_id: option.into(),
             feedback: None,
+            answers: None,
         },
     });
     rig.drain();
