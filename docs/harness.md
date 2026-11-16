@@ -1722,8 +1722,9 @@ What the student sees is decided in `app/src/lib/harness/requests.ts`,
   shows one question at a time: its header, "1/2" when there are more, the
   text, and radio rows (single choice) or checkbox rows (multiple) with each
   option's description and a key cap. Digits 1–9 pick, except while focus is
-  in an input, a textarea or an editable box, and only in the tab in front
-  with focus on nothing or inside the panel; a single choice moves to the
+  in an input, a textarea or an editable box, and only in the focused pane
+  of the tab in front with focus on nothing or inside the panel, so split
+  panes never both take a digit; a single choice moves to the
   next question after 200 ms. The typed answer is the composer itself: while
   a question waits the box is a separate editor for that question's text
   (`QuestionEditor`), with "Type your answer", or only "Choose an option

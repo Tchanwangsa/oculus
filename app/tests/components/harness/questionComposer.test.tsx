@@ -24,7 +24,7 @@ const initial = useHarnessStore.getInitialState();
 const initialCopy = { ...initial };
 const { useDraftStore } = await import("@/stores/chat/draftStore");
 const { useQuestionComposer } = await import("@/components/harness/composer/useQuestionComposer");
-const { QuestionPanelView } = await import("@/components/harness/composer/QuestionPanel");
+const { QuestionPanelView, paneTakesDigit } = await import("@/components/harness/composer/QuestionPanel");
 type Flow = NonNullable<ReturnType<typeof useQuestionComposer>>;
 
 const THREAD = 41;
@@ -213,4 +213,11 @@ test("the panel draws radios with digit caps, the count and the refusal", () => 
   expect(single).toContain(">Back<");
   expect(single).toContain("Answer in a new message");
   expect(single).toContain("What you typed was moved to your message draft.");
+});
+
+test("only the focused pane takes a digit, so split panes never both answer", () => {
+  expect(paneTakesDigit(3, 3)).toBe(true);
+  expect(paneTakesDigit(3, 4)).toBe(false);
+  expect(paneTakesDigit(3, undefined)).toBe(false);
+  expect(paneTakesDigit(0, 4)).toBe(true);
 });

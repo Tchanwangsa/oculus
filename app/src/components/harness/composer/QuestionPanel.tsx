@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import { CheckSquare, Circle, Question, RadioButton, Square } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { useTabActive } from "@/components/tabs/TabContext";
+import { useTabActive, useTabId } from "@/components/tabs/TabContext";
+import { activePane } from "@/stores/shell/tabStore";
 import { digitOption, typingTarget, type AgentQuestion, type AnswerDraft } from "@/lib/harness";
 import { cn } from "@/lib/utils";
 import type { QuestionComposer } from "./useQuestionComposer";
@@ -17,16 +18,18 @@ import type { QuestionComposer } from "./useQuestionComposer";
 export function QuestionPanel({ flow }: { flow: QuestionComposer }) {
   const root = useRef<HTMLDivElement>(null);
   const active = useTabActive();
+  const paneId = useTabId();
   const latest = useRef(flow);
   latest.current = flow;
 
-  // Window-wide, as T3's, but only for this pane's tab and only when focus is
-  // on nothing in particular or inside this panel, so a second pane's panel
-  // or a field elsewhere never takes the digit.
+  // Window-wide, as T3's, but only in the focused pane of the active tab and
+  // only when focus is on nothing in particular or inside this panel, so a
+  // second pane's panel or a field elsewhere never takes the digit.
   useEffect(() => {
     if (!active) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+      if (!paneTakesDigit(paneId, activePane()?.id)) return;
       const target = e.target as HTMLElement | null;
       if (typingTarget(target)) return;
       const focus = document.activeElement;
@@ -40,7 +43,7 @@ export function QuestionPanel({ flow }: { flow: QuestionComposer }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active]);
+  }, [active, paneId]);
 
   return (
     <QuestionPanelView
@@ -60,6 +63,13 @@ export function QuestionPanel({ flow }: { flow: QuestionComposer }) {
       onDismiss={flow.dismiss}
     />
   );
+}
+
+/** Whether this pane may take a digit: only the focused pane does, so two
+ *  split panes with waiting questions never both answer. Outside any pane
+ *  (id 0) the panel always may. */
+export function paneTakesDigit(paneId: number, focusedPaneId: number | undefined): boolean {
+  return paneId === 0 || focusedPaneId === paneId;
 }
 
 /** The panel as drawn, given its state (the WebKit checks render it alone). */
