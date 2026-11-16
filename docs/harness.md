@@ -1854,8 +1854,11 @@ compile without one.
   model or the `default` alias for what the catalogue resolves it to.
 - **Levels belong to the model.** Haiku declares none (no `--effort`);
   opencode's are variants; `agy` bakes them into the slug (`parse_models`
-  splits, `model_slug` rejoins). `sortReasoning` orders by
-  `REASONING_LABELS`; `default_variant` asks for `high` and steps down.
+  splits, `model_slug` rejoins). Rust keeps no list of levels: a level
+  comes from its CLI's catalogue, and `validate_effort` takes any short
+  lowercase word, which can carry no flag into an argv or key into a
+  config. `sortReasoning` orders by `REASONING_LABELS`, unknown levels
+  last; `default_variant` asks for `high` and steps down.
 - Every bridge binds the level at session start, so a change ends the
   session and resumes its conversation in a new one. A model change does
   the same on Claude and Antigravity, which take `--model` at spawn; Codex

@@ -141,16 +141,16 @@ pub struct LectureBrief {
     pub chapters: Vec<crate::lectures::chapters::Chapter>,
 }
 
-/// Every reasoning level any CLI accepts, mirrored by `REASONING_LABELS` in
-/// `app/src/lib/harness/models.ts`. Checked up front so an unknown string never
-/// reaches an argv or a Codex config.
-const REASONING_EFFORTS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
-
+/// The levels a model takes come from its CLI's own catalogue, so a level is
+/// checked by its shape only: a short lowercase word, which can never smuggle
+/// a flag into an argv or a key into a Codex config.
 pub(in crate::harness) fn validate_effort(value: Option<String>) -> Result<Option<String>, String> {
     match value {
         None => Ok(None),
-        Some(v) if REASONING_EFFORTS.contains(&v.as_str()) => Ok(Some(v)),
-        Some(v) => Err(format!("unknown reasoning effort: {v}")),
+        Some(v) if !v.is_empty() && v.len() <= 16 && v.bytes().all(|b| b.is_ascii_lowercase()) => {
+            Ok(Some(v))
+        }
+        Some(v) => Err(format!("not a reasoning level: {v}")),
     }
 }
 
@@ -160,6 +160,17 @@ mod tests {
 
     fn opts(json: &str) -> SendOptions {
         serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn any_level_a_catalogue_lists_passes_and_nothing_else() {
+        for level in ["minimal", "low", "xhigh", "max", "ultra", "none"] {
+            assert_eq!(validate_effort(Some(level.into())), Ok(Some(level.into())));
+        }
+        for bad in ["", "--model", "high x", "High", "a=b", "abcdefghijklmnopq"] {
+            assert!(validate_effort(Some(bad.into())).is_err(), "{bad}");
+        }
+        assert_eq!(validate_effort(None), Ok(None));
     }
 
     #[test]

@@ -150,7 +150,7 @@ fn listed_name(line: &str, level: Option<&str>) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
-/// The level suffixes a slug can end in; the names `validate_effort` accepts.
+/// The level suffixes a slug can end in.
 const LEVELS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
 /// `gemini-3.8-flash-high` → (`gemini-3.8-flash`, `high`). A slug that is
