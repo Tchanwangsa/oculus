@@ -6,6 +6,7 @@ import {
   providerAvailability,
   parseItemMeta,
   getHarnessThreads,
+  getThreadsByIds,
   harnessLoad,
   liveRunId,
   runFromRow,
@@ -47,6 +48,9 @@ const NO_RUNS: Record<number, HarnessRun> = {};
 const NO_REQUESTS: Record<number, HarnessRequest> = {};
 
 interface HarnessState {
+  /** Open threads newest first, plus any completed one a view holds on
+   *  screen (`completed_at` set), so a chat completed while open, or opened
+   *  from Completed or search, stays readable. Lists take `openThreads`. */
   threads: HarnessThread[];
   /** Whether `threads` has been read once. Until then a route's thread id
    *  can't be told from a deleted one, so the page must not give up on it. */
@@ -85,6 +89,9 @@ interface HarnessState {
   clearQuestionDraft: (thread: number, request: number) => void;
 
   loadThreads: () => Promise<void>;
+  /** A completed thread about to open (from Completed or search): listed
+   *  now, so the page finds it before `hold` and the next `loadThreads`. */
+  keep: (thread: HarnessThread) => void;
   /** A view put this thread on screen: count it, and read its rows if nobody
    *  else was. `borrowFrom` is the thread the view showed a moment ago. */
   hold: (id: number, borrowFrom?: number | null) => Promise<void>;
@@ -190,7 +197,12 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   ...defaultSelectionFor(DEFAULT_CHAT_PROVIDER),
 
   loadThreads: async () => {
-    const threads = await getHarnessThreads();
+    const open = await getHarnessThreads();
+    // A held thread missing from the open list completed, or was opened
+    // completed: read it by id so its view keeps it. A deleted one reads nothing.
+    const listed = new Set(open.map((t) => t.id));
+    const held = Object.keys(get().holds).map(Number).filter((id) => !listed.has(id));
+    const threads = held.length ? [...open, ...(await getThreadsByIds(held))] : open;
     set((s) => {
       const live = { ...s.live };
       for (const t of threads) {
@@ -199,6 +211,9 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
       return { threads, live, threadsLoaded: true };
     });
   },
+
+  keep: (thread) =>
+    set((s) => (s.threads.some((t) => t.id === thread.id) ? s : { threads: [...s.threads, thread] })),
 
   hold: async (id, borrowFrom) => {
     const first = !get().holds[id];

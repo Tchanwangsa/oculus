@@ -916,9 +916,12 @@ writes it into the draft once and drops it from the route.
   only after the list has loaded, or a restored tab drops its thread.
 - The conversations column (`ThreadList`, its bodies in `threads/list/`) is
   a `SideNav`, the subject page's column ([ui.md](./ui.md)), 284px by
-  default. Its header row is the view switch, two tabs with icons (Status,
-  pulse; Subject, book) remembered per device (`oculus-chat-list-view`),
-  and the new-chat button at its right, lit while no thread is open. It
+  default. Its header is the search field (`SideNavSearch`) with the
+  new-chat button at its right, lit while no thread is open, and under them
+  the view switch, two tabs with icons (Status, pulse; Subject, book)
+  remembered per device (`oculus-chat-list-view`). It lists open threads
+  only (`openThreads`; the store also keeps a completed chat a view holds,
+  see [Completed](#completed-chats-leave-the-open-list-and-remain-searchable)). It
   resizes, and ⌘⌥B or the toggle in the page header beside the title
   (`ChatPage` owns the panel state) folds it away entirely. The chord acts
   only in the tab in front, since the subject column answers it too. Its
@@ -929,10 +932,24 @@ writes it into the draft once and drops it from the route.
   Failed in place by time; nothing jumps to the top), then "Working" with
   its count, folding, in a `margin-top: auto` block of `SideNav`'s `fill`
   column, so it rests at the column's foot while the list is short and
-  follows it when long. Its fold is kept with the subject groups' folds.
+  follows it when long. Under it, "Completed" with its count folds open onto
+  grey one-line rows (the subject glyph in grey, title, age; Reopen on
+  hover), ten then Show 25 more. Folds are kept with the subject groups'
+  (`oculus-chat-groups-collapsed`); the Completed folds start closed, so
+  their keys there mean open (`order.ts`).
   **Subject view** (`SubjectBody`): threads grouped by subject, groups in
   dragged order, each folding, five rows then Show more; a group header is
   the subject's glyph and short code, so its rows drop their subject line.
+  Each group ends with "n completed", folding open in place onto that
+  subject's completed rows (its own paged read); a subject whose threads are
+  all completed keeps a group for it.
+- **Search** replaces the view while the field holds text: debounced
+  150 ms (`debouncedSearch`, a stale answer never lands), the view switch
+  steps aside, Esc or × clears, Enter opens the first result. No ⌘ key:
+  ⌘K is the app's Search. A result is a row's three lines: subject and age
+  ("Completed · 4d" for a completed chat), title, and the snippet, whose
+  `**` hits `snippetParts` turns into bold spans (an unpaired `**` stays
+  text; never HTML). None is one muted line.
 - **A thread row is three lines** (`ThreadRow`): the subject's glyph and
   `displayCode` (General for none) with the status or the age at the right
   ("25m", `shortAge`); the title, with the lecture glyph; and the newest
@@ -944,14 +961,16 @@ writes it into the draft once and drops it from the route.
   for the list (`useThreadPreviews`), redone when a listed thread's
   `updated_at` or waiting-question count changes, never per token. A
   title is bright and medium while the thread is Done, Approval, Question
-  or Failed, muted otherwise. Hover shows a ⋯ menu (open in a new tab,
-  delete, which arms the row's inline confirm). While the column folds,
+  or Failed, dimmed otherwise, and always a step brighter and larger than
+  the preview (`threads/rowType.ts`, [ui.md](./ui.md)). Hover shows "✓
+  Complete" and a ⋯ menu (open in a new tab, Complete, with ⌘E beside it on
+  the open chat, and delete, which arms the row's inline confirm). While the column folds,
   the subject glyph stays longest with the status dot on its corner.
 - Bare `/chat` is a new thread: the composer docked at the bottom as in a
   thread, and above it the headline that names the subject (`DraftHero`) over
   the three latest threads (`RecentThreads`) — provider mark, title, a chip
   naming its subject or General, age, and the newest message flattened to one
-  muted line (`getThreadPreviews`, one read for the list). The list stays
+  dimmer line, in the column rows' text levels (`getThreadPreviews`, one read for the list). The list stays
   because it is the empty chat's only way back to a recent thread. The page
   has its own scroller, since a thread's follows its bottom.
 - **Each listed thread shows one status** (`StatusPill` in `threads/`, from
@@ -1013,10 +1032,19 @@ thread. Sweeps preserve `updated_at`, so the last activity still orders chats.
 10 initially and 25 thereafter, with `COUNT(*)`, subject counts and a subject
 page (null is General). `getHarnessThreads` reads every open chat by default;
 `getLectureThreads` includes completed ones. Both commands and a sweep that
-changed rows emit `harness-threads-changed` with the changed ids so list
-consumers can refresh. The menu emits `menu-complete-chat` on ⌘E; as for
-Open Location, it is always enabled because Rust does not track the current
-page, and its frontend handler must act only on an open chat.
+changed rows emit `harness-threads-changed` with the changed ids;
+`watchThreadsChanged` (one listener however many thread columns are mounted)
+re-reads the open list and every completed fold at the length it shows
+(`app/src/stores/chat/completedStore.ts`). The menu emits
+`menu-complete-chat` on ⌘E; as for Open Location, it is always enabled
+because Rust does not track the current page, so `ChatPage` acts only in the
+focused pane on an open chat (`completeChatTarget`).
+
+A completed chat stays on screen. `loadThreads` reads any thread a view
+holds that the open list lacks by id (`getThreadsByIds`) and keeps it in the
+store with `completed_at` set; opening one from Completed or search lists it
+first (`keep`), and a route naming one (a restored tab, a ⌘-click) is read by
+id before the page gives up on it (`useRouteThread`).
 
 `app/src/lib/harness/searchThreads.ts` combines title `LIKE` hits and the
 external-content FTS5 index `harness_items_fts`, maintained by insert, edit and

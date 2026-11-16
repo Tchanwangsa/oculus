@@ -5,6 +5,10 @@ export const VIEW_KEY = "oculus-chat-list-view";
 /** The Status view's Working section, folded with the subject groups (whose
  *  keys are subject ids and "general", so this cannot collide). */
 export const WORKING_FOLD = "status:working";
+/** Completed folds start closed, so in the same stored set their key means
+ *  open: the Status view's, and each subject group's. */
+export const COMPLETED_OPEN = "status:completed";
+export const completedOpenKey = (groupKey: string) => `completed:${groupKey}`;
 
 /** The column's width bounds; folded, it is gone entirely. `ChatPage` owns the
  *  panel so its header can hold the fold toggle. */

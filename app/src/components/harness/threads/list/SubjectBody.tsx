@@ -9,7 +9,10 @@ import { groupBySubject } from "@/lib/ui/subjectGroups";
 import { usePointerDrag } from "@/hooks/gestures/usePointerDrag";
 import { useStoredSet } from "@/hooks/ui/useStoredState";
 import { cn } from "@/lib/utils";
+import { useCompletedStore } from "@/stores/chat/completedStore";
 import { arrange, ORDER_KEY, PAGE } from "../order";
+import { SECTION_HEAD } from "../rowType";
+import { withCompletedGroups } from "../completed/groups";
 import { DropLine } from "../parts";
 import { WorkingRing } from "../StatusPill";
 
@@ -29,6 +32,7 @@ export function SubjectBody({
   collapsed,
   onNew,
   row,
+  completed,
 }: {
   threads: HarnessThread[];
   subjects: Subject[];
@@ -40,6 +44,8 @@ export function SubjectBody({
   collapsed: boolean;
   onNew: (scope?: ChatScope) => void;
   row: (thread: HarnessThread) => ReactNode;
+  /** A group's "n completed" fold, its last line. */
+  completed: (subjectId: number | null, groupKey: string) => ReactNode;
 }) {
   // Per-group page expansion; not persisted.
   const [shown, setShown] = useState<Record<string, number>>({});
@@ -51,11 +57,16 @@ export function SubjectBody({
   const boxes = useRef(new Map<string, HTMLDivElement>());
   // `didDrag` swallows the `click` that ends a drag, which would otherwise fold the group.
   const gesture = usePointerDrag("y");
+  const counts = useCompletedStore((s) => s.counts);
   const codes = useMemo(() => new Map(subjects.map((s) => [s.id, s.code])), [subjects]);
 
   const groups = useMemo(
-    () => arrange(groupBySubject(threads, subjects, { key: "general", label: "General" }), order),
-    [threads, subjects, order],
+    () =>
+      arrange(
+        withCompletedGroups(groupBySubject(threads, subjects, { key: "general", label: "General" }), subjects, counts),
+        order,
+      ),
+    [threads, subjects, counts, order],
   );
 
   // Header reorder on pointer events (see docs/ui.md). Groups differ in
@@ -118,7 +129,7 @@ export function SubjectBody({
               if (el) boxes.current.set(g.key, el);
               else boxes.current.delete(g.key);
             }}
-            className={cn("relative mb-2", drag?.key === g.key && "opacity-40")}
+            className={cn("relative", drag?.key === g.key && "opacity-40")}
           >
             {/* Absolute on a neighbouring group, so no height changes mid-drag. The
                 first group's line sits inside its box: above it is the scroller's
@@ -127,7 +138,11 @@ export function SubjectBody({
             {drag?.at === groups.length && gi === groups.length - 1 && <DropLine className="-bottom-1.5" />}
             <div
               onPointerDown={(e) => onHeaderPointerDown(e, g.key)}
-              className="group/head flex select-none items-center gap-1.5 pt-2.5 pr-2 pb-1 pl-2.5 group-data-[collapsed=true]/nav:pointer-events-none"
+              className={cn(
+                "group/head flex select-none items-center gap-1.5 pr-2 pl-2.5 group-data-[collapsed=true]/nav:pointer-events-none",
+                // The first heading sits under the header, which already spaces it.
+                gi === 0 ? "pt-1 pb-1" : SECTION_HEAD,
+              )}
             >
               {/* The glyph is what a folding column leaves longest. */}
               {code ? <SubjectIcon code={code} size={14} className="shrink-0" /> : <Books size={14} className="shrink-0 text-muted-foreground" />}
@@ -175,7 +190,7 @@ export function SubjectBody({
                   <WorkingRing className="size-[11px] text-brand group-hover/head:hidden" />
                 ) : (
                   <span className="text-[11px] tabular-nums text-muted-foreground opacity-70 group-hover/head:hidden">
-                    {g.items.length}
+                    {g.items.length || ""}
                   </span>
                 )}
               </div>
@@ -201,6 +216,7 @@ export function SubjectBody({
                     </span>
                   </button>
                 )}
+                {completed(g.subjectId, g.key)}
               </div>
             )}
           </div>

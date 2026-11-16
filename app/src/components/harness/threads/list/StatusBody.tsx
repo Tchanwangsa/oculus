@@ -1,10 +1,8 @@
 import { useMemo, type ReactNode } from "react";
-import { CaretRight } from "@phosphor-icons/react";
-import { SIDE_NAV_FOLDS } from "@/components/ui/layout/SideNav";
 import type { HarnessThread } from "@/lib/harness";
 import { sqliteUtcToMs } from "@/lib/format/format";
-import { cn } from "@/lib/utils";
 import { threadRowStatus } from "../StatusPill";
+import { SectionHead } from "./SectionHead";
 
 /** Newest first; equal times keep the list's order (`sort` is stable). */
 export function byNewest(threads: HarnessThread[]): HarnessThread[] {
@@ -24,10 +22,11 @@ export function splitWorking(threads: HarnessThread[], runningIds: Set<number>) 
 }
 
 /**
- * The Status view, T3's frame: every thread not at work newest first, with
- * no headings, then "Working · n" folding at the bottom. That section sits in
- * a `margin-top: auto` block inside `SideNav`'s `fill` column, so it rests at
- * the column's foot while the list is short and follows it when it is long.
+ * The Status view, T3's frame: every open thread not at work newest first,
+ * with no headings, then "Working · n" and `completed` folding at the
+ * bottom. Those sit in a `margin-top: auto` block inside `SideNav`'s `fill`
+ * column, so they rest at the column's foot while the list is short and
+ * follow it when it is long.
  */
 export function StatusBody({
   threads,
@@ -36,6 +35,7 @@ export function StatusBody({
   onWorkingOpen,
   collapsed,
   row,
+  completed,
 }: {
   threads: HarnessThread[];
   runningIds: Set<number>;
@@ -43,34 +43,21 @@ export function StatusBody({
   onWorkingOpen: (open: boolean) => void;
   collapsed: boolean;
   row: (thread: HarnessThread) => ReactNode;
+  /** The Completed fold, under Working. */
+  completed: ReactNode;
 }) {
   const { working, rest } = useMemo(() => splitWorking(threads, runningIds), [threads, runningIds]);
   return (
     <>
       <div className="flex flex-col gap-0.5">{rest.map(row)}</div>
-      <div className="mt-auto pt-2.5">
+      <div className="mt-auto pt-1">
         {working.length > 0 && (
           <section aria-label="Working">
-            <button
-              type="button"
-              aria-expanded={workingOpen}
-              tabIndex={collapsed ? -1 : undefined}
-              onClick={() => onWorkingOpen(!workingOpen)}
-              className={cn(
-                "flex w-full items-center gap-2 px-2.5 pt-1.5 pb-1.5 text-left text-[12.5px] font-medium text-muted-foreground transition-colors hover:text-foreground",
-                SIDE_NAV_FOLDS,
-              )}
-            >
-              <span className="flex-1">Working</span>
-              <span className="font-normal tabular-nums opacity-80">{working.length}</span>
-              <CaretRight
-                size={12}
-                className={cn("shrink-0 opacity-70 transition-transform will-change-transform", workingOpen && "rotate-90")}
-              />
-            </button>
+            <SectionHead label="Working" count={working.length} open={workingOpen} onOpen={onWorkingOpen} collapsed={collapsed} />
             {workingOpen && <div className="flex flex-col gap-0.5">{working.map(row)}</div>}
           </section>
         )}
+        {completed}
       </div>
     </>
   );

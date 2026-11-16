@@ -14,6 +14,10 @@ import { GAP, RAIL, RESERVE } from "@/components/harness/threadInfo/layout";
 import { useThreadInfo } from "@/components/harness/threadInfo/useThreadInfo";
 import { useThreadActions } from "@/components/harness/threads/useThreadActions";
 import { useComposerSelection } from "@/components/harness/threads/useComposerSelection";
+import { useRouteThread } from "@/components/harness/threads/useRouteThread";
+import { useTabActive, useTabId } from "@/components/tabs/TabContext";
+import { useTauriEvent } from "@/hooks/backend/useEvents";
+import { useActivePaneId } from "@/stores/shell/tabStore";
 import { PageHeader, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
 import { DropOverlay } from "@/components/ui/layout/DropOverlay";
 import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
@@ -27,7 +31,11 @@ import {
   chatHref,
   chatScope,
   chatThreadId,
+  completeChatTarget,
+  harnessCompleteThread,
   liveScope,
+  MENU_COMPLETE_CHAT_EVENT,
+  openThreads,
   parseUsage,
   scopeSubject,
   type ChatScope,
@@ -61,8 +69,9 @@ export default function ChatPage() {
   // ask "which thread" at the moment they fire.
   const activeRef = useRef(activeId);
   activeRef.current = activeId;
-  const threads = useHarnessStore((s) => s.threads);
-  const threadsLoaded = useHarnessStore((s) => s.threadsLoaded);
+  const allThreads = useHarnessStore((s) => s.threads);
+  // The lists show open threads; the store also keeps completed ones on screen.
+  const threads = useMemo(() => openThreads(allThreads), [allThreads]);
   const items = useHarnessStore((s) => itemsFor(activeId, s.items));
   const subjects = useHarnessStore((s) => s.subjects);
   const subjectsLoaded = useHarnessStore((s) => s.subjectsLoaded);
@@ -91,7 +100,7 @@ export default function ChatPage() {
     [runningKey],
   );
 
-  const thread = threads.find((t) => t.id === activeId) ?? null;
+  const { thread, missing } = useRouteThread(activeId);
   // What the next message uses: the thread's selection (or a pick on its way
   // to Rust), else the session's for a new thread.
   const { selection, refused, switchFrom, locked } = useComposerSelection(thread);
@@ -120,12 +129,23 @@ export default function ChatPage() {
     return () => store.getState().unhold(activeId);
   }, [activeId, store]);
 
-  // A route naming a thread the loaded list doesn't have (deleted here, in
-  // another tab, or before a restore) falls back to a new thread.
-  const missing = threadsLoaded && activeId != null && thread == null;
+  // A route naming a thread that no longer exists (deleted here, in another
+  // tab, or before a restore) falls back to a new thread.
   useEffect(() => {
     if (missing) navigate(chatHref(null), { replace: true });
   }, [missing, navigate]);
+
+  // ⌘E completes the open chat. The menu item is always enabled (Rust does
+  // not know the page), so only the focused Chat pane acts on it. The chat
+  // stays on screen: it only leaves the open list.
+  const tabActive = useTabActive();
+  const paneId = useTabId();
+  const focusedPaneId = useActivePaneId();
+  const focused = tabActive && paneId === focusedPaneId;
+  useTauriEvent(MENU_COMPLETE_CHAT_EVENT, () => {
+    const id = completeChatTarget(focused, thread);
+    if (id != null) harnessCompleteThread(id).catch((e) => console.error("complete thread failed", e));
+  });
 
   // An entry point's `?s=` (a group's "+") seeds the new thread's scope once;
   // the route effect below then drops it, so a re-render cannot seed again.

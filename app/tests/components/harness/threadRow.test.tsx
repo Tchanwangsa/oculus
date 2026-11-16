@@ -46,6 +46,7 @@ const render = (patch: Partial<HarnessThread>, props: Partial<Parameters<typeof 
       confirming={false}
       onOpen={() => {}}
       onNewTab={() => {}}
+      onComplete={() => {}}
       onArm={() => {}}
       onDelete={() => {}}
       {...props}
@@ -56,14 +57,17 @@ const render = (patch: Partial<HarnessThread>, props: Partial<Parameters<typeof 
 const titleClass = (html: string) => html.match(/<span class="([^"]*)">Alpha-beta pruning walkthrough<\/span>/)?.[1] ?? "";
 
 describe("ThreadRow", () => {
-  test("an idle, read thread shows its subject, age and last message, title muted", () => {
+  test("an idle, read thread shows its subject, age and last message, title dimmed", () => {
     const html = render({ settled_at: sqlite(30 * 60_000), viewed_at: new Date().toISOString() });
     expect(html).toContain("COMP30024");
     expect(html).not.toContain("COMP30024_2026");
     expect(html).toContain(">25m<");
     expect(html).toContain("So P(D | +) is about 0.09");
-    expect(titleClass(html)).toContain("text-muted-foreground");
+    expect(titleClass(html)).toContain("text-foreground/80");
     expect(titleClass(html)).not.toContain("font-medium");
+    // Three levels: the preview is smaller and dimmer than even a read title.
+    expect(html).toMatch(/text-\[12\.5px\] text-muted-foreground\/85[^>]*><span class="min-w-0 flex-1 truncate">So P/);
+    expect(html).toContain("text-[13.5px]");
   });
 
   test("an unread finished thread is Done in green with a bright, medium title", () => {
@@ -93,11 +97,11 @@ describe("ThreadRow", () => {
     expect(titleClass(failed)).toContain("font-medium");
   });
 
-  test("a working thread shows the dashed ring and its timer, title muted, the last message below", () => {
+  test("a working thread shows the dashed ring and its timer, title dimmed, the last message below", () => {
     const html = render({ status: "running", run_started_at: sqlite(9_000) }, { running: true });
     expect(html).toContain("border-dashed");
     expect(html).toMatch(/Working<span class="tabular-nums">(9|10)s<\/span>/);
-    expect(titleClass(html)).toContain("text-muted-foreground");
+    expect(titleClass(html)).toContain("text-foreground/80");
     expect(html).toContain("So P(D | +) is about 0.09");
   });
 
@@ -130,6 +134,13 @@ describe("ThreadRow", () => {
     const html = render({}, { confirming: true });
     expect(html).toContain(">Delete<");
     expect(html).not.toContain("Actions for");
+    expect(html).not.toContain("Complete thread");
+  });
+
+  test("hover offers Complete beside the menu", () => {
+    const html = render({});
+    expect(html).toContain('title="Complete thread"');
+    expect(html).toContain("Actions for Alpha-beta pruning walkthrough");
   });
 });
 
