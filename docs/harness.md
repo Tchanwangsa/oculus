@@ -936,9 +936,12 @@ marker as well as rows and queue, so removed turns cannot leave the sidebar busy
 
 ## One turn at a time
 
-A message sent mid-turn waits until the turn closes. Left to the
-CLIs, Claude leaves an idle gap between turns, Codex folds it into the running
-turn (the first answer can vanish), and opencode's v1 API has no queue.
+A message sent mid-turn either waits until the turn closes or, where the
+bridge can take it and the student did not ask it to wait, goes into the
+turn as a steer ([Steering the running turn](#steering-the-running-turn)).
+Left to the CLIs, Claude folds a plain line into the running turn, Codex
+folds it in too (the first answer can vanish), and opencode's v1 API has no
+queue, so a message never reaches a CLI mid-turn except as a steer.
 
 **A waiting message is a run from the moment it is accepted**
 (`store/queue.rs`). The `Send` command on a busy chat, or on one whose queue
