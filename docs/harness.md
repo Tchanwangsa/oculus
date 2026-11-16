@@ -1887,7 +1887,7 @@ policy (`policy.rs`, `judge`) answers before anyone is asked:
 | --- | --- |
 | a write (ACP kind `edit`, `delete`, `move`, or a writing tool) naming a protected path (`requests/policy.rs` over `protected.rs`), a folder that holds the library, or the database (`oculus.db*` at the library root) | Deny, unseen |
 | a write that names no path | Deny, unseen: it cannot be checked |
-| a write whose every path (its `locations`, which agy resolves through symlinks, its diffs' and its input's) is under `agents/` or `studio/` | Allow, unseen |
+| a write whose every path (its `locations`, which agy resolves through symlinks, its diffs' and its input's) is under `agents/` or `studio/`; a relative path is read from both the library root and `agents/`, and both readings must pass | Allow, unseen |
 | a plain `oculus …` or `ls …` (no `;`, `&`, `|`, redirect, substitution or escape, no `BypassSandbox`) | Allow, unseen |
 | any other write, command, read, fetch or tool | a request: `file_change` with the diffs, `command` (with `outsideSandbox` when it sets `BypassSandbox`), or `tool` (`read`, `fetch`, `other`) |
 
@@ -1904,6 +1904,14 @@ generation of its callbacks, which a stop, the turn's end and teardown each
 replace; a refused write is `failed` and the turn's end then cancels it.
 A request agy makes of a client service (`fs/*`, `terminal/*`, anything
 else) is refused with `-32601`.
+
+**agy's terminal sandbox** (`--sandbox`) runs a command from the library
+root, not the session's `cwd`, and refuses its writes there (EPERM; measured
+2026-11-16 on 1.5.9, and it let a write to `/private/tmp` through). A
+command that fails on the sandbox is retried by the agent with
+`BypassSandbox`, which Rust asks the student about: a plain `oculus …` that
+writes the database is one of these, so in Ask the student approves it and
+in Don't ask it is declined.
 
 The student's own agy rules are neither read nor honoured: `agy` ignores
 them under ACP, and Oculus does not guess their meaning. A deny rule the

@@ -139,10 +139,21 @@ fn writes_under_the_chats_folder_and_studio_are_allowed_unseen() {
         "/lib/oculus/agents/notes.md",
         "/lib/oculus/agents/attachments/a.png",
         "/lib/oculus/studio/video/video.json",
-        "scratch/out.txt",
     ] {
         assert_eq!(verdict(&write(path)), Verdict::Allow, "{path}");
     }
+}
+
+#[test]
+fn a_relative_write_is_judged_from_the_library_root_and_the_chats_folder() {
+    // agy's commands run from the library root, so `courses/x.md` may
+    // mean the protected folder.
+    assert!(refused("courses/x.md"));
+    assert!(refused("../courses/x.md"));
+    assert!(
+        matches!(verdict(&write("scratch/out.txt")), Verdict::Ask(_)),
+        "not under the write root read from the library root"
+    );
 }
 
 #[test]

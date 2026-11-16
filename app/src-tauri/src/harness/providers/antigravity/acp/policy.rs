@@ -141,6 +141,24 @@ fn changes(call: &Value, paths: &[String], delete: bool) -> Value {
         .collect()
 }
 
+/// `paths` made absolute. agy runs its commands from the library root, not
+/// the chat's folder, so a relative path is read against both, and each
+/// reading must pass: the stricter answer stands.
+fn absolute_paths(paths: &[String], library: &Path, cwd: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for p in paths {
+        match Path::new(p).is_absolute() {
+            true => out.push(p.clone()),
+            false => {
+                for base in [cwd, library] {
+                    out.push(base.join(p).display().to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Whether `line` is one plain `oculus …` or `ls …`.
 pub(super) fn allowed_command(line: &str) -> bool {
     let line = line.trim();
@@ -211,7 +229,7 @@ pub(super) fn judge(params: &Value, library: &Path, cwd: &Path) -> Verdict {
     let writes =
         matches!(kind.as_str(), "edit" | "delete" | "move") || WRITE_TOOLS.contains(&name.as_str());
     if writes {
-        let paths = paths_of(call);
+        let paths = absolute_paths(&paths_of(call), library, cwd);
         if paths.is_empty() {
             return Verdict::Deny("a write that names no path cannot be checked".into());
         }
