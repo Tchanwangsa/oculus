@@ -35,6 +35,17 @@ export async function getHarnessThreads(limit = -1): Promise<HarnessThread[]> {
   return db.select<HarnessThread[]>(THREADS_SQL, [limit]);
 }
 
+/** These threads, open or completed: the chats a view holds on screen
+ *  after they left the open list (`harnessStore.loadThreads`). */
+export async function getThreadsByIds(ids: number[]): Promise<HarnessThread[]> {
+  if (!ids.length) return [];
+  const db = await getDb();
+  return db.select<HarnessThread[]>(
+    `SELECT ${THREAD_COLUMNS} FROM harness_threads t WHERE t.id IN (${marks(ids.length)})`,
+    ids,
+  );
+}
+
 /** One lecture's threads — its own query, since `getHarnessThreads` caps
  *  library-wide and would drop a lecture's older ones. */
 export async function getLectureThreads(lectureId: string, limit = 100): Promise<HarnessThread[]> {

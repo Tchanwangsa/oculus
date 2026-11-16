@@ -147,15 +147,18 @@ export function SideNavSearch({
   onEnter,
   placeholder,
   inputRef,
+  className,
 }: {
   value: string;
   onChange: (value: string) => void;
   onEnter: () => void;
   placeholder: string;
   inputRef?: Ref<HTMLInputElement>;
+  /** The wrapper's, replacing its padding where the field shares a row. */
+  className?: string;
 }) {
   return (
-    <div className="px-2 pb-2">
+    <div className={cn("px-2 pb-2", className)}>
       <div
         className={cn(
           "flex h-8 items-center gap-2 rounded-full border border-input bg-card px-3 transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25",

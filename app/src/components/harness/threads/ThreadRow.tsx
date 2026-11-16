@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Books, VideoCamera } from "@phosphor-icons/react";
+import { Books, Check, VideoCamera } from "@phosphor-icons/react";
 import { ProviderMark } from "@/components/icons/ProviderMark";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { SIDE_NAV_FOLDS } from "@/components/ui/layout/SideNav";
@@ -12,6 +12,7 @@ import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { cn } from "@/lib/utils";
 import { ConfirmDelete } from "./parts";
 import { RowMenu } from "./RowMenu";
+import { ROW_META, ROW_PREVIEW, ROW_TITLE, TITLE_ATTENTION, TITLE_READ, TITLE_READ_ACTIVE } from "./rowType";
 import { ATTENTION, runStartedMs, STATUS_LOOK, StatusPill, threadRowStatus } from "./StatusPill";
 
 /**
@@ -19,9 +20,9 @@ import { ATTENTION, runStartedMs, STATUS_LOOK, StatusPill, threadRowStatus } fro
  * its status or age; its title; its newest message and provider mark. The
  * Subject view, whose group header names the subject, drops line one and
  * moves the right slot onto the title's line. A title is bright and medium
- * while the thread wants the student (`ATTENTION`), muted otherwise. While
- * the column folds, the subject glyph stays longest, with the status dot on
- * its corner.
+ * while the thread wants the student (`ATTENTION`), dimmed otherwise
+ * (`rowType`). Hover shows "✓ Complete" and the ⋯ menu. While the column
+ * folds, the subject glyph stays longest, with the status dot on its corner.
  */
 export const ThreadRow = memo(function ThreadRow({
   thread: t,
@@ -34,6 +35,7 @@ export const ThreadRow = memo(function ThreadRow({
   confirming,
   onOpen,
   onNewTab,
+  onComplete,
   onArm,
   onDelete,
 }: {
@@ -51,6 +53,7 @@ export const ThreadRow = memo(function ThreadRow({
   confirming: boolean;
   onOpen: (id: number) => void;
   onNewTab: (thread: HarnessThread) => void;
+  onComplete: (id: number) => void;
   /** Arms this row's delete, or disarms with null. */
   onArm: (id: number | null) => void;
   onDelete: (id: number) => void;
@@ -67,17 +70,17 @@ export const ThreadRow = memo(function ThreadRow({
         active ? "bg-sidebar-item-active" : "hover:bg-sidebar-item-hover",
       )}
     >
-      {/* The whole row is the hit target; the menu is a sibling, never inside it. */}
+      {/* The whole row is the hit target; the actions are siblings, never inside it. */}
       <button
         type="button"
         // ⌘-click opens the thread in a new tab (`app/src/lib/shell/newTabClicks.ts`).
         data-tab-href={chatHref(t.id, t.title)}
         aria-current={active ? "page" : undefined}
         onClick={() => onOpen(t.id)}
-        className="flex w-full min-w-0 flex-col gap-px px-2.5 pt-[7px] pb-2 text-left"
+        className="flex w-full min-w-0 flex-col px-2.5 pt-1.5 pb-[7px] text-left"
       >
         {showSubject && (
-          <span className="flex h-[18px] w-full min-w-0 items-center gap-1.5 text-[11.5px] text-muted-foreground">
+          <span className={cn("flex h-[18px] w-full min-w-0 items-center gap-1.5", ROW_META)}>
             <span
               className="relative flex shrink-0"
               title={subject ? displayName(subject.name, subject.code) : "Not scoped to a subject"}
@@ -92,11 +95,11 @@ export const ThreadRow = memo(function ThreadRow({
             <span className={cn("flex shrink-0", SIDE_NAV_FOLDS)}>{right}</span>
           </span>
         )}
-        <span className={cn("flex h-5 w-full min-w-0 items-center gap-1.5 text-[13px]", SIDE_NAV_FOLDS)}>
+        <span className={cn("flex h-[21px] w-full min-w-0 items-center gap-1.5", ROW_TITLE, SIDE_NAV_FOLDS)}>
           <span
             className={cn(
               "min-w-0 flex-1 truncate",
-              attention ? "font-medium text-foreground" : active ? "text-foreground/80" : "text-muted-foreground",
+              attention ? TITLE_ATTENTION : active ? TITLE_READ_ACTIVE : TITLE_READ,
             )}
           >
             {title}
@@ -106,7 +109,7 @@ export const ThreadRow = memo(function ThreadRow({
           )}
           {!showSubject && right}
         </span>
-        <span className={cn("flex w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground/85", SIDE_NAV_FOLDS)}>
+        <span className={cn("flex h-[18px] w-full min-w-0 items-center gap-1.5", ROW_PREVIEW, SIDE_NAV_FOLDS)}>
           <span className="min-w-0 flex-1 truncate">
             {status === "working" ? (
               <LiveLine threadId={t.id} fallback={preview} />
@@ -124,7 +127,7 @@ export const ThreadRow = memo(function ThreadRow({
       </button>
       <div
         className={cn(
-          "absolute top-1.5 right-1.5 flex items-center",
+          "absolute top-1 right-1.5 flex items-center",
           !confirming && SIDE_NAV_FOLDS,
           "group-data-[collapsed=true]/nav:pointer-events-none",
         )}
@@ -141,12 +144,28 @@ export const ThreadRow = memo(function ThreadRow({
             />
           </div>
         ) : (
-          <RowMenu
-            title={title}
-            onNewTab={() => onNewTab(t)}
-            onDelete={() => onArm(t.id)}
-            className="opacity-0 group-hover/thread:opacity-100"
-          />
+          <div
+            data-row-actions
+            className="flex items-center gap-px rounded-md border border-border-subtle bg-popover p-px opacity-0 shadow-xs transition-opacity will-change-[opacity] group-hover/thread:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100"
+          >
+            <button
+              type="button"
+              title="Complete thread"
+              aria-label={`Complete ${title}`}
+              onClick={() => onComplete(t.id)}
+              className="flex h-[22px] items-center gap-1 rounded-[5px] px-1.5 text-[12px] text-muted-foreground outline-none transition-colors hover:bg-sidebar-item-hover hover:text-foreground focus-visible:text-foreground"
+            >
+              <Check size={12} weight="bold" className="shrink-0" />
+              Complete
+            </button>
+            <RowMenu
+              title={title}
+              active={active}
+              onNewTab={() => onNewTab(t)}
+              onComplete={() => onComplete(t.id)}
+              onDelete={() => onArm(t.id)}
+            />
+          </div>
         )}
       </div>
     </div>
@@ -158,7 +177,7 @@ function RightSlot({ thread, status }: { thread: HarnessThread; status: ThreadSt
   if (status) return <StatusPill status={status} since={status === "working" ? runStartedMs(thread) : null} />;
   const ms = sqliteUtcToMs(thread.updated_at);
   return ms == null ? null : (
-    <span className="h-5 shrink-0 text-[11.5px] leading-5 tabular-nums text-muted-foreground/85">{shortAge(ms)}</span>
+    <span className="h-5 shrink-0 text-[11.5px] leading-5 tabular-nums text-muted-foreground">{shortAge(ms)}</span>
   );
 }
 

@@ -394,6 +394,16 @@ themes are opt-in and keep the same structure.
   even before that frame arrives. The width and fold are saved to storage
   only after dragging ends, so synchronous storage stays out of the resize
   loop. Unmounting cancels the pending frame and clears the drag cursor.
+  `SideNavSearch` takes a `className` for its wrapper where it shares a row
+  (Chat's column puts the new-chat button beside it).
+- **A multi-line list row reads as three levels** (T3's sidebar; Chat's
+  thread rows, search results and recent list, `threads/rowType.ts`): a
+  11.5px muted meta line, a 13.5px title (`font-medium text-foreground`
+  when it wants attention, `text-foreground/80` when read), and a 12.5px
+  preview in `text-muted-foreground/85`, so a read title stays a clear step
+  above the preview in every theme. Rows are tight inside (6px top, 7px
+  bottom, no line gap) and 2px apart; a section heading has 16px above and
+  4px below.
 - **Subject tabs share `SubjectPage` for width and gutters** under
   `SubjectLayout`'s header row (the toggle, the subject crumb, the tab's
   name) and beside the subject's nav column, `SubjectLoading` for skeleton

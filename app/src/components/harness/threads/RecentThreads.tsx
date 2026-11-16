@@ -6,7 +6,9 @@ import type { Subject } from "@/lib/db";
 import { displayCode, displayName, sqliteUtcToMs } from "@/lib/format/format";
 import { chatHref, getThreadPreviews, PROVIDERS, type HarnessThread } from "@/lib/harness";
 import { relativeTime } from "@/lib/activity/recents";
-import { runStartedMs, StatusPill, threadRowStatus } from "./StatusPill";
+import { ROW_PREVIEW, ROW_TITLE, TITLE_ATTENTION, TITLE_READ } from "./rowType";
+import { ATTENTION, runStartedMs, StatusPill, threadRowStatus } from "./StatusPill";
+import { cn } from "@/lib/utils";
 
 /** Rows shown; the nav column lists every thread. */
 const SHOWN = 3;
@@ -14,7 +16,7 @@ const SHOWN = 3;
 /**
  * Bare `/chat`'s way back into a conversation: the latest threads above the
  * empty composer, each with its subject (or General), age and newest message
- * (either side's) on one muted line. `threads` is the store's list, newest first.
+ * (either side's) on one dimmer line, in the column rows' text levels (`rowType`). `threads` is the store's list, newest first.
  */
 export const RecentThreads = memo(function RecentThreads({
   threads,
@@ -98,7 +100,7 @@ function Row({
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex min-w-0 items-baseline gap-3">
             <span className="flex min-w-0 flex-1 items-center gap-1.5">
-              <span className="min-w-0 truncate text-[13px] text-foreground">{t.title?.trim() || "Untitled"}</span>
+              <span className={cn("min-w-0 truncate", ROW_TITLE, status && ATTENTION.has(status) ? TITLE_ATTENTION : TITLE_READ)}>{t.title?.trim() || "Untitled"}</span>
               <Badge
                 variant="secondary"
                 title={subject ? displayName(subject.name, subject.code) : "Not scoped to a subject"}
@@ -122,7 +124,7 @@ function Row({
               )
             )}
           </span>
-          {preview && <span className="truncate text-xs text-muted-foreground">{preview}</span>}
+          {preview && <span className={cn("truncate", ROW_PREVIEW)}>{preview}</span>}
         </span>
       </button>
     </div>
