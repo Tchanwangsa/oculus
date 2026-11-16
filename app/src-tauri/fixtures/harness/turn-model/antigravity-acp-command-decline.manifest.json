@@ -1,0 +1,54 @@
+{
+  "provider": "antigravity",
+  "cli_version": "1.5.9",
+  "protocol": "Agent Client Protocol v1 over agy acp --sandbox (JSON-RPC 2.0 on stdio)",
+  "model": "gemini-3.8-flash",
+  "capture_date": "2026-11-15",
+  "source": "stage 5 ACP probe 08-resume-acp.jsonl, lines 24-36, agent-to-client frames",
+  "redaction": "Agent frames as recorded; usage figures the probe redacted stay \"[REDACTED]\". The probe's workspace folder is $LIBRARY/agents (the replay's library), its outside folder's temp suffix is XXXXXX and any home path is /Users/student. The session was opened by the probe (initialize, session/new or load, a thought level); the replay starts at the prompt. The expected outbound is the Oculus bridge's, not the probe driver's: its prompt is the replay request.",
+  "scenario": "in a loaded session, a command asked and declined; the turn ends",
+  "frames": 12,
+  "sha256": "c9fbd26176372646e3568d5b911475e65a2a1b95d617cf0e03799c82287da303",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "session/prompt",
+        "params": {
+          "sessionId": "a85d2c5f-a341-4725-914d-b6768d5452f7",
+          "prompt": [
+            {
+              "type": "text",
+              "text": "Replay request"
+            }
+          ]
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "result": {
+          "outcome": {
+            "outcome": "selected",
+            "optionId": "deny"
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../antigravity-acp-command-decline.ndjson",
+  "native_session": "a85d2c5f-a341-4725-914d-b6768d5452f7",
+  "permission_mode": "ask",
+  "settings": {
+    "recorded_mode": "default",
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_scope": "recorded session; scratch library",
+    "permission_mode": "ask"
+  }
+}

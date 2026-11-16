@@ -1,0 +1,80 @@
+{
+  "provider": "antigravity",
+  "cli_version": "1.5.9",
+  "protocol": "Agent Client Protocol v1 over agy acp --sandbox (JSON-RPC 2.0 on stdio)",
+  "model": "gemini-3.8-flash",
+  "capture_date": "2026-11-15",
+  "source": "stage 5 ACP probe 15-full-turn.jsonl, lines 10-41, agent-to-client frames",
+  "redaction": "Agent frames as recorded; usage figures the probe redacted stay \"[REDACTED]\". The probe's workspace folder is $LIBRARY/agents (the replay's library), its outside folder's temp suffix is XXXXXX and any home path is /Users/student. The session was opened by the probe (initialize, session/new or load, a thought level); the replay starts at the prompt. The expected outbound is the Oculus bridge's, not the probe driver's: its prompt is the replay request.",
+  "scenario": "a full turn: a write in the chat's folder Rust allows unasked, pwd and false each approved once by the student, a failed read, the answer",
+  "frames": 29,
+  "sha256": "5ac2af71cfb79a838eb9d9dfe4fb11dad0fe033696807f9abd5b1768cec3b2d8",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "session/prompt",
+        "params": {
+          "sessionId": "67ecbc6a-7328-4d56-8499-8d28385d6b25",
+          "prompt": [
+            {
+              "type": "text",
+              "text": "Replay request"
+            }
+          ]
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "result": {
+          "outcome": {
+            "outcome": "selected",
+            "optionId": "allow"
+          }
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": "2",
+        "result": {
+          "outcome": {
+            "outcome": "selected",
+            "optionId": "allow"
+          }
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": "3",
+        "result": {
+          "outcome": {
+            "outcome": "selected",
+            "optionId": "allow"
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../antigravity-acp-full-turn.ndjson",
+  "native_session": "67ecbc6a-7328-4d56-8499-8d28385d6b25",
+  "permission_mode": "ask",
+  "settings": {
+    "recorded_mode": "default",
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_scope": "recorded session; scratch library",
+    "permission_mode": "ask"
+  }
+}

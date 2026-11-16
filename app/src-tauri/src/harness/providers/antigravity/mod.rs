@@ -10,6 +10,7 @@
 //! *attached* value; and tool parameters are PascalCase (`CommandLine`,
 //! `AbsolutePath`). `fixtures/harness/antigravity-ls.ndjson` is a real session.
 
+pub mod acp;
 mod install;
 mod json;
 mod models;

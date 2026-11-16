@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::harness::antigravity::acp::AcpSession;
 use crate::harness::antigravity::AntigravitySession;
 use crate::harness::claude::ClaudeSession;
 use crate::harness::codex::{CodexServer, CodexThreadOpts};
@@ -29,6 +30,8 @@ pub(in crate::harness) enum Handle {
     Codex(Arc<CodexServer>, String, Arc<CodexThreadOpts>),
     Opencode(Arc<OpencodeServer>, String),
     Antigravity(Arc<AntigravitySession>),
+    /// Antigravity over ACP (`agy acp`), one process per thread.
+    AntigravityAcp(Arc<AcpSession>),
 }
 
 impl Handle {
@@ -37,7 +40,7 @@ impl Handle {
             Handle::Claude(_) => Provider::Claude,
             Handle::Codex(..) => Provider::Codex,
             Handle::Opencode(..) => Provider::Opencode,
-            Handle::Antigravity(_) => Provider::Antigravity,
+            Handle::Antigravity(_) | Handle::AntigravityAcp(_) => Provider::Antigravity,
         }
     }
 
@@ -47,6 +50,7 @@ impl Handle {
             Handle::Codex(server, tid, _) => server.is_alive() && server.has_thread(tid),
             Handle::Opencode(server, ses) => server.is_alive() && server.has_session(ses),
             Handle::Antigravity(s) => s.is_alive(),
+            Handle::AntigravityAcp(s) => s.is_alive(),
         }
     }
 
@@ -64,6 +68,7 @@ impl Handle {
         match self {
             Handle::Codex(server, tid, _) => server.has_pending_request(tid),
             Handle::Claude(s) => s.has_pending_request(),
+            Handle::AntigravityAcp(s) => s.has_pending_request(),
             Handle::Opencode(..) | Handle::Antigravity(_) => false,
         }
     }
@@ -82,7 +87,10 @@ impl Handle {
                 };
                 Handle::Codex(server.clone(), tid.clone(), Arc::new(opts))
             }
-            Handle::Claude(_) | Handle::Opencode(..) | Handle::Antigravity(_) => self.clone(),
+            Handle::Claude(_)
+            | Handle::Opencode(..)
+            | Handle::Antigravity(_)
+            | Handle::AntigravityAcp(_) => self.clone(),
         }
     }
 
@@ -102,6 +110,10 @@ impl Handle {
                 server.set_model(ses, model);
                 self.clone()
             }
+            Handle::AntigravityAcp(s) => {
+                s.want_model(model);
+                self.clone()
+            }
             Handle::Claude(_) | Handle::Antigravity(_) => self.clone(),
         }
     }
@@ -119,6 +131,7 @@ impl Handle {
             Handle::Codex(server, tid, opts) => server.start_turn(tid, text, opts, bound),
             Handle::Opencode(server, ses) => server.prompt(ses, text, bound),
             Handle::Antigravity(s) => s.send(text, bound),
+            Handle::AntigravityAcp(s) => s.send(text, bound),
         }
     }
 
@@ -130,6 +143,7 @@ impl Handle {
             Handle::Codex(server, tid, _) => server.revert(tid, anchor),
             Handle::Opencode(server, ses) => server.revert(ses, anchor),
             Handle::Antigravity(s) => s.rewind(anchor),
+            Handle::AntigravityAcp(s) => s.rewind(anchor),
         }
     }
 
@@ -139,6 +153,7 @@ impl Handle {
             Handle::Codex(server, tid, _) => server.interrupt(tid),
             Handle::Opencode(server, ses) => server.interrupt(ses),
             Handle::Antigravity(s) => s.interrupt(),
+            Handle::AntigravityAcp(s) => s.interrupt(),
         }
     }
 
@@ -151,6 +166,10 @@ impl Handle {
                 Ok(())
             }
             Handle::Antigravity(s) => {
+                s.kill();
+                Ok(())
+            }
+            Handle::AntigravityAcp(s) => {
                 s.kill();
                 Ok(())
             }
@@ -167,6 +186,7 @@ impl Handle {
             Handle::Opencode(server, ses) if delete => server.delete_session(ses),
             Handle::Opencode(server, ses) => server.detach(ses),
             Handle::Antigravity(s) => s.kill(),
+            Handle::AntigravityAcp(s) => s.kill(),
         }
     }
 }

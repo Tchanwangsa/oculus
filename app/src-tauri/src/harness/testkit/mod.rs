@@ -1,6 +1,7 @@
 //! Offline provider-frame replay through production encoders, translators,
 //! manager, ordered consumer, migrated SQLite and the frontend projection.
 
+mod agy_requests;
 mod assertions;
 mod claude_requests;
 mod codex_requests;

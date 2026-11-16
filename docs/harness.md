@@ -15,7 +15,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Messages that wait their turn, as queued runs | `app/src-tauri/src/harness/store/queue.rs` |
 | Tauri commands (setup, models, turns, suggestions) | `app/src-tauri/src/harness/app/` |
 | The event enum, tool classification (`classify`) and answer selection | `app/src-tauri/src/harness/event/mod.rs`, `app/src-tauri/src/harness/event/classify.rs`, `app/src-tauri/src/harness/event/answer.rs` |
-| Bridges: Claude (`claude -p`), Codex (`app-server`), opencode (`serve`), Antigravity (`agy --print=`) | `app/src-tauri/src/harness/providers/claude/`, `app/src-tauri/src/harness/providers/codex/`, `app/src-tauri/src/harness/providers/opencode/`, `app/src-tauri/src/harness/providers/antigravity/` |
+| Bridges: Claude (`claude -p`), Codex (`app-server`), opencode (`serve`), Antigravity (`agy --print=`, or `agy acp` in a build with the `agy-acp` feature) | `app/src-tauri/src/harness/providers/claude/`, `app/src-tauri/src/harness/providers/codex/`, `app/src-tauri/src/harness/providers/opencode/`, `app/src-tauri/src/harness/providers/antigravity/` (ACP: `acp/`) |
 | Paths no agent may write; opencode's ruleset; agy's rules | `app/src-tauri/src/harness/protected.rs`, `app/src-tauri/templates/OPENCODE.template.json`, `app/src-tauri/src/harness/providers/antigravity/rules.rs` |
 | Finding, installing, updating and signing in the CLIs | `app/src-tauri/src/harness/cli/discover/`, `app/src-tauri/src/harness/cli/install/`, `app/src-tauri/src/harness/cli/update/`, `app/src-tauri/src/harness/cli/signin/` |
 | …their frontend | `app/src/hooks/agents/useBridgeHealth.ts`, `app/src/hooks/agents/useSignInStatus.ts`, `app/src/components/settings/agents/InstallAgentDialog.tsx`, `app/src/components/settings/agents/UpdateAgents.tsx`, `app/src/components/harness/SignInDialog.tsx`, `app/src/pages/settings/integrations/AgentsPage.tsx` |
@@ -97,6 +97,7 @@ persisted the same way. `classify` in `event/classify.rs` is the one tool table.
 | Codex | one `codex app-server` per app, a `threadId` per thread | `thread/resume` |
 | opencode | one `opencode serve` per app, a v1 HTTP session per thread, one SSE stream routed by `sessionID` | session id |
 | Antigravity | one `agy --print=` per thread | `--conversation` |
+| Antigravity, `agy-acp` builds | one `agy acp` per thread, JSON-RPC over stdio ([below](#antigravity-asks-over-acp)) | `session/load` with the session id (print mode's conversation id loads too) |
 
 Claude chat sessions and tool-enabled headless `run_once` jobs (chapters) request
 `--thinking adaptive --thinking-display summarized` and inline
@@ -827,7 +828,10 @@ closed (an opencode session deleted) after its turn. Its brief is Claude's
 the others in `agents/opencode.json`). Claude runs with `--tools ""`, no skills, no MCP and
 no persisted session, and Codex's thread is `ephemeral`; the opencode agents
 end on a `"*": "deny"`. Codex and `agy` cannot drop their tools, so the brief
-forbids them.
+forbids them. Over ACP (`agy-acp` builds) the brief is the session's
+`systemPrompt.append`, and each permission request is answered by Rust's
+policy alone: what it does not allow is refused, never asked
+([Antigravity asks over ACP](#antigravity-asks-over-acp)).
 
 `Harness::one_turn` is the plain shape — prompt in, answer text out, no
 timeout — for a job whose prompt carries everything inline. A one-off turn's
@@ -1697,7 +1701,8 @@ What the student sees is decided in `app/src/lib/harness/requests.ts` and
   request names it by its type, "Claude Code's subagent wire-probe …". Only
   Approve and Decline: nothing under More.
 - Antigravity's print-mode refusal is still its own `permission` row
-  (`PermissionCard`); it does not go through requests.
+  (`PermissionCard`); it does not go through requests. Over ACP its
+  requests are requests like the others' ([below](#antigravity-asks-over-acp)).
 
 ### Codex asks over its callbacks
 
@@ -1831,6 +1836,78 @@ a change restarts the session at the next send.
   `classifier` or `rule`. No classifier refusal has been recorded.
 - `has_pending_request` counts prompts not yet answered or withdrawn, which
   `decide_transition` reads to refuse a switch away from Claude.
+
+### Antigravity asks over ACP
+
+A build with the `agy-acp` cargo feature runs Antigravity as `agy acp
+--sandbox --add-dir <library>`, one process per chat, speaking the Agent
+Client Protocol (JSON-RPC 2.0 on stdio); without it the print bridge above
+runs. Recorded on `agy` 1.5.9 (`fixtures/harness/antigravity-acp-*`, from
+the stage 5 probe; replayed by `testkit/agy_requests.rs`).
+`providers/antigravity/acp/`: `client.rs` (requests and replies by id),
+`session.rs`, `updates.rs` (the timeline), `policy.rs` and `route.rs`.
+
+- **A session.** `initialize` offers no client service (no file or
+  terminal methods, and no `elicitation`: questions are stage 3's), then
+  `session/new` with the chat's folder as `cwd` and the brief in
+  `_meta.antigravity.systemPrompt.append`, or `session/load` with the
+  chat's session id (and the brief again). A load replays the conversation
+  as `session/update`s before it answers; updates count only while a
+  prompt is out, so the history is dropped. A load also resets the model,
+  level and mode, so `configure` follows every new session and every
+  load: `session/set_model` with the slug (`gemini-3.8-flash-low`, as
+  `models::model_slug` folds a level in), `session/set_config_option
+  thought_level` when only a level is set, and `session/set_mode default`.
+  `agy acp` takes no `--model` or `--effort`.
+- **A turn** is one `session/prompt`; its reply ends it (`end_turn`,
+  `max_tokens` → completed, `cancelled` → interrupted, `refusal` or
+  anything else → failed). Chunks carry no message id, so the bridge names
+  blocks `msg-<n>` and `thought-<n>`; a block ends at the next tool call or
+  the other kind's block, and is whole once the reply comes. A tool's
+  `completed` is its lifecycle: a command whose `rawOutput.exit_code` is not
+  0 is a failed row. A second prompt is never sent while one is out: one
+  sent mid-tool steers the turn, and the first reply then says `end_turn`
+  while its tool still runs.
+- **A model change** is told in the session: the next `send` sends
+  `session/set_model` before its prompt (`model_switch_in_session`). A
+  level change restarts the process and loads the session.
+- **Stop** is `session/cancel`; then every permission request still open
+  is answered `cancelled`, as ACP asks of a client. The reply comes back
+  `cancelled` (in under a second during a command, the probe measured) and
+  the process takes the next message. The text streamed so far is kept as
+  partial, with no gap. Force stop kills the process.
+
+**Rust's answer is the only gate.** In mode `default` every write and
+every command sends `session/request_permission` first, and under ACP
+`agy` neither skips nor blocks one for a rule in the student's global
+settings (stage 5 probe, rules-canonical): what Rust allows runs. So the
+policy (`policy.rs`, `judge`) answers before anyone is asked:
+
+| Request | Answer |
+| --- | --- |
+| a write (ACP kind `edit`, `delete`, `move`, or a writing tool) naming a protected path (`requests/policy.rs` over `protected.rs`), a folder that holds the library, or the database (`oculus.db*` at the library root) | Deny, unseen |
+| a write that names no path | Deny, unseen: it cannot be checked |
+| a write whose every path (its `locations`, which agy resolves through symlinks, its diffs' and its input's) is under `agents/` or `studio/` | Allow, unseen |
+| a plain `oculus …` or `ls …` (no `;`, `&`, `|`, redirect, substitution or escape, no `BypassSandbox`) | Allow, unseen |
+| any other write, command, read, fetch or tool | a request: `file_change` with the diffs, `command` (with `outsideSandbox` when it sets `BypassSandbox`), or `tool` (`read`, `fetch`, `other`) |
+
+A request then goes where every bridge's does: the consumer declines it
+unseen in Don't ask, with no turn open, or for a protected path; Auto asks
+as Ask (`auto_review` false: agy has no reviewer). A one-off turn asks
+nobody: what the policy does not allow is refused. Options are Approve
+once (`allow_once`) and Decline (`reject_once`), the only two agy offers;
+there are no session grants. The answer is `{outcome: selected, optionId}`
+on the request's own id (agy's ids are strings), and a line the pipe took
+is `acknowledged`. Copied from T3: an answer is written only while the
+session is not being torn down and the request belongs to the live
+generation of its callbacks, which a stop, the turn's end and teardown each
+replace; a refused write is `failed` and the turn's end then cancels it.
+A request agy makes of a client service (`fs/*`, `terminal/*`, anything
+else) is refused with `-32601`.
+
+The student's own agy rules are neither read nor honoured: `agy` ignores
+them under ACP, and Oculus does not guess their meaning. A deny rule the
+student wrote for their own terminal does not hold in a chat.
 
 ## Going back rewinds the agent too
 

@@ -78,7 +78,7 @@ fn glob_matches(glob: &str, name: &str) -> bool {
 
 /// `path` with `.` and `..` worked out, and its deepest existing folder
 /// through its symlinks, so `/tmp` and `/private/tmp` compare equal.
-fn resolve(path: &Path) -> PathBuf {
+pub(in crate::harness) fn resolve(path: &Path) -> PathBuf {
     let mut lexical = PathBuf::new();
     for component in path.components() {
         match component {

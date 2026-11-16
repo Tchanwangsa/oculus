@@ -511,6 +511,27 @@ impl Rig {
     }
 
     /// Feed the rest of the recording.
+    /// Feed the recording through the next frame `pick` matches, and wait
+    /// for the consumer to catch up.
+    pub fn until_next(&mut self, pick: impl Fn(&Value) -> bool) {
+        let at = self.scenario.frames[self.fed_frames..]
+            .iter()
+            .position(pick)
+            .map(|i| self.fed_frames + i)
+            .expect("no such frame ahead");
+        self.feed_to(at + 1);
+        self.drain();
+    }
+
+    /// [`Self::resume`], waiting for the consumer after each frame, as a
+    /// CLI waits for the answer to its request before going on.
+    pub fn resume_drained(&mut self) {
+        while self.fed_frames < self.scenario.frames.len() {
+            self.feed_to(self.fed_frames + 1);
+            self.drain();
+        }
+    }
+
     pub fn resume(&mut self) {
         self.feed_to(self.scenario.frames.len());
     }
@@ -780,6 +801,14 @@ fn session(
             native_session,
             scratch,
         ),
+        Provider::Antigravity if outbound.speaks_jsonrpc() => {
+            crate::harness::antigravity::acp::replay::bridge(
+                outbound.clone(),
+                sink,
+                native_session,
+                scratch,
+            )
+        }
         Provider::Antigravity => crate::harness::antigravity::replay::bridge(outbound.wire(), sink),
     };
     let handle = bridge.handle.clone();

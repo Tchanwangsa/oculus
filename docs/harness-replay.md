@@ -11,7 +11,7 @@ and release gate for the agent turn model rebuild.
 | Fixtures, individual manifests and explicit known failures | `app/src-tauri/fixtures/harness/turn-model/` |
 | Replay runner (`replay.rs`), its step-by-step runtime (`rig.rs`, `io.rs`), scratch guard and assertions | `app/src-tauri/src/harness/testkit/` |
 | Process transport substitution | `app/src-tauri/src/harness/transport.rs` |
-| Provider constructors and inbound runners | `app/src-tauri/src/harness/providers/claude/replay.rs`, `app/src-tauri/src/harness/providers/codex/replay.rs`, `app/src-tauri/src/harness/providers/opencode/replay.rs`, `app/src-tauri/src/harness/providers/antigravity/replay.rs` |
+| Provider constructors and inbound runners | `app/src-tauri/src/harness/providers/claude/replay.rs`, `app/src-tauri/src/harness/providers/codex/replay.rs`, `app/src-tauri/src/harness/providers/opencode/replay.rs`, `app/src-tauri/src/harness/providers/antigravity/replay.rs`, `app/src-tauri/src/harness/providers/antigravity/acp/replay.rs` |
 | Shared ordered consumer and injected external effects | `app/src-tauri/src/harness/app/consumer/` |
 | Headless frontend store and row projection | `app/tests/harness/project-replay.ts` |
 | Replay output the timeline's own tests fold | `app/tests/fixtures/turn-model/`, `app/tests/components/harness/runRows.test.ts` |
@@ -214,6 +214,24 @@ CLI suggests granting the library, a pipe dying mid-reply, a restart with one
 pending, a mode change restarting the session, and, as a mutation, a prompt
 inside a turn the CLI started itself. A test that declines unseen rewrites
 the manifest's expected deny to Oculus's unseen message.
+`testkit/agy_requests.rs` replays Antigravity over ACP (`agy` 1.5.9,
+`fixtures/harness/antigravity-acp-*`: the stage 5 probe's agent frames from
+the prompt on, the probe's workspace as `$LIBRARY/agents`, which the
+bridge's replay reads as the scratch library, and the Oculus bridge's
+writes as the expected outbound). The rig picks the ACP bridge when the
+manifest's first expected frame is JSON-RPC; a recorded session starts
+open, its requests other than `session/prompt` are answered from the
+manifest as they are written, and its ids continue from the manifest's.
+It checks a full turn (a write in the chat's folder allowed unseen, two
+commands asked and approved, a failed command and read), a write outside
+and a command each declined, a protected path or the database refused
+unseen for each kind, Don't ask (from the start and saved mid-turn), Auto
+asking as Ask, Stop mid-command and mid-text, Stop with a request waiting
+(answered `cancelled`, a later answer not written), a stop agy never
+answers reaching Force stop, a process dying mid-turn, a restart with a
+request pending, a pipe dying mid-reply, and a one-off turn answered by
+policy alone. The waiting-request stop, the dying process and the ignored
+stop are mutations of recordings.
 `testkit/driver.rs` checks the driver through the rig: a crash before the
 start step (the message back in its queue, held, on all four bridges) and
 after it took the run, sends returning at their commit and going out one

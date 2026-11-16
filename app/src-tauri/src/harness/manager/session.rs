@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::harness::antigravity::acp::{AcpSession, AcpSpawn};
 use crate::harness::antigravity::{AntigravitySession, AntigravitySpawn};
 use crate::harness::child::ThreadSpawn;
 use crate::harness::claude::{ClaudeSession, ClaudeSpawn};
@@ -291,6 +292,21 @@ impl Harness {
                     None => server.start_session(&sopts, sink)?,
                 };
                 Handle::Opencode(server, ses)
+            }
+            Provider::Antigravity if cfg!(feature = "agy-acp") => {
+                Handle::AntigravityAcp(AcpSession::spawn(
+                    AcpSpawn {
+                        base: base(cwd)?,
+                        brief: instructions(
+                            &self.data_dir,
+                            opts.scope.as_deref(),
+                            opts.lecture.as_ref(),
+                            opts.studio_brief.as_ref(),
+                        ),
+                        one_off: false,
+                    },
+                    sink,
+                )?)
             }
             Provider::Antigravity => Handle::Antigravity(AntigravitySession::spawn(
                 AntigravitySpawn {

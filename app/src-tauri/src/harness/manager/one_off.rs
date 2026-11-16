@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
 
+use crate::harness::antigravity::acp::{AcpSession, AcpSpawn};
 use crate::harness::antigravity::{AntigravitySession, AntigravitySpawn};
 use crate::harness::child::ThreadSpawn;
 use crate::harness::claude::{ClaudeSession, ClaudeSpawn};
@@ -138,6 +139,18 @@ impl Harness {
                 };
                 let ses = server.start_session(&sopts, sink)?;
                 Handle::Opencode(server, ses)
+            }
+            // Answered by Rust's policy alone: what it does not allow is
+            // refused, never asked.
+            Provider::Antigravity if cfg!(feature = "agy-acp") => {
+                Handle::AntigravityAcp(AcpSession::spawn(
+                    AcpSpawn {
+                        base: base(cwd)?,
+                        brief: instructions.to_string(),
+                        one_off: true,
+                    },
+                    sink,
+                )?)
             }
             Provider::Antigravity => Handle::Antigravity(AntigravitySession::spawn(
                 AntigravitySpawn {

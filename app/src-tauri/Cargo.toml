@@ -181,6 +181,11 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 # and driven on the WKWebView directly (see `src/shell/browser/page.rs`).
 objc2-web-kit = { version = "0.3", features = ["block2", "WKHTTPCookieStore", "WKWebsiteDataStore", "WKWebView", "WKNavigation", "WKFindConfiguration", "WKFindResult", "WKScriptMessage", "WKScriptMessageHandler", "WKUserContentController"] }
 
+[features]
+# Antigravity chats over `agy acp` instead of `agy --print=`
+# (`harness/providers/antigravity/acp/`, docs/harness.md).
+agy-acp = []
+
 [dev-dependencies]
 
 [target.'cfg(windows)'.dependencies]

@@ -1,0 +1,51 @@
+{
+  "provider": "antigravity",
+  "cli_version": "1.5.9",
+  "protocol": "Agent Client Protocol v1 over agy acp --sandbox (JSON-RPC 2.0 on stdio)",
+  "model": "gemini-3.8-flash",
+  "capture_date": "2026-11-15",
+  "source": "stage 5 ACP probe 07-cancel.jsonl, lines 27-31, agent-to-client frames",
+  "redaction": "Agent frames as recorded; usage figures the probe redacted stay \"[REDACTED]\". The probe's workspace folder is $LIBRARY/agents (the replay's library), its outside folder's temp suffix is XXXXXX and any home path is /Users/student. The session was opened by the probe (initialize, session/new or load, a thought level); the replay starts at the prompt. The expected outbound is the Oculus bridge's, not the probe driver's: its prompt is the replay request.",
+  "scenario": "stopped while the answer streams: the text so far is kept, the prompt ends cancelled",
+  "frames": 4,
+  "sha256": "b339e4401a8972ac7fae7b1c5be9ac6412bb975b12c46d3f88df9054f86aa131",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "session/prompt",
+        "params": {
+          "sessionId": "c1e3f868-73fa-4696-945e-861027e169b4",
+          "prompt": [
+            {
+              "type": "text",
+              "text": "Replay request"
+            }
+          ]
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "method": "session/cancel",
+        "params": {
+          "sessionId": "c1e3f868-73fa-4696-945e-861027e169b4"
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../antigravity-acp-cancel-text.ndjson",
+  "native_session": "c1e3f868-73fa-4696-945e-861027e169b4",
+  "permission_mode": "ask",
+  "settings": {
+    "recorded_mode": "default",
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_scope": "recorded session; scratch library",
+    "permission_mode": "ask"
+  }
+}
