@@ -198,7 +198,7 @@ fn draft(rows: &[Row], newest: Option<(i64, i64)>, target: &Target, text: &str) 
 async fn rows(tx: &mut SqliteConnection, thread_id: i64) -> Result<Vec<Row>, String> {
     read_rows(
         &mut *tx,
-        "i.thread_id = ?1 AND i.kind IN ('user', 'assistant')",
+        "i.thread_id = ?1 AND i.kind IN ('user', 'steer', 'assistant')",
         thread_id,
     )
     .await
@@ -235,7 +235,8 @@ async fn read_rows(
                 });
             Row {
                 item_id,
-                student: row.get::<String, _>("kind") == "user",
+                // A steer is the student's words too, inside the run it corrected.
+                student: matches!(row.get::<String, _>("kind").as_str(), "user" | "steer"),
                 text: row.get::<Option<String>, _>("content").unwrap_or_default(),
                 run,
             }

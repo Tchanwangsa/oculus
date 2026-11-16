@@ -130,6 +130,9 @@ mod tests {
             open: None,
             request: None,
             pending: 0,
+            questions: 0,
+            approvals: Vec::new(),
+            queued: None,
         }
     }
 

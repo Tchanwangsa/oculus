@@ -188,6 +188,24 @@ pub async fn harness_unqueue(
     removed.await.map(|_| ())
 }
 
+/// "Send now": write a waiting message into the running turn, keeping its
+/// identity. Refused, with the reason, where the turn cannot take it.
+#[tauri::command]
+pub async fn harness_steer_queued(
+    state: State<'_, HarnessState>,
+    command_id: String,
+    thread_id: i64,
+    queue_id: String,
+) -> Result<(), String> {
+    let run_id = queued_run(&queue_id)?;
+    let steered = state.command(Command {
+        id: command_id,
+        thread_id: Some(thread_id),
+        kind: Kind::SteerQueued { run_id },
+    });
+    steered.await.map(|_| ())
+}
+
 /// Rewrite one that has not gone out yet; the queue is told again, whole.
 #[tauri::command]
 pub async fn harness_edit_queued(

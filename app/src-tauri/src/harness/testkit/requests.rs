@@ -41,7 +41,7 @@ impl Route for Fake {
 }
 
 impl Fake {
-    fn replies(&self) -> Vec<String> {
+    pub(super) fn replies(&self) -> Vec<String> {
         self.replies.lock().unwrap().clone()
     }
 
@@ -77,7 +77,7 @@ pub(super) fn command_request(native: Value, paths: &[&str]) -> NewRequest {
 }
 
 /// The CLI of session 1 asks; the test keeps the fake that will answer.
-fn ask(bench: &Bench, native: Value, paths: &[&str]) -> (Arc<Fake>, BusMsg) {
+pub(super) fn ask(bench: &Bench, native: Value, paths: &[&str]) -> (Arc<Fake>, BusMsg) {
     let fake = Arc::new(Fake::default());
     let asked = HarnessEvent::RequestAsked {
         request: command_request(native, paths),

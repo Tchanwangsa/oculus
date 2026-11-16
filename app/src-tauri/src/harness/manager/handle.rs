@@ -20,6 +20,24 @@ pub struct RewindTo<'a> {
     pub last_seen: Option<&'a str>,
 }
 
+/// What a bridge did with a message written into its running turn.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Steered {
+    /// The provider took it into the turn; its echo will follow.
+    Accepted,
+    /// No turn of ours was open to take it: the turn has ended, or the
+    /// provider has not opened it yet. Nothing was written.
+    Missed,
+    /// The provider refused it, or the bridge cannot steer. Nothing
+    /// reached the turn.
+    Declined(String),
+    /// The write broke partway: whether the provider has it is not known.
+    /// It is never written again.
+    Unknown(String),
+    /// The run was stopped or ended before the write was made.
+    Withdrawn,
+}
+
 /// One provider session: a process per thread (Claude, Antigravity) or a
 /// thread/session id on a shared server (Codex, opencode). Cheap to clone,
 /// so it can be lifted out of the live map and talked to without the lock.
@@ -120,6 +138,13 @@ impl Handle {
             Handle::Opencode(server, ses) => server.prompt(ses, text, bound),
             Handle::Antigravity(s) => s.send(text, bound),
         }
+    }
+
+    /// Write `text` into the session's running turn, under `client`, the id
+    /// the provider echoes back. Only the bridges whose `active_steering`
+    /// is true can; the others decline it, and the decider never asks them.
+    pub(in crate::harness) fn steer(&self, _text: &str, _client: &str) -> Steered {
+        Steered::Declined("this agent cannot take a message mid-turn".into())
     }
 
     /// Antigravity refuses: its protocol has no way back to an earlier message.

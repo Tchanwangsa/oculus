@@ -7,7 +7,7 @@ use crate::harness::core::commit::{self, Applied, Began, Change, Receipt};
 use crate::harness::core::decide::{decide, Answer, Ask, Decision, Plan};
 use crate::harness::core::driver::{self, Calls, Step};
 use crate::harness::core::effect::Effect;
-use crate::harness::core::state::{self, Live, Takeover};
+use crate::harness::core::state::{self, Live, Steering, Takeover};
 use crate::harness::core::{receipts, Command, Kind, Outcome};
 use crate::harness::handoff::store as handoff;
 use crate::harness::store::queue::Waiting;
@@ -158,12 +158,15 @@ impl Consumer {
             Kind::Respond { request_id, .. } => self.requests.answerable(*request_id).is_some(),
             _ => false,
         };
+        let open = thread_id.and_then(|id| self.runs.open_run(id));
         Live {
             held: thread_id.is_some_and(|id| self.held(id)),
             own_turn: thread_id.is_some_and(|id| self.runs.own_open(id)),
             background: thread_id.is_some_and(|id| io.background(id)),
             takeover: Takeover::read(|provider| io.capabilities(provider).provider_handoff),
             route,
+            steering: Steering::read(|provider| io.capabilities(provider)),
+            accepted: open.is_some_and(|run| self.accepted.contains(&run)),
         }
     }
 
@@ -295,6 +298,7 @@ impl Consumer {
                 self.event(thread_id, provider, From::App, selected, None, io);
             }
             Applied::Queue => self.tell_queue(thread_id, provider, io),
+            Applied::Steered(steered) => self.steered(thread_id, provider, *steered, io),
             Applied::Cards(cards) => {
                 for card in cards {
                     self.snapshot(thread_id, provider, &card, io);
@@ -394,7 +398,12 @@ impl Consumer {
 
     /// The student's waiting messages, told whole: the webview's list is a
     /// mirror of the queued runs.
-    fn tell_queue(&mut self, thread_id: i64, provider: Provider, io: &mut impl ConsumerIo) {
+    pub(super) fn tell_queue(
+        &mut self,
+        thread_id: i64,
+        provider: Provider,
+        io: &mut impl ConsumerIo,
+    ) {
         let Some(pool) = self.pool.clone() else {
             return;
         };
@@ -441,7 +450,11 @@ impl Consumer {
         io: &mut impl ConsumerIo,
     ) -> Result<(), String> {
         let plan = Plan {
-            changes: vec![Change::Enqueue { text, options }],
+            changes: vec![Change::Enqueue {
+                text,
+                options,
+                front: false,
+            }],
             text: None,
         };
         self.commit(None, Some(thread_id), provider, plan, io)

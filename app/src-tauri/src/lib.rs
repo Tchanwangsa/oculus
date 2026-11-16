@@ -368,6 +368,7 @@ pub fn run() {
             harness::app::turns::harness_rewind,
             harness::app::turns::harness_load,
             harness::app::turns::harness_unqueue,
+            harness::app::turns::harness_steer_queued,
             harness::app::turns::harness_edit_queued,
             harness::app::turns::harness_reorder_queued,
             harness::app::turns::harness_interrupt,

@@ -43,10 +43,21 @@ pub(in crate::harness) enum Change {
         queued: Option<i64>,
     },
     /// A message, or a card's continuation, joins the back of the queue as
-    /// a waiting run (`store/queue.rs`).
+    /// a waiting run (`store/queue.rs`); with `front`, its head.
     Enqueue {
         text: String,
         options: SendOptions,
+        front: bool,
+    },
+    /// A message written into the open run (`store/steer.rs`): a new one,
+    /// or with `from` a waiting one taken out of the queue. With `restart`
+    /// the run's turn is stopped and started again with it.
+    Steer {
+        text: String,
+        options: SendOptions,
+        target: store::steer::Target,
+        from: Option<i64>,
+        restart: bool,
     },
     EditQueued {
         run_id: i64,
@@ -102,6 +113,8 @@ pub(in crate::harness) enum Applied {
     },
     /// The queue changed: the webview's list is told again.
     Queue,
+    /// A message was written into the open run; its provider is told next.
+    Steered(Box<Steered>),
     /// These cards' continuations were cancelled.
     Cards(Vec<String>),
     /// This run was asked to stop.
@@ -118,6 +131,17 @@ pub(in crate::harness) enum Applied {
     Responded(Box<RequestView>),
     /// The chat's permission mode changed.
     Mode(PermissionMode),
+}
+
+/// A steer as committed, for the consumer to tell and to write.
+pub(in crate::harness) struct Steered {
+    pub written: store::steer::Written,
+    pub run_id: i64,
+    pub text: String,
+    /// The id its provider will know it by and echo back.
+    pub client: String,
+    /// It waits for the run's turn to stop, and goes in as a new attempt.
+    pub restart: bool,
 }
 
 /// A run written as `starting`: its row is in the timeline, and the driver
@@ -208,13 +232,51 @@ pub(in crate::harness) async fn run(
                 outcome.run = Some(began.run);
                 applied.push(Applied::Began(Box::new(began)));
             }
-            Change::Enqueue { text, options } => {
+            Change::Enqueue {
+                text,
+                options,
+                front,
+            } => {
                 let thread_id = thread.ok_or("a send with no thread")?;
                 let provider = selection(&mut tx, thread_id, &options).await?.provider;
                 let run_id =
                     store::queue::enqueue(&mut tx, thread_id, provider, &text, &options).await?;
+                if front {
+                    store::queue::to_front(&mut tx, thread_id, run_id).await?;
+                }
                 outcome.queued = Some(run_id);
                 applied.push(Applied::Queue);
+            }
+            Change::Steer {
+                text,
+                options,
+                target,
+                from,
+                restart,
+            } => {
+                let thread_id = thread.ok_or("a steer with no thread")?;
+                let client = store::steer::client_id();
+                let state = match restart {
+                    true => store::steer::delivery::RESTART,
+                    false => store::steer::delivery::SENDING,
+                };
+                let send = (text.as_str(), &options);
+                let written =
+                    store::steer::write(&mut tx, thread_id, target, send, &client, from, state)
+                        .await?;
+                // "Send now" on a message that has just gone out on its own.
+                let Some(written) = written else { continue };
+                if from.is_some() {
+                    applied.push(Applied::Queue);
+                }
+                outcome.steered = Some(written);
+                applied.push(Applied::Steered(Box::new(Steered {
+                    written,
+                    run_id: target.run_id,
+                    text,
+                    client,
+                    restart,
+                })));
             }
             Change::EditQueued { run_id, text } => {
                 let thread_id = thread.ok_or("a queue with no thread")?;

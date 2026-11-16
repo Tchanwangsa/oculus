@@ -28,6 +28,40 @@ pub(in crate::harness) struct Live {
     /// The request a `Respond` names still has its session's route: the
     /// session that raised it is the live one.
     pub route: bool,
+    /// Which bridges take a message into a running turn, natively or by
+    /// restarting it.
+    pub steering: Steering,
+    /// The open run's start step reported that its provider has the turn:
+    /// before that there is no turn to write into.
+    pub accepted: bool,
+}
+
+/// The bridges whose `active_steering` and `steer_by_restart` capabilities
+/// are true, as the running app holds them.
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub(in crate::harness) struct Steering {
+    native: Takeover,
+    restart: Takeover,
+}
+
+impl Steering {
+    pub fn read(
+        caps: impl Fn(Provider) -> crate::harness::providers::capabilities::Capabilities,
+    ) -> Self {
+        Steering {
+            native: Takeover::read(|p| caps(p).active_steering),
+            restart: Takeover::read(|p| caps(p).steer_by_restart),
+        }
+    }
+
+    /// `provider`'s flags, over the bridge's own capabilities.
+    pub fn of(self, provider: Provider) -> crate::harness::providers::capabilities::Capabilities {
+        crate::harness::providers::capabilities::Capabilities {
+            active_steering: self.native.allows(provider),
+            steer_by_restart: self.restart.allows(provider),
+            ..crate::harness::providers::capabilities::of(provider)
+        }
+    }
 }
 
 /// The bridges whose `provider_handoff` capability is true, as the running
@@ -81,6 +115,14 @@ pub(in crate::harness) struct State {
     pub request: Option<RequestView>,
     /// How many of the chat's requests wait for the student.
     pub pending: i64,
+    /// Of those, the questions: while one waits, typed text answers it.
+    pub questions: i64,
+    /// The approvals the open run waits on, each with the option that
+    /// declines it: a steer declines them on its way in.
+    pub approvals: Vec<(i64, String)>,
+    /// The text of the waiting message a `SteerQueued` names, while it
+    /// still waits.
+    pub queued: Option<String>,
 }
 
 /// What a decider needs of the chat's open run.
@@ -91,6 +133,11 @@ pub(in crate::harness) struct OpenRun {
     pub starting: bool,
     /// The student already asked it to stop.
     pub stop_requested: bool,
+    /// The bridge it runs on, which a steer is written to.
+    pub provider: Provider,
+    /// Its active attempt and binding, which a steer's row joins.
+    pub attempt_id: i64,
+    pub binding_id: i64,
 }
 
 impl State {
@@ -103,8 +150,9 @@ impl State {
     /// The chat as the delivery policy reads it (`manager/policy.rs`).
     pub fn chat(&self) -> Chat {
         Chat {
+            // A run its provider has not taken yet has no turn to write into.
             active: self.open.map(|open| Active {
-                starting: open.starting,
+                starting: open.starting || !self.live.accepted,
                 stopping: open.stop_requested,
             }),
             held: self.live.held,
@@ -131,6 +179,9 @@ pub(in crate::harness) async fn read(
                 run_id: open.run.run_id,
                 starting: open.starting,
                 stop_requested: open.stop_requested,
+                provider: open.provider,
+                attempt_id: open.run.attempt_id,
+                binding_id: open.run.binding_id,
             }),
         ),
         None => ((0, 0), None),
@@ -138,6 +189,25 @@ pub(in crate::harness) async fn read(
     let pending = match command.thread_id {
         Some(id) => requests::store::pending(pool, id).await?,
         None => 0,
+    };
+    let (questions, approvals) = match (command.thread_id, &command.kind, open) {
+        (Some(id), Kind::Send { .. } | Kind::SteerQueued { .. }, Some(open)) => {
+            waiting_on(pool, id, open.run_id).await?
+        }
+        _ => (0, Vec::new()),
+    };
+    let queued = match (command.thread_id, &command.kind) {
+        (Some(id), Kind::SteerQueued { run_id }) => sqlx::query_scalar(
+            "SELECT queued_text FROM harness_runs
+              WHERE id = ?1 AND thread_id = ?2 AND execution_status = 'queued' AND origin = 'student'",
+        )
+        .bind(run_id)
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .flatten(),
+        _ => None,
     };
     let request = match (command.thread_id, &command.kind) {
         (Some(thread_id), Kind::Respond { request_id, .. }) => {
@@ -159,6 +229,9 @@ pub(in crate::harness) async fn read(
         open,
         request,
         pending,
+        questions,
+        approvals,
+        queued,
     };
     if let (Some(thread_id), Kind::Rewind { item_id } | Kind::EditResend { item_id, .. }) =
         (command.thread_id, &command.kind)
@@ -168,4 +241,32 @@ pub(in crate::harness) async fn read(
         state.holder = store::bindings::holder(pool, thread_id, *item_id).await?;
     }
     Ok(state)
+}
+
+/// What the open run waits on the student for: how many questions, and the
+/// approvals with the option that declines each.
+async fn waiting_on(
+    pool: &SqlitePool,
+    thread_id: i64,
+    run_id: i64,
+) -> Result<(i64, Vec<(i64, String)>), String> {
+    let mut conn = pool.acquire().await.map_err(|e| e.to_string())?;
+    let pending: Vec<RequestView> = requests::store::list(&mut conn, thread_id)
+        .await?
+        .into_iter()
+        .filter(|r| r.status == requests::Status::Pending)
+        .collect();
+    let questions = pending.iter().filter(|r| r.kind == "question").count() as i64;
+    let approvals = pending
+        .iter()
+        .filter(|r| r.kind != "question" && r.responder == "live" && r.run_id == Some(run_id))
+        .filter_map(|r| {
+            let decline = r
+                .options
+                .iter()
+                .find(|o| o.decision == requests::Decision::Decline)?;
+            Some((r.id, decline.id.clone()))
+        })
+        .collect();
+    Ok((questions, approvals))
 }

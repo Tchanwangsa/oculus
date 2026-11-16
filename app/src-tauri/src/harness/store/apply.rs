@@ -120,6 +120,9 @@ pub fn writes(ev: &HarnessEvent) -> bool {
             | HarnessEvent::RequestUpdated { .. }
             | HarnessEvent::RequestRetired { .. }
             | HarnessEvent::PermissionMode { .. }
+            | HarnessEvent::SteerUpdated { .. }
+            | HarnessEvent::SteerEchoed { .. }
+            | HarnessEvent::AttemptRestarted { .. }
             | HarnessEvent::Exited { .. }
     )
 }
@@ -168,6 +171,13 @@ async fn apply_rows(
                 ..Stored::default()
             })
             .ok_or_else(|| "a question with no run".to_string()),
+        // The commit wrote the steer's row with its message.
+        HarnessEvent::Steer { item, .. } => item
+            .map(|id| Stored {
+                item_id: Some(id),
+                ..Stored::default()
+            })
+            .ok_or_else(|| "a steer with no row".to_string()),
         HarnessEvent::Continued { run, .. } => run
             .map(|run| Stored {
                 item_id: Some(run.item_id),
@@ -493,7 +503,10 @@ async fn apply_rows(
         | HarnessEvent::RequestOpened { .. }
         | HarnessEvent::RequestUpdated { .. }
         | HarnessEvent::RequestRetired { .. }
-        | HarnessEvent::PermissionMode { .. } => Ok(Stored::default()),
+        | HarnessEvent::PermissionMode { .. }
+        | HarnessEvent::SteerUpdated { .. }
+        | HarnessEvent::SteerEchoed { .. }
+        | HarnessEvent::AttemptRestarted { .. } => Ok(Stored::default()),
     }
 }
 

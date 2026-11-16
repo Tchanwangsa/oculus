@@ -68,6 +68,7 @@ pub(super) fn decide(
             Change::Enqueue {
                 text,
                 options: Default::default(),
+                front: false,
             }
         } else {
             Change::Begin {

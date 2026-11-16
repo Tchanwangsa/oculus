@@ -16,8 +16,9 @@ pub(in crate::harness) struct Command {
 }
 
 pub(in crate::harness) enum Kind {
-    /// A message: a run that starts now on an idle chat, or waits its turn
-    /// in the chat's queue.
+    /// A message: a run that starts now on an idle chat, waits its turn in
+    /// the chat's queue, or is written into the running run (a steer), as
+    /// `mode` and the bridge allow (`manager/policy.rs`).
     Send {
         provider: Provider,
         text: String,
@@ -54,6 +55,11 @@ pub(in crate::harness) enum Kind {
     },
     /// Take a waiting message out of the queue.
     RemoveQueued {
+        run_id: i64,
+    },
+    /// "Send now": a waiting message leaves the queue and is written into
+    /// the running run instead, keeping its identity.
+    SteerQueued {
         run_id: i64,
     },
     /// Put the waiting messages in this order, first to go out first.
@@ -102,6 +108,7 @@ impl Kind {
             Kind::EditQueued { .. } => "edit_queued",
             Kind::RemoveQueued { .. } => "remove_queued",
             Kind::ReorderQueued { .. } => "reorder_queued",
+            Kind::SteerQueued { .. } => "steer_queued",
             Kind::Stop { .. } => "stop",
             Kind::Resume => "resume",
             Kind::ForceStop { .. } => "force_stop",
@@ -125,6 +132,9 @@ pub(in crate::harness) struct Outcome {
     /// The waiting run a send on a busy chat became.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queued: Option<i64>,
+    /// A message written into the running run: its identity and its row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steered: Option<crate::harness::store::steer::Written>,
     /// A rewind's question, handed back to the composer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,

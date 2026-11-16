@@ -449,6 +449,38 @@ pub enum HarnessEvent {
     PermissionMode {
         mode: crate::harness::requests::PermissionMode,
     },
+    /// The student wrote into the running run: its `steer` row, owned by
+    /// that run, is already written (`store/steer.rs`). `message` is the
+    /// message's own identity, a `steered` run that never runs.
+    Steer {
+        text: String,
+        message: i64,
+        /// The row the commit wrote; never serialized.
+        #[serde(skip)]
+        item: Option<i64>,
+    },
+    /// What became of a steer: `written` (the provider took the write),
+    /// `delivered` (it echoed the message back), `unknown` (the write broke
+    /// partway; never resent), or `requeued` (it missed the turn: its row is
+    /// gone and the message waits first in the queue as its own run).
+    SteerUpdated {
+        item_id: i64,
+        message: i64,
+        delivery: String,
+    },
+    /// The provider echoed a steer written under `client_id`. From a
+    /// bridge only; the consumer saves it and tells [`Self::SteerUpdated`].
+    SteerEchoed {
+        client_id: String,
+    },
+    /// A restart steer stopped the run's turn: its attempt is superseded
+    /// and `attempt_id` carries the run on with the correction. The run is
+    /// still open; only the new attempt's terminal settles it.
+    AttemptRestarted {
+        run_id: i64,
+        attempt_id: i64,
+        superseded: i64,
+    },
     /// A completed run whose answer, or part of it, never reached Oculus.
     /// Persisted as a row; never followed by a resend.
     DeliveryNotice {

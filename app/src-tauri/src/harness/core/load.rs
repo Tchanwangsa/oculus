@@ -108,7 +108,7 @@ pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String>
                 COALESCE(r.started_at, r.requested_at) AS started_at, r.ended_at,
                 r.stop_requested_at, b.provider, r.model, r.effort, r.resolved_model
            FROM harness_runs r JOIN harness_bindings b ON b.id = r.binding_id
-          WHERE r.thread_id = ?1 AND r.execution_status NOT IN ('queued', 'cancelled')
+          WHERE r.thread_id = ?1 AND r.execution_status NOT IN ('queued', 'cancelled', 'steered')
             AND r.initiating_item_id IS NOT NULL
           ORDER BY r.id",
     )

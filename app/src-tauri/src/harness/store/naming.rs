@@ -113,6 +113,9 @@ pub async fn reconcile(pool: &SqlitePool) -> Result<Reconciled, String> {
     .await
     .map_err(|e| e.to_string())?
     .rows_affected();
+    // A steer never handed over goes back to its queue too, and a run a
+    // restart steer took back to `starting` is repaired with the running ones.
+    super::steer::reconcile(&mut tx).await?;
     // A run written and never sent goes back to its queue.
     super::queue::requeue_unsent(&mut tx, crate::harness::app::continuation::SKIPPED_QUEUED)
         .await?;

@@ -380,6 +380,16 @@ impl RunScope {
         }
     }
 
+    /// A restart steer superseded the open run's attempt: `attempt_id`
+    /// carries the run on, and its next send binds the turn afresh.
+    pub fn restart(&mut self, thread_id: i64, attempt_id: i64) {
+        if let Some(open) = self.open.get_mut(&thread_id) {
+            open.attempt_id = attempt_id;
+            open.turn = None;
+            open.settling = false;
+        }
+    }
+
     /// The run settled.
     pub fn close(&mut self, thread_id: i64) {
         self.open.remove(&thread_id);

@@ -97,6 +97,9 @@ mod tests {
             open: None,
             request: None,
             pending: 0,
+            questions: 0,
+            approvals: Vec::new(),
+            queued: None,
         }
     }
 
@@ -138,6 +141,9 @@ mod tests {
             run_id: 9,
             starting: false,
             stop_requested: false,
+            provider: Provider::Codex,
+            attempt_id: 1,
+            binding_id: 1,
         });
         busy.live.held = true;
         assert_eq!(pick(&busy, Provider::Codex, "gpt", None).len(), 1);

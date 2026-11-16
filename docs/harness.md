@@ -979,10 +979,12 @@ quit or a crash keeps it.
   (`steer_by_restart`) and then to the queue; an explicit restart on a
   bridge that cannot restart means stop the turn and queue. A run still
   `starting` has no turn to steer, a run being stopped takes nothing, and a
-  slash command is never written into a turn. Both flags are false on every
-  bridge, so the `Send` decider commits only a start or a waiting run today:
-  an outcome that would steer or restart waits in the queue and leaves the
-  running turn alone.
+  slash command is never written into a turn. A run its provider has not
+  taken yet (no `Sent::Accepted`) counts as `starting`. What a steer
+  becomes is [Steering the running turn](#steering-the-running-turn); an
+  explicit restart on a bridge that cannot restart commits the run's stop
+  and the message at the head of the queue, unheld, so it goes out first
+  once the stopped turn has ended.
 - **What holds a chat is saved, with one exception.** A run in `starting`
   or `running` is the turn that has the chat; deciders and the driver read
   it from the rows (`store::queue::open`). A turn the CLI starts itself has
@@ -1115,12 +1117,94 @@ bridge commits the streamed text itself; Claude's closing `result` claims an
 error, so `terminal_reason: "aborted_streaming"` decides and its zeroed usage
 is skipped.
 
+## Steering the running turn
+
+A message sent while the agent works can go into the turn it is on
+instead of waiting for it to end: a **steer**. `resolve_delivery` decides
+([One turn at a time](#one-turn-at-a-time)) from the send's mode and the
+running run's bridge (`active_steering`, `steer_by_restart`), never the
+composer's pick, so a steer always reaches the provider that is working.
+
+**A steer is a row inside the running run; its identity is a run that
+never runs** (`store/steer.rs`). The `Send` commit writes a `steer` row
+owned by the open run and its active attempt, and a `harness_runs` row in
+`steered` holding the text and options, with a negative placeholder ordinal
+like a waiting message's and the steer row as its `initiating_item_id`. No
+ordinal is taken, no attempt is opened, and nothing about the running run
+changes: only that run's own terminal settles it, so a steer never lets the
+queue go. The row's `meta` holds `message` (that run's id), `client` (a
+UUID the provider is written under and echoes back) and `delivery`:
+
+| `delivery` | Meaning |
+| --- | --- |
+| `sending` | saved; the effect has not taken it |
+| `written` | the effect claimed it (`steer::claim`: only while its run is `running` and not stopped, saved with the revision before the write) and the provider took the write |
+| `delivered` | the provider echoed it (`SteerEchoed` from its bridge) |
+| `unknown` | the write broke partway; never written again |
+| `restart` | a correction waiting for its turn to stop (below) |
+
+The consumer tells `Steer { text, message }` with the row (its envelope's
+`itemId` and `runId`), hands `Effect::Steer` to `app/steer.rs`, and tells
+each change as `SteerUpdated { item_id, message, delivery }`. `harness_load`
+returns the row with the others and lists no `steered` run.
+
+**A steer that misses its turn is not lost.** The bridge says `Missed` (no
+turn of ours was open: it had ended, or had not been opened yet), the
+provider refused it (`Declined`), or the run was stopped or ended before
+the write (`Withdrawn`). Nothing reached the turn, so the same run row goes
+back to `queued` at the head of the queue (`steer::missed`) and the row
+leaves the timeline (`SteerUpdated` with `requeued`, then `Queue`). It is
+held when the run it was aimed at was stopped or failed, as Stop and a
+failure hold the queue; otherwise the driver starts it as soon as nothing
+is open, so a steer that came too late becomes the next run, once, and one
+the provider declined waits first behind the running turn.
+
+**"Send now"** (`SteerQueued { run_id }`, `harness_steer_queued`) takes a
+student's waiting message out of the queue and writes it into the running
+run in one commit: its queued run becomes the `steered` one, so the message
+keeps its id whether it is steered, missed or started. It is refused, with
+the reason and nothing recorded, when nothing runs, the run is starting or
+being stopped, a question waits, the text is a command or the bridge cannot
+steer; a message that has just gone out on its own changes nothing.
+
+**What a steer meets in the turn.** A message sent while an approval waits
+declines it in the same commit (each pending approval of the open run with
+a live responder gets its decline option, `Respond`), then steers: the
+student answered with words. While a question waits, typed text is its
+answer ([Questions](#questions-keep-their-native-keys)), so a send queues and
+"Send now" is refused. A turn the CLI started itself has no run to join, so
+a message sent during one queues. `/compact` and every slash command queue.
+
+**Restart steering** is for a bridge that cannot take a message mid-turn
+but can stop and start again (`steer_by_restart`; no bridge sets it yet).
+The steer row is written with `delivery` `restart` and the consumer asks
+the provider to stop the turn once (`Effect::Interrupt`). When that turn's
+terminal comes, `Consumer::restart` reads the saved `restart` rows instead
+of settling: what streamed becomes a partial reply, the attempt is
+`superseded` and its replies `commentary` (never the answer), and a second
+attempt (`steering_restart`) takes the run back to `starting` with the
+corrections, joined, as `queued_text`. `AttemptRestarted { run_id,
+attempt_id, superseded }` is told, `RunScope::restart` clears the run's
+bound turn, and the driver's start step sends the correction as the run's
+next turn: after the old turn's terminal, never before, so two turns never
+write to one conversation. The run settles once, on the new attempt's
+terminal, with its answer from that attempt; the queue stays behind it the
+whole time. A run stopped meanwhile settles on that terminal and its
+corrections wait first in the queue, held.
+
+**After a restart** (`store::reconcile`) a steer still `sending` or
+`restart` was never handed to its provider: its run row goes back to the
+head of the queue, held, and its row goes, as an unsent start does. One
+already `written` stays where it was. A run a restart steer had taken back
+to `starting` is repaired with the running ones: interrupted, its partial
+text kept.
+
 ## One command path
 
 Everything the student does to a chat is a `Command` (`core/command.rs`):
 `Send`, `Rewind`, `EditResend`, `DeleteThread`, `EditQueued`, `RemoveQueued`,
-`ReorderQueued`, `Stop`, `Resume`, `ForceStop`, `SelectModel`, `Respond`,
-`SetPermissionMode`. A Tauri command in
+`ReorderQueued`, `SteerQueued`, `Stop`, `Resume`, `ForceStop`, `SelectModel`,
+`Respond`, `SetPermissionMode`. A Tauri command in
 `app/src-tauri/src/harness/app/turns.rs` only builds one, with the id the webview minted for it
 (`commandId` in `lib/harness/commands.ts`), puts it on the consumer's bus
 (`BusMsg::Command`) and awaits the result. The consumer takes it through

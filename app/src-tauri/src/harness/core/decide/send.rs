@@ -1,18 +1,19 @@
 use crate::harness::manager::policy::{resolve_delivery, Delivery, Mode};
-use crate::harness::providers::capabilities;
 use crate::harness::{Provider, SendOptions};
 
 use super::super::command::Command;
 use super::super::commit::Change;
 use super::super::state::State;
-use super::{select, Decision, Plan};
+use super::{select, steer, Decision, Plan};
 
-/// A message starts its run on an idle chat and waits behind a busy one, or
-/// behind messages already waiting. A send with no chat makes one first, in
-/// the same commit. A message from the student also lifts a hold on the
-/// queue: it joins the back, and the held messages go out ahead of it.
-/// Whichever it does, the run takes the chat's selection when it starts,
-/// not when it was typed (`commit::begin`).
+/// A message starts its run on an idle chat, waits behind a busy one or
+/// behind messages already waiting, or is written into the running run
+/// (`manager/policy.rs` decides which from the send's mode and the bridge).
+/// A send with no chat makes one first, in the same commit. A message that
+/// starts or waits also lifts a hold on the queue: it joins the back, and
+/// the held messages go out ahead of it. A run takes the chat's selection
+/// when it starts, not when it was typed (`commit::begin`). A steer declines
+/// the approvals its run waits on: the student answered with a message.
 pub(super) fn decide(
     state: &State,
     command: &Command,
@@ -37,33 +38,73 @@ pub(super) fn decide(
             first_message: text.to_string(),
         }),
     }
-    if state.held > 0 {
-        changes.push(Change::Unhold);
-    }
-    // No bridge steers or restarts a turn (`capabilities.rs`), so a plain
-    // send starts or queues. A message the policy would steer, or send by
-    // restarting the turn, waits in the queue: neither has a change to
-    // commit, and the running turn is left as it is.
+    // A slash command is never written into a turn, and a steer goes to the
+    // bridge of the run it joins, whatever the composer has picked since.
     let slash = text.trim_start().starts_with('/');
-    let caps = capabilities::of(provider);
-    changes.push(match resolve_delivery(mode, &state.chat(), &caps, slash) {
-        Delivery::Start => Change::Begin {
-            text: text.to_string(),
-            options: options.clone(),
-            receipt: command.id.clone(),
-            queued: None,
-        },
-        Delivery::Queue | Delivery::Steer | Delivery::Restart | Delivery::StopThenQueue => {
-            Change::Enqueue {
-                text: text.to_string(),
-                options: options.clone(),
-            }
+    let bridge = state.open.map_or(provider, |open| open.provider);
+    let caps = state.live.steering.of(bridge);
+    let (text, options) = (text.to_string(), options.clone());
+    let delivery = match resolve_delivery(mode, &state.chat(), &caps, slash) {
+        // While a question waits, typed text is its answer (the composer
+        // sends that as `Respond`), so a message sent anyway waits.
+        Delivery::Steer | Delivery::Restart if state.questions > 0 => Delivery::Queue,
+        delivery => delivery,
+    };
+    match (delivery, state.open) {
+        (Delivery::Steer | Delivery::Restart, Some(open)) => {
+            changes.extend(steer::declines(state));
+            changes.push(Change::Steer {
+                text,
+                options,
+                target: steer::target(open),
+                from: None,
+                restart: delivery == Delivery::Restart,
+            });
         }
-    });
+        // The bridge cannot restart a turn: it is stopped, and the message
+        // goes out first once it has ended.
+        (Delivery::StopThenQueue, Some(open)) => {
+            if !open.stop_requested {
+                changes.push(Change::RequestStop {
+                    run_id: open.run_id,
+                });
+            }
+            changes.push(Change::Enqueue {
+                text,
+                options,
+                front: true,
+            });
+        }
+        (Delivery::Start, _) => {
+            unhold(state, &mut changes);
+            changes.push(Change::Begin {
+                text,
+                options,
+                receipt: command.id.clone(),
+                queued: None,
+            });
+        }
+        _ => {
+            // The student's message lifts a hold on the queue: it joins
+            // the back, and the held messages go out ahead of it.
+            unhold(state, &mut changes);
+            changes.push(Change::Enqueue {
+                text,
+                options,
+                front: false,
+            });
+        }
+    }
     Ok(Decision::Commit(Plan {
         changes,
         text: None,
     }))
+}
+
+fn unhold(state: &State, changes: &mut Vec<Change>) {
+    if state.held > 0 {
+        changes.push(Change::Unhold);
+    }
 }
 
 #[cfg(test)]
@@ -97,9 +138,15 @@ mod tests {
                 run_id: 9,
                 starting: false,
                 stop_requested: false,
+                provider: Provider::Codex,
+                attempt_id: 1,
+                binding_id: 1,
             }),
             request: None,
             pending: 0,
+            questions: 0,
+            approvals: Vec::new(),
+            queued: None,
         }
     }
 
@@ -148,30 +195,75 @@ mod tests {
         assert!(matches!(waits.as_slice(), [Change::Enqueue { .. }]));
     }
 
-    #[test]
-    fn a_steer_or_a_restart_waits_in_the_queue_while_no_bridge_can_do_either() {
+    fn decided(state: &State, mode: Mode, text: &str) -> Vec<Change> {
+        let codex = (Provider::Codex, mode);
         let options = SendOptions::default();
+        match decide(state, &send(Some(4)), codex, text, &options).unwrap() {
+            Decision::Commit(plan) => plan.changes,
+            Decision::Ask(_) => panic!("a send asks the provider nothing"),
+        }
+    }
+
+    #[test]
+    fn a_bridge_that_cannot_steer_queues_a_steer_and_stops_for_a_restart() {
         let busy = state(Some(thread(Provider::Codex)), true);
-        for mode in [Mode::Steer, Mode::Restart, Mode::Queue] {
-            let codex = (Provider::Codex, mode);
-            let Decision::Commit(plan) =
-                decide(&busy, &send(Some(4)), codex, "correction", &options).unwrap()
-            else {
-                panic!("a send asks the provider nothing");
-            };
+        for mode in [Mode::Steer, Mode::Queue, Mode::Auto] {
             assert!(
-                matches!(plan.changes.as_slice(), [Change::Enqueue { .. }]),
+                matches!(
+                    decided(&busy, mode, "correction").as_slice(),
+                    [Change::Enqueue { front: false, .. }]
+                ),
                 "{mode:?}: the running turn is left as it is"
             );
         }
+        assert!(matches!(
+            decided(&busy, Mode::Restart, "again").as_slice(),
+            [
+                Change::RequestStop { run_id: 9 },
+                Change::Enqueue { front: true, .. }
+            ]
+        ));
         // On an idle chat any mode is a plain start.
         let idle = state(Some(thread(Provider::Codex)), false);
-        let queue = (Provider::Codex, Mode::Queue);
-        let Decision::Commit(plan) = decide(&idle, &send(Some(4)), queue, "hi", &options).unwrap()
-        else {
-            panic!("a send asks the provider nothing");
-        };
-        assert!(matches!(plan.changes.as_slice(), [Change::Begin { .. }]));
+        assert!(matches!(
+            decided(&idle, Mode::Queue, "hi").as_slice(),
+            [Change::Begin { .. }]
+        ));
+    }
+
+    #[test]
+    fn a_send_steers_a_turn_its_provider_has_taken_and_declines_what_it_waits_on() {
+        let mut busy = state(Some(thread(Provider::Codex)), true);
+        busy.live.steering = crate::harness::core::state::Steering::read(|p| {
+            crate::harness::providers::capabilities::Capabilities {
+                active_steering: true,
+                ..crate::harness::providers::capabilities::of(p)
+            }
+        });
+        // Not taken yet: no turn to write into.
+        assert!(matches!(
+            decided(&busy, Mode::Auto, "fix").as_slice(),
+            [Change::Enqueue { .. }]
+        ));
+        busy.live.accepted = true;
+        assert!(matches!(
+            decided(&busy, Mode::Auto, "fix").as_slice(),
+            [Change::Steer { from: None, restart: false, target, .. }] if target.run_id == 9
+        ));
+        assert!(matches!(
+            decided(&busy, Mode::Auto, "/compact").as_slice(),
+            [Change::Enqueue { .. }]
+        ));
+        busy.approvals = vec![(5, "decline".into())];
+        assert!(matches!(
+            decided(&busy, Mode::Auto, "fix").as_slice(),
+            [Change::Respond { request_id: 5, option_id, .. }, Change::Steer { .. }] if option_id == "decline"
+        ));
+        busy.questions = 1;
+        assert!(matches!(
+            decided(&busy, Mode::Auto, "red").as_slice(),
+            [Change::Enqueue { .. }]
+        ));
     }
 
     #[test]
@@ -215,6 +307,9 @@ mod tests {
             run_id: 9,
             starting: false,
             stop_requested: false,
+            provider: Provider::Codex,
+            attempt_id: 1,
+            binding_id: 1,
         });
         let Decision::Commit(plan) =
             decide(&claude, &send(Some(4)), codex, "hello", &options).unwrap()
