@@ -3,6 +3,7 @@
 //! and releases queued messages as turns close. One module per command
 //! family, registered in `lib.rs` by the module that defines it.
 
+pub mod completed;
 pub(in crate::harness) mod consumer;
 pub(in crate::harness) mod continuation;
 pub mod dictation;

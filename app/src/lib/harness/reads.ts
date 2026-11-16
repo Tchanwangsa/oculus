@@ -27,10 +27,10 @@ const RUN_STARTED_AT =
 
 const THREAD_COLUMNS = `t.*, ${SETTLED_AT}, ${PENDING_REQUESTS}, ${PENDING_QUESTIONS}, ${RUN_STARTED_AT}`;
 
-/** The thread list's read, newest first; `$1` is the limit. */
-export const THREADS_SQL = `SELECT ${THREAD_COLUMNS} FROM harness_threads t ORDER BY t.updated_at DESC, t.id DESC LIMIT $1`;
+/** Open threads, newest first; `$1` is the limit (-1 reads every open thread). */
+export const THREADS_SQL = `SELECT ${THREAD_COLUMNS} FROM harness_threads t WHERE t.completed_at IS NULL ORDER BY t.updated_at DESC, t.id DESC LIMIT $1`;
 
-export async function getHarnessThreads(limit = 100): Promise<HarnessThread[]> {
+export async function getHarnessThreads(limit = -1): Promise<HarnessThread[]> {
   const db = await getDb();
   return db.select<HarnessThread[]>(THREADS_SQL, [limit]);
 }

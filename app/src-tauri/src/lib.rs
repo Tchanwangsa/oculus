@@ -371,6 +371,8 @@ pub fn run() {
             harness::app::turns::harness_interrupt,
             harness::app::turns::harness_resume,
             harness::app::turns::harness_force_stop,
+            harness::app::completed::harness_complete_thread,
+            harness::app::completed::harness_reopen_thread,
             harness::app::turns::harness_delete_thread,
             harness::app::requests::harness_respond,
             harness::app::requests::harness_set_permission_mode,

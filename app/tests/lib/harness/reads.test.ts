@@ -4,7 +4,7 @@ import { flattenPreview, previewsSql, questionsSql, THREADS_SQL } from "@/lib/ha
 
 /** The columns the two reads touch, as the migrations leave them. */
 const sqlite = new SQLite(":memory:");
-sqlite.run(`CREATE TABLE harness_threads (id INTEGER PRIMARY KEY, title TEXT, updated_at TEXT NOT NULL DEFAULT '2026-11-15 00:00:00')`);
+sqlite.run(`CREATE TABLE harness_threads (id INTEGER PRIMARY KEY, title TEXT, completed_at TEXT, updated_at TEXT NOT NULL DEFAULT '2026-11-15 00:00:00')`);
 sqlite.run(`CREATE TABLE harness_items (id INTEGER PRIMARY KEY, thread_id INTEGER, kind TEXT, content TEXT, run_id INTEGER)`);
 sqlite.run(`CREATE TABLE harness_runs (id INTEGER PRIMARY KEY, thread_id INTEGER, execution_status TEXT,
   initiating_item_id INTEGER, answer_item_id INTEGER, requested_at TEXT, started_at TEXT, ended_at TEXT)`);
@@ -82,4 +82,13 @@ test("the list reads when the run in flight started, and nothing once none is", 
 
 test("a preview reads as one plain line", () => {
   expect(flattenPreview("## Plan\n- **Read** [week 7](/x.pdf)\n\n```py\nx\n```\nthen `run` it")).toBe("Plan Read week 7 then run it");
+});
+
+test("open reads exclude completed chats and an unlimited read reaches beyond 100", () => {
+  sqlite.run("UPDATE harness_threads SET completed_at = '2026-11-16' WHERE id = 1");
+  for (let id = 1000; id <= 1106; id++) sqlite.run("INSERT INTO harness_threads(id, title) VALUES (?1, 'open')", [id]);
+  const threads = all<{ id: number }>(THREADS_SQL, [-1]);
+  expect(threads.filter((t) => t.id >= 1000)).toHaveLength(107);
+  expect(threads.some((t) => t.id === 1)).toBe(false);
+  expect(threads[0].id).toBe(1106);
 });

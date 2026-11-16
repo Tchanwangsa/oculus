@@ -151,6 +151,8 @@ export interface HarnessThread {
   usage: string | null;
   created_at: string;
   updated_at: string;
+  /** Display state; a new message or Reopen clears it. */
+  completed_at?: string | null;
   /** When the student last had it on screen (`harness_thread_viewed`). */
   viewed_at?: string | null;
   /** When its latest run ended: `MAX(harness_runs.ended_at)`, read, never stored. */

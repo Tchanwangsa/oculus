@@ -79,6 +79,7 @@ mod tests {
         State {
             thread: Some(ThreadRow {
                 id: 4,
+                completed_at: None,
                 provider,
                 model: Some(model.into()),
                 effort: effort.map(String::from),

@@ -88,6 +88,9 @@ pub(in crate::harness) enum Change {
         item_id: i64,
         context: bool,
     },
+    SetCompleted {
+        completed: bool,
+    },
     DeleteThread,
     /// The student's answer claims the request: one conditional write, so
     /// of two answers only one lands.
@@ -126,6 +129,7 @@ pub(in crate::harness) enum Applied {
         /// up for it (`bindings::rewound`).
         stale: Vec<Provider>,
     },
+    Completion,
     Deleted,
     /// A request was answered; its answer goes to the provider next.
     Responded(Box<RequestView>),
@@ -227,6 +231,9 @@ pub(in crate::harness) async fn run(
                 queued,
             } => {
                 let thread_id = thread.ok_or("a send with no thread")?;
+                if reopen_on_send(&mut tx, thread_id).await? {
+                    applied.push(Applied::Completion);
+                }
                 let send = (text, options, receipt, queued);
                 let began = begin(&mut tx, thread_id, send).await?;
                 outcome.run = Some(began.run);
@@ -238,6 +245,9 @@ pub(in crate::harness) async fn run(
                 front,
             } => {
                 let thread_id = thread.ok_or("a send with no thread")?;
+                if reopen_on_send(&mut tx, thread_id).await? {
+                    applied.push(Applied::Completion);
+                }
                 let provider = selection(&mut tx, thread_id, &options).await?.provider;
                 let run_id =
                     store::queue::enqueue(&mut tx, thread_id, provider, &text, &options).await?;
@@ -255,6 +265,9 @@ pub(in crate::harness) async fn run(
                 restart,
             } => {
                 let thread_id = thread.ok_or("a steer with no thread")?;
+                if reopen_on_send(&mut tx, thread_id).await? {
+                    applied.push(Applied::Completion);
+                }
                 let client = store::steer::client_id();
                 let state = match restart {
                     true => store::steer::delivery::RESTART,
@@ -353,6 +366,11 @@ pub(in crate::harness) async fn run(
                 requests::store::set_mode(&mut tx, thread_id, mode).await?;
                 applied.push(Applied::Mode(mode));
             }
+            Change::SetCompleted { completed } => {
+                let thread_id = thread.ok_or("completion with no thread")?;
+                store::completed::set(&mut tx, thread_id, completed).await?;
+                applied.push(Applied::Completion);
+            }
             Change::DeleteThread => {
                 let thread_id = thread.ok_or("a delete with no thread")?;
                 store::threads::delete(&mut tx, thread_id).await?;
@@ -376,6 +394,13 @@ pub(in crate::harness) async fn run(
         revision,
         applied,
     })
+}
+
+/// Recheck in the write transaction: the hourly sweep may have completed a
+/// chat after its send decision was read but before the commit got the lock.
+async fn reopen_on_send(conn: &mut SqliteConnection, thread: i64) -> Result<bool, String> {
+    sqlx::query("UPDATE harness_threads SET completed_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1 AND completed_at IS NOT NULL")
+        .bind(thread).execute(conn).await.map(|r| r.rows_affected() > 0).map_err(|e| e.to_string())
 }
 
 /// The chat a send starts, and the Studio video it makes, linked.
