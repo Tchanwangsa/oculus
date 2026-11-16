@@ -38,7 +38,10 @@ pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
             ToolKind::Read,
             base(&any(&["AbsolutePath", "TargetFile", "Path"])),
         ),
-        "write_to_file" => (
+        // `agy acp` 1.5.9 names its file tools these, with a `Path`.
+        "read_file" => (ToolKind::Read, base(&any(&["Path", "AbsolutePath"]))),
+        "edit_file" => (ToolKind::Edit, base(&any(&["Path", "AbsolutePath"]))),
+        "write_to_file" | "write_file" => (
             ToolKind::Write,
             base(&any(&["AbsolutePath", "TargetFile", "Path"])),
         ),
@@ -224,6 +227,23 @@ mod tests {
         assert_eq!(
             classify("Read", &json!({"file_path": "/a/b.md"})),
             (ToolKind::Read, "b.md".into())
+        );
+    }
+
+    #[test]
+    fn agy_acp_file_tools_are_titled_by_their_file() {
+        let path = serde_json::json!({ "Path": "/lib/agents/notes.md", "Content": "x" });
+        assert_eq!(
+            classify("write_file", &path),
+            (ToolKind::Write, "notes.md".into())
+        );
+        assert_eq!(
+            classify("edit_file", &path),
+            (ToolKind::Edit, "notes.md".into())
+        );
+        assert_eq!(
+            classify("read_file", &path),
+            (ToolKind::Read, "notes.md".into())
         );
     }
 
