@@ -196,6 +196,63 @@ describe("Claude's requests", () => {
   });
 });
 
+describe("Claude's other tool calls", () => {
+  const call = (payload: Record<string, unknown>) =>
+    requestDetail(request({ provider: "claude", action: "tool", options: [APPROVE, DECLINE], payload: { tool: "toolu_1", ...payload } }));
+
+  test("a read outside its folders names the path", () => {
+    const d = call({ name: "Read", kind: "read", path: "/Users/s/notes.md", pattern: null });
+    expect(d.title).toBe("Claude Code wants to read outside its folders");
+    expect(d.subject).toBe("Read /Users/s/notes.md");
+    expect(d.tool).toEqual({ line: "Read /Users/s/notes.md", note: null, args: null });
+    expect([d.command, d.changes, d.access, d.outsideSandbox]).toEqual([null, [], [], false]);
+  });
+
+  test("a search through files says what it matches", () => {
+    expect(call({ name: "Grep", kind: "read", path: "/x", pattern: "TODO" }).tool?.note).toBe("Lines matching TODO");
+    expect(call({ name: "Glob", kind: "read", path: "/x", pattern: "**/*.md" }).tool?.note).toBe("Files matching **/*.md");
+  });
+
+  test("a fetch names the page and what it asks of it", () => {
+    const d = call({ name: "WebFetch", kind: "fetch", url: "https://example.com/", prompt: "Return the page title." });
+    expect(d.title).toBe("Claude Code wants to fetch a web page");
+    expect(d.subject).toBe("Fetch https://example.com/");
+    expect(d.tool?.note).toBe("“Return the page title.”");
+  });
+
+  test("a web search names its query", () => {
+    const d = call({ name: "WebSearch", kind: "search", query: "rust borrow checker" });
+    expect(d.title).toBe("Claude Code wants to search the web");
+    expect(d.subject).toBe("Search the web for “rust borrow checker”");
+  });
+
+  test("an MCP tool names its server and tool, with its arguments as JSON", () => {
+    const d = call({
+      name: "mcp__github__create_issue", kind: "mcp",
+      mcp: { server: "github", tool: "create_issue" }, arguments: { repo: "r", title: "Bug" },
+    });
+    expect(d.title).toBe("Claude Code wants to use github");
+    expect(d.subject).toBe("Use github › create_issue");
+    expect(d.tool?.args).toBe('{\n  "repo": "r",\n  "title": "Bug"\n}');
+  });
+
+  test("any other tool by its name, with its arguments", () => {
+    const d = call({ name: "Skill", kind: "other", arguments: { skill: "oculus-plan" } });
+    expect(d.title).toBe("Claude Code wants to use Skill");
+    expect(d.subject).toBe("Use Skill");
+    expect(d.tool?.args).toContain('"skill": "oculus-plan"');
+  });
+
+  test("a subagent's call names the subagent", () => {
+    const d = call({ name: "WebSearch", kind: "search", query: "q", agent: { path: "researcher" } });
+    expect(d.title).toBe("Claude Code's subagent researcher wants to search the web");
+  });
+
+  test("other actions carry no tool", () => {
+    expect(requestDetail(request()).tool).toBeNull();
+  });
+});
+
 describe("a reviewer's decision on a command row", () => {
   test("approved, with risk and rationale", () => {
     expect(reviewView({ status: "approved", risk: "low", rationale: "Harmless.", source: "agent" }))

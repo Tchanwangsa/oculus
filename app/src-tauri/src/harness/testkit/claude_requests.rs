@@ -22,11 +22,13 @@ const UNSEEN: &str = "Oculus declined this without asking the student. Do not re
 /// student stops the turn once its first prompt is shown.
 type Recorded = (&'static str, &'static [(usize, &'static str)], bool);
 
-pub(super) const NAMES: [Recorded; 11] = [
+pub(super) const NAMES: [Recorded; 12] = [
     ("claude-approval-escape", &[(0, "accept")], false),
     ("claude-approval-escape-decline", &[(0, "decline")], false),
     ("claude-approval-write", &[(0, "accept")], false),
     ("claude-approval-write-decline", &[(0, "decline")], false),
+    // Derived from the write-decline recording: no WebFetch prompt was recorded.
+    ("claude-approval-tool-decline", &[(0, "decline")], false),
     (
         "claude-approval-network",
         &[(0, "accept"), (1, "accept")],
@@ -292,6 +294,31 @@ fn a_declined_write_is_not_made() {
     assert_eq!(row.3.as_deref(), Some("decline"));
     let call = payload(&rig, row.0)["tool"].as_str().unwrap().to_string();
     assert_eq!(tool(&rig, &call)["ok"], false);
+    rig.finish();
+}
+
+#[test]
+fn a_web_fetch_is_asked_as_a_tool_call_and_a_declined_one_does_not_run() {
+    let rig = answered("claude-approval-tool-decline", "decline");
+    let row = requests(&rig).remove(0);
+    assert_eq!(row.1, "tool");
+    assert_eq!(
+        (row.2.as_str(), row.3.as_deref(), row.4.as_str()),
+        ("resolved", Some("decline"), "acknowledged")
+    );
+    assert!(row.6.is_some(), "it belongs to the run");
+    assert_eq!(
+        payload(&rig, row.0),
+        json!({
+            "name": "WebFetch",
+            "kind": "fetch",
+            "url": "https://example.com/",
+            "prompt": "Return the page title.",
+            "tool": "toolu_01UHEaTeaTaJzd5CDMxHcNVG",
+        })
+    );
+    assert_eq!(tool(&rig, "toolu_01UHEaTeaTaJzd5CDMxHcNVG")["ok"], false);
+    assert_eq!(run_status(&rig), "completed");
     rig.finish();
 }
 

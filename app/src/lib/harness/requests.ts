@@ -36,11 +36,26 @@ export interface RequestDetail {
   changes: RequestChange[];
   /** A permissions request: one line per access asked for. */
   access: string[];
+  /** Any other tool call (Claude's reads outside its folders, web fetches
+   *  and searches, MCP tools). */
+  tool: RequestTool | null;
   /** The agent's own reason, as it gave it. */
   reason: string | null;
   /** One short line naming what is asked, for the composer bar and a
    *  settled row: the command, the file, or the access. */
   subject: string;
+}
+
+/** A tool call that is not a command or a file change, in plain words. */
+export interface RequestTool {
+  /** What it will do: "Read /x", "Fetch https://…", "Search the web for
+   *  “…”", "Use github › create_issue". */
+  line: string;
+  /** What narrows it: a fetch's question about the page, a search pattern. */
+  note: string | null;
+  /** Its arguments as indented JSON: an MCP tool's, or a tool Oculus has no
+   *  words for. */
+  args: string | null;
 }
 
 const text = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
@@ -96,6 +111,63 @@ export function accessLines(permissions: unknown): string[] {
   return lines;
 }
 
+/** A `tool` request's payload (`providers/claude/approvals.rs`) as a line,
+ *  its narrowing note and its arguments. */
+export function toolOf(payload: Record<string, unknown>): RequestTool {
+  const name = text(payload.name) ?? "a tool";
+  const args = payload.arguments && typeof payload.arguments === "object"
+    ? JSON.stringify(payload.arguments, null, 2)
+    : null;
+  switch (payload.kind) {
+    case "read": {
+      const path = text(payload.path);
+      const pattern = text(payload.pattern);
+      const matching = name === "Grep" ? "Lines matching" : "Files matching";
+      return {
+        line: path ? `Read ${path}` : "Read outside its folders",
+        note: pattern ? `${matching} ${pattern}` : null,
+        args: null,
+      };
+    }
+    case "fetch": {
+      const url = text(payload.url);
+      const prompt = text(payload.prompt);
+      return { line: url ? `Fetch ${url}` : "Fetch a web page", note: prompt ? `“${prompt}”` : null, args: null };
+    }
+    case "search": {
+      const query = text(payload.query);
+      return { line: query ? `Search the web for “${query}”` : "Search the web", note: null, args: null };
+    }
+    case "mcp": {
+      const mcp = (payload.mcp ?? {}) as Record<string, unknown>;
+      const server = text(mcp.server);
+      const tool = text(mcp.tool);
+      const line = server && tool ? `Use ${server} › ${tool}` : `Use ${name}`;
+      return { line, note: null, args };
+    }
+    default:
+      return { line: `Use ${name}`, note: null, args };
+  }
+}
+
+/** The request title's verb phrase for a `tool` request. */
+function toolTitle(payload: Record<string, unknown>): string {
+  switch (payload.kind) {
+    case "read":
+      return "read outside its folders";
+    case "fetch":
+      return "fetch a web page";
+    case "search":
+      return "search the web";
+    case "mcp": {
+      const server = text((payload.mcp as Record<string, unknown> | undefined)?.server);
+      return server ? `use ${server}` : "use a tool";
+    }
+    default:
+      return `use ${text(payload.name) ?? "a tool"}`;
+  }
+}
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const baseName = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
 
@@ -109,6 +181,7 @@ export function requestDetail(request: HarnessRequest): RequestDetail {
   const host = request.action === "network" ? text(p.host) : null;
   const access = request.action === "permissions" ? accessLines(p.permissions) : host ? [`Reach ${host}`] : [];
   const network = request.action === "network" && !host;
+  const tool = request.action === "tool" ? toolOf(p) : null;
   const asker = agent ? `${who}'s subagent ${agent}` : who;
   let title: string;
   let subject: string;
@@ -129,6 +202,10 @@ export function requestDetail(request: HarnessRequest): RequestDetail {
       title = `${asker} wants more access`;
       subject = access.join(", ") || "More access";
       break;
+    case "tool":
+      title = `${asker} wants to ${toolTitle(p)}`;
+      subject = tool?.line ?? "A tool";
+      break;
     default:
       title = `${asker} asks for approval`;
       subject = "A request";
@@ -143,6 +220,7 @@ export function requestDetail(request: HarnessRequest): RequestDetail {
     host,
     changes,
     access,
+    tool,
     reason: text(p.reason),
     subject,
   };

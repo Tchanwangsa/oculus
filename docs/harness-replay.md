@@ -202,7 +202,9 @@ outbound, so a reply on the wrong id or with the wrong body fails the replay.
 (`fixtures/harness/claude-approval-*`, `claude-auto-*`: the stage 2 probe
 recordings' stdout frames, temp-folder suffixes replaced by `XXXXXX`, and
 the Oculus bridge's writes as the expected outbound): an escape approved
-and declined, a Write outside approved and declined, a new host, two
+and declined, a Write outside approved and declined, a WebFetch asked as a
+tool call and declined (`claude-approval-tool-decline`, derived from the
+write recording: no read, web or MCP prompt has been recorded), a new host, two
 prompts answered out of order, Stop with one pending, a subagent's prompt
 labelled by its `task_started`, a background subagent asking with no turn
 open, Auto's classifier and a deny rule on the call's row, Don't ask saved

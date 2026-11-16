@@ -58,8 +58,10 @@ paths at the end of the message.
 ## Chat shell
 
 Respect sandbox refusals; do not work around them. Depending on how the
-student set up this chat, a step the sandbox blocks may be refused outright
-or put to them to approve once; a declined step stays declined.
+student set up this chat, a step the sandbox or its rules block (a command,
+a file outside the folders you may write, a web fetch, a tool from another
+server) may be refused outright or put to them to approve once; a declined
+step stays declined.
 
 - **Run one command per call.** Pipes and `&&` are permitted; loops,
   substitution (`$(…)` and backticks), shell variables and multiline

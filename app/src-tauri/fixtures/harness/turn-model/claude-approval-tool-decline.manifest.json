@@ -1,0 +1,53 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.325",
+  "protocol": "Claude print stream-json with the control channel (--permission-prompts host --permission-prompt-tool stdio)",
+  "model": "claude-haiku-5-5",
+  "capture_date": "2026-11-15",
+  "source": "derived from stage 2 Claude probe 04-approval-write-deny.jsonl, lines 3-142 (the claude-approval-write-decline fixture): no read, web or MCP prompt was recorded, so the recorded Write prompt keeps its frames and ids and becomes a WebFetch (its tool_use, streamed input, can_use_tool prompt, denied tool_result and closing text); the thinking block is dropped. The prompt's fields are the CLI's generic can_use_tool shape (installed-source-snippets.txt) with the WebFetch domain suggestion probe 05 recorded for SandboxNetworkAccess.",
+  "redaction": "CLI stdout frames only, as recorded (tokens, account ids and emails were already removed by the probe). The probe's temp-folder suffixes are removed and any home path becomes /Users/student. The expected outbound is the Oculus bridge's for this permission mode, not the probe driver's messages. Recorded with a private CLAUDE_CONFIG_DIR, --setting-sources '' and --strict-mcp-config.",
+  "scenario": "a WebFetch the CLI asks about, declined (derived, not recorded)",
+  "frames": 58,
+  "sha256": "bb38f6aecb4de705d18c18f9cdea30f5914ad2a56e631e89541eeb30e756ec03",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "e9447400-3a19-4ffa-a64f-ed4a8d985236",
+          "response": {
+            "behavior": "deny",
+            "message": "The student declined this. Do not retry it or try another way to do the same thing."
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-approval-tool-decline.ndjson",
+  "native_session": "",
+  "permission_mode": "ask",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "recorded session route; scratch cwd",
+    "recorded_permission_mode": "acceptEdits",
+    "permission_mode": "ask"
+  }
+}

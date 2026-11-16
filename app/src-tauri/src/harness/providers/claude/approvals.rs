@@ -7,11 +7,14 @@
 //! there is (`Reply::Acknowledged`); the tool's result says whether it ran.
 //! `control_cancel_request` withdraws a prompt.
 //!
-//! Three kinds are asked, as recorded on 2.1.325: a Bash call (outside the
-//! sandbox only when it sets `dangerouslyDisableSandbox`), a file tool
-//! writing outside the allowed folders, and `SandboxNetworkAccess` for a new
-//! host. Any other prompt is declined unseen. The CLI's suggested grants are
-//! never passed on: the network one would persist to `localSettings`.
+//! Recorded on 2.1.325: a Bash call (outside the sandbox only when it sets
+//! `dangerouslyDisableSandbox`), a file tool writing outside the allowed
+//! folders, and `SandboxNetworkAccess` for a new host. Any other tool (a read
+//! outside the allowed folders, a web fetch or search, an MCP tool) is asked
+//! as a `tool` request; no such prompt has been recorded, so its shape is the
+//! CLI's generic one. `AskUserQuestion` is declined unseen. The CLI's
+//! suggested grants are never passed on: the network one would persist to
+//! `localSettings`.
 
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
@@ -30,6 +33,16 @@ use super::session::ClaudeSession;
 /// The pseudo-tool a sandboxed command's new host asks under. Its
 /// `tool_use_id` is not the command's.
 const NETWORK: &str = "SandboxNetworkAccess";
+
+/// The tools that write a file, asked as a file change.
+const FILE_TOOLS: [&str; 4] = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
+
+/// The tools that read files or list folders.
+const READ_TOOLS: [&str; 5] = ["Read", "NotebookRead", "Glob", "Grep", "LS"];
+
+/// Questions are answered nowhere yet: a chat's launch disallows the tool,
+/// and a prompt for it is declined unseen.
+const QUESTION: &str = "AskUserQuestion";
 
 /// What the agent is told when the student declines.
 pub(super) const DECLINED: &str =
@@ -146,6 +159,53 @@ fn file_change(tool: &str, input: &Value) -> Option<(String, Value)> {
     Some((path, change))
 }
 
+/// Any other tool's call, in the shape a `tool` request's row reads: the
+/// tool's `name`, a `kind` (`read`, `fetch`, `search`, `mcp` or `other`) and
+/// what it would touch. A read names no `paths`: `protected.rs` keeps agents
+/// from writing, and the library is readable already.
+fn tool_call(tool: &str, request: &Value) -> Value {
+    let input = &request["input"];
+    let text = |key: &str| Some(s(input, key)).filter(|v| !v.is_empty());
+    match tool {
+        t if READ_TOOLS.contains(&t) => {
+            let path = text("file_path")
+                .or_else(|| text("notebook_path"))
+                .or_else(|| text("path"))
+                .or_else(|| request["blocked_path"].as_str().map(String::from));
+            json!({ "name": tool, "kind": "read", "path": path, "pattern": text("pattern") })
+        }
+        "WebFetch" => {
+            json!({ "name": tool, "kind": "fetch", "url": text("url"), "prompt": text("prompt") })
+        }
+        "WebSearch" => json!({ "name": tool, "kind": "search", "query": text("query") }),
+        _ => match mcp_names(tool, request) {
+            Some((server, name)) => json!({
+                "name": tool,
+                "kind": "mcp",
+                "mcp": { "server": server, "tool": name },
+                "arguments": input,
+            }),
+            None => json!({ "name": tool, "kind": "other", "arguments": input }),
+        },
+    }
+}
+
+/// An MCP tool's server and its own name, from `mcp__<server>__<tool>`. The
+/// prompt's `mcp_server.name` is the server as configured, which the tool
+/// name carries normalised.
+fn mcp_names(tool: &str, request: &Value) -> Option<(String, String)> {
+    let rest = tool.strip_prefix("mcp__")?;
+    let configured = request["mcp_server"]["name"]
+        .as_str()
+        .filter(|n| !n.is_empty());
+    let exact = configured.and_then(|c| Some((c, rest.strip_prefix(&format!("{c}__"))?)));
+    if let Some((server, name)) = exact {
+        return Some((server.to_string(), name.to_string()));
+    }
+    let (server, name) = rest.split_once("__")?;
+    Some((configured.unwrap_or(server).to_string(), name.to_string()))
+}
+
 /// The request a `can_use_tool` prompt stands for, or `None` for a kind
 /// Oculus does not ask about. A file change is judged by the file it writes
 /// and the CLI's `blocked_path`, checked against the protected ones before
@@ -174,7 +234,8 @@ pub(super) fn request_of(
             }
             (Action::Network, json!({ "host": host }), Vec::new())
         }
-        _ => {
+        QUESTION => return None,
+        t if FILE_TOOLS.contains(&t) => {
             let (path, change) = file_change(&tool, input)?;
             let mut paths = vec![path];
             if let Some(blocked) = request["blocked_path"].as_str() {
@@ -183,6 +244,7 @@ pub(super) fn request_of(
             let payload = json!({ "changes": [change], "reason": Value::Null });
             (Action::FileChange, payload, paths)
         }
+        _ => (Action::Tool, tool_call(&tool, request), Vec::new()),
     };
     if action != Action::Network {
         payload["tool"] = json!(s(request, "tool_use_id"));

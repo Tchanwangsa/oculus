@@ -1539,9 +1539,10 @@ prompt and before the turn's first event.
 
 ## Requests
 
-When the CLI wants something its sandbox blocks (a command outside it, a
-file change, more access) the student is asked in the chat and the answer
-goes back to the same waiting call. One table, `harness_requests`
+When the CLI wants something its sandbox or its rules block (a command
+outside it, a file change, more access, a tool call it asks about) the
+student is asked in the chat and the answer goes back to the same waiting
+call. One table, `harness_requests`
 (migration 58, `requests/requests.sql`), holds each request's state; its
 timeline row (kind `request`) holds only its id.
 
@@ -1642,7 +1643,8 @@ What the student sees is decided in `app/src/lib/harness/requests.ts` and
   to change files, more access, the network; a child agent's request names
   it, "Codex's subagent child_probe …"), then per action the whole command
   with its folder, each file with its kind and diff (`DiffBlock`, Show more
-  past 240px), or one line per access asked for, the agent's reason, and
+  past 240px), one line per access asked for, or what a tool call will do
+  with its arguments (`FoldBlock`, the same fold), the agent's reason, and
   "Runs outside the sandbox" only where the payload's `outsideSandbox` is
   true. Settled, it is one work-row line: Approved, Always allowed,
   Declined, Expired or Cancelled with what was asked, and under it Rust's
@@ -1684,9 +1686,14 @@ What the student sees is decided in `app/src/lib/harness/requests.ts` and
   with "The app was closed."
 - **A Claude request** reads "Claude Code wants to run a command" (or to
   change a file, to reach the network). A command shows no folder: the
-  prompt names none. A new host is "Reach example.com". A subagent's request
-  names it by its type, "Claude Code's subagent wire-probe …". Only Approve
-  and Decline: nothing under More.
+  prompt names none. A new host is "Reach example.com". Any other tool call
+  (`toolOf`) says what it will do: "Read /Users/…/notes.md" (with "Lines
+  matching …" for a Grep), "Fetch https://…" with what it asks of the page,
+  "Search the web for “…”", or "Use github › create_issue" with its
+  arguments as JSON; its title is "wants to read outside its folders", "to
+  fetch a web page", "to search the web", or "to use github". A subagent's
+  request names it by its type, "Claude Code's subagent wire-probe …". Only
+  Approve and Decline: nothing under More.
 - Antigravity's print-mode refusal is still its own `permission` row
   (`PermissionCard`); it does not go through requests.
 
@@ -1782,11 +1789,28 @@ a change restarts the session at the next send.
   `addDirectories` suggestion names is never granted, so it is not checked,
   and an unprotected file at the library's root is asked; and
   `SandboxNetworkAccess`, a new host for a sandboxed command (payload
-  `host`; its call id is not the command's). Any other prompt (a read
-  outside, a web fetch, an MCP tool) is declined unseen, as is every prompt
-  of a one-off turn and one that arrives while Stop is being asked. The
-  CLI's suggested grants are never sent back: the network one would persist
-  to `localSettings`. Approve once and Decline only.
+  `host`; its call id is not the command's). Any other tool is a `tool`
+  request with the tool's `name` and a `kind`: `read` (`Read`, `Glob`,
+  `Grep`, `LS`, `NotebookRead` outside the allowed folders; `path`, else
+  the prompt's `blocked_path`, and `pattern`), `fetch` (`WebFetch`; `url`
+  and `prompt`), `search` (`WebSearch`; `query`), `mcp`
+  (`mcp__<server>__<tool>`; `mcp: { server, tool }`, the server as the
+  prompt's `mcp_server.name` gives it, and `arguments`), or `other`
+  (`arguments`). A read names no `paths`: `protected.rs` keeps agents from
+  writing, and the library is readable already. No such prompt has been
+  recorded; `claude-approval-tool-decline` is derived from the write
+  recording. `AskUserQuestion` is declined unseen, as is every prompt of a
+  one-off turn and one that arrives while Stop is being asked. The CLI's
+  suggested grants are never sent back: the network one would persist to
+  `localSettings`. Approve once and Decline only.
+- **What reaches a prompt.** No rule in the launch refuses a read, a web
+  call or an MCP tool first: the deny rules are `Edit(…)` for the protected
+  paths and `Bash(sqlite3:*)`. Reads inside `agents/` and the library
+  (`--add-dir`) never prompt; the rest come to Rust in Ask and Don't ask
+  (which declines them unseen), and in Auto only what the classifier leaves.
+  A chat does not pass `--strict-mcp-config`, so the student's own MCP
+  servers load and their calls come as requests; a one-off turn has no
+  tools.
 - **Withdrawal.** `control_cancel_request` names a prompt the CLI gave up.
   After our interrupt (probe `08`) the turn's end cancels it as stopped and
   nothing is written to it; otherwise it becomes `RequestRetired` (expired,

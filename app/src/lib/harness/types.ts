@@ -192,7 +192,8 @@ export interface HarnessRequest {
   /** Per action. A command: `command`, `cwd` (Codex), `reason`,
    *  `outsideSandbox`. A file change: `changes` (`path`, `diff`, `kind`),
    *  `reason`. Permissions: `permissions` (the profile asked for), `reason`.
-   *  Network: Codex's `command`, or Claude's `host` alone. Any: `agent`
+   *  Network: Codex's `command`, or Claude's `host` alone. Tool (Claude):
+   *  `name`, `kind` and its target (`toolOf`). Any: `agent`
    *  (`path`, and Codex's `thread` or Claude's `tool` and `description`)
    *  when a child agent asked, `tool` (the native item id, which its tool
    *  row's `ref_id` matches). */

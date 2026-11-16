@@ -301,25 +301,178 @@ fn an_edit_shows_what_it_replaces() {
 }
 
 #[test]
-fn a_kind_oculus_does_not_ask_about_is_declined_unseen() {
+fn a_question_and_a_file_tool_naming_no_file_are_declined_unseen() {
     let mut rig = rigged(false);
-    for (id, tool) in [("q", "AskUserQuestion"), ("w", "WebFetch"), ("r", "Read")] {
-        rig.feed(prompt(
-            id,
-            json!({ "tool_name": tool, "input": { "url": "https://x", "file_path": "/x" } }),
-        ));
-    }
+    rig.feed(prompt(
+        "q",
+        json!({ "tool_name": "AskUserQuestion", "input": { "questions": [] } }),
+    ));
+    rig.feed(prompt(
+        "w",
+        json!({ "tool_name": "Write", "input": { "content": "x" } }),
+    ));
     assert!(rig.told().is_empty(), "nobody is asked");
     assert!(!rig.session.has_pending_request());
     let written = rig.written();
-    assert_eq!(written.len(), 3);
-    for (frame, id) in written.iter().zip(["q", "w", "r"]) {
+    assert_eq!(written.len(), 2);
+    for (frame, id) in written.iter().zip(["q", "w"]) {
         assert_eq!(frame["response"]["request_id"], id);
         assert_eq!(
             frame["response"]["response"],
             json!({ "behavior": "deny", "message": DECLINED_UNSEEN })
         );
     }
+}
+
+/// The `tool` request a prompt for `tool` with `input` (and any of the
+/// prompt's other fields in `extra`) becomes.
+fn tool_request(tool: &str, input: Value, extra: Value) -> crate::harness::requests::NewRequest {
+    let mut rig = rigged(false);
+    let mut request = json!({ "tool_name": tool, "input": input, "tool_use_id": "toolu_t" });
+    for (k, v) in extra.as_object().unwrap() {
+        request[k] = v.clone();
+    }
+    rig.feed(prompt("req-t", request));
+    let (request, _) = asked(rig.told());
+    assert_eq!(request.action, Action::Tool, "{tool}");
+    assert_eq!(request.payload["tool"], "toolu_t", "{tool}: the call's id");
+    assert!(request.paths.is_empty(), "{tool}: nothing to check");
+    let ids: Vec<&str> = request.options.iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(ids, ["accept", "decline"], "{tool}");
+    request
+}
+
+#[test]
+fn a_read_outside_is_asked_with_the_path_it_reads() {
+    let read = tool_request(
+        "Read",
+        json!({ "file_path": "/elsewhere/notes.md" }),
+        json!({ "decision_reason_type": "workingDir" }),
+    );
+    assert_eq!(read.payload["name"], "Read");
+    assert_eq!(read.payload["kind"], "read");
+    assert_eq!(read.payload["path"], "/elsewhere/notes.md");
+    assert_eq!(read.payload["pattern"], Value::Null);
+
+    let grep = tool_request(
+        "Grep",
+        json!({ "pattern": "TODO", "path": "/elsewhere" }),
+        json!({}),
+    );
+    assert_eq!(
+        (&grep.payload["path"], &grep.payload["pattern"]),
+        (&json!("/elsewhere"), &json!("TODO"))
+    );
+
+    let glob = tool_request(
+        "Glob",
+        json!({ "pattern": "**/*.md" }),
+        json!({ "blocked_path": "/elsewhere/docs" }),
+    );
+    assert_eq!(
+        glob.payload["path"], "/elsewhere/docs",
+        "no path of its own: the one the CLI says it blocked"
+    );
+}
+
+#[test]
+fn a_web_fetch_names_its_url_and_what_it_asks_of_the_page() {
+    let fetch = tool_request(
+        "WebFetch",
+        json!({ "url": "https://example.com/", "prompt": "Return the page title." }),
+        json!({}),
+    );
+    assert_eq!(
+        fetch.payload,
+        json!({
+            "name": "WebFetch",
+            "kind": "fetch",
+            "url": "https://example.com/",
+            "prompt": "Return the page title.",
+            "tool": "toolu_t",
+        })
+    );
+}
+
+#[test]
+fn a_web_search_names_its_query() {
+    let search = tool_request(
+        "WebSearch",
+        json!({ "query": "rust borrow checker", "allowed_domains": ["rust-lang.org"] }),
+        json!({}),
+    );
+    assert_eq!(
+        search.payload,
+        json!({ "name": "WebSearch", "kind": "search", "query": "rust borrow checker", "tool": "toolu_t" })
+    );
+}
+
+#[test]
+fn an_mcp_tool_names_its_server_its_tool_and_its_arguments() {
+    let args = json!({ "owner": "o", "repo": "r", "title": "Bug" });
+    let call = tool_request("mcp__github__create_issue", args.clone(), json!({}));
+    assert_eq!(call.payload["kind"], "mcp");
+    assert_eq!(call.payload["name"], "mcp__github__create_issue");
+    assert_eq!(
+        call.payload["mcp"],
+        json!({ "server": "github", "tool": "create_issue" })
+    );
+    assert_eq!(call.payload["arguments"], args);
+
+    // The server as configured, when the prompt names it; its tool name
+    // carries it normalised.
+    let named = tool_request(
+        "mcp__my_notes__search__all",
+        json!({}),
+        json!({ "mcp_server": { "name": "my_notes", "source": "user" } }),
+    );
+    assert_eq!(
+        named.payload["mcp"],
+        json!({ "server": "my_notes", "tool": "search__all" })
+    );
+    let spaced = tool_request(
+        "mcp__my_notes__search",
+        json!({}),
+        json!({ "mcp_server": { "name": "my notes", "source": "user" } }),
+    );
+    assert_eq!(
+        spaced.payload["mcp"],
+        json!({ "server": "my notes", "tool": "search" })
+    );
+}
+
+#[test]
+fn any_other_tool_is_asked_by_name_with_its_arguments() {
+    let other = tool_request("Skill", json!({ "skill": "oculus-plan" }), json!({}));
+    assert_eq!(
+        other.payload,
+        json!({
+            "name": "Skill",
+            "kind": "other",
+            "arguments": { "skill": "oculus-plan" },
+            "tool": "toolu_t",
+        })
+    );
+}
+
+#[test]
+fn an_approved_tool_call_is_allowed_with_its_input_as_sent() {
+    let mut rig = rigged(false);
+    let input = json!({ "url": "https://example.com/", "prompt": "Title?" });
+    rig.feed(prompt(
+        "req-f",
+        json!({ "tool_name": "WebFetch", "input": input, "tool_use_id": "toolu_f" }),
+    ));
+    let (request, route) = asked(rig.told());
+    assert_eq!(route.0.reply(&request.options[0]), Reply::Acknowledged);
+    assert_eq!(
+        rig.written()[0]["response"],
+        json!({
+            "subtype": "success",
+            "request_id": "req-f",
+            "response": { "behavior": "allow", "updatedInput": input },
+        })
+    );
 }
 
 #[test]
