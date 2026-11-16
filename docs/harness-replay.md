@@ -206,8 +206,9 @@ and declined, a Write outside approved and declined, a new host, two
 prompts answered out of order, Stop with one pending, a subagent's prompt
 labelled by its `task_started`, a background subagent asking with no turn
 open, Auto's classifier and a deny rule on the call's row, Don't ask saved
-mid-turn, a protected path (in the file or in the folder the CLI suggests
-granting) declined unseen, a pipe dying mid-reply, a restart with one
+mid-turn, a protected path (in the file or its `blocked_path`) declined
+unseen while an unprotected file at the library's root is asked though the
+CLI suggests granting the library, a pipe dying mid-reply, a restart with one
 pending, a mode change restarting the session, and, as a mutation, a prompt
 inside a turn the CLI started itself. A test that declines unseen rewrites
 the manifest's expected deny to Oculus's unseen message.

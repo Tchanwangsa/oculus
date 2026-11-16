@@ -147,9 +147,10 @@ fn file_change(tool: &str, input: &Value) -> Option<(String, Value)> {
 }
 
 /// The request a `can_use_tool` prompt stands for, or `None` for a kind
-/// Oculus does not ask about. A file change's paths, and the folders the CLI
-/// suggests granting for it, are checked against the protected ones before
-/// the student sees it.
+/// Oculus does not ask about. A file change is judged by the file it writes
+/// and the CLI's `blocked_path`, checked against the protected ones before
+/// the student sees it; the folder the CLI suggests granting is never
+/// granted, so it is not checked.
 pub(super) fn request_of(
     request: &Value,
     wire_id: &str,
@@ -176,7 +177,6 @@ pub(super) fn request_of(
         _ => {
             let (path, change) = file_change(&tool, input)?;
             let mut paths = vec![path];
-            paths.extend(suggested_folders(request));
             if let Some(blocked) = request["blocked_path"].as_str() {
                 paths.push(blocked.to_string());
             }
@@ -209,20 +209,6 @@ pub(super) fn request_of(
         native_ref: json!(wire_id).to_string(),
         paths,
     })
-}
-
-/// The folders the CLI's `addDirectories` suggestions name. Never granted
-/// here, but a grant there is what approving would invite, so a protected
-/// one refuses the request.
-fn suggested_folders(request: &Value) -> Vec<String> {
-    let suggestions = request["permission_suggestions"].as_array();
-    suggestions
-        .into_iter()
-        .flatten()
-        .filter(|s| s["type"] == "addDirectories")
-        .flat_map(|s| s["directories"].as_array().cloned().unwrap_or_default())
-        .filter_map(|d| d.as_str().map(String::from))
-        .collect()
 }
 
 impl ClaudeSession {

@@ -542,26 +542,40 @@ fn dont_ask_saved_mid_turn_declines_the_next_prompt_unseen() {
     rig.finish();
 }
 
-#[test]
-fn a_write_naming_a_protected_path_never_reaches_the_student() {
-    // A file in a protected folder, and a file at the library's root whose
-    // suggested grant is the library itself: either is refused unseen.
-    for (file, folder) in [("courses/notes.md", "courses"), ("notes.md", "")] {
-        let mut scenario =
-            Scenario::recorded("claude-approval-write-decline").gate("asked", prompt);
+/// The write-decline recording with its prompt's file and `blocked_path`
+/// set (relative to the library), and the folder the CLI suggests granting
+/// set to the library itself, held once the prompt is fed. `unseen`: Oculus
+/// declines it without asking.
+fn write_into_library(file: &str, blocked: Option<&str>, unseen: bool) -> Rig {
+    let mut scenario = Scenario::recorded("claude-approval-write-decline");
+    let after = scenario.frames.iter().position(prompt).unwrap() + 1;
+    scenario.gates.push(("asked".into(), after));
+    if unseen {
         let deny = &mut scenario.fixture.expected_outbound[1].frame["response"]["response"];
         deny["message"] = json!(UNSEEN);
-        let mut rig = Rig::start(scenario);
-        let library = rig.library();
-        let at = rig.scenario.frames.iter().position(prompt).unwrap();
-        let request = &mut rig.scenario.frames[at]["request"];
-        request["input"]["file_path"] = json!(library.join(file).display().to_string());
-        let granted = match folder {
-            "" => library.clone(),
-            folder => library.join(folder),
-        };
-        request["permission_suggestions"][0]["directories"] =
-            json!([granted.display().to_string()]);
+    }
+    let mut rig = Rig::start(scenario);
+    let library = rig.library();
+    let at = rig.scenario.frames.iter().position(prompt).unwrap();
+    let request = &mut rig.scenario.frames[at]["request"];
+    request["input"]["file_path"] = json!(library.join(file).display().to_string());
+    if let Some(blocked) = blocked {
+        request["blocked_path"] = json!(library.join(blocked).display().to_string());
+    }
+    request["permission_suggestions"][0]["directories"] = json!([library.display().to_string()]);
+    rig
+}
+
+#[test]
+fn a_write_naming_a_protected_path_never_reaches_the_student() {
+    // A file in a protected folder, a protected file at the library's root,
+    // and a file whose `blocked_path` is in a protected folder.
+    for (file, blocked) in [
+        ("courses/notes.md", None),
+        ("settings.json", None),
+        ("agents/notes.md", Some("courses/notes.md")),
+    ] {
+        let mut rig = write_into_library(file, blocked, true);
         rig.open();
         rig.until("asked");
         rig.resume();
@@ -571,6 +585,26 @@ fn a_write_naming_a_protected_path_never_reaches_the_student() {
         assert_eq!(opened(&rig), 0, "{file}");
         rig.finish();
     }
+}
+
+#[test]
+fn an_unprotected_file_at_the_library_root_is_asked_though_claude_suggests_granting_the_library() {
+    let mut rig = write_into_library("notes.md", None, false);
+    rig.open();
+    rig.until("asked");
+    let row = requests(&rig).remove(0);
+    assert_eq!((row.1.as_str(), row.2.as_str()), ("file_change", "pending"));
+    let shown = payload(&rig, row.0);
+    assert!(shown["changes"][0]["path"]
+        .as_str()
+        .unwrap()
+        .ends_with("/notes.md"));
+    respond(&mut rig, "answer", row.0, "decline").unwrap();
+    rig.resume();
+    rig.close();
+    rig.drain();
+    assert_eq!(requests(&rig)[0].3.as_deref(), Some("decline"));
+    rig.finish();
 }
 
 #[test]

@@ -1777,9 +1777,10 @@ a change restarts the session at the next send.
 - **What is asked.** A `Bash` call (payload `command`, its `description` as
   the reason, `outsideSandbox` only when it sets `dangerouslyDisableSandbox`);
   a file tool (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`) writing outside
-  the allowed folders, as a file change whose `paths` are the file and every
-  folder the CLI's `addDirectories` suggestion names, so a grant reaching a
-  protected folder or the library refuses it unseen; and
+  the allowed folders, as a file change judged by the file it writes: its
+  `paths` are the file and the prompt's `blocked_path`. The folder the CLI's
+  `addDirectories` suggestion names is never granted, so it is not checked,
+  and an unprotected file at the library's root is asked; and
   `SandboxNetworkAccess`, a new host for a sandboxed command (payload
   `host`; its call id is not the command's). Any other prompt (a read
   outside, a web fetch, an MCP tool) is declined unseen, as is every prompt

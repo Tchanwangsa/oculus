@@ -258,7 +258,7 @@ fn a_new_host_is_a_network_request_and_its_suggested_grant_is_never_sent() {
 }
 
 #[test]
-fn a_write_outside_names_its_file_and_the_folder_the_cli_would_grant() {
+fn a_write_outside_is_judged_by_its_file_not_the_folder_the_cli_would_grant() {
     let mut rig = rigged(false);
     rig.feed(prompt(
         "req-5",
@@ -275,7 +275,7 @@ fn a_write_outside_names_its_file_and_the_folder_the_cli_would_grant() {
     ));
     let (request, _) = asked(rig.told());
     assert_eq!(request.action, Action::FileChange);
-    assert_eq!(request.paths, ["/elsewhere/new.txt", "/elsewhere"]);
+    assert_eq!(request.paths, ["/elsewhere/new.txt"]);
     let change = &request.payload["changes"][0];
     assert_eq!(change["path"], "/elsewhere/new.txt");
     assert_eq!(change["kind"], "add");
