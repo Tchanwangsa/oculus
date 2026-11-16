@@ -123,7 +123,7 @@ async fn a_send_reopens_in_the_same_transaction_for_start_and_queue_and_rolls_ba
 }
 
 #[tokio::test]
-async fn sweep_skips_preparing_running_starting_queued_pending_questions_failed_and_recent_threads() {
+async fn sweep_skips_in_flight_pending_failed_and_recent_threads() {
     let pool = pool().await;
     for id in 1..=13 {
         sqlx::query("INSERT INTO harness_threads(id, provider, status, updated_at) VALUES (?1, 'claude', 'idle', '2000-01-01')")
