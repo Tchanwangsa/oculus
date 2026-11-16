@@ -235,6 +235,13 @@ request pending, a pipe dying mid-reply, and a one-off turn answered by
 policy alone. The waiting-request stop, the dying process and the ignored
 stop are mutations of recordings.
 
+`testkit/agy_recovery.rs` drives synthetic setup traffic through the real
+ACP client and production send: `session/load` fails, a fresh `session/new`
+opens, a full transcript handoff goes out exactly once, the binding learns
+the fresh id, and the next message uses it without another handoff. The
+session-start note survives reopening. This is derived evidence, not a live
+failed-load recording.
+
 `testkit/questions.rs` replays twelve question fixtures through the real
 command, decider and bridge reply path: Codex 0.169.0 single choice, two
 questions, non-blocking and blocking typed answers, Stop, and derived empty

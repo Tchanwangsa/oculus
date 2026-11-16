@@ -437,6 +437,10 @@ pub enum HarnessEvent {
     PermissionMode {
         mode: crate::harness::requests::PermissionMode,
     },
+    /// A saved conversation could not load; the send starts a fresh session.
+    SessionRestarted {
+        text: String,
+    },
     /// A completed run whose answer, or part of it, never reached Oculus.
     /// Persisted as a row; never followed by a resend.
     DeliveryNotice {

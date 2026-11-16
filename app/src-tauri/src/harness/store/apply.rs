@@ -345,6 +345,9 @@ async fn apply_rows(
         }
         // `meta` records which provider's credentials failed, or that its usage
         // limit is spent, so a reload can redraw the sign-in card or the notice.
+        HarnessEvent::SessionRestarted { text } => insert_item(
+            conn, thread_id, "session_restarted", None, Some(text), None, owner,
+        ).await.map(Stored::row),
         HarnessEvent::Error {
             message,
             auth,

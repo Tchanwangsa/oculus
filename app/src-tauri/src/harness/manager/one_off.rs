@@ -141,14 +141,17 @@ impl Harness {
             }
             // Answered by Rust's policy alone: what it does not allow is
             // refused, never asked.
-            Provider::Antigravity => Handle::Antigravity(AcpSession::spawn(
-                AcpSpawn {
-                    base: base(cwd)?,
-                    brief: instructions.to_string(),
-                    one_off: true,
-                },
-                sink,
-            )?),
+            Provider::Antigravity => Handle::Antigravity(
+                AcpSession::spawn(
+                    AcpSpawn {
+                        base: base(cwd)?,
+                        brief: instructions.to_string(),
+                        one_off: true,
+                    },
+                    sink,
+                )
+                .map_err(|e| e.to_string())?,
+            ),
         };
         Ok(OneOff { handle, rx })
     }

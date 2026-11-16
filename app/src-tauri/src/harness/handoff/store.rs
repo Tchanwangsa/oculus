@@ -100,6 +100,77 @@ pub(in crate::harness) async fn plan(
     })
 }
 
+/// A saved Antigravity session could not load, before any prompt was sent.
+/// Replace only this run's binding and handoff, leaving earlier runs on the
+/// old binding. Stop/delete wins over recovery. The next send sees the new id.
+pub(in crate::harness) async fn restart(
+    pool: &sqlx::SqlitePool,
+    run: &crate::harness::store::RunStart,
+    text: &str,
+) -> Result<bool, String> {
+    let err = |e: sqlx::Error| e.to_string();
+    let mut tx = pool.begin().await.map_err(err)?;
+    // Take the SQLite write lock before reading the claim, against Stop.
+    let row: Option<(i64, i64, Option<String>, Option<String>)> = sqlx::query_as(
+        "UPDATE harness_runs SET delivery_state = delivery_state
+          WHERE id = ?1 AND execution_status = 'running' AND stop_requested_at IS NULL
+            AND delivery_state = 'unknown'
+          RETURNING thread_id, ordinal, model, effort",
+    )
+    .bind(run.run_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(err)?;
+    let Some((thread, ordinal, model, effort)) = row else {
+        return Ok(false);
+    };
+    let binding = bindings::fresh(&mut tx, thread, Provider::Antigravity).await?;
+    let mut history = rows(&mut tx, thread).await?;
+    history.retain(|r| match &r.run {
+        Some(r) => r.ordinal < ordinal,
+        None => r.item_id < run.item_id,
+    });
+    let newest = sqlx::query_as(
+        "SELECT ordinal, binding_id FROM harness_runs WHERE thread_id = ?1
+          AND ordinal > 0 AND ordinal < ?2 ORDER BY ordinal DESC LIMIT 1",
+    )
+    .bind(thread)
+    .bind(ordinal)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(err)?;
+    let target = Target::of(
+        &mut tx,
+        &binding,
+        &Selection {
+            provider: Provider::Antigravity,
+            model,
+            effort,
+        },
+    )
+    .await?;
+    sqlx::query("DELETE FROM harness_handoffs WHERE run_id = ?1")
+        .bind(run.run_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(err)?;
+    // Slash commands must stay first; their next ordinary send gets history.
+    if !text.trim_start().starts_with('/') {
+        if let Some(draft) = draft(&history, newest, &target, text) {
+            save(&mut tx, thread, run.run_id, binding.id, &draft).await?;
+        }
+    }
+    sqlx::query("UPDATE harness_runs SET binding_id = ?2 WHERE id = ?1")
+        .bind(run.run_id)
+        .bind(binding.id)
+        .execute(&mut *tx)
+        .await
+        .map_err(err)?;
+    crate::harness::store::raise_revision(&mut tx, thread).await?;
+    tx.commit().await.map_err(err)?;
+    Ok(true)
+}
+
 /// The session a draft is made for.
 struct Target {
     /// `None` for a session that does not exist yet.

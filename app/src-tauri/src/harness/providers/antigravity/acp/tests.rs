@@ -609,7 +609,7 @@ fn an_agy_older_than_the_recorded_one_is_refused_with_how_to_update() {
         "initialize" => json!({ "agentInfo": { "version": "1.5.8" } }),
         _ => json!({ "sessionId": "n" }),
     });
-    let refused = session.open(&spawn, "").unwrap_err();
+    let refused = session.open(&spawn, "").unwrap_err().to_string();
     assert!(refused.contains("1.5.9 or newer"), "{refused}");
     assert!(refused.contains("Settings"), "{refused}");
     assert_eq!(methods(&heard), ["initialize"], "no session was opened");

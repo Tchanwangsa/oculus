@@ -1923,6 +1923,13 @@ the stage 5 probe; replayed by `testkit/agy_requests.rs`).
   `models::model_slug` folds a level in), `session/set_config_option
   thought_level` when only a level is set, and `session/set_mode default`.
   `agy acp` takes no `--model` or `--effort`.
+  If the saved `session/load` fails before any prompt, the start step gives
+  up that binding, starts `session/new`, and sends the same budgeted full
+  transcript handoff a provider switch sends, with the student's message.
+  Earlier runs retain their old binding; this run and later sends use the
+  new session id. A timeline note says Antigravity started a new session.
+  Stop/delete wins over recovery, setup failures fail the send, and a prompt
+  write with uncertain delivery is never retried.
 - **A turn** is one `session/prompt`; its reply ends it (`end_turn`,
   `max_tokens` → completed, `cancelled` → interrupted, `refusal` or
   anything else → failed). Chunks carry no message id, so the bridge names

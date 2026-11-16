@@ -83,6 +83,7 @@ type HarnessEvent =
   /** How the chat asks from its next run on (`harnessSetPermissionMode`). */
   | { type: "permission_mode"; mode: PermissionMode }
   /** The row saying an answer, or part of it, did not arrive. */
+  | { type: "session_restarted"; text: string }
   | { type: "delivery_notice"; text: string }
   | { type: "compaction"; source?: string }
   /** Stored evidence of missing text; the timeline shows `delivery_notice` instead. */
@@ -247,6 +248,7 @@ type ItemKind =
    *  continuing"), `meta` is `{ proposal: string }`. Never the student's words. */
   | "continuation"
   /** A run whose answer, or part of it, never arrived; `content` says which. */
+  | "session_restarted"
   | "delivery_notice"
   | "compaction"
   /** Something the agent asked the student; `ref_id` is the `HarnessRequest`'s

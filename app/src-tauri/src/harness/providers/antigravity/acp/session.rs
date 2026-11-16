@@ -19,6 +19,33 @@ use super::policy::{judge, Verdict};
 use super::route::{outcome, AcpRoute, Options};
 use super::updates::Translator;
 
+/// A failed load heard no student prompt; the app can replace its binding
+/// and retry once with a durable full handoff. Other setup errors fail the send.
+#[derive(Debug)]
+pub enum OpenError {
+    Load(String),
+    Setup(String),
+}
+
+impl std::fmt::Display for OpenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Load(e) | Self::Setup(e) => f.write_str(e),
+        }
+    }
+}
+
+impl From<String> for OpenError {
+    fn from(e: String) -> Self {
+        Self::Setup(e)
+    }
+}
+impl From<&str> for OpenError {
+    fn from(e: &str) -> Self {
+        Self::Setup(e.into())
+    }
+}
+
 /// What one `agy acp` process is started with.
 pub struct AcpSpawn {
     /// `base.cwd` is the chat's folder and write root; `base.library` is
@@ -132,7 +159,7 @@ impl AcpSession {
         })
     }
 
-    pub fn spawn(cfg: AcpSpawn, sink: Sink) -> Result<Arc<Self>, String> {
+    pub fn spawn(cfg: AcpSpawn, sink: Sink) -> Result<Arc<Self>, OpenError> {
         let base = cfg.base;
         let mut cmd = crate::runtime::platform::cli_command(&base.bin)?;
         cmd.args(launch_args(&base))
@@ -149,7 +176,7 @@ impl AcpSession {
         });
         if let Err(e) = session.open(&base, &cfg.brief) {
             session.kill();
-            return Err(format!("Antigravity was not started: {e}"));
+            return Err(e);
         }
         Ok(session)
     }
@@ -161,7 +188,7 @@ impl AcpSession {
     /// `initialize`, then a new session or the chat's own loaded, then its
     /// settings. No client file or terminal service is offered (the agent's
     /// own tools do the work, and ask first), and no elicitation yet.
-    pub(super) fn open(&self, base: &ThreadSpawn, brief: &str) -> Result<(), String> {
+    pub(super) fn open(&self, base: &ThreadSpawn, brief: &str) -> Result<(), OpenError> {
         let init = self.rpc.request(
             "initialize",
             json!({
@@ -182,7 +209,8 @@ impl AcpSession {
             return Err(format!(
                 "Antigravity {MIN_VERSION} or newer is needed, and this is {have}. \
                  Update it in Settings → Agents."
-            ));
+            )
+            .into());
         }
         let cwd = base.cwd.display().to_string();
         let mut params = json!({ "cwd": cwd, "mcpServers": [] });
@@ -192,7 +220,9 @@ impl AcpSession {
         let id = match &base.resume {
             Some(id) => {
                 params["sessionId"] = json!(id);
-                self.rpc.request("session/load", params)?;
+                self.rpc
+                    .request("session/load", params)
+                    .map_err(OpenError::Load)?;
                 id.clone()
             }
             None => self.rpc.request("session/new", params)?["sessionId"]

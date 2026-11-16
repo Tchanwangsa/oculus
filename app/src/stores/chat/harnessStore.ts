@@ -531,6 +531,9 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           if (run && run.ended_ms == null) setRun({ ...run, stopping: true, unresponsive: { others: event.others } });
           break;
         }
+        case "session_restarted":
+          push(rowFrom(env, "session_restarted", event.text));
+          break;
         case "delivery_notice":
           push(rowFrom(env, "delivery_notice", event.text));
           break;

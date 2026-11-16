@@ -458,3 +458,14 @@ describe("a request's row", () => {
     expect(rows.slice(windowStart(rows, from)).some((r) => rowItems(r)[0].id === 5)).toBe(true);
   });
 });
+
+test("a restarted Antigravity session stays a note outside the work fold", () => {
+  const text = "Antigravity started a new session because the saved conversation could not be loaded.";
+  useHarnessStore.getState().apply({ threadId: THREAD, provider: "antigravity", itemId: 90, runId: 9, event: { type: "session_restarted", text } });
+  const item = useHarnessStore.getState().items[THREAD][0];
+  expect(item.kind).toBe("session_restarted");
+  const rows = buildRows([item], false, { runs: { 9: { id: 9, status: "completed", delivery: "delivered", answer_item_id: null } } });
+  expect(rows).toHaveLength(1);
+  expect(rows[0].kind).toBe("item");
+  expect(item.content).toBe(text);
+});

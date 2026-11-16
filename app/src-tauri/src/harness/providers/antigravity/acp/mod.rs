@@ -20,4 +20,4 @@ pub(in crate::harness) mod replay;
 #[cfg(test)]
 mod tests;
 
-pub use session::{AcpSession, AcpSpawn};
+pub use session::{AcpSession, AcpSpawn, OpenError};

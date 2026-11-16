@@ -133,7 +133,7 @@ async fn send(rt: &Runtime, start: Start) -> Result<bool, Failure> {
     };
     // The session to resume is the run's binding's, the provider's current
     // one in this chat when the run was written.
-    let resume = store::bindings::of_run(&pool, run.run_id)
+    let mut resume = store::bindings::of_run(&pool, run.run_id)
         .await?
         .and_then(|binding| binding.native_session);
     let (text, cards) = prompt(
@@ -145,25 +145,52 @@ async fn send(rt: &Runtime, start: Start) -> Result<bool, Failure> {
     )
     .await?;
     let text = super::skills::name_picked_skills(provider, &opts.skills, text);
-    // The earlier conversation this session has not seen goes first, in
-    // its marked block. One that cannot be sent fails the run here, before
-    // the provider hears anything.
-    let text = match handoff::store::outgoing(&pool, run.run_id).await? {
-        Some(block) => handoff::history::with_block(&block, &text),
-        None => text,
-    };
-    // The last check before the provider hears of it: a run stopped while
-    // this step prepared, or one a rewind or a delete took, is not sent.
+    // Claim once; recovery below is safe only before the provider heard a
+    // prompt. A failed prompt write is uncertain and is never retried.
     if !store::claim_start(&pool, &run).await? {
         return Ok(false);
     }
-    let (h, sinks) = (rt.harness.clone(), sinks_for(&rt.bus, thread_id, provider));
-    let sent =
-        blocking(move || Ok(h.send(thread_id, provider, resume.as_deref(), &opts, &text, &sinks)));
-    match sent.await? {
-        Ok(()) => {}
-        Err(SendError::Unsent(e)) => return Err(Failure::Unsent(e)),
-        Err(SendError::Unknown(e)) => return Err(Failure::Unknown(e)),
+    let mut recovered = false;
+    loop {
+        let outgoing = match handoff::store::outgoing(&pool, run.run_id).await? {
+            Some(block) => handoff::history::with_block(&block, &text),
+            None => text.clone(),
+        };
+        let (h, sinks) = (rt.harness.clone(), sinks_for(&rt.bus, thread_id, provider));
+        let (send_opts, send_resume) = (opts.clone(), resume.clone());
+        let sent = blocking(move || {
+            Ok(h.send(
+                thread_id,
+                provider,
+                send_resume.as_deref(),
+                &send_opts,
+                &outgoing,
+                &sinks,
+            ))
+        })
+        .await?;
+        match sent {
+            Ok(()) => break,
+            Err(SendError::ResumeFailed(e))
+                if !recovered && provider == crate::harness::Provider::Antigravity =>
+            {
+                elog!("[oculus] agy: starting a fresh session after load failed: {e}");
+                if !handoff::store::restart(&pool, &run, &text).await? {
+                    return Ok(false);
+                }
+                recovered = true;
+                resume = None;
+            }
+            Err(SendError::Unsent(e) | SendError::ResumeFailed(e)) => {
+                return Err(Failure::Unsent(e))
+            }
+            Err(SendError::Unknown(e)) => return Err(Failure::Unknown(e)),
+        }
+    }
+    if recovered {
+        (super::sink_for(&rt.bus, thread_id, provider))(crate::harness::HarnessEvent::SessionRestarted {
+            text: "Antigravity started a new session because the saved conversation could not be loaded.".into(),
+        });
     }
     if let Err(e) = store::mark_sent(&pool, &run).await {
         elog!("[oculus] harness run {}: {e}", run.run_id);

@@ -33,13 +33,21 @@ pub enum SendError {
     /// The write to the provider failed, so whether it has the message is
     /// not known.
     Unknown(String),
+    /// Antigravity could not load the saved session. No prompt was sent.
+    ResumeFailed(String),
 }
 
 impl SendError {
     pub fn into_message(self) -> String {
         match self {
-            SendError::Unsent(e) | SendError::Unknown(e) => e,
+            SendError::Unsent(e) | SendError::Unknown(e) | SendError::ResumeFailed(e) => e,
         }
+    }
+}
+
+impl From<String> for SendError {
+    fn from(e: String) -> Self {
+        Self::Unsent(e)
     }
 }
 
@@ -62,8 +70,7 @@ impl Harness {
         let (handle, generation, sinks) = {
             let mut live = self.live.lock().unwrap();
             let caps = self.capabilities(provider);
-            self.ensure(&mut live, thread_id, (provider, caps), resume, opts, sinks)
-                .map_err(SendError::Unsent)?;
+            self.ensure(&mut live, thread_id, (provider, caps), resume, opts, sinks)?;
             let session = live
                 .get(&thread_id)
                 .ok_or_else(|| SendError::Unsent("no session".into()))?;
@@ -114,7 +121,8 @@ impl Harness {
                     provider_handoff: true,
                     ..self.capabilities(provider)
                 };
-                self.ensure(&mut live, thread_id, (provider, caps), resume, opts, sinks)?;
+                self.ensure(&mut live, thread_id, (provider, caps), resume, opts, sinks)
+                    .map_err(SendError::into_message)?;
             }
             live.get(&thread_id).ok_or("no session")?.handle.clone()
         };
@@ -135,7 +143,7 @@ impl Harness {
         resume: Option<&str>,
         opts: &SendOptions,
         sinks: &Arc<dyn Sinks>,
-    ) -> Result<(), String> {
+    ) -> Result<(), SendError> {
         let target = Selection {
             provider,
             model: opts.model.clone(),
@@ -155,7 +163,7 @@ impl Harness {
         );
         match transition {
             Transition::Reuse => return Ok(()),
-            Transition::Reject(reason) => return Err(reason),
+            Transition::Reject(reason) => return Err(reason.into()),
             Transition::SwitchModelInSession | Transition::SwitchModeInSession => {
                 if let Some(session) = live.get_mut(&thread_id) {
                     if session.selection.model != target.model {
@@ -191,7 +199,7 @@ impl Harness {
             live.insert(
                 thread_id,
                 Live {
-                    handle: spawn(sink).with_mode(mode),
+                    handle: spawn(sink)?.with_mode(mode),
                     selection: target,
                     mode,
                     generation,
@@ -292,19 +300,27 @@ impl Harness {
                 };
                 Handle::Opencode(server, ses)
             }
-            Provider::Antigravity => Handle::Antigravity(AcpSession::spawn(
-                AcpSpawn {
-                    base: base(cwd)?,
-                    brief: instructions(
-                        &self.data_dir,
-                        opts.scope.as_deref(),
-                        opts.lecture.as_ref(),
-                        opts.studio_brief.as_ref(),
-                    ),
-                    one_off: false,
-                },
-                sink,
-            )?),
+            Provider::Antigravity => Handle::Antigravity(
+                AcpSession::spawn(
+                    AcpSpawn {
+                        base: base(cwd)?,
+                        brief: instructions(
+                            &self.data_dir,
+                            opts.scope.as_deref(),
+                            opts.lecture.as_ref(),
+                            opts.studio_brief.as_ref(),
+                        ),
+                        one_off: false,
+                    },
+                    sink,
+                )
+                .map_err(|e| match e {
+                    crate::harness::antigravity::acp::OpenError::Load(e) => {
+                        SendError::ResumeFailed(e)
+                    }
+                    e => SendError::Unsent(format!("Antigravity was not started: {e}")),
+                })?,
+            ),
         };
         live.insert(
             thread_id,

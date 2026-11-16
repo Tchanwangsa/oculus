@@ -77,3 +77,50 @@ pub(in crate::harness) fn bridge(
         eof: Box::new(move || closing.closed()),
     }
 }
+
+/// Synthetic setup replay: unlike captured turn excerpts this drives the
+/// production initialize/load/new path, including explicit RPC errors.
+pub(in crate::harness) fn opening_bridge(
+    outbound: Outbound,
+    sink: Sink,
+    resume: Option<&str>,
+    root: &Path,
+) -> Result<Bridge, super::OpenError> {
+    let base = ThreadSpawn {
+        bin: "agy".into(),
+        cwd: root.join("agents"),
+        library: root.into(),
+        resume: resume.map(String::from),
+        model: None,
+        effort: None,
+        env: Vec::new(),
+        raw_log: None,
+    };
+    let reply_to: Arc<std::sync::Mutex<Weak<AcpSession>>> = Arc::default();
+    let replier = reply_to.clone();
+    let proc = ChildProc::replay(Arc::new(move |frame: Value| {
+        let response = outbound.try_exchange(frame.clone())?;
+        if frame.get("method").is_some() && frame["method"] != "session/prompt" {
+            if let Some(s) = replier.lock().unwrap().upgrade() {
+                let reply = match response.get("error") {
+                    Some(error) => json!({"id":frame["id"], "error":error}),
+                    None => json!({"id":frame["id"], "result":response}),
+                };
+                s.rpc_reply(reply);
+            }
+        }
+        Ok(())
+    }));
+    let session = AcpSession::new(proc, 1, sink, &base, false);
+    *reply_to.lock().unwrap() = Arc::downgrade(&session);
+    if let Err(e) = session.open(&base, "") {
+        session.kill();
+        return Err(e);
+    }
+    let (reading, closing, root) = (session.clone(), session.clone(), root.to_path_buf());
+    Ok(Bridge {
+        handle: Handle::Antigravity(session),
+        inbound: Box::new(move |frame| reading.inbound(&place(frame, &root))),
+        eof: Box::new(move || closing.closed()),
+    })
+}

@@ -30,7 +30,7 @@ use super::{guard::assert_scratch, outbound::Outbound, scenario::Scenario, snaps
 
 pub(super) struct Rig {
     pub scenario: Scenario,
-    scratch: crate::test_support::Scratch,
+    pub(super) scratch: crate::test_support::Scratch,
     database: PathBuf,
     pub runtime: Runtime,
     pub pool: SqlitePool,
@@ -50,7 +50,7 @@ pub(super) struct Rig {
     effects: Effects,
     kept: Arc<Mutex<Option<Vec<Effect>>>>,
     told: Arc<Mutex<Vec<Value>>>,
-    outbound: Outbound,
+    pub(super) outbound: Outbound,
     bridge: Bridge,
     fed: Arc<AtomicBool>,
     clock: Arc<Clock>,

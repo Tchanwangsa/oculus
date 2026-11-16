@@ -902,6 +902,7 @@ fn makes_row(ev: &HarnessEvent) -> bool {
             | HarnessEvent::Thinking { .. }
             | HarnessEvent::ToolStarted { .. }
             | HarnessEvent::Compaction { .. }
+            | HarnessEvent::SessionRestarted { .. }
     )
 }
 
