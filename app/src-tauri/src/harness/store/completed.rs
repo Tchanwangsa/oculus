@@ -30,7 +30,7 @@ pub async fn sweep(pool: &SqlitePool) -> Result<Vec<i64>, String> {
          WHERE t.completed_at IS NULL AND t.status NOT IN ('running', 'error', 'failed')
            AND julianday(t.updated_at) < julianday('now', '-3 days')
            AND NOT EXISTS (SELECT 1 FROM harness_runs r WHERE r.thread_id = t.id
-                           AND r.execution_status IN ('starting', 'running', 'queued'))
+                           AND r.execution_status IN ('preparing', 'starting', 'running', 'queued'))
            AND NOT EXISTS (SELECT 1 FROM harness_requests q WHERE q.thread_id = t.id AND q.status = 'pending')
            AND COALESCE((SELECT r.execution_status FROM harness_runs r WHERE r.thread_id = t.id
                          AND r.execution_status NOT IN ('queued', 'cancelled') ORDER BY r.ordinal DESC LIMIT 1), '') != 'failed'

@@ -123,9 +123,9 @@ async fn a_send_reopens_in_the_same_transaction_for_start_and_queue_and_rolls_ba
 }
 
 #[tokio::test]
-async fn sweep_skips_running_starting_queued_pending_questions_failed_and_recent_threads() {
+async fn sweep_skips_preparing_running_starting_queued_pending_questions_failed_and_recent_threads() {
     let pool = pool().await;
-    for id in 1..=12 {
+    for id in 1..=13 {
         sqlx::query("INSERT INTO harness_threads(id, provider, status, updated_at) VALUES (?1, 'claude', 'idle', '2000-01-01')")
             .bind(id).execute(&pool).await.unwrap();
     }
@@ -137,7 +137,8 @@ async fn sweep_skips_running_starting_queued_pending_questions_failed_and_recent
         INSERT INTO harness_runs(id, thread_id, ordinal, origin, binding_id, execution_status)
           VALUES (6,6,1,'student',6,'starting'), (7,7,1,'student',7,'running'),
                  (8,8,1,'student',8,'queued'), (9,9,1,'student',9,'completed'),
-                 (10,10,1,'student',10,'completed'), (11,11,1,'student',11,'failed');
+                 (10,10,1,'student',10,'completed'), (11,11,1,'student',11,'failed'),
+                 (13,13,1,'student',13,'preparing');
         INSERT INTO harness_attempts(id,run_id,ordinal,reason,status) VALUES (9,9,1,'initial','completed'), (10,10,1,'initial','completed');
         INSERT INTO harness_items(id,thread_id,kind) VALUES (9,9,'request'), (10,10,'request');
         INSERT INTO harness_requests(thread_id,run_id,attempt_id,binding_id,item_id,provider,kind,action,payload,options,responder,generation,native_ref)
