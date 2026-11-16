@@ -13,7 +13,13 @@ use crate::harness::SendOptions;
 
 use super::super::{replay::Replay, rig::Rig, scenario::Scenario};
 
-pub(in super::super) const NAMES: [&str; 2] = ["codex-steer-tool", "codex-steer-text-finish"];
+pub(in super::super) const NAMES: [&str; 5] = [
+    "codex-steer-tool",
+    "codex-steer-text-finish",
+    "claude-steer-tool",
+    "claude-steer-text",
+    "claude-steer-finish",
+];
 
 /// Whether the steer `steer` is written just before `frames[at]` is read.
 pub(super) fn gates(steer: &Value, frames: &[Value], at: usize) -> bool {

@@ -50,12 +50,14 @@ fn rigged(one_off: bool) -> Rigged {
         background: Arc::default(),
         one_off,
         callbacks: Mutex::new(HashSet::new()),
+        steering: Arc::default(),
     });
     let translator = Translator {
         interrupting: session.interrupting.clone(),
         expecting: session.expecting.clone(),
         turns: session.turns.clone(),
         background_count: session.background.clone(),
+        steering: session.steering.clone(),
         ..Default::default()
     };
     let (tx, events) = mpsc::channel();
@@ -654,4 +656,97 @@ fn a_one_off_question_is_denied_even_if_a_callback_arrives() {
     assert!(rig.told().is_empty());
     assert_eq!(rig.written()[0]["response"]["response"]["behavior"], "deny");
     assert!(!rig.session.has_pending_request());
+}
+
+fn stream_start() -> Value {
+    json!({ "type": "stream_event", "event": { "type": "message_start", "message": {} } })
+}
+
+fn result(reason: &str) -> Value {
+    json!({ "type": "result", "subtype": "success", "is_error": false, "terminal_reason": reason })
+}
+
+fn finished(events: &[HarnessEvent]) -> usize {
+    events
+        .iter()
+        .filter(|e| matches!(e, HarnessEvent::TurnFinished { .. }))
+        .count()
+}
+
+#[test]
+fn a_steer_joins_only_a_turn_of_ours_and_holds_it_open_through_the_first_result() {
+    let mut rig = rigged(false);
+    // Before any turn of ours opened there is nothing to join.
+    assert_eq!(
+        rig.session.steer("early", "u-0"),
+        crate::harness::Steered::Missed
+    );
+    let bound: crate::harness::event::Bound = Arc::new(|_| {});
+    rig.session.send("question", &bound).unwrap();
+    rig.feed(stream_start());
+    assert_eq!(
+        rig.session.steer("in metres", "u-1"),
+        crate::harness::Steered::Accepted
+    );
+    let steer = rig.written().pop().unwrap();
+    assert_eq!(steer["priority"], "now");
+    assert_eq!(steer["uuid"], "u-1");
+    assert_eq!(steer["message"]["content"], "in metres");
+    // A steer never claims the next turn as the student's question.
+    assert!(!rig.session.expecting.load(Ordering::SeqCst));
+    rig.feed(json!({ "type": "command_lifecycle", "command_uuid": "u-1", "state": "queued" }));
+    // The first result ends only the part before the steer.
+    rig.feed(result("aborted_tools"));
+    rig.feed(json!({ "type": "command_lifecycle", "command_uuid": "u-1", "state": "started" }));
+    rig.feed(stream_start());
+    let events = rig.told();
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, HarnessEvent::SteerEchoed { client_id } if client_id == "u-1")));
+    assert_eq!(finished(&events), 0);
+    assert!(!events
+        .iter()
+        .any(|e| matches!(e, HarnessEvent::UnpromptedTurn { .. })));
+    rig.feed(result("completed"));
+    assert_eq!(
+        finished(&rig.told()),
+        1,
+        "the steer's own result ends the turn"
+    );
+    // The turn is over: a steer now misses it and writes nothing.
+    let writes = rig.written().len();
+    assert_eq!(
+        rig.session.steer("late", "u-2"),
+        crate::harness::Steered::Missed
+    );
+    assert_eq!(rig.written().len(), writes);
+}
+
+#[test]
+fn a_stop_ends_the_turn_even_with_a_steer_waiting() {
+    let mut rig = rigged(false);
+    let bound: crate::harness::event::Bound = Arc::new(|_| {});
+    rig.session.send("question", &bound).unwrap();
+    rig.feed(stream_start());
+    rig.session.steer("correction", "u-1");
+    rig.session.interrupt().unwrap();
+    rig.feed(result("aborted_streaming"));
+    let events = rig.told();
+    assert!(events.iter().any(
+        |e| matches!(e, HarnessEvent::TurnFinished { status, .. } if status == "interrupted")
+    ));
+}
+
+#[test]
+fn a_turn_the_cli_started_itself_takes_no_steer() {
+    let mut rig = rigged(false);
+    rig.feed(stream_start());
+    assert!(rig
+        .told()
+        .iter()
+        .any(|e| matches!(e, HarnessEvent::UnpromptedTurn { .. })));
+    assert_eq!(
+        rig.session.steer("go on", "u-1"),
+        crate::harness::Steered::Missed
+    );
 }

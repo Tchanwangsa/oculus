@@ -146,7 +146,8 @@ impl Handle {
     pub(in crate::harness) fn steer(&self, text: &str, client: &str) -> Steered {
         match self {
             Handle::Codex(server, tid, _) => server.steer(tid, text, client),
-            Handle::Claude(_) | Handle::Opencode(..) | Handle::Antigravity(_) => {
+            Handle::Claude(s) => s.steer(text, client),
+            Handle::Opencode(..) | Handle::Antigravity(_) => {
                 Steered::Declined("this agent cannot take a message mid-turn".into())
             }
         }

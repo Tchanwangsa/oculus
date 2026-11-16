@@ -325,9 +325,16 @@ steer delivered, the command's completion after the turn's terminal and
 after the next message started staying on its row in the first run), a
 steer mid-stream keeping the cut text as partial work with no gap, a steer
 the server refuses at the terminal becoming the next run once, and a steer
-saved but never written waiting held after a restart. These run in the
-registry and in the exact ignored release gate. A plain mid-turn send now
-steers on Codex, so `Rig::send` sends as a queued message (⌘↩); the
+saved but never written waiting held after a restart. `claude.rs` checks
+the Claude recordings: a steer during a 20 s foreground Bash (the tool runs
+to its end, two `result` frames, one settlement), one while text streams
+(the cut text kept as work) and one written as the turn's result arrived
+(answered in the same run); `providers/claude/tests.rs` checks the write
+itself, line by line (no turn of ours, a turn the CLI started itself, a
+turn whose result was read: missed with nothing written; a stop ends the
+turn even with a steer waiting). These run in the registry and in the exact
+ignored release gate. A plain mid-turn send now
+steers on Codex and Claude, so `Rig::send` sends as a queued message (⌘↩); the
 recorded checks of the queue and Stop keep their meaning.
 
 `testkit/queue.rs` checks queued runs: a message sent mid-turn through a

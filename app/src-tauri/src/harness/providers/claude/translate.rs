@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use base64::Engine;
 use serde_json::Value;
@@ -149,6 +149,22 @@ pub(super) struct Translator {
     /// The subagents started in this process, by task id: a permission
     /// prompt names its subagent by that id (`approvals.rs`).
     pub(super) agents: HashMap<String, Agent>,
+    /// Steers written into the open turn, shared with
+    /// [`super::session::ClaudeSession::steer`].
+    pub(super) steering: Arc<Mutex<Steering>>,
+}
+
+/// What a steer needs to know of the turn, shared by the session's writes
+/// and its reader.
+#[derive(Default)]
+pub(super) struct Steering {
+    /// A turn a send of ours opened is running: a steer may join it. A
+    /// turn the CLI started itself has no run to join.
+    pub(super) open: bool,
+    /// Steers written into it that no turn of the CLI's has taken up yet,
+    /// by uuid. While one waits, a `result` ends only the part of the turn
+    /// before it: the CLI answers the steer next, in a `result` of its own.
+    pub(super) waiting: Vec<String>,
 }
 
 /// A decision the CLI made on a call without asking anyone, as its row
@@ -183,6 +199,7 @@ impl Translator {
             // What finished before the student's turn is that turn's to take up.
             self.finished.clear();
             self.turn = Some(self.turns.open());
+            self.steering.lock().unwrap().open = true;
         } else {
             self.turn_unprompted = true;
             self.turn = Some(self.turns.own());
@@ -484,7 +501,8 @@ impl Translator {
                 // A stopped turn reports `is_error: true` with an
                 // `[ede_diagnostic]` in `errors`; only `terminal_reason:
                 // "aborted_streaming"` (or our flag) names it. The rest is fallback.
-                let interrupted = self.interrupting.swap(false, Ordering::SeqCst)
+                let stopped = self.interrupting.swap(false, Ordering::SeqCst);
+                let interrupted = stopped
                     || v.get("terminal_reason")
                         .and_then(|t| t.as_str())
                         .is_some_and(|t| t.starts_with("aborted"))
@@ -513,6 +531,16 @@ impl Translator {
                         context_window,
                         cost_usd: v.get("total_cost_usd").and_then(|c| c.as_f64()),
                     });
+                }
+                // A steer written into this turn and not yet taken up: this
+                // `result` closes the part of the turn before it, whatever
+                // its `terminal_reason` says, and the CLI goes on with the
+                // steer (probes `11-steer-tool`, `11-steer-text`). Only a
+                // stop of ours ends the turn here.
+                let steered =
+                    !is_error && !stopped && !self.steering.lock().unwrap().waiting.is_empty();
+                if steered {
+                    return out;
                 }
                 if is_error && !interrupted {
                     let msg = v
@@ -561,10 +589,26 @@ impl Translator {
                 self.last_turn = turn.clone();
                 self.turn_open = false;
                 self.turn_unprompted = false;
+                let mut steering = self.steering.lock().unwrap();
+                steering.open = false;
+                steering.waiting.clear();
+                drop(steering);
                 out.push(HarnessEvent::TurnFinished {
                     status: status.into(),
                     turn,
                 });
+            }
+            // A steer's lifecycle, keyed by the uuid it was written under:
+            // `queued` is the CLI's echo, `started` the CLI taking it up.
+            "command_lifecycle" => {
+                let uuid = str_of(v, "command_uuid");
+                match v.get("state").and_then(|s| s.as_str()) {
+                    Some("queued") => out.push(HarnessEvent::SteerEchoed { client_id: uuid }),
+                    Some("started") => {
+                        self.steering.lock().unwrap().waiting.retain(|w| *w != uuid);
+                    }
+                    _ => {}
+                }
             }
             "rate_limit_event" => {
                 if let Some(w) = v

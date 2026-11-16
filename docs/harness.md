@@ -1139,7 +1139,7 @@ UUID the provider is written under and echoes back) and `delivery`:
 | --- | --- |
 | `sending` | saved; the effect has not taken it |
 | `written` | the effect claimed it (`steer::claim`: only while its run is `running` and not stopped, saved with the revision before the write) and the provider took the write |
-| `delivered` | the provider echoed it (`SteerEchoed`: Codex's `userMessage` item carrying the `clientId`) |
+| `delivered` | the provider echoed it (`SteerEchoed`: Codex's `userMessage` item carrying the `clientId`, Claude's `command_lifecycle` `queued` carrying the `uuid`) |
 | `unknown` | the write broke partway; never written again |
 | `restart` | a correction waiting for its turn to stop (below) |
 
@@ -1192,7 +1192,23 @@ even after the next run started, and updates its row in the first run
 (`ToolFinished` finds the row by its tool id). Text a steer cut off
 mid-stream never gets its `item/completed`; the echo commits what streamed
 as a partial reply (work, no gap), and the corrected answer follows as
-usual. Claude, opencode and Antigravity do not steer yet: a send queues.
+usual.
+
+Claude does too (recorded on 2.1.325 in `claude-steer-tool`, `-text` and
+`-finish`): `ClaudeSession::steer` writes a user message with `priority:
+"now"` and the `client` as its `uuid`. It writes only into a turn a send of
+ours opened (`Steering::open`, set when the turn consumes `expecting`), under
+the lock the reader closes that turn with, so a turn that has ended, or one
+the CLI started itself, is `Missed` and nothing is written; it never sets
+`expecting`, so the CLI's next turn of its own is still told as one. The CLI
+answers a steer with two `result` frames: while a written steer has not
+been taken up (`command_lifecycle` `started`), a `result` closes only the
+part before it, whatever its `terminal_reason` (`aborted_tools`,
+`aborted_streaming`, or `completed` for a steer written as the turn ended),
+and the turn, its ordinal and its run go on; the steer's own `result` ends
+them. A stop of ours ends the turn on the first. A running foreground tool
+is not cut short: the steer waits for it. opencode and Antigravity do not
+steer yet: a send queues.
 
 **Restart steering** is for a bridge that cannot take a message mid-turn
 but can stop and start again (`steer_by_restart`; no bridge sets it yet).

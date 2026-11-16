@@ -62,8 +62,9 @@ pub const fn of(provider: Provider) -> Capabilities {
         interrupt: true,
         rewind,
         shared_process,
-        // Codex: `turn/steer` recorded on 0.169.0 (`codex-steer-*`).
-        active_steering: matches!(provider, Provider::Codex),
+        // Codex: `turn/steer` recorded on 0.169.0 (`codex-steer-*`). Claude:
+        // a `priority: "now"` message on 2.1.325 (`claude-steer-*`).
+        active_steering: matches!(provider, Provider::Codex | Provider::Claude),
         steer_by_restart: false,
         // Codex names the model in `turn/start` and opencode in each
         // prompt; Claude and `agy` take `--model` at spawn.
@@ -114,6 +115,7 @@ pub const fn fixture(provider: Provider, flag: Flag) -> Option<&'static str> {
         (Provider::Claude, Flag::Approvals) => Some("claude-approval-escape"),
         (Provider::Claude, Flag::AutoReview) => Some("claude-auto-classifier"),
         (Provider::Codex, Flag::ActiveSteering) => Some("codex-steer-tool"),
+        (Provider::Claude, Flag::ActiveSteering) => Some("claude-steer-tool"),
         _ => None,
     }
 }
@@ -214,7 +216,7 @@ mod tests {
             .filter(|c| c.active_steering)
             .map(|c| c.provider)
             .collect();
-        assert_eq!(steering, [Provider::Codex]);
+        assert_eq!(steering, [Provider::Claude, Provider::Codex]);
         assert!(all().iter().all(|c| !c.steer_by_restart));
         assert_eq!(wire["modelSwitchInSession"], true);
         assert_eq!(
