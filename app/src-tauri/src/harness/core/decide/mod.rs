@@ -9,6 +9,7 @@ pub(in crate::harness) mod respond;
 mod rewind;
 mod select;
 mod send;
+pub(in crate::harness) mod steer;
 
 use crate::harness::{Provider, SendOptions};
 
@@ -96,6 +97,7 @@ pub(in crate::harness) fn decide(
         Kind::EditQueued { run_id, text } => queue::edit(state, *run_id, text),
         Kind::RemoveQueued { run_id } => queue::remove(state, *run_id),
         Kind::ReorderQueued { order } => queue::reorder(state, order),
+        Kind::SteerQueued { run_id } => steer::send_now(state, *run_id),
         Kind::Stop { run_id } => queue::stop(state, *run_id),
         Kind::Resume => queue::resume(state),
         Kind::ForceStop { run_id } => queue::force_stop(state, *run_id),

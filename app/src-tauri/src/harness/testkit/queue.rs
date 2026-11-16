@@ -73,7 +73,7 @@ fn a_message_sent_mid_turn_waits_as_a_run_and_starts_as_the_same_run() {
                 provider: rig.provider,
                 text: "Replay request".into(),
                 options: SendOptions::default(),
-                mode: Default::default(),
+                mode: crate::harness::manager::policy::Mode::Queue,
             },
         })
         .unwrap();
@@ -217,7 +217,7 @@ fn a_waiting_message_keeps_the_options_it_was_sent_with() {
         provider: Provider::Claude,
         text: "second".into(),
         options,
-        mode: Default::default(),
+        mode: crate::harness::manager::policy::Mode::Queue,
     };
     let (second, _) = bench.command("c2", kind);
     bench.play(vec![first, second, bench.app(ended("completed"))]);

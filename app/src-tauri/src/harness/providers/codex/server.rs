@@ -15,6 +15,9 @@ use crate::harness::Sink;
 use super::translate::rate_windows;
 use super::{CodexSpawn, CodexThreadOpts, ModelInfo, ThreadRoute, ThreadState};
 
+/// The server's refusal of a steer whose turn has already ended.
+const NO_ACTIVE_TURN: &str = "no active turn";
+
 /// No answer in this long is a hung server, not a slow one.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -394,6 +397,38 @@ impl CodexServer {
         };
         self.request_then("turn/start", p, Some(Box::new(started)))?;
         Ok(())
+    }
+
+    /// Write a correction into the thread's running turn (`turn/steer`).
+    /// `expectedTurnId` is the turn the `turn/start` reply named, the id the
+    /// route already trusts; with none open the steer missed it. The
+    /// server's "no active turn" error (-32600) is a turn that ended first
+    /// (probe `21`); any other refusal is a decline. A steer never stops a
+    /// command the turn is running (probe `25`).
+    pub fn steer(&self, thread_id: &str, text: &str, client: &str) -> crate::harness::Steered {
+        use crate::harness::Steered;
+        let turn = self
+            .routes
+            .lock()
+            .unwrap()
+            .get(thread_id)
+            .and_then(|r| r.state.lock().unwrap().active_turn.clone());
+        let Some(turn_id) = turn else {
+            return Steered::Missed;
+        };
+        let params = json!({
+            "threadId": thread_id,
+            "expectedTurnId": turn_id,
+            "clientUserMessageId": client,
+            "input": [{ "type": "text", "text": text, "text_elements": [] }],
+        });
+        match self.request("turn/steer", params) {
+            Ok(_) => Steered::Accepted,
+            Err(e) if e.contains(NO_ACTIVE_TURN) => Steered::Missed,
+            // Written, then no reply or the server died: it may have it.
+            Err(e) if e.starts_with("codex turn/steer:") => Steered::Unknown(e),
+            Err(e) => Steered::Declined(e),
+        }
     }
 
     pub fn interrupt(&self, thread_id: &str) -> Result<(), String> {

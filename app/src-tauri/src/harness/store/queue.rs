@@ -101,6 +101,27 @@ pub async fn enqueue(
     Ok(run_id)
 }
 
+/// Put a waiting run at the head of the thread's queue: a message that
+/// must go out before the ones already waiting.
+pub async fn to_front(
+    tx: &mut SqliteConnection,
+    thread_id: i64,
+    run_id: i64,
+) -> Result<(), String> {
+    sqlx::query(
+        "UPDATE harness_runs
+            SET queue_position = (SELECT COALESCE(MIN(q.queue_position), 1) - 1 FROM harness_runs q
+                                   WHERE q.thread_id = ?2 AND q.execution_status = 'queued')
+          WHERE id = ?1 AND thread_id = ?2 AND execution_status = 'queued'",
+    )
+    .bind(run_id)
+    .bind(thread_id)
+    .execute(&mut *tx)
+    .await
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
 /// The student's waiting messages in queue order. A card's continuation
 /// waits in the same queue and is never listed: it is not theirs to edit.
 pub async fn list(

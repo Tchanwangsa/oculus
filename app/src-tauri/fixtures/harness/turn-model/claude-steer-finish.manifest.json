@@ -1,0 +1,56 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.325",
+  "protocol": "print stream-json, user message with priority now and uuid",
+  "model": "claude-haiku-5-5",
+  "capture_date": "2026-11-15",
+  "source": "claude/11-steer-finish.jsonl lines 3-29; inbound frames",
+  "source_sha256": "acdbfe3ddf3335c426421b482667e6a475ba9c700805151f5d97af39f2455c7d",
+  "redaction": "Inbound frames as recorded. Home paths become /Users/student; scratch suffixes become XXXXXX. Expected outbound is the Oculus bridge's: its own send envelope, and each steer's write with the client id as \"Replay client\" (Oculus mints a random one); the replay puts that id into the recorded echo frames.",
+  "scenario": "a steer written as the turn's result arrived; the CLI ran it next",
+  "evidence": "recorded",
+  "frames": 26,
+  "sha256": "c26b8ab340806564d51d8bd52e0c01bbf3371b6b9017ef434beee72ff1d32fb4",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Reply only AFTER-FINISH-OK."
+        },
+        "parent_tool_use_id": null,
+        "session_id": "",
+        "priority": "now",
+        "uuid": "Replay client"
+      },
+      "response": null,
+      "any_prompt": true
+    }
+  ],
+  "input": "../claude-steer-finish.ndjson",
+  "native_session": "",
+  "permission_mode": "ask",
+  "settings": {
+    "steers": [
+      {
+        "gate": "steer",
+        "before_result": true,
+        "text": "Reply only AFTER-FINISH-OK.",
+        "client": "355f3af8-9c4b-4da9-959e-2693d486eb0c"
+      }
+    ]
+  }
+}

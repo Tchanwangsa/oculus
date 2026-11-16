@@ -1,0 +1,147 @@
+{
+  "provider": "codex",
+  "cli_version": "0.169.0",
+  "protocol": "app-server JSON-RPC turn/steer",
+  "model": "gpt-6.1-sol",
+  "capture_date": "2026-11-15",
+  "source": "codex/21-steer-text-and-finish.jsonl lines 15-70; inbound frames",
+  "source_sha256": "8559d4059be6a5d941b829e3e24f9986f0ac3b16153ebf62f8ce96ba342b1dbf",
+  "redaction": "Inbound frames as recorded. Home paths become /Users/student; scratch suffixes become XXXXXX. Expected outbound is the Oculus bridge's: its own send envelope, and each steer's write with the client id as \"Replay client\" (Oculus mints a random one); the replay puts that id into the recorded echo frames.",
+  "scenario": "a steer while the answer streams, then one sent at the turn's terminal, which the server refuses",
+  "evidence": "recorded",
+  "frames": 49,
+  "sha256": "c7bb3826e9e37b3a3e0d7c45cf2938a32b4093a4e19d5dfb5448e9c6cf34c1b0",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1dd46-d3e3-7422-83db-39ca8e9d8154",
+          "input": [
+            {
+              "type": "text",
+              "text": "Replay request",
+              "text_elements": []
+            }
+          ],
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "user",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": true,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+          }
+        }
+      },
+      "response": {
+        "turn": {
+          "id": "01a1dd46-d432-7111-b79f-aad492274f68"
+        }
+      }
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "turn/steer",
+        "params": {
+          "threadId": "01a1dd46-d3e3-7422-83db-39ca8e9d8154",
+          "expectedTurnId": "01a1dd46-d432-7111-b79f-aad492274f68",
+          "clientUserMessageId": "Replay client",
+          "input": [
+            {
+              "type": "text",
+              "text": "Correction: stop the list and reply only STREAM_STEERED.",
+              "text_elements": []
+            }
+          ]
+        }
+      },
+      "response": {
+        "turnId": "01a1dd46-d432-7111-b79f-aad492274f68"
+      },
+      "any_prompt": true
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "turn/steer",
+        "params": {
+          "threadId": "01a1dd46-d3e3-7422-83db-39ca8e9d8154",
+          "expectedTurnId": "01a1dd46-d432-7111-b79f-aad492274f68",
+          "clientUserMessageId": "Replay client",
+          "input": [
+            {
+              "type": "text",
+              "text": "FINISH_RACE_MARKER",
+              "text_elements": []
+            }
+          ]
+        }
+      },
+      "response": {
+        "rpc_error": {
+          "code": -32600,
+          "message": "no active turn to steer"
+        }
+      },
+      "any_prompt": true
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1dd46-d3e3-7422-83db-39ca8e9d8154",
+          "input": [
+            {
+              "type": "text",
+              "text": "Replay request",
+              "text_elements": []
+            }
+          ],
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "user",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": true,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+          }
+        }
+      },
+      "response": {
+        "turn": {
+          "id": "replay-next-turn"
+        }
+      },
+      "any_prompt": true
+    }
+  ],
+  "input": "../codex-steer-text-finish.ndjson",
+  "native_session": "01a1dd46-d3e3-7422-83db-39ca8e9d8154",
+  "permission_mode": "ask",
+  "settings": {
+    "steers": [
+      {
+        "gate": "stream",
+        "after_delta": 9,
+        "text": "Correction: stop the list and reply only STREAM_STEERED.",
+        "client": "probe-steer-stream-1"
+      },
+      {
+        "gate": "terminal",
+        "missed": true,
+        "text": "FINISH_RACE_MARKER",
+        "client": "probe-steer-finish-1"
+      }
+    ]
+  }
+}

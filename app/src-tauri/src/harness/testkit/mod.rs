@@ -30,6 +30,7 @@ mod rig;
 mod runs;
 mod scenario;
 mod snapshot;
+mod steering;
 mod steps;
 mod stop;
 mod switching;

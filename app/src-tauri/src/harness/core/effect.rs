@@ -22,6 +22,9 @@ pub(in crate::harness) enum Effect {
         command: String,
         ask: Box<RewindAsk>,
     },
+    /// Write a steer into the thread's running turn; what the provider
+    /// said comes back on the bus as [`BusMsg::Steered`].
+    Steer(Box<SteerWrite>),
     /// Ask the thread's CLI to stop the turn it has open.
     Interrupt { thread_id: i64 },
     /// Kill what is answering the thread (`Harness::force_stop`).
@@ -46,6 +49,16 @@ pub(in crate::harness) struct Reply {
     pub route: LiveRoute,
     pub option: RequestOption,
     pub answers: Vec<crate::harness::requests::QuestionAnswer>,
+}
+
+/// A steer as its effect writes it.
+#[derive(Clone)]
+pub(in crate::harness) struct SteerWrite {
+    pub thread_id: i64,
+    pub provider: Provider,
+    pub written: crate::harness::store::steer::Written,
+    pub text: String,
+    pub client: String,
 }
 
 #[derive(Clone)]
@@ -102,6 +115,7 @@ pub(in crate::harness) async fn run(rt: &Runtime, effect: Effect) {
                 answer: Answer::Rewound { context },
             });
         }
+        Effect::Steer(steer) => crate::harness::app::steer::write(rt, *steer).await,
         Effect::Interrupt { thread_id } => {
             let harness = rt.harness.clone();
             let asked = crate::runtime::blocking::run(move || harness.interrupt(thread_id)).await;

@@ -340,6 +340,46 @@ seeded in SQL, target rows pass through the live event projection, and all
 rows survive reopen. The release
 gate runs the six handoff fixtures as well as the 39 matrix cases.
 
+`testkit/steering/` checks steering. On the scripted bus with a fake
+bridge (`Bench::steer_by`, which turns `active_steering` or
+`steer_by_restart` on for every bridge; `bench.rs` claims a steer and plays
+the bridge's answer back as `BusMsg::Steered`), `fake.rs` covers the steer
+row inside the running run and its one settlement, a steer arriving after
+the turn finished starting once as its own run under the same identity, a
+declined one waiting first in the queue, the dispatch re-checks (an idle
+chat starts, a run not yet taken queues), Stop, slash commands and an
+explicit queue never steering, a turn the CLI started itself, two steers in
+a row, Stop before and after the write, "Send now" keeping the message's
+identity and its refusals, an approval declined by a steer, a question
+making a send wait, and the queue claim a steer never releases.
+`restart.rs` covers restart steering: the superseded attempt, the second
+attempt's start after the old terminal, one settlement, two corrections
+restarting once, Stop during a restart, and a restart on a bridge that
+cannot restart.
+`recorded.rs` replays the steering probes through the real `Send`, effect
+and bridge write: each manifest's `settings.steers` names the frame a steer
+was written before (`gate`) and its text, and the replay puts the client id
+Oculus minted into the recorded echo frames in place of the probe's (the
+manifest's expected write says `"Replay client"`, which matches any id; a
+`"rpc_error"` response comes back as the server's JSON-RPC error). The
+generator `fixtures/harness/scripts/steering.mjs` wraps the probe assets.
+`codex.rs` checks a steer during a 20 s command (one run, one answer, the
+steer delivered, the command's completion after the turn's terminal and
+after the next message started staying on its row in the first run), a
+steer mid-stream keeping the cut text as partial work with no gap, a steer
+the server refuses at the terminal becoming the next run once, and a steer
+saved but never written waiting held after a restart. `claude.rs` checks
+the Claude recordings: a steer during a 20 s foreground Bash (the tool runs
+to its end, two `result` frames, one settlement), one while text streams
+(the cut text kept as work) and one written as the turn's result arrived
+(answered in the same run); `providers/claude/tests.rs` checks the write
+itself, line by line (no turn of ours, a turn the CLI started itself, a
+turn whose result was read: missed with nothing written; a stop ends the
+turn even with a steer waiting). These run in the registry and in the exact
+ignored release gate. A plain mid-turn send now
+steers on Codex and Claude, so `Rig::send` sends as a queued message (⌘↩); the
+recorded checks of the queue and Stop keep their meaning.
+
 `testkit/queue.rs` checks queued runs: a message sent mid-turn through a
 real bridge waiting as a run and starting as the same run, the queue's
 commands, options riding the queue, a continuation's place in line, and
@@ -444,9 +484,9 @@ Background recordings assert no extra student message, one autonomous divider
 and live/reload equality. The incomplete Codex websearch recording deliberately
 keeps its missing-terminal failures visible.
 
-Native steering, two-correction races, superseded attempts, authoritative gap
-replacement, transport reconnect offsets and actual fixed-protocol narration
-capture remain unverified. The current event contract cannot represent several
+Authoritative gap replacement, transport reconnect offsets and actual
+fixed-protocol narration capture remain unverified, and so does restart
+steering on a real bridge (none sets `steer_by_restart`). The current event contract cannot represent several
 of those facts. Artifact tests cover source visibility, the fence drawn once
 outside its fold with its original index, stable database keys, widget
 progress and absent Ask grants; proposal registration and Undo are covered

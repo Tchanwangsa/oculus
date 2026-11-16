@@ -1,0 +1,118 @@
+{
+  "provider": "codex",
+  "cli_version": "0.169.0",
+  "protocol": "app-server JSON-RPC turn/steer",
+  "model": "gpt-6.1-sol",
+  "capture_date": "2026-11-15",
+  "source": "codex/25-steer-tool-lifecycle.jsonl lines 15-64; inbound frames",
+  "source_sha256": "0cb072f774dc44ffc4446f6d4dd6a19c7d6514077f85155392efebb137be7fe5",
+  "redaction": "Inbound frames as recorded. Home paths become /Users/student; scratch suffixes become XXXXXX. Expected outbound is the Oculus bridge's: its own send envelope, and each steer's write with the client id as \"Replay client\" (Oculus mints a random one); the replay puts that id into the recorded echo frames.",
+  "scenario": "a steer while a 20 s command runs; the command completes after the turn's terminal",
+  "evidence": "recorded",
+  "frames": 45,
+  "sha256": "96003bd6c1c545f4ed9e317391fb8f836c9b389a7f155b5723cb824aa5351bc9",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1dd47-ec91-7cb1-b292-21ed6491b01d",
+          "input": [
+            {
+              "type": "text",
+              "text": "Replay request",
+              "text_elements": []
+            }
+          ],
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "user",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": true,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+          }
+        }
+      },
+      "response": {
+        "turn": {
+          "id": "01a1dd47-ece9-7011-b78d-86beb8729e04"
+        }
+      }
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "turn/steer",
+        "params": {
+          "threadId": "01a1dd47-ec91-7cb1-b292-21ed6491b01d",
+          "expectedTurnId": "01a1dd47-ece9-7011-b78d-86beb8729e04",
+          "clientUserMessageId": "Replay client",
+          "input": [
+            {
+              "type": "text",
+              "text": "Correction: reply only LIFECYCLE_STEERED. Do not issue further tools.",
+              "text_elements": []
+            }
+          ]
+        }
+      },
+      "response": {
+        "turnId": "01a1dd47-ece9-7011-b78d-86beb8729e04"
+      },
+      "any_prompt": true
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "turn/start",
+        "params": {
+          "threadId": "01a1dd47-ec91-7cb1-b292-21ed6491b01d",
+          "input": [
+            {
+              "type": "text",
+              "text": "Replay request",
+              "text_elements": []
+            }
+          ],
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "user",
+          "sandboxPolicy": {
+            "type": "workspaceWrite",
+            "writableRoots": [],
+            "networkAccess": true,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false
+          }
+        }
+      },
+      "response": {
+        "turn": {
+          "id": "replay-next-turn"
+        }
+      },
+      "any_prompt": true
+    }
+  ],
+  "input": "../codex-steer-tool.ndjson",
+  "native_session": "01a1dd47-ec91-7cb1-b292-21ed6491b01d",
+  "permission_mode": "ask",
+  "settings": {
+    "steers": [
+      {
+        "gate": "steer",
+        "after": {
+          "method": "item/started",
+          "type": "commandExecution"
+        },
+        "text": "Correction: reply only LIFECYCLE_STEERED. Do not issue further tools.",
+        "client": "probe-steer-lifecycle"
+      }
+    ]
+  }
+}

@@ -22,6 +22,10 @@ pub(super) struct Expected {
 /// What every recording sent as its request.
 pub(super) const REQUEST: &str = "Replay request";
 
+/// Where a recording wrote a steer's client id: Oculus mints a fresh one
+/// per steer, so any string matches.
+pub(super) const CLIENT: &str = "Replay client";
+
 /// Whether `actual` is `expected`, with any string where the recording
 /// sent its request; that string is the prompt.
 fn same_but_prompt(actual: &Value, expected: &Value, prompt: &mut Option<String>) -> bool {
@@ -30,6 +34,7 @@ fn same_but_prompt(actual: &Value, expected: &Value, prompt: &mut Option<String>
             *prompt = Some(said.clone());
             true
         }
+        (Value::String(_), Value::String(recorded)) if recorded == CLIENT => true,
         (Value::Array(a), Value::Array(e)) => {
             a.len() == e.len() && a.iter().zip(e).all(|(a, e)| same_but_prompt(a, e, prompt))
         }

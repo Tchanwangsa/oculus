@@ -273,7 +273,9 @@ impl Rig {
 
     /// One student send under the command id `receipt`, as `harness_send`
     /// makes it: decided and committed on the consumer, then sent to the
-    /// provider by the start step. The run it started, or the refusal.
+    /// provider by the start step. The run it started, or the refusal. A
+    /// send while a turn runs waits behind it (the composer's ⌘↩); steering
+    /// is `testkit/steering/`'s.
     pub fn send(&mut self, receipt: &str) -> Result<store::RunStart, String> {
         self.send_with(receipt, &SendOptions::default())
     }
@@ -291,7 +293,7 @@ impl Rig {
                 provider: self.provider,
                 text: "Replay request".into(),
                 options: opts.clone(),
-                mode: Default::default(),
+                mode: crate::harness::manager::policy::Mode::Queue,
             },
         })?;
         sent.run
@@ -415,6 +417,11 @@ impl Rig {
     }
 
     /// The prompts that went out where any was accepted, in order.
+    /// Every write to the provider so far, as the replay checked it.
+    pub fn writes(&self) -> Vec<Value> {
+        self.outbound.finish(false)
+    }
+
     pub fn prompts(&self) -> Vec<String> {
         self.outbound.prompts()
     }
@@ -434,7 +441,7 @@ impl Rig {
                 provider,
                 text: text.into(),
                 options: opts.clone(),
-                mode: Default::default(),
+                mode: crate::harness::manager::policy::Mode::Queue,
             },
         })
     }

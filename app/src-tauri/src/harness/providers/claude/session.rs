@@ -14,7 +14,7 @@ use crate::harness::requests::PermissionMode;
 use crate::harness::Sink;
 
 use super::settings::settings_json;
-use super::translate::Translator;
+use super::translate::{Steering, Translator};
 use super::ClaudeSpawn;
 
 fn configure_thinking(cmd: &mut Command, one_off: bool) {
@@ -87,6 +87,9 @@ pub struct ClaudeSession {
     /// Permission prompts raised and not yet answered or withdrawn, by
     /// their wire id (`approvals.rs`).
     pub(super) callbacks: Mutex<HashSet<String>>,
+    /// Whether a turn of ours is open, and the steers written into it,
+    /// shared with the reader ([`Steering`]).
+    pub(super) steering: Arc<Mutex<Steering>>,
 }
 
 impl ClaudeSession {
@@ -169,6 +172,7 @@ impl ClaudeSession {
         let expecting = Arc::new(AtomicBool::new(false));
         let turns = Arc::new(Turns::default());
         let background = Arc::new(AtomicUsize::new(0));
+        let steering = Arc::new(Mutex::new(Steering::default()));
         let session = Arc::new(ClaudeSession {
             proc,
             request_ids: AtomicU64::new(1),
@@ -179,6 +183,7 @@ impl ClaudeSession {
             background: background.clone(),
             one_off: cfg.one_off,
             callbacks: Mutex::new(HashSet::new()),
+            steering: steering.clone(),
         });
 
         let reader_session = session.clone();
@@ -189,6 +194,7 @@ impl ClaudeSession {
                 expecting: expecting.clone(),
                 turns,
                 background_count: background,
+                steering,
                 ..Default::default()
             };
             child::read_json_lines(stdout, raw_log.as_ref(), |v| {
@@ -216,6 +222,7 @@ impl ClaudeSession {
 
     /// stdout reached EOF: fail what is open, then announce the exit.
     pub(super) fn closed(&self, state: &mut Translator, sink: &Sink) {
+        *self.steering.lock().unwrap() = Steering::default();
         for ev in state.close() {
             sink(ev);
         }
@@ -242,8 +249,9 @@ impl ClaudeSession {
         self.proc.is_alive()
     }
 
-    /// One user turn. A line sent mid-turn is queued by the CLI itself, which
-    /// is why the manager holds messages back until `TurnFinished`. `bound`
+    /// One user turn. A plain line sent mid-turn is folded into the turn by
+    /// the CLI (probe `11-steer-tool-plain`), which is why a send waits for
+    /// `TurnFinished` and a correction goes through [`Self::steer`]. `bound`
     /// hears the turn's ordinal before the CLI hears the message.
     pub fn send(&self, text: &str, bound: &Bound) -> Result<(), String> {
         bound(self.turns.reserve());
@@ -254,6 +262,37 @@ impl ClaudeSession {
             "parent_tool_use_id": null,
             "session_id": "",
         }))
+    }
+
+    /// Write a correction into the running turn: a user message with
+    /// `priority: "now"` and `client` as its `uuid`, which the CLI echoes
+    /// in `command_lifecycle` frames. Written only into a turn a send of
+    /// ours opened, under the lock the reader closes that turn with, so a
+    /// turn that has ended (or one the CLI started itself) is missed, never
+    /// written to. It never sets `expecting`: the CLI takes it up inside
+    /// the same turn, which ends with the steer's own `result`. A running
+    /// tool finishes first; it is not cut short (probe `11-steer-tool`).
+    pub fn steer(&self, text: &str, client: &str) -> crate::harness::Steered {
+        use crate::harness::Steered;
+        let mut steering = self.steering.lock().unwrap();
+        if !steering.open {
+            return Steered::Missed;
+        }
+        let written = self.proc.write_line(&serde_json::json!({
+            "type": "user",
+            "message": { "role": "user", "content": text },
+            "parent_tool_use_id": null,
+            "session_id": "",
+            "priority": "now",
+            "uuid": client,
+        }));
+        match written {
+            Ok(()) => {
+                steering.waiting.push(client.to_string());
+                Steered::Accepted
+            }
+            Err(e) => Steered::Unknown(e),
+        }
     }
 
     /// Stop the current turn without ending the session. The CLI emits the

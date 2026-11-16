@@ -24,7 +24,7 @@ fn recorded_registry_runs_every_provider_through_store_and_rows() {
         verify_fixture(name);
         count += 1;
     }
-    assert_eq!(count, 71, "every fixture needs a registered runner");
+    assert_eq!(count, 76, "every fixture needs a registered runner");
 }
 
 fn verify_fixture(name: &str) {
@@ -41,6 +41,8 @@ fn verify_fixture(name: &str) {
     let agy_requests = super::agy_requests::NAMES.iter().any(|(n, ..)| *n == name);
     let replay = if super::questions::NAMES.contains(&name) {
         super::questions::recorded(name)
+    } else if super::steering::recorded::NAMES.contains(&name) {
+        super::steering::recorded::recorded(name)
     } else if handoff {
         super::handoff_recordings::recorded(name)
     } else if requests {
@@ -186,6 +188,9 @@ fn release_matrix_has_no_known_failures() {
         verify_fixture(name);
     }
     for name in super::handoff_recordings::NAMES {
+        verify_fixture(name);
+    }
+    for name in super::steering::recorded::NAMES {
         verify_fixture(name);
     }
     assert!(

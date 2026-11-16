@@ -120,9 +120,15 @@ mod tests {
                 run_id,
                 starting: false,
                 stop_requested: false,
+                provider: Provider::Codex,
+                attempt_id: 1,
+                binding_id: 1,
             }),
             request: None,
             pending: 0,
+            questions: 0,
+            approvals: Vec::new(),
+            queued: None,
         }
     }
 
@@ -154,6 +160,9 @@ mod tests {
             run_id: 7,
             starting: false,
             stop_requested: true,
+            provider: Provider::Codex,
+            attempt_id: 1,
+            binding_id: 1,
         });
         assert!(changes(&stopping, Some(7)).is_empty());
     }

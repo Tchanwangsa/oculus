@@ -21,6 +21,7 @@ pub(in crate::harness) mod send;
 pub mod setup;
 pub mod skills;
 pub(in crate::harness) mod startup;
+pub(in crate::harness) mod steer;
 pub mod suggest;
 mod thought_clock;
 pub mod turns;
@@ -108,6 +109,13 @@ pub(in crate::harness) enum BusMsg {
         provider: Provider,
         run_id: i64,
         outcome: send::Sent,
+    },
+    /// What a steer's write came to (`Effect::Steer`).
+    Steered {
+        thread_id: i64,
+        provider: Provider,
+        written: crate::harness::store::steer::Written,
+        outcome: crate::harness::Steered,
     },
     /// What the write of an answer to a request proved (`Effect::Reply`).
     Replied {

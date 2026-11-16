@@ -8,6 +8,7 @@ mod items;
 mod naming;
 pub mod queue;
 mod runs;
+pub mod steer;
 pub mod threads;
 
 #[cfg(test)]

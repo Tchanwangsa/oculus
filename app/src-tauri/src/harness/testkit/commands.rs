@@ -15,7 +15,7 @@ use tokio::sync::oneshot::Receiver;
 use crate::harness::app::consumer::{consume, ConsumerIo};
 use crate::harness::app::{BusMsg, Envelope};
 use crate::harness::core::decide::Answer;
-use crate::harness::core::effect::{Effect, Start};
+use crate::harness::core::effect::{Effect, Start, SteerWrite};
 use crate::harness::core::{load, Command, Kind, Outcome};
 use crate::harness::providers::capabilities::{self, Capabilities};
 use crate::harness::{jobs, store, HarnessEvent, Provider, Release, SendOptions};
@@ -42,6 +42,7 @@ pub(super) struct Bench {
     /// Whether the provider says its context went back, per rewind asked.
     rewinds: Arc<AtomicBool>,
     handoff: Arc<AtomicBool>,
+    steering: Arc<(AtomicBool, AtomicBool)>,
     fed: Arc<AtomicBool>,
     drained: Sender<Sender<()>>,
     consumer: Option<JoinHandle<()>>,
@@ -53,6 +54,7 @@ struct Record {
     events: Vec<Value>,
     effects: Vec<String>,
     starts: Vec<Start>,
+    steers: Vec<SteerWrite>,
 }
 
 struct Io {
@@ -62,6 +64,9 @@ struct Io {
     rewinds: Arc<AtomicBool>,
     /// Every bridge takes a handoff, as a replay's rig lets them.
     handoff: Arc<AtomicBool>,
+    /// Every bridge takes a message into its running turn, natively or by
+    /// restarting it: the fake bridge the steering checks run against.
+    steering: Arc<(AtomicBool, AtomicBool)>,
     /// The scratch library whose protected paths a request may not name.
     library: std::path::PathBuf,
 }
@@ -70,6 +75,8 @@ impl ConsumerIo for Io {
     fn capabilities(&self, provider: Provider) -> Capabilities {
         Capabilities {
             provider_handoff: self.handoff.load(Ordering::SeqCst),
+            active_steering: self.steering.0.load(Ordering::SeqCst),
+            steer_by_restart: self.steering.1.load(Ordering::SeqCst),
             ..capabilities::of(provider)
         }
     }
@@ -84,6 +91,7 @@ impl ConsumerIo for Io {
         let mut record = self.record.lock().unwrap();
         record.effects.push(match &effect {
             Effect::Start(start) => format!("start {}", start.text),
+            Effect::Steer(steer) => format!("steer {}", steer.text),
             Effect::Rewind { ask, .. } => format!("rewind {}", ask.anchor),
             Effect::Interrupt { .. } => "interrupt".to_string(),
             Effect::ForceStop { .. } => "force stop".to_string(),
@@ -104,6 +112,7 @@ impl ConsumerIo for Io {
                 });
             }
             Effect::Start(start) => record.starts.push(*start),
+            Effect::Steer(steer) => record.steers.push(*steer),
             // A bridge's write, made here as the production effect makes it
             // off the consumer's thread, and its proof sent back.
             Effect::Reply(reply) => {
@@ -153,6 +162,7 @@ impl Bench {
         let record: Arc<Mutex<Record>> = Arc::default();
         let rewinds = Arc::new(AtomicBool::new(true));
         let handoff = Arc::new(AtomicBool::new(false));
+        let steering = Arc::new((AtomicBool::new(false), AtomicBool::new(false)));
         let fed = Arc::new(AtomicBool::new(false));
         let mut io = Io {
             pool: pool.clone(),
@@ -160,6 +170,7 @@ impl Bench {
             record: record.clone(),
             rewinds: rewinds.clone(),
             handoff: handoff.clone(),
+            steering: steering.clone(),
             library: dir.to_path_buf(),
         };
         let feed = Feed {
@@ -179,6 +190,7 @@ impl Bench {
             record,
             rewinds,
             handoff,
+            steering,
             fed,
             drained,
             consumer: Some(consumer),
@@ -206,6 +218,18 @@ impl Bench {
     /// From now on every bridge takes a handoff.
     pub(super) fn allow_handoff(&self) {
         self.handoff.store(true, Ordering::SeqCst);
+    }
+
+    /// From now on every bridge steers natively (`native`) or by restarting
+    /// the turn (`restart`), as the fake bridge of the steering checks.
+    pub(super) fn steer_by(&self, native: bool, restart: bool) {
+        self.steering.0.store(native, Ordering::SeqCst);
+        self.steering.1.store(restart, Ordering::SeqCst);
+    }
+
+    /// The steers handed to their effect so far.
+    pub(super) fn steers(&self) -> Vec<SteerWrite> {
+        self.record.lock().unwrap().steers.clone()
     }
 
     /// Whether the provider will say its context went back with a rewind.

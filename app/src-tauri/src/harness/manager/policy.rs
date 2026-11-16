@@ -229,10 +229,10 @@ mod tests {
         );
     }
 
-    /// No bridge steers yet, so a plain send can only start or queue on any
-    /// of them, whatever the chat is doing.
+    /// A plain send steers only where the bridge's flag says it can, and no
+    /// bridge restarts a turn for one.
     #[test]
-    fn every_bridge_starts_or_queues_a_plain_send_today() {
+    fn a_plain_send_steers_only_on_a_bridge_whose_flag_says_so() {
         let chats = [
             Chat::default(),
             running(),
@@ -244,11 +244,11 @@ mod tests {
         for caps in capabilities::all() {
             for chat in &chats {
                 let delivery = resolve_delivery(Mode::Auto, chat, &caps, false);
-                assert!(
-                    matches!(delivery, Delivery::Start | Delivery::Queue),
-                    "{:?}: {delivery:?}",
-                    caps.provider
-                );
+                match delivery {
+                    Delivery::Start | Delivery::Queue => {}
+                    Delivery::Steer => assert!(caps.active_steering, "{:?}", caps.provider),
+                    _ => panic!("{:?}: {delivery:?}", caps.provider),
+                }
             }
         }
     }

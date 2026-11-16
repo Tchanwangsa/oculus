@@ -24,12 +24,14 @@ pub(in crate::harness) fn bridge(wire: Wire, sink: Sink) -> Bridge {
         background: Arc::default(),
         one_off: false,
         callbacks: Mutex::new(HashSet::new()),
+        steering: Arc::default(),
     });
     let translator = Rc::new(RefCell::new(Translator {
         interrupting: session.interrupting.clone(),
         expecting: session.expecting.clone(),
         turns: session.turns.clone(),
         background_count: session.background.clone(),
+        steering: session.steering.clone(),
         ..Default::default()
     }));
     let (reader, closer, reading, closing, eof_sink) = (

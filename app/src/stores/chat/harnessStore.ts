@@ -534,6 +534,28 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         case "session_restarted":
           push(rowFrom(env, "session_restarted", event.text));
           break;
+        case "steer":
+          // The row Rust wrote with the message (`store/steer.rs`).
+          push(rowFrom(env, "steer", event.text, { message: event.message, client: event.client, delivery: event.delivery }));
+          break;
+        case "steer_updated": {
+          if (!held) break;
+          const at = rows.findIndex((r) => r.id === event.item_id);
+          if (at < 0) break;
+          // A steer that missed its turn leaves the run; it is in the queue now.
+          rows = event.delivery === "requeued"
+            ? rows.filter((r) => r.id !== event.item_id)
+            : rows.map((r, i) => (i === at ? { ...r, meta: JSON.stringify({ ...parseItemMeta(r), delivery: event.delivery }) } : r));
+          break;
+        }
+        case "attempt_restarted": {
+          if (!held) break;
+          const work = new Set(event.work_item_ids);
+          rows = rows.map((r) => (work.has(r.id) ? { ...r, display_role: "commentary" } : r));
+          // What streamed under the old attempt is a row now; the run goes on.
+          live = { ...prev, streaming: "", thinking: "", running: true };
+          break;
+        }
         case "delivery_notice":
           push(rowFrom(env, "delivery_notice", event.text));
           break;

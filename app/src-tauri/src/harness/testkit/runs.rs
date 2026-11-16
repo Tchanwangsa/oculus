@@ -146,7 +146,7 @@ pub(super) fn send(
             provider,
             text: "question".into(),
             options: SendOptions::default(),
-            mode: Default::default(),
+            mode: crate::harness::manager::policy::Mode::Queue,
         },
     };
     (BusMsg::Command { command, reply }, answer)

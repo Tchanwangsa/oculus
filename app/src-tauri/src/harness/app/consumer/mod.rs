@@ -4,6 +4,7 @@
 
 mod commands;
 mod requests;
+mod steering;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -87,6 +88,7 @@ pub(in crate::harness) fn consume(
         stops: HashMap::new(),
         requests: Registry::default(),
         withdrawals: Vec::new(),
+        restarting: HashSet::new(),
     };
     for msg in rx {
         consumer.handle(msg, io);
@@ -129,6 +131,8 @@ struct Consumer {
     /// Routes of requests a turn's end gave up, to be told no once the
     /// step that ended them is done (`requests_left_by`).
     withdrawals: Vec<crate::harness::requests::LiveRoute>,
+    /// Runs whose turn was asked to stop for a restart steer.
+    restarting: HashSet<i64>,
 }
 
 impl Consumer {
@@ -169,6 +173,12 @@ impl Consumer {
                 run_id,
                 outcome,
             } => self.sent(thread_id, provider, run_id, outcome, io),
+            BusMsg::Steered {
+                thread_id,
+                provider,
+                written,
+                outcome,
+            } => self.steer_reported(thread_id, provider, written, outcome, io),
             BusMsg::Replied {
                 thread_id,
                 provider,
@@ -384,6 +394,9 @@ impl Consumer {
             HarnessEvent::RequestRetired { native_ref } if thread_id > 0 => {
                 return self.request_retired(thread_id, provider, from, &native_ref, io);
             }
+            HarnessEvent::SteerEchoed { client_id } if thread_id > 0 => {
+                return self.steer_echoed(thread_id, provider, &client_id, io);
+            }
             _ => {}
         }
         // Whose turn a terminal ends. One for a turn this thread does not
@@ -495,6 +508,23 @@ impl Consumer {
                     }
                     Err(e) => elog!("[oculus] harness store: {e}"),
                 }
+                // A restart steer waits on this turn: the run goes on as a
+                // new attempt, unsettled, and the queue stays behind it.
+                if let (
+                    Some(Terminal::Run),
+                    Some(run_id),
+                    Some(attempt_id),
+                    HarnessEvent::TurnFinished { status, turn },
+                ) = (terminal, tags.run_id, tags.attempt_id, &ev)
+                {
+                    let (status, turn) = (status.clone(), turn.clone());
+                    if self.restart(thread_id, provider, (run_id, attempt_id), &status, io) {
+                        self.runs
+                            .finished(thread_id, from, turn.as_ref(), Terminal::Stray);
+                        self.drive(thread_id, provider, io);
+                        return;
+                    }
+                }
                 settled = match (terminal, tags.run_id, tags.attempt_id, &ev) {
                     (
                         Some(Terminal::Run),
@@ -582,6 +612,7 @@ impl Consumer {
             self.revisions.insert(thread_id, settlement.revision);
         }
         self.runs.close(thread_id);
+        self.restarting.remove(&run_id);
         self.started.remove(&run_id);
         self.accepted.remove(&run_id);
         self.asked.remove(&run_id);

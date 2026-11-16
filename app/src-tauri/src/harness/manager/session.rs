@@ -335,6 +335,20 @@ impl Harness {
         Ok(())
     }
 
+    /// Write a message into the thread's running turn
+    /// (`Handle::steer`). Written outside the lock, like a send. A thread
+    /// with no live session has no turn to write into.
+    pub fn steer(&self, thread_id: i64, text: &str, client: &str) -> super::handle::Steered {
+        let handle = {
+            let live = self.live.lock().unwrap();
+            live.get(&thread_id).map(|l| l.handle.clone())
+        };
+        match handle {
+            Some(handle) => handle.steer(text, client),
+            None => super::handle::Steered::Missed,
+        }
+    }
+
     /// Ask the thread's CLI to stop its turn. Asked outside the lock, like
     /// a send.
     pub fn interrupt(&self, thread_id: i64) -> Result<(), String> {
