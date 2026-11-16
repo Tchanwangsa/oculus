@@ -203,6 +203,37 @@
     "expected_failures": []
   },
   {
+    "id": "antigravity-acp-ls",
+    "fixture": "antigravity-acp-ls",
+    "mutation": "none",
+    "checks": [
+      "one_answer",
+      "live_reload",
+      "one_settlement"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "antigravity-acp-repeated-reply",
+    "fixture": "antigravity-acp-ls",
+    "mutation": "repeated_terminal",
+    "checks": [
+      "one_message",
+      "one_settlement"
+    ],
+    "expected_failures": []
+  },
+  {
+    "id": "antigravity-acp-missing-reply",
+    "fixture": "antigravity-acp-ls",
+    "mutation": "missing_terminal",
+    "checks": [
+      "settled",
+      "honest_outcome"
+    ],
+    "expected_failures": []
+  },
+  {
     "id": "identical-distinct-messages",
     "fixture": "claude-ls",
     "mutation": "identical_distinct",

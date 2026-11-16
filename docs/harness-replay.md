@@ -222,6 +222,10 @@ writes as the expected outbound). The rig picks the ACP bridge when the
 manifest's first expected frame is JSON-RPC; a recorded session starts
 open, its requests other than `session/prompt` are answered from the
 manifest as they are written, and its ids continue from the manifest's.
+`antigravity-acp-ls` (an `ls` Rust allows unseen, then the answer) was
+recorded on 2026-11-16 with the bridge's own `initialize`, `session/set_model`
+and `session/set_mode`; the release matrix runs it as recorded, with its
+reply repeated and with its reply missing.
 It checks a full turn (a write in the chat's folder allowed unseen, two
 commands asked and approved, a failed command and read), a write outside
 and a command each declined, a protected path or the database refused
@@ -290,7 +294,7 @@ must be a temporary folder. No CLI runs from that test. The registry
 dispatches these six fixtures to their multi-run driver: source rows are
 seeded in SQL, target rows pass through the live event projection, and all
 rows survive reopen. The release
-gate runs the six handoff fixtures as well as the 39 matrix cases.
+gate runs the six handoff fixtures as well as the 42 matrix cases.
 
 `testkit/queue.rs` checks queued runs: a message sent mid-turn through a
 real bridge waiting as a run and starting as the same run, the queue's
@@ -353,6 +357,9 @@ the first row gates that contract separately for all bridges.
 | codex-ls-repeat-snapshot | Pass | — |
 | opencode-v1-text-repeat-snapshot | Pass | — |
 | antigravity-ls-repeat-snapshot | Pass | — |
+| antigravity-acp-ls | Pass | — |
+| antigravity-acp-repeated-reply | Pass | — |
+| antigravity-acp-missing-reply | Pass | — |
 | identical-distinct-messages | Pass | — |
 | codex-native-phases-and-plan-mutation | Pass | — |
 | claude-interrupt | Pass | — |

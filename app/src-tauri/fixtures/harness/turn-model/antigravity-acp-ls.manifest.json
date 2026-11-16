@@ -1,0 +1,67 @@
+{
+  "provider": "antigravity",
+  "cli_version": "1.5.9",
+  "protocol": "Agent Client Protocol v1 over agy acp --sandbox (JSON-RPC 2.0 on stdio)",
+  "model": "gemini-3.8-flash-low",
+  "capture_date": "2026-11-16",
+  "source": "stage 5 step 6 recording acp-ls.jsonl: agy acp driven as the Oculus bridge drives it (initialize with no client services, session/new, session/set_model gemini-3.8-flash-low, session/set_mode default), every agent frame from the first prompt to the last reply",
+  "redaction": "Agent frames as recorded. The scratch library is $LIBRARY (its agents/ folder the session's cwd) and any home path is /Users/student. The replay starts at the first prompt; the setup calls are in the source recording.",
+  "scenario": "ls in the chat's folder, which Rust allows unseen, and the answer",
+  "frames": 15,
+  "sha256": "5976f079eeb20c9d74f68f540640f030e7fc61f3310b64be74c823b8e4e6845b",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "session/prompt",
+        "params": {
+          "sessionId": "77bdc348-faa3-4f62-aeb1-67f9d6f8111f",
+          "prompt": [
+            {
+              "type": "text",
+              "text": "Replay request"
+            }
+          ]
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "result": {
+          "outcome": {
+            "outcome": "selected",
+            "optionId": "allow"
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../antigravity-acp-ls.ndjson",
+  "native_session": "77bdc348-faa3-4f62-aeb1-67f9d6f8111f",
+  "permission_mode": "ask",
+  "settings": {
+    "recorded_model": "gemini-3.8-flash-low",
+    "recorded_mode": "default",
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_scope": "recorded session; scratch library",
+    "launch": [
+      "$HOME/.local/bin/agy",
+      "acp",
+      "--sandbox",
+      "--add-dir",
+      "$LIBRARY"
+    ],
+    "cleanup": {
+      "settingsBefore": "c372ce30625ef5517759f686d1ecc3def405f38a98eb43fadd3e94df341c6c6b",
+      "settingsAfter": "c372ce30625ef5517759f686d1ecc3def405f38a98eb43fadd3e94df341c6c6b",
+      "scratchRemoved": true
+    },
+    "permission_mode": "ask"
+  }
+}

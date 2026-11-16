@@ -134,6 +134,7 @@ impl Scenario {
                     v["type"] != "result"
                         && v["method"] != "turn/completed"
                         && v["event"] != "result"
+                        && !acp_reply(v)
                 });
             }
             Mutation::PublicNarration => {
@@ -214,6 +215,7 @@ impl Scenario {
                         v["type"] == "result"
                             || v["method"] == "turn/completed"
                             || v["event"] == "result"
+                            || acp_reply(v)
                     })
                     .unwrap();
                 self.frames.insert(index + 1, self.frames[index].clone());
@@ -240,4 +242,9 @@ impl Scenario {
         }
         self
     }
+}
+
+/// An `agy acp` prompt's reply: the turn's terminal.
+fn acp_reply(frame: &Value) -> bool {
+    frame.get("method").is_none() && frame["result"]["stopReason"].is_string()
 }
