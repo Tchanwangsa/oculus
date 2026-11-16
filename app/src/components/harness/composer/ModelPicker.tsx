@@ -2,6 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type React
 import { CaretDown, Check, LockSimple, MagnifyingGlass, Star } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ProviderMark } from "@/components/icons/ProviderMark";
 import {
   providerAvailability,
@@ -228,14 +229,13 @@ export const ModelPicker = memo(function ModelPicker({
       <PopoverContent
         align={align}
         sideOffset={6}
-        className="flex max-h-[min(var(--radix-popover-content-available-height),28rem)] w-auto max-w-[calc(100vw-16px)] overflow-hidden p-0"
+        className="flex max-h-[min(var(--radix-popover-content-available-height),28rem)] w-72 flex-col overflow-hidden p-0"
         onOpenAutoFocus={(e) => {
           if (!showSearch) return;
           e.preventDefault();
           searchRef.current?.focus();
         }}
       >
-        <div className="flex w-72 min-w-0 shrink flex-col">
         {providers.length > 1 || stars.length > 0 ? (
           <div className="flex shrink-0 items-center gap-0.5 border-b border-border bg-surface px-2.5 pt-1">
             <button
@@ -306,15 +306,12 @@ export const ModelPicker = memo(function ModelPicker({
           </div>
         ) : null}
 
-        {(starView || !peek) && (refused || switchFrom) ? (
+        {(starView || !peek) && refused ? (
           <div
-            role={refused ? "alert" : undefined}
-            className={cn(
-              "shrink-0 border-b border-border-subtle px-3 py-2 text-[11px] leading-relaxed",
-              refused ? "text-destructive" : "text-muted-foreground",
-            )}
+            role="alert"
+            className="shrink-0 border-b border-border-subtle px-3 py-2 text-[11px] leading-relaxed text-destructive"
           >
-            {refused ?? `Switches from ${providerLabel(switchFrom!)} with your next message.`}
+            {refused}
           </div>
         ) : null}
 
@@ -389,60 +386,45 @@ export const ModelPicker = memo(function ModelPicker({
           )}
         </div>
 
-        </div>
-
         {levels.length > 0 ? (
-          <ReasoningColumn
-            levels={levels}
-            level={level}
-            defaultLevel={selected?.defaultReasoningEffort ?? null}
-            onReasoning={onReasoning}
-          />
+          <>
+            <div className="shrink-0 border-t border-border" />
+            <div className="shrink-0 px-2 pb-2.5 pt-2.5">
+              <SectionLabel className="mb-2 px-1 py-0">Reasoning</SectionLabel>
+              {/* A sunken tray; the chosen level is the raised pill in it. */}
+              <ToggleGroup
+                type="single"
+                spacing={1}
+                aria-label="Reasoning"
+                value={level ?? ""}
+                onValueChange={(v) => {
+                  // Radix clears on re-click; a level stays chosen.
+                  if (!v) return;
+                  onReasoning(v);
+                }}
+                className="flex w-full rounded-lg bg-muted p-0.5"
+              >
+                {levels.map((l) => {
+                  const text = reasoningLabel(l);
+                  return (
+                    <ToggleGroupItem
+                      key={l}
+                      value={l}
+                      aria-label={text}
+                      className="h-6 min-w-0 flex-auto shrink-0 whitespace-nowrap rounded-md px-1 text-[11px] font-normal text-muted-foreground shadow-none transition-colors hover:text-foreground data-[state=on]:bg-foreground/12 data-[state=on]:font-semibold data-[state=on]:text-foreground data-[state=on]:shadow-sm"
+                    >
+                      {text}
+                    </ToggleGroupItem>
+                  );
+                })}
+              </ToggleGroup>
+            </div>
+          </>
         ) : null}
       </PopoverContent>
     </Popover>
   );
 });
-
-/** The chosen model's levels, weakest first, down the menu's right side:
- *  the chosen one ticked, the model's own default tagged. */
-function ReasoningColumn({
-  levels,
-  level,
-  defaultLevel,
-  onReasoning,
-}: {
-  levels: string[];
-  level: string | null;
-  defaultLevel: string | null;
-  onReasoning: (level: string) => void;
-}) {
-  return (
-    <div role="radiogroup" aria-label="Reasoning" className="flex w-44 shrink-0 flex-col overflow-y-auto overscroll-contain border-l border-border px-1 pb-1">
-      <SectionLabel>Reasoning</SectionLabel>
-      {levels.map((l) => {
-        const on = l === level;
-        return (
-          <button
-            key={l}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            onClick={() => onReasoning(l)}
-            className={cn(
-              "flex w-full cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs outline-none transition-colors hover:bg-accent focus-visible:bg-accent",
-              on ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <span className="min-w-0 truncate">{reasoningLabel(l)}</span>
-            {l === defaultLevel ? <span className="text-[11px] text-muted-foreground">Default</span> : null}
-            <Check className={cn("ml-auto size-3.5 shrink-0", on ? "opacity-100" : "opacity-0")} />
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 /** Shown in place of a locked agent's catalogue: this chat cannot move to it. */
 function SwitchLocked({ label }: { label: string }) {

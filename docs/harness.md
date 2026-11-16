@@ -1887,8 +1887,7 @@ compile without one.
   config. `sortReasoning` orders by `REASONING_LABELS`, unknown levels
   last; `default_variant` asks for `high` and steps down.
 - **Layout.** Agent tabs, the models, then the chosen model's levels in a
-  column on the right, the chosen one ticked and the model's default
-  tagged.
+  row at the bottom: a sunken tray whose chosen level is a raised pill.
 - **Stars.** Every model row has a star (`stores/chat/modelStars.ts`,
   webview storage). The Starred tab, first in the strip, lists starred
   models across agents and opens by default while the chat's model is one
