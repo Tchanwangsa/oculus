@@ -1,17 +1,18 @@
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { CaretDown, Check, LockSimple, MagnifyingGlass } from "@phosphor-icons/react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { CaretDown, Check, LockSimple, MagnifyingGlass, Star } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ProviderMark } from "@/components/icons/ProviderMark";
 import {
   providerAvailability,
   providerLabel,
   reasoningLabel,
   SWITCH_LOCKED,
+  type HarnessModel,
   type PickerProvider,
   type Provider,
 } from "@/lib/harness";
+import { isStarred, useModelStars, type ModelStar } from "@/stores/chat/modelStars";
 import { settingsPage, type SettingsPageId } from "@/lib/search/settings";
 import { navigateActive } from "@/lib/shell/tabRouters";
 import { cn } from "@/lib/utils";
@@ -32,7 +33,9 @@ export type { PickerProvider } from "@/lib/harness";
  * model and level. Levels come off the model, not the provider. A provider
  * whose CLI is missing shows `NotInstalled` instead of its catalogue, and a
  * `locked` one (a started chat it cannot take over) is dimmed but opens a
- * note saying so, without being picked. Stable selection props keep composer
+ * note saying so, without being picked. Each model row has a star; the
+ * Starred tab, first in the strip, lists starred models across agents and
+ * opens by default while the chat's model is one of them. Stable selection props keep composer
  * draft keystrokes outside this catalogue's memo boundary.
  */
 export const ModelPicker = memo(function ModelPicker({
@@ -95,6 +98,12 @@ export const ModelPicker = memo(function ModelPicker({
   const searchRef = useRef<HTMLInputElement>(null);
   /** A locked tab the student opened: its note shows, nothing is picked. */
   const [peek, setPeek] = useState<Provider | null>(null);
+  const stars = useModelStars((s) => s.stars);
+  const toggleStar = useModelStars((s) => s.toggle);
+  /** The Starred tab is showing instead of an agent's catalogue. */
+  const [starView, setStarView] = useState(false);
+  /** A starred model on another agent, picked once the switch to it lands. */
+  const [pending, setPending] = useState<{ provider: Provider; model: string } | null>(null);
 
   const active = providers.find((p) => p.id === provider);
   const availability = providerAvailability(provider);
@@ -107,12 +116,58 @@ export const ModelPicker = memo(function ModelPicker({
     if (!open) {
       setQuery("");
       setPeek(null);
+      setPending(null);
     }
   }, [open]);
 
+  // Laid out before paint, so the menu never flashes the agent's tab first.
+  useLayoutEffect(() => {
+    if (open) setStarView(model != null && isStarred(useModelStars.getState().stars, provider, model));
+    // Only on opening: the tab the student picks afterwards stays.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const choose = (m: HarnessModel) => {
+    onModel(m.id);
+    // The CLI rejects a level the new model doesn't take.
+    if (!reasoning || !m.reasoningEfforts.includes(reasoning)) {
+      onReasoning(m.defaultReasoningEffort ?? m.reasoningEfforts[0] ?? null);
+    }
+  };
+
+  // A switch may land a render later (or after Rust answers); its catalogue
+  // may still be loading. A star the catalogue no longer has opens its tab.
+  useEffect(() => {
+    if (!pending || pending.provider !== provider) return;
+    const p = providers.find((x) => x.id === provider);
+    if (!p || p.loading) return;
+    const m = p.models.find((x) => x.id === pending.model);
+    setPending(null);
+    if (m) choose(m);
+    else setStarView(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending, provider, providers]);
+
+  const pickStar = (star: ModelStar) => {
+    if (star.provider === provider) {
+      const m = models.find((x) => x.id === star.model);
+      if (m) choose(m);
+      else setStarView(false);
+      return;
+    }
+    if (locked?.(star.provider)) {
+      setStarView(false);
+      setPeek(star.provider);
+      return;
+    }
+    setPeek(null);
+    setPending({ provider: star.provider, model: star.model });
+    onProvider(star.provider);
+  };
+
   const missing = active?.health === "missing";
 
-  const showSearch = !peek && !unsupported && !missing && models.length > SEARCH_THRESHOLD;
+  const showSearch = !starView && !peek && !unsupported && !missing && models.length > SEARCH_THRESHOLD;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return models;
@@ -124,7 +179,7 @@ export const ModelPicker = memo(function ModelPicker({
   const offered = unsupported || missing ? [] : selected?.reasoningEfforts ?? [];
   const level = reasoning && offered.includes(reasoning) ? reasoning : null;
   // A locked agent's note hides the dial; the trigger still names the level.
-  const levels = peek ? [] : offered;
+  const levels = peek && !starView ? [] : offered;
 
   // An id with no row (a model this list doesn't know) shows as the raw id.
   const label = selected?.label ?? model;
@@ -157,7 +212,9 @@ export const ModelPicker = memo(function ModelPicker({
       ) : (
         <ProviderMark provider={provider} className="size-3.5 shrink-0" />
       )}
-      <span className="min-w-0 truncate">{keepEmptyTrigger ? emptyLabel : (label ?? emptyLabel)}</span>
+      <span className={cn("min-w-0 truncate", label != null && !keepEmptyTrigger && "text-foreground")}>
+        {keepEmptyTrigger ? emptyLabel : (label ?? emptyLabel)}
+      </span>
       {levelText && !keepEmptyTrigger ? (
         <span className="shrink-0 text-muted-foreground">{levelText}</span>
       ) : null}
@@ -171,17 +228,37 @@ export const ModelPicker = memo(function ModelPicker({
       <PopoverContent
         align={align}
         sideOffset={6}
-        className="flex max-h-[min(var(--radix-popover-content-available-height),28rem)] w-72 flex-col overflow-hidden p-0"
+        className="flex max-h-[min(var(--radix-popover-content-available-height),28rem)] w-auto max-w-[calc(100vw-16px)] overflow-hidden p-0"
         onOpenAutoFocus={(e) => {
           if (!showSearch) return;
           e.preventDefault();
           searchRef.current?.focus();
         }}
       >
-        {providers.length > 1 ? (
+        <div className="flex w-72 min-w-0 shrink flex-col">
+        {providers.length > 1 || stars.length > 0 ? (
           <div className="flex shrink-0 items-center gap-0.5 border-b border-border bg-surface px-2.5 pt-1">
+            <button
+              type="button"
+              title="Starred"
+              aria-label="Starred models"
+              aria-pressed={starView}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setPeek(null);
+                setStarView(true);
+              }}
+              className={cn(
+                "flex size-8 items-center justify-center border-b-2 transition-colors focus-visible:outline-none",
+                starView
+                  ? "border-foreground text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Star className="size-4" weight={starView ? "fill" : "regular"} />
+            </button>
             {providers.map((p) => {
-              const isActive = p.id === (peek ?? provider);
+              const isActive = !starView && p.id === (peek ?? provider);
               // A missing or locked agent is dimmed but clickable: its panel says why.
               const gone = p.health === "missing";
               const shut = p.id !== provider && !!locked?.(p.id);
@@ -193,6 +270,7 @@ export const ModelPicker = memo(function ModelPicker({
                   aria-disabled={shut || undefined}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
+                    setStarView(false);
                     if (shut) setPeek(p.id);
                     else {
                       setPeek(null);
@@ -228,7 +306,7 @@ export const ModelPicker = memo(function ModelPicker({
           </div>
         ) : null}
 
-        {!peek && (refused || switchFrom) ? (
+        {(starView || !peek) && (refused || switchFrom) ? (
           <div
             role={refused ? "alert" : undefined}
             className={cn(
@@ -241,7 +319,18 @@ export const ModelPicker = memo(function ModelPicker({
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 pb-1">
-          {peek ? (
+          {starView ? (
+            <StarredList
+              stars={stars}
+              providers={providers}
+              provider={provider}
+              model={model}
+              pending={pending}
+              locked={locked}
+              onPick={pickStar}
+              onUnstar={toggleStar}
+            />
+          ) : peek ? (
             <SwitchLocked label={providers.find((p) => p.id === peek)?.label ?? providerLabel(peek)} />
           ) : unsupported ? (
             <div className="px-2 py-3 text-xs text-muted-foreground">
@@ -290,13 +379,9 @@ export const ModelPicker = memo(function ModelPicker({
                     description={m.description}
                     title={m.id}
                     selected={m.id === model}
-                    onClick={() => {
-                      onModel(m.id);
-                      // The CLI rejects a level the new model doesn't take.
-                      if (!reasoning || !m.reasoningEfforts.includes(reasoning)) {
-                        onReasoning(m.defaultReasoningEffort ?? m.reasoningEfforts[0] ?? null);
-                      }
-                    }}
+                    starred={isStarred(stars, provider, m.id)}
+                    onStar={() => toggleStar({ provider, model: m.id, label: m.label })}
+                    onClick={() => choose(m)}
                   />
                 ))
               )}
@@ -304,44 +389,60 @@ export const ModelPicker = memo(function ModelPicker({
           )}
         </div>
 
+        </div>
+
         {levels.length > 0 ? (
-          <>
-            <div className="shrink-0 border-t border-border" />
-            <div className="shrink-0 px-2 py-2.5">
-              <SectionLabel className="mb-2 px-1 py-0">Reasoning</SectionLabel>
-              <ToggleGroup
-                type="single"
-                spacing={1}
-                aria-label="Reasoning"
-                value={level ?? ""}
-                onValueChange={(v) => {
-                  // Radix clears on re-click; a level stays chosen.
-                  if (!v) return;
-                  onReasoning(v);
-                }}
-                className="flex w-full"
-              >
-                {levels.map((l) => {
-                  const text = reasoningLabel(l);
-                  return (
-                    <ToggleGroupItem
-                      key={l}
-                      value={l}
-                      aria-label={text}
-                      className="h-6 min-w-0 flex-auto shrink-0 whitespace-nowrap rounded-md px-1 text-[11px] font-normal text-muted-foreground shadow-none transition-colors hover:text-foreground data-[state=on]:bg-accent data-[state=on]:text-foreground"
-                    >
-                      {text}
-                    </ToggleGroupItem>
-                  );
-                })}
-              </ToggleGroup>
-            </div>
-          </>
+          <ReasoningColumn
+            levels={levels}
+            level={level}
+            defaultLevel={selected?.defaultReasoningEffort ?? null}
+            onReasoning={onReasoning}
+          />
         ) : null}
       </PopoverContent>
     </Popover>
   );
 });
+
+/** The chosen model's levels, weakest first, down the menu's right side:
+ *  the chosen one ticked, the model's own default tagged. */
+function ReasoningColumn({
+  levels,
+  level,
+  defaultLevel,
+  onReasoning,
+}: {
+  levels: string[];
+  level: string | null;
+  defaultLevel: string | null;
+  onReasoning: (level: string) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label="Reasoning" className="flex w-44 shrink-0 flex-col overflow-y-auto overscroll-contain border-l border-border px-1 pb-1">
+      <SectionLabel>Reasoning</SectionLabel>
+      {levels.map((l) => {
+        const on = l === level;
+        return (
+          <button
+            key={l}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => onReasoning(l)}
+            className={cn(
+              "flex w-full cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs outline-none transition-colors hover:bg-accent focus-visible:bg-accent",
+              on ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <span className="min-w-0 truncate">{reasoningLabel(l)}</span>
+            {l === defaultLevel ? <span className="text-[11px] text-muted-foreground">Default</span> : null}
+            <Check className={cn("ml-auto size-3.5 shrink-0", on ? "opacity-100" : "opacity-0")} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 /** Shown in place of a locked agent's catalogue: this chat cannot move to it. */
 function SwitchLocked({ label }: { label: string }) {
@@ -393,31 +494,119 @@ function EmptyNote({
   );
 }
 
+/** The starred models across agents, in starring order. A star on an agent
+ *  this chat cannot move to, or whose CLI is missing, is dimmed and says why. */
+function StarredList({
+  stars,
+  providers,
+  provider,
+  model,
+  pending,
+  locked,
+  onPick,
+  onUnstar,
+}: {
+  stars: ModelStar[];
+  providers: PickerProvider[];
+  provider: Provider;
+  model: string | null;
+  pending: { provider: Provider; model: string } | null;
+  locked?: (provider: Provider) => boolean;
+  onPick: (star: ModelStar) => void;
+  onUnstar: (star: ModelStar) => void;
+}) {
+  if (stars.length === 0) {
+    return (
+      <div className="px-2 py-3 text-[11px] leading-relaxed text-muted-foreground">
+        Star a model on an agent's tab to keep it here.
+      </div>
+    );
+  }
+  return (
+    <>
+      <SectionLabel>Starred</SectionLabel>
+      {stars.map((star) => {
+        const p = providers.find((x) => x.id === star.provider);
+        const gone = !p || p.health === "missing";
+        const shut = star.provider !== provider && !!locked?.(star.provider);
+        const current = pending
+          ? pending.provider === star.provider && pending.model === star.model
+          : star.provider === provider && star.model === model;
+        const agent = p?.label ?? providerLabel(star.provider);
+        return (
+          <ModelRow
+            key={`${star.provider}:${star.model}`}
+            label={p?.models.find((m) => m.id === star.model)?.label ?? star.label}
+            title={[agent, star.model, shut && SWITCH_LOCKED, gone && "not installed"].filter(Boolean).join(" · ")}
+            mark={<ProviderMark provider={star.provider} className="size-3.5 shrink-0" />}
+            dim={gone || shut}
+            selected={current}
+            starred
+            onStar={() => onUnstar(star)}
+            onClick={() => onPick(star)}
+          />
+        );
+      })}
+    </>
+  );
+}
+
 function ModelRow({
   label,
   description,
   title,
+  mark,
+  dim = false,
   selected,
+  starred,
+  onStar,
   onClick,
 }: {
   label: string;
   description?: string;
   title?: string;
+  /** The agent's mark, in the Starred tab where rows mix agents. */
+  mark?: ReactNode;
+  dim?: boolean;
   selected: boolean;
+  starred: boolean;
+  onStar: () => void;
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      title={title ?? description}
-      onClick={onClick}
-      className="flex w-full cursor-default select-none items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-xs text-foreground outline-none transition-colors hover:bg-accent focus-visible:bg-accent"
-    >
-      <span className="min-w-0 truncate">{label}</span>
-      <Check
-        className={cn("size-3.5 shrink-0 text-muted-foreground", selected ? "opacity-100" : "opacity-0")}
-      />
-    </button>
+    <div className="group/row flex w-full items-center rounded-md transition-colors hover:bg-accent has-[:focus-visible]:bg-accent">
+      <button
+        type="button"
+        title={title ?? description}
+        onClick={onClick}
+        className={cn(
+          "flex min-w-0 flex-1 cursor-default select-none items-center gap-2 py-1.5 pl-2 text-left text-xs text-foreground outline-none",
+          dim && "opacity-50",
+        )}
+      >
+        {mark}
+        <span className="min-w-0 truncate">{label}</span>
+        <Check
+          className={cn("ml-auto size-3.5 shrink-0 text-muted-foreground", selected ? "opacity-100" : "opacity-0")}
+        />
+      </button>
+      <button
+        type="button"
+        aria-label={starred ? `Unstar ${label}` : `Star ${label}`}
+        title={starred ? "Unstar" : "Star"}
+        aria-pressed={starred}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onStar}
+        className={cn(
+          "flex size-7 shrink-0 cursor-default items-center justify-center rounded-md outline-none transition-opacity focus-visible:opacity-100",
+          starred
+            ? "text-warning"
+            : "text-muted-foreground opacity-0 hover:text-foreground group-hover/row:opacity-100",
+        )}
+      >
+        <Star className="size-3.5" weight={starred ? "fill" : "regular"} />
+      </button>
+    </div>
   );
 }
 

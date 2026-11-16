@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { CaretDown, Check, ShieldCheck, ShieldSlash, ShieldStar } from "@phosphor-icons/react";
+import { Check, ShieldCheck, ShieldSlash, ShieldStar, WarningCircle } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   harnessSetPermissionMode,
   MODE_LABEL,
@@ -24,10 +25,11 @@ const MODE_ICON: Record<PermissionMode, Icon> = {
 };
 
 /**
- * How this chat asks for what the agent's sandbox blocks: Ask, Auto or
- * Don't ask, saved per chat with `harnessSetPermissionMode` from its next
- * run on. Each mode has its line; an agent that cannot ask, or has no
- * reviewer for Auto, says so. Rust refuses a change while a request waits;
+ * The chat's permission mode, an icon-only trigger: how it asks for what
+ * the agent's sandbox blocks (Ask, Auto or Don't ask), saved per chat with `harnessSetPermissionMode` from its next
+ * run on. Each mode has its line; an agent that cannot ask says so in a
+ * tooltip on the header's warning icon, and one with no reviewer says so
+ * on Auto's line. Rust refuses a change while a request waits;
  * its sentence shows at the top of the open menu.
  */
 export function PermissionModeControl({ threadId, provider }: { threadId: number | null; provider: Provider }) {
@@ -63,16 +65,24 @@ export function PermissionModeControl({ threadId, provider }: { threadId: number
           type="button"
           variant="ghost"
           size="sm"
-          aria-label="How this chat asks"
-          title={`How this chat asks: ${MODE_LABEL[mode]}`}
-          className="h-6 shrink-0 gap-1 px-1.5 text-[11px] font-normal text-muted-foreground hover:text-foreground"
+          aria-label={`Permission mode: ${MODE_LABEL[mode]}`}
+          title={`Permission mode: ${MODE_LABEL[mode]}`}
+          className="size-6 shrink-0 p-0 text-muted-foreground hover:text-foreground"
         >
           <ModeIcon mode={mode} />
-          <span>{MODE_LABEL[mode]}</span>
-          <CaretDown className="size-3 shrink-0" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={6} collisionPadding={8} className="w-72 max-w-[calc(100vw-16px)] p-0">
+      <PopoverContent
+        align="start"
+        sideOffset={6}
+        collisionPadding={8}
+        className="w-72 max-w-[calc(100vw-16px)] p-0"
+        // Radix would focus the header's warning icon first and open its tooltip.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          (e.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus();
+        }}
+      >
         <PermissionModeMenu caps={caps} mode={mode} busy={save.pending} refused={save.error} onPick={pick} />
       </PopoverContent>
     </Popover>
@@ -101,17 +111,24 @@ export function PermissionModeMenu({
   const { note, choices } = modeChoices(caps);
   return (
     <div className="flex flex-col">
-      <div className="border-b border-border-subtle px-3 pb-1.5 pt-2.5 text-[11px] font-medium text-muted-foreground">
-        When the agent's sandbox blocks something
+      <div className="flex items-center justify-between gap-2 border-b border-border-subtle px-3 pb-1.5 pt-2.5 text-[11px] font-medium text-muted-foreground">
+        <span>Permission mode</span>
+        {note && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span tabIndex={0} aria-label={note} className="flex cursor-default text-warning outline-none">
+                <WarningCircle className="size-3.5" aria-hidden />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-64">
+              {note}
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
       {refused && (
         <div role="alert" className="border-b border-border-subtle px-3 py-2 text-[11px] leading-relaxed text-destructive">
           {refused}
-        </div>
-      )}
-      {note && (
-        <div className="border-b border-border-subtle px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-          {note}
         </div>
       )}
       <div className="flex flex-col p-1">

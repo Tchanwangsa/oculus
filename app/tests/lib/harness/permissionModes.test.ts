@@ -6,16 +6,16 @@ describe("the mode control's lines per bridge", () => {
     const { note, choices } = modeChoices({ provider: "codex", approvals: true, autoReview: true });
     expect(note).toBeNull();
     expect(choices).toEqual([
-      { mode: "ask", label: "Ask", line: "Asks you before the agent runs anything its sandbox blocks" },
-      { mode: "auto", label: "Auto", line: "The agent's own reviewer decides; you are not asked" },
-      { mode: "quiet", label: "Don't ask", line: "Anything the sandbox blocks is declined" },
+      { mode: "ask", label: "Ask", line: "You approve what the sandbox blocks" },
+      { mode: "auto", label: "Auto", line: "The agent's reviewer decides" },
+      { mode: "quiet", label: "Don't ask", line: "Blocked actions are declined" },
     ]);
   });
 
   test("no reviewer: Auto says it asks as Ask", () => {
     const { note, choices } = modeChoices({ provider: "opencode", approvals: true, autoReview: false });
     expect(note).toBeNull();
-    expect(choices[1].line).toBe("opencode has no reviewer, so Auto asks you, as Ask does");
+    expect(choices[1].line).toBe("opencode has no reviewer, so it asks");
   });
 
   test("no approvals: the control says the agent cannot ask yet", () => {

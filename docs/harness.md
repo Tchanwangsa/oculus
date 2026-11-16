@@ -1659,10 +1659,12 @@ What the student sees is decided in `app/src/lib/harness/requests.ts` and
   behind the request as any send during a run does. There is no
   decline-with-message: Rust refuses feedback.
 - **The mode control** (`PermissionModeControl`, after the model picker,
-  for an open thread only) shows the chat's mode and opens to Ask, Auto
-  and Don't ask, each with its line. Where the bridge has no reviewer
+  for an open thread only) is an icon-only button showing the chat's mode
+  (its name in the tooltip) and opens a "Permission mode" menu of Ask, Auto
+  and Don't ask, each with a one-line description. Where the bridge has no reviewer
   (`autoReview` false) Auto says it asks as Ask; where it has no
-  `approvals` the menu says the agent cannot ask yet. A pick is saved with
+  `approvals` a warning icon in the menu's header says, in its tooltip,
+  that the agent cannot ask yet. A pick is saved with
   `harnessSetPermissionMode`; Rust's refusal (a request waiting) shows at
   the top of the open menu.
 - **Auto's evidence**: a tool row whose meta has a `review` says "Reviewer
@@ -1780,6 +1782,14 @@ compile without one.
   opencode's are variants; `agy` bakes them into the slug (`parse_models`
   splits, `model_slug` rejoins). `sortReasoning` orders by
   `REASONING_LABELS`; `default_variant` asks for `high` and steps down.
+- **Layout.** Agent tabs, the models, then the chosen model's levels in a
+  column on the right, the chosen one ticked and the model's default
+  tagged.
+- **Stars.** Every model row has a star (`stores/chat/modelStars.ts`,
+  webview storage). The Starred tab, first in the strip, lists starred
+  models across agents and opens by default while the chat's model is one
+  of them; picking one on another agent switches agent, then picks it once
+  the switch lands.
 - Every bridge binds the level at session start, so a change ends the
   session and resumes its conversation in a new one. A model change does
   the same on Claude and Antigravity, which take `--model` at spawn; Codex

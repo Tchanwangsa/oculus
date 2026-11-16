@@ -13,9 +13,9 @@ export const MODE_LABEL: Record<PermissionMode, string> = {
 };
 
 const MODE_LINE: Record<PermissionMode, string> = {
-  ask: "Asks you before the agent runs anything its sandbox blocks",
-  auto: "The agent's own reviewer decides; you are not asked",
-  quiet: "Anything the sandbox blocks is declined",
+  ask: "You approve what the sandbox blocks",
+  auto: "The agent's reviewer decides",
+  quiet: "Blocked actions are declined",
 };
 
 export interface ModeChoice {
@@ -40,7 +40,7 @@ export function modeChoices(caps: Pick<Capabilities, "provider" | "approvals" | 
     label: MODE_LABEL[mode],
     line:
       mode === "auto" && caps.approvals && !caps.autoReview
-        ? `${who} has no reviewer, so Auto asks you, as Ask does`
+        ? `${who} has no reviewer, so it asks`
         : MODE_LINE[mode],
   }));
   return { note, choices };
