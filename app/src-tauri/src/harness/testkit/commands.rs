@@ -558,7 +558,12 @@ fn deleting_a_chat_twice_under_one_id_answers_the_same_and_its_session_is_heard_
 /// revision N holds is exactly what the envelopes up to N told.
 #[test]
 fn every_envelope_carries_a_revision_a_reload_can_compare() {
-    for name in ["claude-ls", "codex-ls", "opencode-v1-ls", "antigravity-ls"] {
+    for name in [
+        "claude-ls",
+        "codex-ls",
+        "opencode-v1-ls",
+        "antigravity-acp-ls",
+    ] {
         let scenario = Scenario::recorded(name);
         let mut rig = Rig::start(scenario);
         rig.open();

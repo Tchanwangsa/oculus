@@ -408,8 +408,13 @@ fn scripted(
         h.lock().unwrap().push(frame.clone());
         if let (Some(method), Some(id)) = (frame["method"].as_str(), frame.get("id")) {
             if method != "session/prompt" {
+                let mut result = reply(method);
+                if method == "initialize" && result["agentInfo"].is_null() {
+                    result["agentInfo"] =
+                        json!({ "name": "Antigravity ACP Server", "version": "1.5.9" });
+                }
                 if let Some(s) = m.lock().unwrap().upgrade() {
-                    s.rpc_reply(json!({ "id": id, "result": reply(method) }));
+                    s.rpc_reply(json!({ "id": id, "result": result }));
                 }
             }
         }
@@ -575,4 +580,29 @@ fn a_request_the_agent_makes_of_a_client_service_is_refused() {
     let frames = heard.lock().unwrap().clone();
     assert_eq!(frames[0]["id"], 9);
     assert_eq!(frames[0]["error"]["code"], -32601);
+}
+
+#[test]
+fn an_agy_older_than_the_recorded_one_is_refused_with_how_to_update() {
+    for (version, refused) in [
+        ("1.5.8", true),
+        ("1.2.9", true),
+        ("", true),
+        ("dev", true),
+        ("1.5.9", false),
+        ("1.5.10", false),
+        ("2.0.0", false),
+    ] {
+        assert_eq!(super::session::too_old(version), refused, "{version:?}");
+    }
+    let spawn = base(None, None, None);
+    let (session, heard, events) = scripted(&spawn, |method| match method {
+        "initialize" => json!({ "agentInfo": { "version": "1.5.8" } }),
+        _ => json!({ "sessionId": "n" }),
+    });
+    let refused = session.open(&spawn, "").unwrap_err();
+    assert!(refused.contains("1.5.9 or newer"), "{refused}");
+    assert!(refused.contains("Settings"), "{refused}");
+    assert_eq!(methods(&heard), ["initialize"], "no session was opened");
+    assert!(events.lock().unwrap().is_empty());
 }

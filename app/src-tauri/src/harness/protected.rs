@@ -1,10 +1,8 @@
 //! What no agent may write, whichever CLI runs it. Claude
-//! (`providers/claude/settings.rs`) and Antigravity
-//! (`providers/antigravity/rules.rs`) render these into their own rule
-//! syntax; opencode's copy is static in `templates/OPENCODE.template.json`,
-//! held to these by the test below.
-
-use std::path::{Path, PathBuf};
+//! (`providers/claude/settings.rs`) renders these into its rule syntax;
+//! Rust refuses them at every request (`requests/policy.rs`), which is
+//! Antigravity's only gate; opencode's copy is static in
+//! `templates/OPENCODE.template.json`, held to these by the test below.
 
 /// Library folders an agent reads but never writes.
 pub const LIBRARY_DIRS: [&str; 3] = ["courses", "lectures", "canvas-session"];
@@ -13,8 +11,8 @@ pub const LIBRARY_DIRS: [&str; 3] = ["courses", "lectures", "canvas-session"];
 /// and the links scanning CLIs find them through (`crate::agents`).
 pub const WORKSPACE_DIRS: [&str; 3] = ["skills", ".claude", ".agents"];
 
-/// Library-root files, by pattern; agy's rules name the files instead
-/// (`named_root_files`). Never `oculus.db*`: see `providers/claude/settings.rs`.
+/// Library-root files, by pattern. Never `oculus.db*`: see
+/// `providers/claude/settings.rs`.
 ///
 /// The sessions live in keyd's sealed vault, so the first two cover only the
 /// files an earlier version kept, until keyd imports them. The last two are
@@ -29,20 +27,6 @@ pub const ROOT_FILE_GLOBS: [&str; 6] = [
     "vault.bin*",
     ".vault.bin.*",
 ];
-
-/// The files `ROOT_FILE_GLOBS` cover that can be named, for rules that take
-/// no patterns. Their names come from keyd's `paths`, not from a copy here.
-pub fn named_root_files(library: &Path) -> Vec<PathBuf> {
-    use keyd_core::paths;
-    let vault = paths::vault(library);
-    vec![
-        paths::cookie(library),
-        paths::sso_cookie(library),
-        paths::ed_token(library),
-        paths::vault_lock(&vault),
-        vault,
-    ]
-}
 
 /// Whether the rule pattern `glob` (`*` within a path segment, `**` across
 /// segments) covers `path`: the check that no deny list reaches keyd's socket.
@@ -67,22 +51,21 @@ pub(super) fn glob_covers(glob: &str, path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
-    fn every_file_agy_names_is_covered_by_a_root_glob_and_the_vault_is_among_them() {
+    fn the_vault_and_the_temp_file_each_write_goes_through_are_covered() {
+        use keyd_core::paths;
         let lib = Path::new("/l");
-        let named = named_root_files(lib);
-        for file in &named {
-            let path = crate::library::paths::slash_path(file);
+        let vault = paths::vault(lib);
+        for file in [vault.clone(), paths::vault_lock(&vault)] {
+            let path = crate::library::paths::slash_path(&file);
             assert!(
                 ROOT_FILE_GLOBS
                     .iter()
                     .any(|g| glob_covers(&format!("/l/{g}"), &path)),
                 "no root glob covers {path}"
             );
-        }
-        for want in ["/l/vault.bin", "/l/vault.bin.lock"] {
-            assert!(named.contains(&PathBuf::from(want)), "{want}");
         }
         // The temp file a vault write goes through (`vault/store.rs`).
         assert!(ROOT_FILE_GLOBS

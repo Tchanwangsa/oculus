@@ -148,7 +148,7 @@ fn a_replaced_session_is_heard_no_more() {
 /// beside its successor.
 #[test]
 fn changing_the_reasoning_level_leaves_one_live_process() {
-    for name in ["claude-ls", "antigravity-ls"] {
+    for name in ["claude-ls", "antigravity-acp-ls"] {
         let mut scenario = Scenario::recorded(name);
         let again = scenario.fixture.expected_outbound[0].clone();
         scenario.fixture.expected_outbound.push(again);

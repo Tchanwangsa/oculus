@@ -350,18 +350,6 @@ pub enum HarnessEvent {
         /// Whether the provider's session rewound too (false: no anchor, or session gone).
         context: bool,
     },
-    /// Antigravity refused a step its rules don't allow; the turn is already
-    /// over. Carries what to allow before the next message; persisted as a row.
-    PermissionNeeded {
-        /// The provider's tool (`run_command`, `write_to_file`).
-        tool: String,
-        /// In the provider's word: `command`, `write_file`, `read_file`, `read_url`.
-        action: String,
-        /// What it was refused on: the command line, or the path.
-        target: Option<String>,
-        /// A rule that would allow it (`command(python3)`), when readable off the refusal.
-        rule: Option<String>,
-    },
     /// The provider compacted the conversation's context. A row of its own:
     /// never an answer, and its summary is never shown as the student's prose.
     Compaction {

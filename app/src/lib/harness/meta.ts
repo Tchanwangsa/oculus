@@ -106,13 +106,3 @@ export function parsePermissionMeta(item: HarnessItem): PermissionMeta {
     rule: str(m.rule),
   };
 }
-
-/** An `agy` rule taken apart; null outside the shapes `is_valid_rule` in
- *  `app/src-tauri/src/harness/providers/antigravity/rules.rs` accepts. */
-export function splitRule(
-  rule: string,
-): { action: "command" | "read_file" | "write_file" | "read_url"; value: string } | null {
-  const m = /^(command|read_file|write_file|read_url)\((.+)\)$/.exec(rule);
-  if (!m) return null;
-  return { action: m[1] as "command" | "read_file" | "write_file" | "read_url", value: m[2] };
-}

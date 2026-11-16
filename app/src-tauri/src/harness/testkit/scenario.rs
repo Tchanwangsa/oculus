@@ -16,7 +16,6 @@ pub(super) enum Mutation {
     PartialOnly,
     CodexPhase,
     UnknownReasoning,
-    AgyRefusal,
     IdenticalDistinct,
     RepeatedTerminal,
     Compaction,
@@ -117,15 +116,10 @@ impl Scenario {
                                 && !v["properties"]["part"]["time"]["end"].is_null()
                         })
                         .unwrap(),
-                    crate::harness::Provider::Antigravity => self
-                        .frames
-                        .iter()
-                        .rposition(|v| {
-                            v["event"] == "step_update"
-                                && v["step_update"]["state"] == "DONE"
-                                && v["step_update"]["step_type"] == "agent_response"
-                        })
-                        .unwrap(),
+                    // ACP has no snapshots: its reply is what closes the turn.
+                    crate::harness::Provider::Antigravity => {
+                        self.frames.iter().rposition(acp_reply).unwrap()
+                    }
                 };
                 self.frames.insert(index + 1, self.frames[index].clone());
             }
@@ -190,15 +184,6 @@ impl Scenario {
                     !(v["type"] == "message.part.updated"
                         && v["properties"]["part"]["type"] == "reasoning")
                 });
-            }
-            Mutation::AgyRefusal => {
-                let result = self
-                    .frames
-                    .iter_mut()
-                    .find(|v| v["event"] == "result")
-                    .unwrap();
-                result["result"]["denied_actions"] =
-                    serde_json::json!([{"action":"write_file", "display_name":"WriteFile"}]);
             }
             Mutation::IdenticalDistinct => {
                 let index = last.unwrap();

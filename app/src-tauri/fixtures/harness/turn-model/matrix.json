@@ -152,17 +152,6 @@
     "expected_failures": []
   },
   {
-    "id": "antigravity-ls",
-    "fixture": "antigravity-ls",
-    "mutation": "none",
-    "checks": [
-      "one_answer",
-      "live_reload",
-      "one_settlement"
-    ],
-    "expected_failures": []
-  },
-  {
     "id": "claude-ls-repeat-snapshot",
     "fixture": "claude-ls",
     "mutation": "repeat_snapshot",
@@ -185,16 +174,6 @@
   {
     "id": "opencode-v1-text-repeat-snapshot",
     "fixture": "opencode-v1-text",
-    "mutation": "repeat_snapshot",
-    "checks": [
-      "one_message",
-      "one_settlement"
-    ],
-    "expected_failures": []
-  },
-  {
-    "id": "antigravity-ls-repeat-snapshot",
-    "fixture": "antigravity-ls",
     "mutation": "repeat_snapshot",
     "checks": [
       "one_message",
@@ -296,15 +275,6 @@
     "mutation": "unknown_reasoning",
     "checks": [
       "no_reasoning_as_answer"
-    ],
-    "expected_failures": []
-  },
-  {
-    "id": "agy-refusal-success-mutation",
-    "fixture": "antigravity-ls",
-    "mutation": "agy_refusal",
-    "checks": [
-      "refusal_visible"
     ],
     "expected_failures": []
   },

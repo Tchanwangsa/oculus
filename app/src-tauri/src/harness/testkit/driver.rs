@@ -42,7 +42,12 @@ fn unsent(name: &str) -> Scenario {
 /// launch, held, and nothing starts it.
 #[test]
 fn a_crash_before_the_start_step_keeps_the_message_and_starts_nothing_at_launch() {
-    for name in ["claude-ls", "codex-ls", "opencode-v1-ls", "antigravity-ls"] {
+    for name in [
+        "claude-ls",
+        "codex-ls",
+        "opencode-v1-ls",
+        "antigravity-acp-ls",
+    ] {
         let mut rig = Rig::start(unsent(name));
         rig.hold_effects();
         let sent = rig.send("typed").unwrap();

@@ -25,7 +25,6 @@ export const Item = memo(function Item({
   actions,
   asked,
   onSignIn,
-  latest,
   role,
   folded,
   stream,
@@ -38,8 +37,6 @@ export const Item = memo(function Item({
   asked?: HarnessItem;
   /** Opens the sign-in dialog; a `setState`, so stable. */
   onSignIn?: (provider: Provider) => void;
-  /** For a `permission` row: the latest refusal carries the allow button. */
-  latest?: boolean;
   /** For a reply: how its run settled it (`buildRows`). */
   role?: ReplyRole;
   /** Inside a run's fold: a reply is work, drawn without its widget fences. */
@@ -71,7 +68,7 @@ export const Item = memo(function Item({
     case "compaction":
       return <Compacted />;
     case "permission":
-      return <PermissionCard item={item} actionable={!!latest} onFollowUp={actions?.followUp} />;
+      return <PermissionCard item={item} />;
     case "request":
       return <RequestRow item={item} />;
   }

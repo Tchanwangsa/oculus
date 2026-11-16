@@ -39,10 +39,6 @@ pub struct SendOptions {
     /// That video, resolved from the thread's link.
     #[serde(skip)]
     pub studio_brief: Option<StudioBrief>,
-    /// Antigravity only: the student's approved rules, for the spawn to write
-    /// (`antigravity_rules::install`). `None` keeps the last ones written.
-    #[serde(skip)]
-    pub antigravity_rules: Option<Vec<String>>,
     /// How the chat asks (`harness_threads.permission_mode`), read from its
     /// row at each start, so the saved mode is what runs.
     #[serde(skip)]
@@ -218,14 +214,12 @@ mod tests {
         let mut o = opts(sent);
         o.scope = Some("COMP1".into());
         o.continuation = Some("12.0".into());
-        o.antigravity_rules = Some(vec!["command(ls)".into()]);
         o.permission_mode = crate::harness::requests::PermissionMode::Auto;
         let stored = serde_json::to_value(&o).unwrap();
         for resolved in [
             "scope",
             "lecture",
             "studioBrief",
-            "antigravityRules",
             "permissionMode",
             "continuation",
         ] {

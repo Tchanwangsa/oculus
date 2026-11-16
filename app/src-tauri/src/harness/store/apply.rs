@@ -367,32 +367,6 @@ async fn apply_rows(
                 .await
                 .map(Stored::row)
         }
-        // Its own row, not an error: the turn ended normally, and a reload must
-        // offer the rule again. `content` is the refused target.
-        HarnessEvent::PermissionNeeded {
-            tool,
-            action,
-            target,
-            rule,
-        } => {
-            let meta = serde_json::json!({
-                "tool": tool,
-                "action": action,
-                "target": target,
-                "rule": rule,
-            });
-            insert_item(
-                conn,
-                thread_id,
-                "permission",
-                None,
-                target.as_deref(),
-                Some(meta.to_string()),
-                owner,
-            )
-            .await
-            .map(Stored::row)
-        }
         HarnessEvent::Usage {
             input_tokens,
             output_tokens,

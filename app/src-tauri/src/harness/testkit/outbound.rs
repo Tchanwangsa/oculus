@@ -132,15 +132,6 @@ impl Outbound {
             .find_map(|e| e.frame.get("method").and(e.frame["id"].as_i64()))
     }
 
-    /// The next expected frame is JSON-RPC (`agy acp`), not print mode's.
-    pub(super) fn speaks_jsonrpc(&self) -> bool {
-        let state = self.state.lock().unwrap();
-        state
-            .expected
-            .front()
-            .is_some_and(|e| e.frame.get("jsonrpc").is_some())
-    }
-
     pub(super) fn wire(&self) -> Wire {
         let this = self.clone();
         Arc::new(move |frame| this.try_exchange(frame).map(|_| ()))

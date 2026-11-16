@@ -15,8 +15,8 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Messages that wait their turn, as queued runs | `app/src-tauri/src/harness/store/queue.rs` |
 | Tauri commands (setup, models, turns, suggestions) | `app/src-tauri/src/harness/app/` |
 | The event enum, tool classification (`classify`) and answer selection | `app/src-tauri/src/harness/event/mod.rs`, `app/src-tauri/src/harness/event/classify.rs`, `app/src-tauri/src/harness/event/answer.rs` |
-| Bridges: Claude (`claude -p`), Codex (`app-server`), opencode (`serve`), Antigravity (`agy --print=`, or `agy acp` in a build with the `agy-acp` feature) | `app/src-tauri/src/harness/providers/claude/`, `app/src-tauri/src/harness/providers/codex/`, `app/src-tauri/src/harness/providers/opencode/`, `app/src-tauri/src/harness/providers/antigravity/` (ACP: `acp/`) |
-| Paths no agent may write; opencode's ruleset; agy's rules | `app/src-tauri/src/harness/protected.rs`, `app/src-tauri/templates/OPENCODE.template.json`, `app/src-tauri/src/harness/providers/antigravity/rules.rs` |
+| Bridges: Claude (`claude -p`), Codex (`app-server`), opencode (`serve`), Antigravity (`agy acp`) | `app/src-tauri/src/harness/providers/claude/`, `app/src-tauri/src/harness/providers/codex/`, `app/src-tauri/src/harness/providers/opencode/`, `app/src-tauri/src/harness/providers/antigravity/` (`acp/`) |
+| Paths no agent may write; opencode's ruleset; what Rust answers agy | `app/src-tauri/src/harness/protected.rs`, `app/src-tauri/templates/OPENCODE.template.json`, `app/src-tauri/src/harness/providers/antigravity/acp/policy.rs` |
 | Finding, installing, updating and signing in the CLIs | `app/src-tauri/src/harness/cli/discover/`, `app/src-tauri/src/harness/cli/install/`, `app/src-tauri/src/harness/cli/update/`, `app/src-tauri/src/harness/cli/signin/` |
 | …their frontend | `app/src/hooks/agents/useBridgeHealth.ts`, `app/src/hooks/agents/useSignInStatus.ts`, `app/src/components/settings/agents/InstallAgentDialog.tsx`, `app/src/components/settings/agents/UpdateAgents.tsx`, `app/src/components/harness/SignInDialog.tsx`, `app/src/pages/settings/integrations/AgentsPage.tsx` |
 | Hidden native processes, Windows job ownership and npm shim resolution | `app/src-tauri/src/runtime/platform/` |
@@ -96,8 +96,7 @@ persisted the same way. `classify` in `event/classify.rs` is the one tool table.
 | Claude Code | one `claude -p --input-format stream-json` per thread | `--resume` |
 | Codex | one `codex app-server` per app, a `threadId` per thread | `thread/resume` |
 | opencode | one `opencode serve` per app, a v1 HTTP session per thread, one SSE stream routed by `sessionID` | session id |
-| Antigravity | one `agy --print=` per thread | `--conversation` |
-| Antigravity, `agy-acp` builds | one `agy acp` per thread, JSON-RPC over stdio ([below](#antigravity-asks-over-acp)) | `session/load` with the session id (print mode's conversation id loads too) |
+| Antigravity | one `agy acp` per thread, JSON-RPC over stdio ([below](#antigravity-asks-over-acp)) | `session/load` with the session id (a print-mode chat's conversation id loads too) |
 
 Claude chat sessions and tool-enabled headless `run_once` jobs (chapters) request
 `--thinking adaptive --thinking-display summarized` and inline
@@ -134,8 +133,7 @@ display policy: no thinking flags or summary setting, with
   the chats its last session left open, so nothing was started: …"); the
   next command runs it again. A first launch, with no database file yet,
   has nothing to repair.
-- **Settings storage is shared.** Job selections, rate limits and Antigravity
-  approvals use `db::store::setting` / `db::store::set_setting`; each caller owns its
+- **Settings storage is shared.** Job selections and rate limits use `db::store::setting` / `db::store::set_setting`; each caller owns its
   JSON shape and fallback policy.
 - **Account events have no thread.** Codex's `account/rateLimits/updated` is
   dispatched before the route lookup (`translate_account`) on thread 0, which
@@ -171,7 +169,9 @@ protected paths are one list in `protected.rs`: the library folders, the root fi
   a redirect. Rule shapes: a leading `"*": "deny"` beats every later allow;
   the *last* rule decides whether the tool is offered at all, so an allow comes
   last; a path inside the session directory is written relative to it.
-- **Antigravity**: [below](#antigravity-keeps-its-rules-in-the-students-global-settings).
+- **Antigravity**: `agy acp` asks before every write and command, and Rust
+  answers each request first ([Antigravity asks over ACP](#antigravity-asks-over-acp)).
+  Nothing is written to the student's own agy settings.
 
 **The database is the first hole, three files wide.** The CLI reads the board
 and permits Studio metadata writes ([cli.md](./cli.md)), and a sandbox that opens
@@ -190,7 +190,7 @@ only paths that exist, the database's absent sidecars included);
 `"{{LIBRARY}}/studio/**": "allow"` in opencode's template, after every
 library deny, since opencode's `*` crosses `/` and the last matching rule
 wins, so `{{LIBRARY}}/*.json` alone would refuse a video's `video.json`;
-`write_file(<data>/studio)` for agy. Each bridge's tests pin the grant and
+Rust's allow for agy's writes under it (`acp/policy.rs`). Each bridge's tests pin the grant and
 that no deny covers a video's files. A library file is meant to change only
 through `oculus studio components|themes promote`, which keeps the old text
 in `.history/`; the sandbox cannot tell the CLI from a direct edit, so that
@@ -235,7 +235,7 @@ No deny list covers it. What each CLI needs was measured on the CLI itself:
 | --- | --- | --- |
 | Claude | `sandbox.network.allowUnixSockets` naming that one socket, never `allowAllUnixSockets`; without it the connect fails with EPERM | `settings_json`, `claude.rs` |
 | Codex | the `workspace-write` policy's network access, since Codex has no per-socket grant; without it the connect is EPERM | `network_access` in thread config and `networkAccess` on every turn's `sandboxPolicy`, `codex.rs` |
-| Antigravity | nothing beyond `--sandbox`; its rules deny only writes to listed paths, and `command(oculus)` is allowed | `launch_args`, `antigravity_rules.rs` |
+| Antigravity | nothing beyond `--sandbox`; Rust allows a plain `oculus …` unasked | `launch_args`, `acp/policy.rs` |
 | opencode | nothing: it has no sandbox, and `bash` allows `oculus *` | `OPENCODE.template.json` |
 
 Each bridge's tests pin its row, and that nothing it denies covers the socket.
@@ -255,41 +255,16 @@ makes no request.
 | Claude | `sandbox.network.allowedDomains: ["<host>:<port>"]` (omitted with no row; the CLI matches the port too); none on a one-off turn | A loopback server (`localhost`, `127.0.0.1`, `::1`) needs no entry on macOS: with `allowLocalBinding` a sandboxed command may connect to any localhost port, and the CLI sets `NO_PROXY` so loopback is dialled directly (Claude Code's sandboxing docs, "A command fails to reach a server on localhost"). Any other host is reachable only through the sandbox's filtering proxy (`HTTP(S)_PROXY`/`ALL_PROXY`), where the entry admits it; `oculus`'s TTS client (ureq 2) reads no proxy variable and dials directly, so a non-loopback server is not reached from a Claude thread |
 | Codex | none needed: the `workspace-write` policy's `networkAccess` is already on (for keyd's socket) | Any host |
 | opencode | none: no sandbox | Any host |
-| Antigravity | `read_url(<host>)` in its rules, which its docs say joins the terminal sandbox's outbound allowlist | Not measured: its docs say sandboxed commands have no network by default and that `read_url` domains are added to the allowlist, and say nothing about localhost |
-
-### Antigravity keeps its rules in the student's global settings
-
-`--sandbox` bounds shell commands only, and `--dangerously-skip-permissions`
-lets `write_to_file` write outside the library, so that flag is never passed.
-`agy` 1.2.9 reads rules only from `~/.gemini/antigravity-cli/settings.json`,
-so `providers/antigravity/rules.rs` merges Oculus's block there before every spawn (or
-fails the spawn): writes on the three database files and `studio/`, the
-`read_url` grant for the TTS server's host, the `oculus` binary's
-real directory (the sandbox can't read through the `~/.local/bin` symlink),
-read-only commands no flag turns into a write (`find`/`rg` are out — the
-matcher is a word prefix), `sqlite3 <library>/oculus.db` denied per path
-spelling (not `command(sqlite3)`, which bans it everywhere), and the student's
-approvals. The entries are global — they apply in the student's own `agy` —
-and `antigravity-rules.json` at the library root records which are Oculus's.
-Generated file rules and suggested folder grants use `/` separators on every
-platform; a suggested grant requires a fully absolute native path.
-
-**A refusal ends the turn as `completed`** (an `ERROR` step reading
-`permission check failed…`, then a `SUCCESS` result with `denied_actions`).
-The bridge emits `PermissionNeeded` (`PermissionCard.tsx`);
-`harness_antigravity_allow` stores the rule and drops the process, since a live
-`agy` never re-reads rules or `--model`. A deny-rule refusal shares the prefix
-but the agent carries on. `agy` has no control channel (interrupt signals the
-child), no rewind and no `--append-system-prompt`; its tool parameters are
-PascalCase (`CommandLine`, `AbsolutePath`).
+| Antigravity | none: Oculus writes no rules | Not measured: agy's docs say sandboxed commands have no network by default |
 
 ## The brief is appended, except on opencode
 
-`HARNESS.template.md` goes in as `--append-system-prompt` (Claude) or
-`developerInstructions` (Codex). opencode's agent `prompt` *replaces* the
+`HARNESS.template.md` goes in as `--append-system-prompt` (Claude),
+`developerInstructions` (Codex) or `_meta.antigravity.systemPrompt.append` on
+`agy acp`'s `session/new` and `session/load`. opencode's agent `prompt` *replaces* the
 system prompt, so the brief is the `oculus` agent's prompt in
 `agents/opencode.json`, rewritten on every server start. Where there is no
-per-call append (opencode, `agy`), the per-thread half rides the first user
+per-call append (opencode), the per-thread half rides the first user
 message.
 
 **Each instruction has one owner.** `AGENTS.template.md` holds library use,
@@ -822,14 +797,13 @@ maths-heavy replies mounts a page at a time.
 Naming, the editor's suggestions, the lecture-end job and a widget's `ask`
 share `Harness::one_off`: a session outside any thread, no rows, no raw log,
 closed (an opencode session deleted) after its turn. Its brief is Claude's
-`--append-system-prompt`, Codex's `developerInstructions` or the head of
-`agy`'s first message; opencode takes it as a hidden agent's prompt
+`--append-system-prompt`, Codex's `developerInstructions` or `agy`'s
+`systemPrompt.append`; opencode takes it as a hidden agent's prompt
 (`oculus-namer`, `oculus-writer`, `oculus-lecture-end`, `oculus-widget` and
 the others in `agents/opencode.json`). Claude runs with `--tools ""`, no skills, no MCP and
 no persisted session, and Codex's thread is `ephemeral`; the opencode agents
 end on a `"*": "deny"`. Codex and `agy` cannot drop their tools, so the brief
-forbids them. Over ACP (`agy-acp` builds) the brief is the session's
-`systemPrompt.append`, and each permission request is answered by Rust's
+forbids them, and each of `agy`'s permission requests is answered by Rust's
 policy alone: what it does not allow is refused, never asked
 ([Antigravity asks over ACP](#antigravity-asks-over-acp)).
 
@@ -1297,7 +1271,7 @@ comes back under an `itemId` it already has.
 | Claude | the `assistant` line's `uuid` / block index; none without a uuid | unknown | an empty narration block is a gap (`empty_narration`) |
 | Codex | the item id | `commentary` / `final_answer` from `agentMessage.phase`, else unknown | streamed text with no `item/completed` by `turn/completed`; a gap unless the turn was interrupted |
 | opencode | the part id | unknown | text with no closing snapshot by the turn's close; deltas for a part no snapshot classified are never shown as text and become an `unknown_protocol` gap |
-| Antigravity | `step-<index>` | unknown | a response step with no `DONE`; a repeated update after `DONE` is ignored |
+| Antigravity | `msg-<n>` / `thought-<n>`, named by the bridge (ACP chunks carry no id) | unknown | a block the process's end cut off before the prompt's reply; a gap unless the turn was stopped |
 
 `DeliveryGap` rows go in `harness_delivery_gaps` for the open run, state
 `unresolved`; nothing resends. Codex `plan` items are a `Plan` tool row
@@ -1346,7 +1320,7 @@ dropped. Answer text that streams but is not yet a row is kept per run in
 `harness_stream_drafts`, for a restart and for a reload
 ([One command path](#one-command-path)). `AssistantDelta` carries `item`, the provider's id
 for the message the text belongs to (Codex's item id, opencode's part id,
-Antigravity's `step-<index>`; none on Claude, whose stream names no block
+Antigravity's `msg-<n>`; none on Claude, whose stream names no block
 its committed message is known by; never serialized). `app/src-tauri/src/harness/app/drafts.rs`
 gathers the deltas by that id and the consumer writes a run's whole
 uncommitted text at most once per 50 ms, not once per delta: every chat's
@@ -1375,7 +1349,7 @@ kept."
 
 Each bridge's EOF path closes an open turn as failed through the same code in
 the app and the replay (`ClaudeSession::closed`, `CodexServer::closed`,
-`OpencodeServer::on_exit`, `AntigravitySession::closed`), keeping streamed
+`OpencodeServer::on_exit`, `AcpSession::closed`), keeping streamed
 text as partial with a gap.
 
 Envelopes carry a `sequence` that rises with each one (seeded from the clock
@@ -1700,9 +1674,9 @@ What the student sees is decided in `app/src/lib/harness/requests.ts` and
   fetch a web page", "to search the web", or "to use github". A subagent's
   request names it by its type, "Claude Code's subagent wire-probe …". Only
   Approve and Decline: nothing under More.
-- Antigravity's print-mode refusal is still its own `permission` row
-  (`PermissionCard`); it does not go through requests. Over ACP its
-  requests are requests like the others' ([below](#antigravity-asks-over-acp)).
+- A `permission` row is a refusal from Antigravity's old print mode, kept
+  as history (`PermissionCard`, with nothing to allow); Antigravity asks
+  through requests now ([below](#antigravity-asks-over-acp)).
 
 ### Codex asks over its callbacks
 
@@ -1839,10 +1813,11 @@ a change restarts the session at the next send.
 
 ### Antigravity asks over ACP
 
-A build with the `agy-acp` cargo feature runs Antigravity as `agy acp
---sandbox --add-dir <library>`, one process per chat, speaking the Agent
-Client Protocol (JSON-RPC 2.0 on stdio); without it the print bridge above
-runs. Recorded on `agy` 1.5.9 (`fixtures/harness/antigravity-acp-*`, from
+Antigravity runs as `agy acp --sandbox --add-dir <library>`, one process
+per chat, speaking the Agent Client Protocol (JSON-RPC 2.0 on stdio).
+`initialize` must name `agy` 1.5.9 or newer (`acp::MIN_VERSION`), the one
+the bridge was recorded against; an older one fails the spawn with how to
+update it. Recorded on `agy` 1.5.9 (`fixtures/harness/antigravity-acp-*`, from
 the stage 5 probe; replayed by `testkit/agy_requests.rs`).
 `providers/antigravity/acp/`: `client.rs` (requests and replies by id),
 `session.rs`, `updates.rs` (the timeline), `policy.rs` and `route.rs`.
@@ -1980,8 +1955,9 @@ compile without one.
   the switch lands.
 - Every bridge binds the level at session start, so a change ends the
   session and resumes its conversation in a new one. A model change does
-  the same on Claude and Antigravity, which take `--model` at spawn; Codex
-  and opencode take the model with each turn
+  the same on Claude, which takes `--model` at spawn; Codex and opencode
+  take the model with each turn, and Antigravity with `session/set_model`
+  before it
   ([Changing provider mid-chat](#changing-provider-mid-chat)).
 
 ## Changing provider mid-chat
@@ -1991,7 +1967,7 @@ A thread's `provider`, `model` and `effort` (`harness_threads`) are its
 with ([Each send is a run](#each-send-is-a-run)), so changing the selection
 changes nothing already written.
 
-Claude Code, Codex and print-mode Antigravity accept a context handoff
+Claude Code, Codex and Antigravity accept a context handoff
 (`provider_handoff`); opencode refuses it. The direct CLI recordings
 `handoff-{claude,codex,antigravity}-{full,delta}.ndjson` under
 `app/src-tauri/fixtures/harness/` show recall of the supplied facts without
@@ -2572,8 +2548,9 @@ instructions are in `<SKILL.md>`.", which carries the path so a bridge that
 does not index a Personal skill can still read it; a bridge's own form
 replaces its `invoke_skill` body once a recorded turn shows that bridge acting
 on it. Nothing picked leaves the prompt untouched, so a typed `/word` reaches
-every bridge as text (Claude one-offs and every `agy` launch also run with
-`--disable-slash-commands`). The brief (`HARNESS.template.md`) tells the agent
+every bridge as text (Claude one-offs also run with
+`--disable-slash-commands`; `agy acp` has no such flag, so a message that
+starts with one of its own commands, such as `/compact`, runs it). The brief (`HARNESS.template.md`) tells the agent
 what the line means.
 
 ## The empty box, earlier messages and the stash
@@ -2785,7 +2762,7 @@ lecture, the link is read back on every send and before any spawn
 section after the subject and lecture ones: the absolute folder, format,
 theme, subject library and length target read from video.json and the link,
 and the order of work (direct it with the skill, draft, ask before the
-final). It is the per-thread half the opencode and `agy` bridges send ahead
+final). It is the per-thread half the opencode bridge sends ahead
 of the first message.
 
 ## Proposal context is read at dispatch, and confirmation lives in Rust
@@ -2908,7 +2885,7 @@ Live Task/TaskList, Deadline/Upcoming, Lecture, StudioVideo, CheatNote and Revie
 
 ## Gotchas
 
-- Never pass `agy` `--dangerously-skip-permissions` — its file tools then write outside the library.
+- Never pass `agy` `--dangerously-skip-permissions`: it answers every permission request before Rust sees one, and Rust's answer is Antigravity's only containment.
 - Never put an `Edit` deny on `oculus.db*` in Claude's settings — it cancels the write grant and every board write fails readonly.
 - Never grant the library folder instead of the three database files — it exposes keyd's vault.
 - Never let Settings make a billed call, or start opencode anywhere but its own page or the onboarding opencode card's Connect button — see [No model is ever probed](#no-model-is-ever-probed).

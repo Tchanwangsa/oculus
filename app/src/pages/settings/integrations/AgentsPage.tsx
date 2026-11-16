@@ -1,12 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { ArrowCircleUp, ArrowsClockwise, CircleNotch } from "@phosphor-icons/react";
-import {
-  harnessAntigravityRevoke,
-  harnessAntigravityRules,
-  splitRule,
-  providerAvailability,
-  type Provider,
-} from "@/lib/harness";
+import { providerAvailability, type Provider } from "@/lib/harness";
 import { useBridgeHealth } from "@/hooks/agents/useBridgeHealth";
 import { signInAccount, signInState, useSignInStatus } from "@/hooks/agents/useSignInStatus";
 import { SignInDialog, useSignIn } from "@/components/harness/SignInDialog";
@@ -231,93 +225,10 @@ function CliAgentsSection() {
   );
 }
 
-/** An approval in the chat allow button's words, not `agy`'s syntax. */
-function ruleWords(rule: string): string {
-  const r = splitRule(rule);
-  if (!r) return rule;
-  switch (r.action) {
-    case "command":
-      return `Run ${r.value}`;
-    case "write_file":
-      return `Write in ${r.value}`;
-    case "read_file":
-      return `Read ${r.value}`;
-    case "read_url":
-      return `Read pages on ${r.value}`;
-  }
-}
-
-/**
- * What the student has let Antigravity do (from `PermissionCard`'s allow
- * button), with a way to revoke. Hidden until there is something to list;
- * once shown it stays for the visit so removing the last one doesn't jump the
- * page.
- */
-function AntigravityApprovalsSection() {
-  const [rules, setRules] = useState<string[] | null>(null);
-  const [shown, setShown] = useState(false);
-  const [removing, setRemoving] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    harnessAntigravityRules()
-      .then((r) => {
-        setRules(r);
-        if (r.length) setShown(true);
-      })
-      .catch(() => setRules([]));
-  }, []);
-
-  const revoke = async (rule: string) => {
-    setRemoving(rule);
-    setError(null);
-    try {
-      setRules(await harnessAntigravityRevoke(rule));
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setRemoving(null);
-    }
-  };
-
-  if (!shown || !rules) return null;
-  return (
-    <Section
-      title="Antigravity approvals"
-      description="Saved permissions, shared with agy in your terminal."
-    >
-      <div className="divide-y divide-border-subtle">
-        {rules.map((rule) => (
-          <div key={rule} className="settings-row flex items-center justify-between gap-4 py-2.5">
-            <div className="min-w-0 truncate text-[13px] text-foreground" title={rule}>
-              {ruleWords(rule)}
-            </div>
-            <Button
-              variant="outline"
-              size="xs"
-              className="shrink-0"
-              disabled={removing !== null}
-              onClick={() => void revoke(rule)}
-            >
-              {removing === rule && <CircleNotch size={12} className="animate-spin" />}
-              Remove
-            </Button>
-          </div>
-        ))}
-        {rules.length === 0 && (
-          <div className="py-2.5 text-xs text-muted-foreground">No approvals.</div>
-        )}
-      </div>
-      {error && <p className="mt-2 break-words text-xs text-destructive">{error}</p>}
-    </Section>
-  );
-}
-
 export default function SettingsAgentsPage() {
   return (
     <div className="flex flex-col gap-8">
       <CliAgentsSection />
-      <AntigravityApprovalsSection />
     </div>
   );
 }

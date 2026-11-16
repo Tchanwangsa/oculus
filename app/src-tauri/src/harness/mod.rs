@@ -37,7 +37,6 @@ pub use manager::{
     OneSink, OwnTurns, RawLog, Release, RewindTo, SendError, SendOptions, Sinks, StudioBrief,
     StudioSend,
 };
-pub use providers::antigravity::rules as antigravity_rules;
 pub use providers::{antigravity, claude, codex, opencode};
 
 use std::sync::Arc;

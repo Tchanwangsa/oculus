@@ -92,12 +92,6 @@ export const Timeline = memo(function Timeline({
   // "Waiting for approval" for both.
   const folding = (last?.kind === "work" && last.state === "running") ||
     (waitingRow != null && rows.some((r) => r.kind === "work" && r.state === "running"));
-  // Only the newest refusal is still a question; the ones above it are what
-  // happened. Allowing is idempotent, so this is tidiness, not safety.
-  const latestPermission = useMemo(() => {
-    for (let i = items.length - 1; i >= 0; i--) if (items[i].kind === "permission") return items[i].id;
-    return undefined;
-  }, [items]);
   // Every view of a thread (a Chat tab, the lecture dock) draws it here.
   useThreadViewed(threadId);
   const { start, rootRef, sentinelRef } = useRowWindow(rows, threadId, waitingRow);
@@ -136,7 +130,6 @@ export const Timeline = memo(function Timeline({
                 actions={questions}
                 asked={r.asked}
                 onSignIn={setSignIn}
-                latest={r.item.id === latestPermission}
                 role={r.role}
               />
             </RetainedRow>

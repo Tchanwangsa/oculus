@@ -72,7 +72,7 @@ pub(in crate::harness) fn bridge(
     let session = session(outbound, sink, native_session, root, false);
     let (reading, closing, root) = (session.clone(), session.clone(), root.to_path_buf());
     Bridge {
-        handle: Handle::AntigravityAcp(session),
+        handle: Handle::Antigravity(session),
         inbound: Box::new(move |frame| reading.inbound(&place(frame, &root))),
         eof: Box::new(move || closing.closed()),
     }

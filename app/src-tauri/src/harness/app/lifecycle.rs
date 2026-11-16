@@ -42,7 +42,6 @@ pub fn init(app: &AppHandle) -> HarnessState {
     HarnessState {
         harness,
         bus: tx,
-        own_turns,
         startup: Arc::default(),
     }
 }

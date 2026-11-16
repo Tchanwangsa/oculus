@@ -116,21 +116,6 @@ impl AgentPrinter {
                 end_line(&mut mid, &mut out);
                 let _ = writeln!(out, "{} {message}", paint("error:", RED));
             }
-            // Antigravity refused; the turn ends here.
-            HarnessEvent::PermissionNeeded {
-                action,
-                target,
-                rule,
-                ..
-            } => {
-                end_line(&mut mid, &mut out);
-                let what = target.as_deref().unwrap_or(action.as_str());
-                let hint = rule
-                    .as_deref()
-                    .map(|r| format!(" — allow {r}"))
-                    .unwrap_or_default();
-                let _ = writeln!(out, "{} {what}{hint}", paint("refused:", RED));
-            }
             HarnessEvent::UnpromptedTurn { after } => {
                 end_line(&mut mid, &mut out);
                 let why = if after.is_empty() {

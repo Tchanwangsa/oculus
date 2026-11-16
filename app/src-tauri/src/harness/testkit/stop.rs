@@ -259,7 +259,12 @@ fn stop_for_a_run_that_just_finished_touches_nothing() {
 /// call; the run ends interrupted with no provider write at all.
 #[test]
 fn stop_during_a_slow_start_cancels_before_the_provider_is_called() {
-    for name in ["claude-ls", "codex-ls", "opencode-v1-ls", "antigravity-ls"] {
+    for name in [
+        "claude-ls",
+        "codex-ls",
+        "opencode-v1-ls",
+        "antigravity-acp-ls",
+    ] {
         let mut scenario = Scenario::recorded(name);
         scenario.fixture.expected_outbound.clear();
         let mut rig = Rig::start(scenario);

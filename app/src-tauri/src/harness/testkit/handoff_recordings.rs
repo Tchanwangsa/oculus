@@ -59,12 +59,15 @@ fn export_the_production_handoff_prompts() {
     );
     for target in [Provider::Claude, Provider::Codex, Provider::Antigravity] {
         for delta in [false, true] {
-            let mut scenario = Scenario::recorded(&format!("{}-ls", target.as_str()));
+            let mut scenario = Scenario::recorded(&plain(target));
             if delta {
                 scenario.fixture.expected_outbound[0].any_prompt = true;
                 let mut next = scenario.fixture.expected_outbound[0].clone();
-                if target == Provider::Codex {
-                    next.frame["id"] = 2.into();
+                match target {
+                    Provider::Codex => next.frame["id"] = 2.into(),
+                    // Its prompt follows the recorded one's id.
+                    Provider::Antigravity => next.frame["id"] = 6.into(),
+                    _ => {}
                 }
                 scenario.fixture.expected_outbound.push(next);
             } else {
@@ -79,7 +82,7 @@ fn export_the_production_handoff_prompts() {
                 rig.drain();
             }
             seed(&rig, target, delta);
-            let recording = rig.recording(&format!("{}-ls", target.as_str()));
+            let recording = rig.recording(&plain(target));
             if !delta {
                 rig.session_of(&recording);
             }
@@ -106,7 +109,17 @@ fn export_the_production_handoff_prompts() {
 }
 
 fn terminal(frame: &serde_json::Value) -> bool {
-    frame["type"] == "result" || frame["event"] == "result" || frame["method"] == "turn/completed"
+    frame["type"] == "result"
+        || frame["method"] == "turn/completed"
+        || (frame.get("method").is_none() && frame["result"]["stopReason"].is_string())
+}
+
+/// The plain one-turn recording of `provider`, which a seeded chat starts from.
+fn plain(provider: Provider) -> String {
+    match provider {
+        Provider::Antigravity => "antigravity-acp-ls".into(),
+        other => format!("{}-ls", other.as_str()),
+    }
 }
 
 fn answer(rig: &Rig, run: i64) -> String {

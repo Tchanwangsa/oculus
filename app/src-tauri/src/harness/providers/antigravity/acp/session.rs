@@ -71,6 +71,21 @@ pub struct AcpSession {
     pub(super) me: Weak<AcpSession>,
 }
 
+/// The oldest `agy` this bridge was recorded against (stage 5's probe):
+/// an older one may not ask before writes, or load a print-mode chat.
+pub const MIN_VERSION: &str = "1.5.9";
+
+/// Whether `version` (`1.5.9`) is older than [`MIN_VERSION`]. One that does
+/// not read as numbers is too old: nothing says what it speaks.
+pub(super) fn too_old(version: &str) -> bool {
+    let parts =
+        |v: &str| -> Option<Vec<u64>> { v.trim().split('.').map(|p| p.parse().ok()).collect() };
+    match (parts(version), parts(MIN_VERSION)) {
+        (Some(have), Some(need)) => have < need,
+        _ => true,
+    }
+}
+
 /// `agy`'s argv after the binary. `--sandbox` bounds its shell commands
 /// (and lets `oculus` reach keyd's socket); never
 /// `--dangerously-skip-permissions`, which would answer every request
@@ -147,7 +162,7 @@ impl AcpSession {
     /// settings. No client file or terminal service is offered (the agent's
     /// own tools do the work, and ask first), and no elicitation yet.
     pub(super) fn open(&self, base: &ThreadSpawn, brief: &str) -> Result<(), String> {
-        self.rpc.request(
+        let init = self.rpc.request(
             "initialize",
             json!({
                 "protocolVersion": 1,
@@ -158,6 +173,17 @@ impl AcpSession {
                 "clientInfo": { "name": "oculus", "title": "Oculus", "version": env!("CARGO_PKG_VERSION") },
             }),
         )?;
+        let version = init["agentInfo"]["version"].as_str().unwrap_or("");
+        if too_old(version) {
+            let have = match version {
+                "" => "an unknown version".to_string(),
+                v => v.to_string(),
+            };
+            return Err(format!(
+                "Antigravity {MIN_VERSION} or newer is needed, and this is {have}. \
+                 Update it in Settings → Agents."
+            ));
+        }
         let cwd = base.cwd.display().to_string();
         let mut params = json!({ "cwd": cwd, "mcpServers": [] });
         if !brief.trim().is_empty() {

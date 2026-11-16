@@ -47,14 +47,8 @@ pub struct Capabilities {
     pub mode_switch_in_session: bool,
 }
 
-/// Antigravity runs over ACP (`agy acp`) in this build: its requests come
-/// to Rust, a model change is told in the session, and Rust reads the
-/// chat's mode as each request arrives.
-const AGY_ACP: bool = cfg!(feature = "agy-acp");
-
-/// One bridge's flags. Antigravity has no way back to an earlier message;
-/// in print mode it stops by killing its own child, over ACP with
-/// `session/cancel`.
+/// One bridge's flags. Antigravity (`agy acp`) has no way back to an
+/// earlier message.
 pub const fn of(provider: Provider) -> Capabilities {
     let (rewind, shared_process) = match provider {
         Provider::Claude => (true, false),
@@ -69,10 +63,9 @@ pub const fn of(provider: Provider) -> Capabilities {
         active_steering: false,
         steer_by_restart: false,
         // Codex names the model in `turn/start`, opencode in each prompt
-        // and `agy acp` in `session/set_model` before one; Claude and print
-        // mode's `agy` take `--model` at spawn.
-        model_switch_in_session: shared_process
-            || (AGY_ACP && matches!(provider, Provider::Antigravity)),
+        // and `agy acp` in `session/set_model` before one; Claude takes
+        // `--model` at spawn.
+        model_switch_in_session: shared_process || matches!(provider, Provider::Antigravity),
         provider_handoff: matches!(
             provider,
             Provider::Claude | Provider::Codex | Provider::Antigravity
@@ -84,12 +77,13 @@ pub const fn of(provider: Provider) -> Capabilities {
         // Antigravity over ACP: on 1.5.9 (`antigravity-acp-*`), approve
         // once only, no reviewer; the CLI holds no mode, so a change needs
         // no restart. opencode's probe is stage 2.4.
-        approvals: matches!(provider, Provider::Codex | Provider::Claude)
-            || (AGY_ACP && matches!(provider, Provider::Antigravity)),
+        approvals: matches!(
+            provider,
+            Provider::Codex | Provider::Claude | Provider::Antigravity
+        ),
         auto_review: matches!(provider, Provider::Codex | Provider::Claude),
         session_grants: matches!(provider, Provider::Codex),
-        mode_switch_in_session: matches!(provider, Provider::Codex)
-            || (AGY_ACP && matches!(provider, Provider::Antigravity)),
+        mode_switch_in_session: matches!(provider, Provider::Codex | Provider::Antigravity),
     }
 }
 
@@ -119,7 +113,7 @@ pub const fn fixture(provider: Provider, flag: Flag) -> Option<&'static str> {
         (Provider::Codex, Flag::ModeSwitchInSession) => Some("codex-mode-switch"),
         (Provider::Claude, Flag::Approvals) => Some("claude-approval-escape"),
         (Provider::Claude, Flag::AutoReview) => Some("claude-auto-classifier"),
-        (Provider::Antigravity, Flag::Interrupt) if AGY_ACP => Some("antigravity-acp-cancel"),
+        (Provider::Antigravity, Flag::Interrupt) => Some("antigravity-acp-cancel"),
         (Provider::Antigravity, Flag::Approvals) => Some("antigravity-acp-full-turn"),
         (Provider::Antigravity, Flag::ModeSwitchInSession) => {
             Some("antigravity-acp-command-decline")
@@ -227,12 +221,11 @@ mod tests {
             .filter(|c| c.model_switch_in_session)
             .map(|c| c.provider)
             .collect();
-        let mut expected = vec![Provider::Codex, Provider::Opencode];
-        if AGY_ACP {
-            expected.push(Provider::Antigravity);
-        }
-        assert_eq!(in_session, expected);
-        assert_eq!(of(Provider::Antigravity).approvals, AGY_ACP);
+        assert_eq!(
+            in_session,
+            [Provider::Codex, Provider::Opencode, Provider::Antigravity]
+        );
+        assert!(of(Provider::Antigravity).approvals);
         assert!(
             !of(Provider::Antigravity).auto_review,
             "agy has no reviewer"

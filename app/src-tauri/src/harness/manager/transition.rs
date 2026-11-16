@@ -223,12 +223,11 @@ mod tests {
             Transition::SwitchModelInSession
         );
         assert_eq!(switches(Provider::Claude), Transition::RestartAndResume);
-        // Over ACP `agy` takes `session/set_model`; print mode, `--model`.
-        let agy = match cfg!(feature = "agy-acp") {
-            true => Transition::SwitchModelInSession,
-            false => Transition::RestartAndResume,
-        };
-        assert_eq!(switches(Provider::Antigravity), agy);
+        // `agy acp` takes `session/set_model` before the next prompt.
+        assert_eq!(
+            switches(Provider::Antigravity),
+            Transition::SwitchModelInSession
+        );
         // Both changed: the level decides, since no bridge changes it in place.
         let live = selection(Provider::Codex, "one", Some("low"));
         let target = selection(Provider::Codex, "two", Some("high"));
@@ -281,8 +280,8 @@ mod tests {
         );
         assert_eq!(moded(Provider::Codex, Ask, Ask, None), Transition::Reuse);
         // A bridge with no approvals reads no mode: it is only recorded.
-        // Over ACP `agy` holds none either: Rust reads the saved mode as
-        // each request arrives.
+        // `agy acp` holds none either: Rust reads the saved mode as each
+        // request arrives.
         for provider in [Provider::Opencode, Provider::Antigravity] {
             let caps = capabilities::of(provider);
             assert!(!caps.approvals || caps.mode_switch_in_session);

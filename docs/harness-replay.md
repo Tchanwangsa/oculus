@@ -11,7 +11,7 @@ and release gate for the agent turn model rebuild.
 | Fixtures, individual manifests and explicit known failures | `app/src-tauri/fixtures/harness/turn-model/` |
 | Replay runner (`replay.rs`), its step-by-step runtime (`rig.rs`, `io.rs`), scratch guard and assertions | `app/src-tauri/src/harness/testkit/` |
 | Process transport substitution | `app/src-tauri/src/harness/transport.rs` |
-| Provider constructors and inbound runners | `app/src-tauri/src/harness/providers/claude/replay.rs`, `app/src-tauri/src/harness/providers/codex/replay.rs`, `app/src-tauri/src/harness/providers/opencode/replay.rs`, `app/src-tauri/src/harness/providers/antigravity/replay.rs`, `app/src-tauri/src/harness/providers/antigravity/acp/replay.rs` |
+| Provider constructors and inbound runners | `app/src-tauri/src/harness/providers/claude/replay.rs`, `app/src-tauri/src/harness/providers/codex/replay.rs`, `app/src-tauri/src/harness/providers/opencode/replay.rs`, `app/src-tauri/src/harness/providers/antigravity/acp/replay.rs` |
 | Shared ordered consumer and injected external effects | `app/src-tauri/src/harness/app/consumer/` |
 | Headless frontend store and row projection | `app/tests/harness/project-replay.ts` |
 | Replay output the timeline's own tests fold | `app/tests/fixtures/turn-model/`, `app/tests/components/harness/runRows.test.ts` |
@@ -142,7 +142,7 @@ let second = rig.send("after-restart").unwrap(); // waits for the repair
 
 Each manifest declares provider, CLI/protocol version, model, capture date or
 its uncertainty, source range, redaction, scenario, raw-frame count, SHA-256,
-and expected outbound frames/responses. The existing thirteen bridge recordings
+and expected outbound frames/responses. The original bridge recordings
 are referenced unchanged. Exact CLI versions not present in a recording remain
 unknown; a bridge protocol version is labeled as such.
 
@@ -218,9 +218,7 @@ the manifest's expected deny to Oculus's unseen message.
 `fixtures/harness/antigravity-acp-*`: the stage 5 probe's agent frames from
 the prompt on, the probe's workspace as `$LIBRARY/agents`, which the
 bridge's replay reads as the scratch library, and the Oculus bridge's
-writes as the expected outbound). The rig picks the ACP bridge when the
-manifest's first expected frame is JSON-RPC; a recorded session starts
-open, its requests other than `session/prompt` are answered from the
+writes as the expected outbound). A recorded session starts open, its requests other than `session/prompt` are answered from the
 manifest as they are written, and its ids continue from the manifest's.
 `antigravity-acp-ls` (an `ls` Rust allows unseen, then the answer) was
 recorded on 2026-11-16 with the bridge's own `initialize`, `session/set_model`
@@ -272,7 +270,7 @@ scripted bus (`Bench::allow_handoff`) it checks a rewind to a question
 another provider answered, a rewind to a run that carried a handoff, and an
 edit sent under another provider.
 `testkit/handoff_recordings.rs` seeds three synthetic earlier exchanges and
-replays the Claude, Codex and print-mode Antigravity `handoff-*-full`
+replays the Claude, Codex and Antigravity `handoff-*-full`
 fixtures as the first target run after a provider switch, with its exact
 outbound prompt checked by `Rig::session_checked`.
 Their `delta` recordings include a real warmup turn and then the missed
@@ -284,8 +282,10 @@ scratch folders with normal sign-in; they do not drive the live Oculus
 runtime. Their manifests include launch settings and every stdout frame.
 Codex replay restores the spawn model from the next expected turn because
 it substitutes for `thread/start`.
-Antigravity's manifest pins equal before/after settings checksums: direct
-print-mode recording does not install the Oculus bridge's global rules.
+Antigravity's were recorded over `agy acp` (2026-11-16) with the bridge's own
+`initialize`, `session/set_model` and `session/set_mode`, from the first
+prompt on; their manifests pin equal before/after checksums of the
+student's agy settings, which nothing writes.
 Rejected wording probes live under
 `app/src-tauri/fixtures/harness/handoff-rejected/` and never enable a flag.
 The optional `export_the_production_handoff_prompts` test writes the prompts
@@ -294,7 +294,7 @@ must be a temporary folder. No CLI runs from that test. The registry
 dispatches these six fixtures to their multi-run driver: source rows are
 seeded in SQL, target rows pass through the live event projection, and all
 rows survive reopen. The release
-gate runs the six handoff fixtures as well as the 42 matrix cases.
+gate runs the six handoff fixtures as well as the 39 matrix cases.
 
 `testkit/queue.rs` checks queued runs: a message sent mid-turn through a
 real bridge waiting as a run and starting as the same run, the queue's
@@ -352,11 +352,9 @@ the first row gates that contract separately for all bridges.
 | claude-ls | Pass | — |
 | codex-ls | Pass | — |
 | opencode-v1-ls | Pass | — |
-| antigravity-ls | Pass | — |
 | claude-ls-repeat-snapshot | Pass | — |
 | codex-ls-repeat-snapshot | Pass | — |
 | opencode-v1-text-repeat-snapshot | Pass | — |
-| antigravity-ls-repeat-snapshot | Pass | — |
 | antigravity-acp-ls | Pass | — |
 | antigravity-acp-repeated-reply | Pass | — |
 | antigravity-acp-missing-reply | Pass | — |
@@ -366,7 +364,6 @@ the first row gates that contract separately for all bridges.
 | codex-interrupt | Pass | — |
 | opencode-v1-interrupt | Pass | — |
 | opencode-unknown-reasoning-mutation | Pass | — |
-| agy-refusal-success-mutation | Pass | — |
 | claude-background-agent | Pass | — |
 | claude-background-agent-fast | Pass | — |
 | missing-terminal | Pass | — |

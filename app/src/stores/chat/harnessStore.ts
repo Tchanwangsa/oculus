@@ -592,16 +592,6 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
             ),
           );
           break;
-        case "permission_needed":
-          push(
-            rowFrom(env, "permission", event.target ?? "", {
-              tool: event.tool,
-              action: event.action,
-              target: event.target,
-              rule: event.rule,
-            }),
-          );
-          break;
         // The whole list, as saved; one the snapshot already holds is skipped.
         case "queue":
           return stale ? s : { queued: { ...s.queued, [threadId]: event.messages } };

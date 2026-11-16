@@ -53,15 +53,6 @@ type HarnessEvent =
   /** Rows from `from_item_id` on are gone; `context` is whether the agent
    *  was rewound too. */
   | { type: "rewound"; from_item_id: number; context: boolean }
-  /** Antigravity only: a refusal that already ended the turn. `rule` would
-   *  allow it, for `harnessAntigravityAllow`. */
-  | {
-      type: "permission_needed";
-      tool: string;
-      action: string;
-      target: string | null;
-      rule: string | null;
-    }
   /** Rust's settlement of a student's run: its one answer row (none when no
    *  text arrived), the earlier replies that are now work, how it ended and
    *  its stored interval (SQLite UTC). */

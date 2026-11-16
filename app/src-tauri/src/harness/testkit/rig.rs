@@ -801,15 +801,12 @@ fn session(
             native_session,
             scratch,
         ),
-        Provider::Antigravity if outbound.speaks_jsonrpc() => {
-            crate::harness::antigravity::acp::replay::bridge(
-                outbound.clone(),
-                sink,
-                native_session,
-                scratch,
-            )
-        }
-        Provider::Antigravity => crate::harness::antigravity::replay::bridge(outbound.wire(), sink),
+        Provider::Antigravity => crate::harness::antigravity::acp::replay::bridge(
+            outbound.clone(),
+            sink,
+            native_session,
+            scratch,
+        ),
     };
     let handle = bridge.handle.clone();
     // Codex and opencode name their session as it is started or resumed

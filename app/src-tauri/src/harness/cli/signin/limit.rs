@@ -62,7 +62,7 @@ mod tests {
             (
                 Provider::Antigravity,
                 &[include_str!(
-                    "../../../../fixtures/harness/antigravity-ls.ndjson"
+                    "../../../../fixtures/harness/antigravity-acp-ls.ndjson"
                 )],
             ),
         ];

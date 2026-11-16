@@ -5,10 +5,9 @@
 
 use sqlx::SqlitePool;
 
-use crate::harness::antigravity_rules;
 use crate::harness::core::effect::{Runtime, Start};
 use crate::harness::{handoff, store};
-use crate::harness::{LectureBrief, Provider, SendError, SendOptions, StudioBrief};
+use crate::harness::{LectureBrief, SendError, SendOptions, StudioBrief};
 use crate::runtime::blocking::run as blocking;
 
 use super::proposal_context::{self, Cards};
@@ -122,11 +121,6 @@ async fn send(rt: &Runtime, start: Start) -> Result<bool, Failure> {
     // session is `Harness::ensure`'s call (`manager/transition.rs`).
     let lecture = lecture_brief(&pool, &row).await;
     let studio_brief = studio_brief(&pool, thread_id).await;
-    // Only a spawn uses these, but whether this send spawns is `ensure`'s call.
-    let antigravity_rules = match provider {
-        Provider::Antigravity => Some(antigravity_rules::stored(&pool).await?),
-        _ => None,
-    };
     let permission_mode = crate::harness::requests::store::mode(&pool, thread_id).await?;
     let opts = SendOptions {
         model,
@@ -135,7 +129,6 @@ async fn send(rt: &Runtime, start: Start) -> Result<bool, Failure> {
         scope: row.subject_code,
         lecture,
         studio_brief,
-        antigravity_rules,
         ..opts
     };
     // The session to resume is the run's binding's, the provider's current

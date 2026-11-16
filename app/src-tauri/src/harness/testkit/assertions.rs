@@ -203,7 +203,6 @@ pub(super) fn check(name: &str, replay: &Replay, projection: &Value) -> bool {
                 && outside[0]["role"] != "provisional"
                 && folded + 1 == messages()
         }
-        "refusal_visible" => visible("permission") == 1,
         "one_compaction" => visible("compaction") == 1 && visible("assistant") == 0,
         "narration_is_work" => items
             .iter()

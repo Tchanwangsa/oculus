@@ -901,7 +901,6 @@ fn makes_row(ev: &HarnessEvent) -> bool {
         HarnessEvent::AssistantMessage { .. }
             | HarnessEvent::Thinking { .. }
             | HarnessEvent::ToolStarted { .. }
-            | HarnessEvent::PermissionNeeded { .. }
             | HarnessEvent::Compaction { .. }
     )
 }

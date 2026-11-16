@@ -17,7 +17,12 @@ use super::scenario::Scenario;
 
 #[test]
 fn a_send_allocates_one_run_attempt_binding_and_receipt() {
-    for name in ["claude-ls", "codex-ls", "opencode-v1-ls", "antigravity-ls"] {
+    for name in [
+        "claude-ls",
+        "codex-ls",
+        "opencode-v1-ls",
+        "antigravity-acp-ls",
+    ] {
         let replay = run(Scenario::recorded(name));
         let ledger = &replay.ledger;
         for table in ["runs", "attempts", "bindings", "receipts"] {
@@ -381,7 +386,7 @@ fn bridges_name_their_messages_and_report_no_gap_on_clean_turns() {
         "claude-ls",
         "codex-ls",
         "opencode-v1-ls",
-        "antigravity-ls",
+        "antigravity-acp-ls",
         "claude-interrupt",
         "codex-interrupt",
         "opencode-v1-interrupt",

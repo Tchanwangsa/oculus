@@ -5,8 +5,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::harness::antigravity::acp::{AcpSession, AcpSpawn};
-use crate::harness::antigravity::{AntigravitySession, AntigravitySpawn};
+use crate::harness::antigravity::{AcpSession, AcpSpawn};
 use crate::harness::child::ThreadSpawn;
 use crate::harness::claude::{ClaudeSession, ClaudeSpawn};
 use crate::harness::codex::{self, CodexThreadOpts};
@@ -293,32 +292,16 @@ impl Harness {
                 };
                 Handle::Opencode(server, ses)
             }
-            Provider::Antigravity if cfg!(feature = "agy-acp") => {
-                Handle::AntigravityAcp(AcpSession::spawn(
-                    AcpSpawn {
-                        base: base(cwd)?,
-                        brief: instructions(
-                            &self.data_dir,
-                            opts.scope.as_deref(),
-                            opts.lecture.as_ref(),
-                            opts.studio_brief.as_ref(),
-                        ),
-                        one_off: false,
-                    },
-                    sink,
-                )?)
-            }
-            Provider::Antigravity => Handle::Antigravity(AntigravitySession::spawn(
-                AntigravitySpawn {
+            Provider::Antigravity => Handle::Antigravity(AcpSession::spawn(
+                AcpSpawn {
                     base: base(cwd)?,
-                    // `agy` reads the library-wide brief (`agents/AGENTS.md`)
-                    // itself; only the per-thread half is sent.
-                    brief: thread_sections(
+                    brief: instructions(
+                        &self.data_dir,
                         opts.scope.as_deref(),
                         opts.lecture.as_ref(),
                         opts.studio_brief.as_ref(),
                     ),
-                    approved: opts.antigravity_rules.clone(),
+                    one_off: false,
                 },
                 sink,
             )?),

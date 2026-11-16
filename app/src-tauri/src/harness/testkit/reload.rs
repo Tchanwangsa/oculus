@@ -75,7 +75,7 @@ fn a_reload_at_any_point_of_an_answer_shows_its_text_and_each_row_once() {
         "claude-ls",
         "codex-ls",
         "opencode-v1-text",
-        "antigravity-ls",
+        "antigravity-acp-ls",
     ] {
         let scenario = Scenario::recorded(name);
         let frames = scenario.frames.clone();

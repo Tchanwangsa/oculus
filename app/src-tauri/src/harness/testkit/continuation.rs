@@ -451,7 +451,12 @@ fn a_continuation_waits_behind_a_busy_thread_and_goes_out_once() {
 
 #[test]
 fn a_finished_job_starts_one_run_whose_answer_appears() {
-    for name in ["claude-ls", "codex-ls", "opencode-v1-ls", "antigravity-ls"] {
+    for name in [
+        "claude-ls",
+        "codex-ls",
+        "opencode-v1-ls",
+        "antigravity-acp-ls",
+    ] {
         let mut scenario = Scenario::recorded(name);
         scenario.continuation = true;
         let replay = run(scenario);
