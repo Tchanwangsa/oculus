@@ -70,10 +70,12 @@ pub const fn of(provider: Provider) -> Capabilities {
             Provider::Claude | Provider::Codex | Provider::Antigravity
         ),
         // Codex: recorded on 0.169.0 (`codex-approval-*`, `codex-auto-review*`,
-        // `codex-session-grant`, `codex-mode-switch`). The other bridges'
-        // probes are stages 2.4 and 5.
-        approvals: matches!(provider, Provider::Codex),
-        auto_review: matches!(provider, Provider::Codex),
+        // `codex-session-grant`, `codex-mode-switch`). Claude: on 2.1.325
+        // (`claude-approval-*`, `claude-auto-*`), approve once only; its
+        // mode is fixed at spawn, so a change restarts the session.
+        // opencode's and Antigravity's probes are stages 2.4 and 5.
+        approvals: matches!(provider, Provider::Codex | Provider::Claude),
+        auto_review: matches!(provider, Provider::Codex | Provider::Claude),
         session_grants: matches!(provider, Provider::Codex),
         mode_switch_in_session: matches!(provider, Provider::Codex),
     }
@@ -103,6 +105,8 @@ pub const fn fixture(provider: Provider, flag: Flag) -> Option<&'static str> {
         (Provider::Codex, Flag::AutoReview) => Some("codex-auto-review-denied"),
         (Provider::Codex, Flag::SessionGrants) => Some("codex-session-grant"),
         (Provider::Codex, Flag::ModeSwitchInSession) => Some("codex-mode-switch"),
+        (Provider::Claude, Flag::Approvals) => Some("claude-approval-escape"),
+        (Provider::Claude, Flag::AutoReview) => Some("claude-auto-classifier"),
         _ => None,
     }
 }

@@ -139,7 +139,8 @@ impl Phase {
     }
 }
 
-/// A CLI reviewer's decision on one tool call.
+/// A decision the CLI made on one tool call without asking anyone: Auto's
+/// reviewer, or (on Claude) a deny rule, which holds in every mode.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Review {
     /// `in_progress`, `approved`, `denied`, `timed_out` or `aborted`.
@@ -149,7 +150,8 @@ pub struct Review {
     pub risk: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rationale: Option<String>,
-    /// Who decided, as the CLI names it (`agent` for Codex's reviewer).
+    /// Who decided, as the CLI names it: `agent` for Codex's reviewer,
+    /// `classifier` for Claude's Auto, `rule` for a deny rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
 }
@@ -261,8 +263,9 @@ pub enum HarnessEvent {
         title: String,
         input: serde_json::Value,
     },
-    /// The CLI's own reviewer on a tool call, in the chat's Auto mode:
-    /// stored on the call's row (`meta.review`). The student was not asked.
+    /// The CLI's own decision on a tool call (Auto's reviewer, or a deny
+    /// rule): stored on the call's row (`meta.review`). The student was not
+    /// asked.
     ToolReviewed {
         /// The call's id, as its `ToolStarted` named it.
         id: String,

@@ -1,0 +1,73 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.325",
+  "protocol": "Claude print stream-json with the control channel (--permission-prompts host --permission-prompt-tool stdio)",
+  "model": "claude-haiku-5-5",
+  "capture_date": "2026-11-15",
+  "source": "stage 2 Claude probe 05-approval-network-allow.jsonl, lines 3-295, inbound frames",
+  "redaction": "CLI stdout frames only, as recorded (tokens, account ids and emails were already removed by the probe). The probe's temp-folder suffixes are removed and any home path becomes /Users/student. The expected outbound is the Oculus bridge's for this permission mode, not the probe driver's messages. Recorded with a private CLAUDE_CONFIG_DIR, --setting-sources '' and --strict-mcp-config.",
+  "scenario": "SandboxNetworkAccess for a new host approved, then an unsandboxed retry approved",
+  "frames": 291,
+  "sha256": "560942037a856b9c27726b6dd0501e36451ce79f7c6883105057cc7c8ef6d7d3",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "a944cabd-8120-47ed-88de-9b00e4135a1a",
+          "response": {
+            "behavior": "allow",
+            "updatedInput": {
+              "host": "example.com"
+            }
+          }
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "194f0a0d-5401-483d-8c78-707b008b90d3",
+          "response": {
+            "behavior": "allow",
+            "updatedInput": {
+              "command": "curl -I --max-time 10 https://example.com",
+              "description": "Send HEAD request to example.com with 10s timeout, unsandboxed retry",
+              "dangerouslyDisableSandbox": true
+            }
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-approval-network.ndjson",
+  "native_session": "",
+  "permission_mode": "ask",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "recorded session route; scratch cwd",
+    "recorded_permission_mode": "acceptEdits",
+    "permission_mode": "ask"
+  }
+}

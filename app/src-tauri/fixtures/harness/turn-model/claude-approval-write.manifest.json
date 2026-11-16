@@ -1,0 +1,56 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.325",
+  "protocol": "Claude print stream-json with the control channel (--permission-prompts host --permission-prompt-tool stdio)",
+  "model": "claude-haiku-5-5",
+  "capture_date": "2026-11-15",
+  "source": "stage 2 Claude probe 03-approval-write-allow.jsonl, lines 3-67, inbound frames",
+  "redaction": "CLI stdout frames only, as recorded (tokens, account ids and emails were already removed by the probe). The probe's temp-folder suffixes are removed and any home path becomes /Users/student. The expected outbound is the Oculus bridge's for this permission mode, not the probe driver's messages. Recorded with a private CLAUDE_CONFIG_DIR, --setting-sources '' and --strict-mcp-config.",
+  "scenario": "a Write outside the allowed folders approved once",
+  "frames": 64,
+  "sha256": "256917c91900582ae05a6855b5c173e4bc8a35fe8c35649aefcd22784506a5a6",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "a3444a4c-7c2e-4c35-a9ee-1af569f317a2",
+          "response": {
+            "behavior": "allow",
+            "updatedInput": {
+              "file_path": "/private/tmp/oculus-claude-external.XXXXXX/write-allow.txt",
+              "content": "hello"
+            }
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-approval-write.ndjson",
+  "native_session": "",
+  "permission_mode": "ask",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "recorded session route; scratch cwd",
+    "recorded_permission_mode": "acceptEdits",
+    "permission_mode": "ask"
+  }
+}

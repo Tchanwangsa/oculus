@@ -24,6 +24,11 @@ export interface ModeChoice {
   line: string;
 }
 
+/** Auto's line where the bridge's reviewer is its own: Claude's classifier. */
+const AUTO_LINE: Partial<Record<Capabilities["provider"], string>> = {
+  claude: "Classifier decides",
+};
+
 /** What the control shows for an agent: a note when it cannot ask at all,
  *  and each mode with its one line. Auto says it asks as Ask where the
  *  agent has no reviewer. */
@@ -41,7 +46,9 @@ export function modeChoices(caps: Pick<Capabilities, "provider" | "approvals" | 
     line:
       mode === "auto" && caps.approvals && !caps.autoReview
         ? `${who} has no reviewer, so it asks`
-        : MODE_LINE[mode],
+        : mode === "auto" && caps.approvals
+          ? AUTO_LINE[caps.provider] ?? MODE_LINE[mode]
+          : MODE_LINE[mode],
   }));
   return { note, choices };
 }

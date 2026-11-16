@@ -6,10 +6,13 @@
 //! process stays up between turns; a thread whose process has gone resumes
 //! with `--resume <session id>`.
 //!
-//! `--permission-prompts none` auto-denies, because under `-p` an unanswered
-//! prompt hangs the turn — so containment is settled up front in
-//! `settings::settings_json`. See docs/harness.md.
+//! Containment is settled up front in `settings::settings_json`. What it
+//! leaves undecided in a chat comes to the host as a permission prompt and
+//! is asked of the student (`approvals.rs`); a one-off turn's prompts are
+//! denied by the CLI (`--permission-prompts none`), since nobody is there
+//! to answer and an unanswered prompt hangs the turn. See docs/harness.md.
 
+mod approvals;
 mod models;
 mod session;
 mod settings;
@@ -20,6 +23,7 @@ mod translate;
 use std::path::PathBuf;
 
 use crate::harness::child::ThreadSpawn;
+use crate::harness::requests::PermissionMode;
 
 pub use models::{concrete_model, list_models, ModelInfo};
 pub use session::ClaudeSession;
@@ -29,8 +33,9 @@ pub struct ClaudeSpawn {
     pub base: ThreadSpawn,
     /// The discovered `oculus` binary, allowed by absolute path as well as name.
     pub oculus: Option<PathBuf>,
-    /// `default`, `acceptEdits`, `plan`, `bypassPermissions`.
-    pub permission_mode: String,
+    /// How the chat asks (`session::permission_args`); a one-off turn's is
+    /// not read.
+    pub mode: PermissionMode,
     /// Appended to the CLI's own system prompt.
     pub system_append: String,
     /// A turn outside any thread (`Harness::one_off`): no tools, skills or MCP
@@ -40,3 +45,5 @@ pub struct ClaudeSpawn {
 
 #[cfg(test)]
 pub(in crate::harness) mod replay;
+#[cfg(test)]
+mod tests;

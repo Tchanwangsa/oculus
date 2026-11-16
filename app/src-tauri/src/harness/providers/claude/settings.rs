@@ -8,12 +8,14 @@ use crate::harness::protected::{LIBRARY_DIRS, ROOT_FILE_GLOBS, WORKSPACE_DIRS};
 /// `//` prefixes an absolute path in the CLI's rule syntax. Root files are
 /// denied by suffix, because a bare `*` also denied everything under `agents/`.
 /// `hosts` (`host:port`) are the network destinations a sandboxed command
-/// may reach: the TTS server's, or none.
+/// may reach: the TTS server's, or none. `unsandboxed` lets a command ask to
+/// run outside the sandbox (`session::unsandboxed_commands`).
 pub(super) fn settings_json(
     library: &Path,
     cwd: &Path,
     oculus: Option<&Path>,
     hosts: &[String],
+    unsandboxed: bool,
     thinking_summaries: bool,
 ) -> String {
     let root = library.display().to_string();
@@ -60,7 +62,7 @@ pub(super) fn settings_json(
             "enabled": true,
             "failIfUnavailable": false,
             "autoAllowBashIfSandboxed": true,
-            "allowUnsandboxedCommands": false,
+            "allowUnsandboxedCommands": unsandboxed,
             "network": network,
             "filesystem": { "allowWrite": write },
         },
@@ -85,6 +87,7 @@ mod tests {
             None,
             &[],
             false,
+            false,
         ))
         .unwrap();
         assert!(settings.get("showThinkingSummaries").is_none());
@@ -95,7 +98,7 @@ mod tests {
         let library = Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
         let cwd = library.join("agents");
         let v: serde_json::Value =
-            serde_json::from_str(&settings_json(library, &cwd, None, &[], true))
+            serde_json::from_str(&settings_json(library, &cwd, None, &[], false, true))
                 .expect("valid settings JSON");
 
         let write = v.pointer("/sandbox/filesystem/allowWrite").unwrap();
@@ -183,6 +186,7 @@ mod tests {
             &cwd,
             Some(Path::new("/opt/oculus/bin/oculus")),
             &[],
+            false,
             true,
         ))
         .expect("valid settings JSON");
@@ -206,6 +210,7 @@ mod tests {
             &library.join("agents"),
             None,
             &[],
+            false,
             true,
         ))
         .unwrap();
@@ -241,6 +246,38 @@ mod tests {
         }
     }
 
+    /// Only a chat in Ask lets a command ask to leave the sandbox; Auto, Don't
+    /// ask and a one-off turn keep every command inside it.
+    #[test]
+    fn only_ask_lets_a_command_ask_to_leave_the_sandbox() {
+        use super::super::session::unsandboxed_commands;
+        use crate::harness::requests::PermissionMode;
+        let library = Path::new("/l");
+        let unsandboxed = |one_off, mode| {
+            let flag = unsandboxed_commands(one_off, mode);
+            let v: serde_json::Value = serde_json::from_str(&settings_json(
+                library,
+                &library.join("agents"),
+                None,
+                &[],
+                flag,
+                !one_off,
+            ))
+            .unwrap();
+            v["sandbox"]["allowUnsandboxedCommands"].as_bool().unwrap()
+        };
+        assert!(unsandboxed(false, PermissionMode::Ask));
+        assert!(!unsandboxed(false, PermissionMode::Auto));
+        assert!(!unsandboxed(false, PermissionMode::Quiet));
+        for mode in [
+            PermissionMode::Ask,
+            PermissionMode::Auto,
+            PermissionMode::Quiet,
+        ] {
+            assert!(!unsandboxed(true, mode), "a one-off turn under {mode:?}");
+        }
+    }
+
     /// The TTS host goes in as `allowedDomains`, exactly as given.
     #[test]
     fn the_tts_host_is_the_only_network_domain() {
@@ -250,6 +287,7 @@ mod tests {
             &library.join("agents"),
             None,
             &["127.0.0.1:8880".to_owned()],
+            false,
             true,
         ))
         .unwrap();
@@ -273,6 +311,7 @@ mod tests {
                 &library.join("agents"),
                 None,
                 &[],
+                false,
                 true,
             ))
             .unwrap();

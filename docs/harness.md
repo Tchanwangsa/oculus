@@ -154,9 +154,13 @@ protected paths are one list in `protected.rs`: the library folders, the root fi
 
 - **Claude**: its sandbox with the cwd as the write root (plus the two holes
   below), `--add-dir` for
-  reads (without it `ls ../courses` is refused), `Edit` denies on protected
-  paths so `--add-dir` doesn't pull them into `acceptEdits`, and
-  `--permission-prompts none`, since an unanswered prompt under `-p` hangs.
+  reads (without it `ls ../courses` is refused), and `Edit` denies on
+  protected paths so `--add-dir` doesn't pull them into `acceptEdits`. What
+  that leaves undecided comes to the host as a permission prompt and is
+  asked of the student by the chat's mode
+  ([Claude asks over its control channel](#claude-asks-over-its-control-channel));
+  a one-off turn runs `--permission-prompts none`, since nobody is there to
+  answer and an unanswered prompt under `-p` hangs.
 - **Codex**: `workspace-write` rooted at the cwd (plus the two holes below),
   its approval policy is the chat's permission mode
   ([Requests](#requests)): `never` in "Don't ask" and every one-off turn.
@@ -1535,9 +1539,10 @@ prompt and before the turn's first event.
 
 ## Requests
 
-When the CLI wants something its sandbox blocks (a command outside it, a
-file change, more access) the student is asked in the chat and the answer
-goes back to the same waiting call. One table, `harness_requests`
+When the CLI wants something its sandbox or its rules block (a command
+outside it, a file change, more access, a tool call it asks about) the
+student is asked in the chat and the answer goes back to the same waiting
+call. One table, `harness_requests`
 (migration 58, `requests/requests.sql`), holds each request's state; its
 timeline row (kind `request`) holds only its id.
 
@@ -1609,8 +1614,10 @@ tells `PermissionMode`; it is refused while a request waits ("Answer the
 waiting request before changing how this chat asks."). The consumer reads
 the saved mode as each request arrives, so a change mid-turn decides the
 turn's next request: under `quiet` it is declined unseen, under `ask` or
-`auto` it is shown. Auto's reviewer is a wire setting, so a switch to or
-from `auto` takes effect from the next turn's start. The start step
+`auto` it is shown. Auto's reviewer is a launch setting (Codex's on each
+`turn/start`, Claude's at spawn), so a switch to or from `auto` takes effect
+from the next turn's start, and on Claude, whose mode is fixed at spawn, by
+restarting the session for it. The start step
 reads it off the row (`SendOptions::permission_mode`), as does a rewind
 that respawns the session, and it is part of
 the session's reuse key ([`decide_transition`](#changing-provider-mid-chat)).
@@ -1636,7 +1643,8 @@ What the student sees is decided in `app/src/lib/harness/requests.ts` and
   to change files, more access, the network; a child agent's request names
   it, "Codex's subagent child_probe …"), then per action the whole command
   with its folder, each file with its kind and diff (`DiffBlock`, Show more
-  past 240px), or one line per access asked for, the agent's reason, and
+  past 240px), one line per access asked for, or what a tool call will do
+  with its arguments (`FoldBlock`, the same fold), the agent's reason, and
   "Runs outside the sandbox" only where the payload's `outsideSandbox` is
   true. Settled, it is one work-row line: Approved, Always allowed,
   Declined, Expired or Cancelled with what was asked, and under it Rust's
@@ -1661,18 +1669,33 @@ What the student sees is decided in `app/src/lib/harness/requests.ts` and
 - **The mode control** (`PermissionModeControl`, after the model picker,
   for an open thread only) is an icon-only button showing the chat's mode
   (its name in the tooltip) and opens a "Permission mode" menu of Ask, Auto
-  and Don't ask, each with a one-line description. Where the bridge has no reviewer
-  (`autoReview` false) Auto says it asks as Ask; where it has no
-  `approvals` a warning icon in the menu's header says, in its tooltip,
-  that the agent cannot ask yet. A pick is saved with
+  and Don't ask, each with a one-line description. Where the bridge has no
+  reviewer (`autoReview` false) Auto says it asks as Ask; on Claude,
+  "Classifier decides"; where it has no `approvals` a warning icon in the
+  menu's header says, in its tooltip, that the agent cannot ask yet. A pick
+  is saved with
   `harnessSetPermissionMode`; Rust's refusal (a request waiting) shows at
   the top of the open menu.
 - **Auto's evidence**: a tool row whose meta has a `review` says "Reviewer
-  approved" or "Reviewer denied" quietly at its right, and opened, the risk
-  and the rationale. It never becomes a request.
+  approved" or "Reviewer denied" (Codex), "Approved by Claude's classifier"
+  or "Refused by Claude's classifier" quietly at its right, and opened, the
+  risk and the rationale, with "you were not asked (Auto)". A Claude call a
+  deny rule refused (a protected path, `sqlite3`), in any mode, says "Refused
+  by a rule", and opened, that Oculus keeps agents out of it in every mode.
+  None of these ever becomes a request.
 - A reload reads the requests with the rows, so a live request comes back
   as a waiting row the bar answers, and one the restart ended as Expired
   with "The app was closed."
+- **A Claude request** reads "Claude Code wants to run a command" (or to
+  change a file, to reach the network). A command shows no folder: the
+  prompt names none. A new host is "Reach example.com". Any other tool call
+  (`toolOf`) says what it will do: "Read /Users/…/notes.md" (with "Lines
+  matching …" for a Grep), "Fetch https://…" with what it asks of the page,
+  "Search the web for “…”", or "Use github › create_issue" with its
+  arguments as JSON; its title is "wants to read outside its folders", "to
+  fetch a web page", "to search the web", or "to use github". A subagent's
+  request names it by its type, "Claude Code's subagent wire-probe …". Only
+  Approve and Decline: nothing under More.
 - Antigravity's print-mode refusal is still its own `permission` row
   (`PermissionCard`); it does not go through requests.
 
@@ -1731,6 +1754,84 @@ saved mode. Outside `quiet` the thread's config also turns on
 - `has_pending_request` counts callbacks not yet answered or retired, which
   `decide_transition` reads to refuse a switch away from Codex.
 
+### Claude asks over its control channel
+
+Recorded on Claude Code 2.1.325 (`fixtures/harness/claude-approval-*`,
+`claude-auto-*`; replayed by `testkit/claude_requests.rs`).
+`providers/claude/approvals.rs`; the launch is `session::permission_args`
+and `settings_json`:
+
+| Mode | `--permission-mode` | Prompts | `allowUnsandboxedCommands` |
+| --- | --- | --- | --- |
+| `ask` | `acceptEdits` | `--permission-prompts host --permission-prompt-tool stdio` | true |
+| `auto` | `auto` (the CLI's classifier) | the same | false |
+| `quiet` | `acceptEdits` | the same; the consumer declines each prompt unseen | false |
+| one-off turns | `default` | `--permission-prompts none`: the CLI denies them | false |
+
+A chat's launch also passes `--disallowedTools AskUserQuestion`: under host
+prompts the CLI would offer it, and nothing answers a question yet. Only Ask
+lets a command ask to leave the sandbox: in Auto the classifier would be all
+that stands between a shell command and a protected folder, and in Don't ask
+nobody would approve one. The mode is fixed at spawn (the settings file
+differs between Ask and the others), so `mode_switch_in_session` is false and
+a change restarts the session at the next send.
+
+- **The wire.** A prompt is a `control_request` `can_use_tool`; the answer is
+  a `control_response` on its `request_id`: `allow` with the tool's input as
+  sent, or `deny` with a message ("The student declined this…", or "Oculus
+  declined this without asking the student…" when Rust declines it unseen).
+  The CLI sends nothing back for an answer, so a line the pipe took is
+  `acknowledged`; a write that breaks is `uncertain`; a process already gone
+  is `failed`. `native_ref` is the `request_id` as JSON.
+- **What is asked.** A `Bash` call (payload `command`, its `description` as
+  the reason, `outsideSandbox` only when it sets `dangerouslyDisableSandbox`);
+  a file tool (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`) writing outside
+  the allowed folders, as a file change judged by the file it writes: its
+  `paths` are the file and the prompt's `blocked_path`. The folder the CLI's
+  `addDirectories` suggestion names is never granted, so it is not checked,
+  and an unprotected file at the library's root is asked; and
+  `SandboxNetworkAccess`, a new host for a sandboxed command (payload
+  `host`; its call id is not the command's). Any other tool is a `tool`
+  request with the tool's `name` and a `kind`: `read` (`Read`, `Glob`,
+  `Grep`, `LS`, `NotebookRead` outside the allowed folders; `path`, else
+  the prompt's `blocked_path`, and `pattern`), `fetch` (`WebFetch`; `url`
+  and `prompt`), `search` (`WebSearch`; `query`), `mcp`
+  (`mcp__<server>__<tool>`; `mcp: { server, tool }`, the server as the
+  prompt's `mcp_server.name` gives it, and `arguments`), or `other`
+  (`arguments`). A read names no `paths`: `protected.rs` keeps agents from
+  writing, and the library is readable already. No such prompt has been
+  recorded; `claude-approval-tool-decline` is derived from the write
+  recording. `AskUserQuestion` is declined unseen, as is every prompt of a
+  one-off turn and one that arrives while Stop is being asked. The CLI's
+  suggested grants are never sent back: the network one would persist to
+  `localSettings`. Approve once and Decline only.
+- **What reaches a prompt.** No rule in the launch refuses a read, a web
+  call or an MCP tool first: the deny rules are `Edit(…)` for the protected
+  paths and `Bash(sqlite3:*)`. Reads inside `agents/` and the library
+  (`--add-dir`) never prompt; the rest come to Rust in Ask and Don't ask
+  (which declines them unseen), and in Auto only what the classifier leaves.
+  A chat does not pass `--strict-mcp-config`, so the student's own MCP
+  servers load and their calls come as requests; a one-off turn has no
+  tools.
+- **Withdrawal.** `control_cancel_request` names a prompt the CLI gave up.
+  After our interrupt (probe `08`) the turn's end cancels it as stopped and
+  nothing is written to it; otherwise it becomes `RequestRetired` (expired,
+  withdrawn).
+- **A subagent** asks on the parent's channel with `agent_id`, the task's
+  id, not `parent_tool_use_id`. The translator keeps each `task_started`'s
+  `subagent_type`, Agent call and description by task id, so the payload
+  says `agent: { path, tool, description }`. A background subagent can ask
+  after its parent's `result`: no turn is open, so the consumer declines it
+  unseen. One that asks inside a turn the CLI started itself is shown with
+  no run and cancelled when that turn ends.
+- **Auto** sends no prompt for what the classifier decides; the tool result's
+  `tool_result_meta[].permission_decision` says it (`reason_type:
+  classifier`), and a deny rule's refusal too (`reason_type: rule`, in any
+  mode). The translator turns either into `ToolReviewed` with `source`
+  `classifier` or `rule`. No classifier refusal has been recorded.
+- `has_pending_request` counts prompts not yet answered or withdrawn, which
+  `decide_transition` reads to refuse a switch away from Claude.
+
 ## Going back rewinds the agent too
 
 Edit, Retry and Rewind truncate at a row (`harness::store::truncate`, announced as
@@ -1780,8 +1881,11 @@ compile without one.
   model or the `default` alias for what the catalogue resolves it to.
 - **Levels belong to the model.** Haiku declares none (no `--effort`);
   opencode's are variants; `agy` bakes them into the slug (`parse_models`
-  splits, `model_slug` rejoins). `sortReasoning` orders by
-  `REASONING_LABELS`; `default_variant` asks for `high` and steps down.
+  splits, `model_slug` rejoins). Rust keeps no list of levels: a level
+  comes from its CLI's catalogue, and `validate_effort` takes any short
+  lowercase word, which can carry no flag into an argv or key into a
+  config. `sortReasoning` orders by `REASONING_LABELS`, unknown levels
+  last; `default_variant` asks for `high` and steps down.
 - **Layout.** Agent tabs, the models, then the chosen model's levels in a
   column on the right, the chosen one ticked and the model's default
   tagged.
@@ -1843,7 +1947,7 @@ from the thread's live session and the run's selection, in this order:
 | another provider's | `CreateWithHandoff` | the old session is released (`Replaced`) and the target's is spawned or resumed |
 | same provider, another reasoning level | `RestartAndResume` | released and resumed under the new level |
 | same provider, another model | `SwitchModelInSession` where `model_switch_in_session` is true: Codex's next `turn/start` and opencode's next prompt name it. Else `RestartAndResume` | |
-| same provider, another permission mode | `SwitchModeInSession` where `mode_switch_in_session` is true (Codex names it on its next `turn/start`) or the bridge has no `approvals` (it reads no mode, so the mode is only recorded). Else `RestartAndResume` | |
+| same provider, another permission mode | `SwitchModeInSession` where `mode_switch_in_session` is true (Codex names it on its next `turn/start`) or the bridge has no `approvals` (it reads no mode, so the mode is only recorded). Else `RestartAndResume` (Claude, whose mode is fixed at spawn) | |
 | the same selection and mode | `Reuse` | |
 
 A rewind brings up the question's provider the same way, without regard to

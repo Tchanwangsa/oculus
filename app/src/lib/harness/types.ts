@@ -189,11 +189,14 @@ export interface HarnessRequest {
   provider: Provider;
   kind: "approval" | "question";
   action: "command" | "file_change" | "permissions" | "network" | "access" | "tool" | "rule";
-  /** Per action. A command: `command`, `cwd`, `reason`, `outsideSandbox`.
-   *  A file change: `changes` (`path`, `diff`, `kind`), `reason`. Permissions:
-   *  `permissions` (the profile asked for), `reason`. Any: `agent` (`path`,
-   *  `thread`) when a child agent asked, `tool` (the native item id, which
-   *  its tool row's `ref_id` matches). */
+  /** Per action. A command: `command`, `cwd` (Codex), `reason`,
+   *  `outsideSandbox`. A file change: `changes` (`path`, `diff`, `kind`),
+   *  `reason`. Permissions: `permissions` (the profile asked for), `reason`.
+   *  Network: Codex's `command`, or Claude's `host` alone. Tool (Claude):
+   *  `name`, `kind` and its target (`toolOf`). Any: `agent`
+   *  (`path`, and Codex's `thread` or Claude's `tool` and `description`)
+   *  when a child agent asked, `tool` (the native item id, which its tool
+   *  row's `ref_id` matches). */
   payload: Record<string, unknown>;
   options: RequestOption[];
   status: "pending" | "resolved" | "expired" | "cancelled";
@@ -255,13 +258,15 @@ export interface ToolMeta {
   review?: ToolReview;
 }
 
-/** A CLI reviewer's decision on one tool call (`Review` in
- *  `app/src-tauri/src/harness/event/mod.rs`). A `denied` call did not run. */
+/** A decision the CLI made on one tool call without asking (`Review` in
+ *  `app/src-tauri/src/harness/event/mod.rs`): Auto's reviewer, or a deny
+ *  rule. A `denied` call did not run. */
 export interface ToolReview {
   status: "in_progress" | "approved" | "denied" | "timed_out" | "aborted";
   risk?: "low" | "medium" | "high" | string;
   rationale?: string;
-  /** Who decided, as the CLI names it. */
+  /** Who decided, as the CLI names it: `agent` (Codex's reviewer),
+   *  `classifier` (Claude's Auto), `rule` (a deny rule, in any mode). */
   source?: string;
 }
 

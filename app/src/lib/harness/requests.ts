@@ -30,14 +30,32 @@ export interface RequestDetail {
   outsideSandbox: boolean;
   /** The command needs the network (Codex's network escalation). */
   network: boolean;
+  /** A host the agent asks to reach with no command (Claude's
+   *  `SandboxNetworkAccess`); listed in `access` too. */
+  host: string | null;
   changes: RequestChange[];
   /** A permissions request: one line per access asked for. */
   access: string[];
+  /** Any other tool call (Claude's reads outside its folders, web fetches
+   *  and searches, MCP tools). */
+  tool: RequestTool | null;
   /** The agent's own reason, as it gave it. */
   reason: string | null;
   /** One short line naming what is asked, for the composer bar and a
    *  settled row: the command, the file, or the access. */
   subject: string;
+}
+
+/** A tool call that is not a command or a file change, in plain words. */
+export interface RequestTool {
+  /** What it will do: "Read /x", "Fetch https://…", "Search the web for
+   *  “…”", "Use github › create_issue". */
+  line: string;
+  /** What narrows it: a fetch's question about the page, a search pattern. */
+  note: string | null;
+  /** Its arguments as indented JSON: an MCP tool's, or a tool Oculus has no
+   *  words for. */
+  args: string | null;
 }
 
 const text = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
@@ -93,6 +111,63 @@ export function accessLines(permissions: unknown): string[] {
   return lines;
 }
 
+/** A `tool` request's payload (`providers/claude/approvals.rs`) as a line,
+ *  its narrowing note and its arguments. */
+export function toolOf(payload: Record<string, unknown>): RequestTool {
+  const name = text(payload.name) ?? "a tool";
+  const args = payload.arguments && typeof payload.arguments === "object"
+    ? JSON.stringify(payload.arguments, null, 2)
+    : null;
+  switch (payload.kind) {
+    case "read": {
+      const path = text(payload.path);
+      const pattern = text(payload.pattern);
+      const matching = name === "Grep" ? "Lines matching" : "Files matching";
+      return {
+        line: path ? `Read ${path}` : "Read outside its folders",
+        note: pattern ? `${matching} ${pattern}` : null,
+        args: null,
+      };
+    }
+    case "fetch": {
+      const url = text(payload.url);
+      const prompt = text(payload.prompt);
+      return { line: url ? `Fetch ${url}` : "Fetch a web page", note: prompt ? `“${prompt}”` : null, args: null };
+    }
+    case "search": {
+      const query = text(payload.query);
+      return { line: query ? `Search the web for “${query}”` : "Search the web", note: null, args: null };
+    }
+    case "mcp": {
+      const mcp = (payload.mcp ?? {}) as Record<string, unknown>;
+      const server = text(mcp.server);
+      const tool = text(mcp.tool);
+      const line = server && tool ? `Use ${server} › ${tool}` : `Use ${name}`;
+      return { line, note: null, args };
+    }
+    default:
+      return { line: `Use ${name}`, note: null, args };
+  }
+}
+
+/** The request title's verb phrase for a `tool` request. */
+function toolTitle(payload: Record<string, unknown>): string {
+  switch (payload.kind) {
+    case "read":
+      return "read outside its folders";
+    case "fetch":
+      return "fetch a web page";
+    case "search":
+      return "search the web";
+    case "mcp": {
+      const server = text((payload.mcp as Record<string, unknown> | undefined)?.server);
+      return server ? `use ${server}` : "use a tool";
+    }
+    default:
+      return `use ${text(payload.name) ?? "a tool"}`;
+  }
+}
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const baseName = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
 
@@ -102,9 +177,11 @@ export function requestDetail(request: HarnessRequest): RequestDetail {
   const who = providerLabel(request.provider);
   const agent = agentName(p);
   const changes = request.action === "file_change" ? changesOf(p) : [];
-  const access = request.action === "permissions" ? accessLines(p.permissions) : [];
   const command = request.action === "command" || request.action === "network" ? text(p.command) : null;
-  const network = request.action === "network";
+  const host = request.action === "network" ? text(p.host) : null;
+  const access = request.action === "permissions" ? accessLines(p.permissions) : host ? [`Reach ${host}`] : [];
+  const network = request.action === "network" && !host;
+  const tool = request.action === "tool" ? toolOf(p) : null;
   const asker = agent ? `${who}'s subagent ${agent}` : who;
   let title: string;
   let subject: string;
@@ -115,7 +192,7 @@ export function requestDetail(request: HarnessRequest): RequestDetail {
       break;
     case "network":
       title = `${asker} wants to reach the network`;
-      subject = command ?? "Network access";
+      subject = command ?? host ?? "Network access";
       break;
     case "file_change":
       title = `${asker} wants to change ${changes.length === 1 ? "a file" : plural(changes.length, "file")}`;
@@ -124,6 +201,10 @@ export function requestDetail(request: HarnessRequest): RequestDetail {
     case "permissions":
       title = `${asker} wants more access`;
       subject = access.join(", ") || "More access";
+      break;
+    case "tool":
+      title = `${asker} wants to ${toolTitle(p)}`;
+      subject = tool?.line ?? "A tool";
       break;
     default:
       title = `${asker} asks for approval`;
@@ -136,8 +217,10 @@ export function requestDetail(request: HarnessRequest): RequestDetail {
     cwd: text(p.cwd),
     outsideSandbox: p.outsideSandbox === true,
     network,
+    host,
     changes,
     access,
+    tool,
     reason: text(p.reason),
     subject,
   };
@@ -272,30 +355,46 @@ export function awaitsApproval(requests: Record<number, HarnessRequest> | undefi
   return false;
 }
 
-/** A reviewer's decision on a tool row, as the row says it. */
+/** A decision the CLI made on a tool row without asking: Auto's reviewer
+ *  (Codex's, or Claude's classifier, `source: "classifier"`), or a deny
+ *  rule that holds in every mode (`source: "rule"`). */
 export interface ReviewView {
   label: string;
   tone: "muted" | "danger";
   /** "Low risk"; null when the reviewer gave none. */
   risk: string | null;
   rationale: string | null;
+  /** Why nobody was asked, said after the label when the row is opened. */
+  note: string;
 }
 
-export function reviewView(review: ToolReview | undefined | null): ReviewView | null {
-  if (!review || typeof review !== "object") return null;
-  const risk = text(review.risk);
-  const words: Record<string, [string, ReviewView["tone"]]> = {
+const REVIEW_WORDS: Record<string, Record<string, [string, ReviewView["tone"]]>> = {
+  classifier: {
+    approved: ["Approved by Claude's classifier", "muted"],
+    denied: ["Refused by Claude's classifier", "danger"],
+  },
+  rule: {
+    denied: ["Refused by a rule", "danger"],
+  },
+  reviewer: {
     approved: ["Reviewer approved", "muted"],
     denied: ["Reviewer denied", "danger"],
     in_progress: ["Reviewing", "muted"],
     timed_out: ["Review timed out", "danger"],
     aborted: ["Review stopped", "muted"],
-  };
-  const [label, tone] = words[review.status] ?? ["Reviewed", "muted"];
+  },
+};
+
+export function reviewView(review: ToolReview | undefined | null): ReviewView | null {
+  if (!review || typeof review !== "object") return null;
+  const risk = text(review.risk);
+  const source = review.source === "classifier" || review.source === "rule" ? review.source : "reviewer";
+  const [label, tone] = REVIEW_WORDS[source][review.status] ?? ["Reviewed", "muted"];
   return {
     label,
     tone,
     risk: risk ? `${risk.charAt(0).toUpperCase()}${risk.slice(1)} risk` : null,
     rationale: text(review.rationale),
+    note: source === "rule" ? "Oculus keeps agents out of this in every mode" : "you were not asked (Auto)",
   };
 }

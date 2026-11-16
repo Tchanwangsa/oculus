@@ -1,0 +1,57 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.325",
+  "protocol": "Claude print stream-json with the control channel (--permission-prompts host --permission-prompt-tool stdio)",
+  "model": "claude-haiku-5-5",
+  "capture_date": "2026-11-15",
+  "source": "stage 2 Claude probe 13-subagent-foreground.jsonl, lines 3-187, inbound frames",
+  "redaction": "CLI stdout frames only, as recorded (tokens, account ids and emails were already removed by the probe). The probe's temp-folder suffixes are removed and any home path becomes /Users/student. The expected outbound is the Oculus bridge's for this permission mode, not the probe driver's messages. Recorded with a private CLAUDE_CONFIG_DIR, --setting-sources '' and --strict-mcp-config.",
+  "scenario": "a foreground subagent's escape, named by agent_id, approved",
+  "frames": 184,
+  "sha256": "74e3016bf85706165fe354cf5ee235f2b08889ddb196b7945aa86e5cc46d8241",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "e3f5c0cf-a86a-449e-ad74-d533d892b76f",
+          "response": {
+            "behavior": "allow",
+            "updatedInput": {
+              "command": "touch /private/tmp/oculus-claude-external.XXXXXX/child-foreground",
+              "description": "Create empty child-foreground marker file outside sandbox",
+              "dangerouslyDisableSandbox": true
+            }
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-approval-child.ndjson",
+  "native_session": "",
+  "permission_mode": "ask",
+  "settings": {
+    "recorded_agent": null,
+    "recorded_variant": null,
+    "replay_model": null,
+    "replay_effort": null,
+    "replay_agent": null,
+    "replay_scope": "recorded session route; scratch cwd",
+    "recorded_permission_mode": "acceptEdits",
+    "permission_mode": "ask"
+  }
+}

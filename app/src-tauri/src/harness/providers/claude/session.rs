@@ -1,6 +1,6 @@
 //! One `claude -p` process per thread: spawn, send, interrupt, rewind.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -10,6 +10,7 @@ use serde_json::Value;
 
 use crate::harness::child::{self, ChildProc};
 use crate::harness::event::{Bound, HarnessEvent, Provider, Turns};
+use crate::harness::requests::PermissionMode;
 use crate::harness::Sink;
 
 use super::settings::settings_json;
@@ -23,6 +24,45 @@ fn configure_thinking(cmd: &mut Command, one_off: bool) {
     } else {
         cmd.args(["--thinking", "adaptive", "--thinking-display", "summarized"]);
     }
+}
+
+/// How a session is started: its CLI permission mode, who answers its
+/// prompts, and the tools it may never call. A chat's prompts come to the
+/// host (`approvals.rs`); Auto hands them to the CLI's classifier first. A
+/// one-off turn has nobody to ask, so its prompts are denied by the CLI.
+/// `AskUserQuestion` stays out of a chat until questions are answered in it.
+pub(super) fn permission_args(one_off: bool, mode: PermissionMode) -> Vec<&'static str> {
+    if one_off {
+        // `default` auto-allows no tool, and the turn has none anyway.
+        return vec![
+            "--permission-mode",
+            "default",
+            "--permission-prompts",
+            "none",
+        ];
+    }
+    let cli_mode = match mode {
+        PermissionMode::Auto => "auto",
+        PermissionMode::Ask | PermissionMode::Quiet => "acceptEdits",
+    };
+    vec![
+        "--permission-mode",
+        cli_mode,
+        "--permission-prompts",
+        "host",
+        "--permission-prompt-tool",
+        "stdio",
+        "--disallowedTools",
+        "AskUserQuestion",
+    ]
+}
+
+/// Whether a shell command may ask to leave the sandbox
+/// (`dangerouslyDisableSandbox`). Only in Ask, where the student answers:
+/// in Auto the classifier would be all that stands between a command and a
+/// protected folder, and in Don't ask nobody would approve it.
+pub(super) fn unsandboxed_commands(one_off: bool, mode: PermissionMode) -> bool {
+    !one_off && mode == PermissionMode::Ask
 }
 
 pub struct ClaudeSession {
@@ -44,6 +84,11 @@ pub struct ClaudeSession {
     pub(super) turns: Arc<Turns>,
     /// How many background tasks its reader counts as running.
     pub(super) background: Arc<AtomicUsize>,
+    /// A one-off turn: any permission prompt is declined, unseen.
+    pub(super) one_off: bool,
+    /// Permission prompts raised and not yet answered or withdrawn, by
+    /// their wire id (`approvals.rs`).
+    pub(super) callbacks: Mutex<HashSet<String>>,
 }
 
 impl ClaudeSession {
@@ -66,8 +111,7 @@ impl ClaudeSession {
             .args(["--output-format", "stream-json"])
             .arg("--verbose")
             .arg("--include-partial-messages")
-            .args(["--permission-mode", &cfg.permission_mode])
-            .args(["--permission-prompts", "none"]);
+            .args(permission_args(cfg.one_off, cfg.mode));
         if let Some(m) = &base.model {
             cmd.args(["--model", m]);
         }
@@ -104,6 +148,7 @@ impl ClaudeSession {
                 &base.cwd,
                 cfg.oculus.as_deref(),
                 &hosts,
+                unsandboxed_commands(cfg.one_off, cfg.mode),
                 !cfg.one_off,
             ),
         ]);
@@ -134,6 +179,8 @@ impl ClaudeSession {
             expecting: expecting.clone(),
             turns: turns.clone(),
             background: background.clone(),
+            one_off: cfg.one_off,
+            callbacks: Mutex::new(HashSet::new()),
         });
 
         let reader_session = session.clone();
@@ -147,18 +194,26 @@ impl ClaudeSession {
                 ..Default::default()
             };
             child::read_json_lines(stdout, raw_log.as_ref(), |v| {
-                if v.get("type").and_then(|t| t.as_str()) == Some("control_response") {
-                    reader_session.settle(&v);
-                    return;
-                }
-                for ev in state.translate(&v) {
-                    sink(ev);
-                }
+                reader_session.line(&v, &mut state, &sink);
             });
             reader_session.closed(&mut state, &sink);
         });
 
         Ok(session)
+    }
+
+    /// One line from stdout: the control channel's own lines, or the stream.
+    pub(super) fn line(self: &Arc<Self>, v: &Value, state: &mut Translator, sink: &Sink) {
+        match v.get("type").and_then(|t| t.as_str()) {
+            Some("control_response") => self.settle(v),
+            Some("control_request") => self.control_request(v, &state.agents, sink),
+            Some("control_cancel_request") => self.control_cancelled(v, sink),
+            _ => {
+                for ev in state.translate(v) {
+                    sink(ev);
+                }
+            }
+        }
     }
 
     /// stdout reached EOF: fail what is open, then announce the exit.

@@ -63,12 +63,16 @@ impl Handle {
     pub(super) fn has_pending_request(&self) -> bool {
         match self {
             Handle::Codex(server, tid, _) => server.has_pending_request(tid),
-            _ => false,
+            Handle::Claude(s) => s.has_pending_request(),
+            Handle::Opencode(..) | Handle::Antigravity(_) => false,
         }
     }
 
     /// The same session, sending its later turns under `mode`. Only Codex
-    /// reads one, on each `turn/start`; the others record it.
+    /// reads one, on each `turn/start`. Claude's is fixed at spawn (its
+    /// settings say whether a command may leave the sandbox), so a change
+    /// restarts it (`mode_switch_in_session` is false) and this keeps it as
+    /// it is; the others ask no one and record it.
     pub(super) fn with_mode(&self, mode: PermissionMode) -> Handle {
         match self {
             Handle::Codex(server, tid, opts) => {
@@ -78,7 +82,7 @@ impl Handle {
                 };
                 Handle::Codex(server.clone(), tid.clone(), Arc::new(opts))
             }
-            _ => self.clone(),
+            Handle::Claude(_) | Handle::Opencode(..) | Handle::Antigravity(_) => self.clone(),
         }
     }
 

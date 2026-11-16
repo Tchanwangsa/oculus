@@ -279,7 +279,7 @@ mod tests {
         );
         assert_eq!(moded(Provider::Codex, Ask, Ask, None), Transition::Reuse);
         // A bridge with no approvals reads no mode: it is only recorded.
-        for provider in [Provider::Claude, Provider::Opencode, Provider::Antigravity] {
+        for provider in [Provider::Opencode, Provider::Antigravity] {
             assert!(!capabilities::of(provider).approvals);
             assert_eq!(
                 moded(provider, Ask, Quiet, None),
@@ -287,23 +287,18 @@ mod tests {
                 "{provider:?}"
             );
         }
-        // One that fixes its mode at spawn restarts for it.
-        let caps = Capabilities {
-            approvals: true,
-            mode_switch_in_session: false,
-            ..capabilities::of(Provider::Claude)
-        };
-        let running = selection(Provider::Claude, "m", None);
-        let current = Current {
-            selection: &running,
-            mode: Ask,
-            background: false,
-            pending_request: false,
-        };
-        assert_eq!(
-            decide_transition(Some(current), (&running, Auto), &caps),
-            Transition::RestartAndResume
-        );
+        // Claude fixes its mode at spawn (whether a command may leave the
+        // sandbox is in its settings), so every change restarts it, and the
+        // same mode keeps it.
+        assert!(capabilities::of(Provider::Claude).approvals);
+        for (from, to) in [(Ask, Auto), (Auto, Ask), (Ask, Quiet), (Quiet, Auto)] {
+            assert_eq!(
+                moded(Provider::Claude, from, to, None),
+                Transition::RestartAndResume,
+                "{from:?} to {to:?}"
+            );
+        }
+        assert_eq!(moded(Provider::Claude, Auto, Auto, None), Transition::Reuse);
     }
 
     #[test]

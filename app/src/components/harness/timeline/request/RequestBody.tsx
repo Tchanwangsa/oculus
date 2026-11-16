@@ -2,10 +2,12 @@ import { Globe, Warning } from "@phosphor-icons/react";
 import { CodeText } from "@/components/markdown/MdComponents";
 import { changeKindLabel, type RequestDetail } from "@/lib/harness";
 import { DiffBlock } from "./DiffBlock";
+import { FoldBlock } from "./FoldBlock";
 
 /** What a request asks, per action: the whole command with its folder and,
  *  only where Rust says so, that it runs outside the sandbox; each file with
- *  its diff; the access asked for; then the agent's reason. */
+ *  its diff; the access asked for; what another tool call will do, with its
+ *  arguments; then the agent's reason. */
 export function RequestBody({ detail }: { detail: RequestDetail }) {
   return (
     <div className="flex min-w-0 flex-col gap-1.5" data-selectable>
@@ -46,6 +48,19 @@ export function RequestBody({ detail }: { detail: RequestDetail }) {
             <li key={line} className="break-all">{line}</li>
           ))}
         </ul>
+      )}
+      {detail.tool && (
+        <div className="min-w-0">
+          <p className="break-all text-[11.5px] font-medium text-foreground/85">{detail.tool.line}</p>
+          {detail.tool.note && (
+            <p className="break-words text-[11px] leading-relaxed text-muted-foreground">{detail.tool.note}</p>
+          )}
+          {detail.tool.args && (
+            <FoldBlock text={detail.tool.args}>
+              <CodeText className="px-2.5 text-[11.5px] text-foreground/85">{detail.tool.args}</CodeText>
+            </FoldBlock>
+          )}
+        </div>
       )}
       {detail.reason && (
         <p className="break-words text-[11.5px] leading-relaxed text-muted-foreground">“{detail.reason}”</p>

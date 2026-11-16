@@ -12,6 +12,13 @@ describe("the mode control's lines per bridge", () => {
     ]);
   });
 
+  test("Claude's Auto says its classifier decides", () => {
+    const { note, choices } = modeChoices({ provider: "claude", approvals: true, autoReview: true });
+    expect(note).toBeNull();
+    expect(choices[1].line).toBe("Classifier decides");
+    expect(choices[0].line).toBe("You approve what the sandbox blocks");
+  });
+
   test("no reviewer: Auto says it asks as Ask", () => {
     const { note, choices } = modeChoices({ provider: "opencode", approvals: true, autoReview: false });
     expect(note).toBeNull();
