@@ -4,7 +4,7 @@ import { previewsSql, THREADS_SQL } from "@/lib/harness/reads";
 
 /** The columns the two reads touch, as the migrations leave them. */
 const sqlite = new SQLite(":memory:");
-sqlite.run(`CREATE TABLE harness_threads (id INTEGER PRIMARY KEY, title TEXT, updated_at TEXT NOT NULL DEFAULT '2026-11-15 00:00:00')`);
+sqlite.run(`CREATE TABLE harness_threads (id INTEGER PRIMARY KEY, title TEXT, completed_at TEXT, updated_at TEXT NOT NULL DEFAULT '2026-11-15 00:00:00')`);
 sqlite.run(`CREATE TABLE harness_items (id INTEGER PRIMARY KEY, thread_id INTEGER, kind TEXT, content TEXT, run_id INTEGER)`);
 sqlite.run(`CREATE TABLE harness_runs (id INTEGER PRIMARY KEY, thread_id INTEGER, execution_status TEXT,
   initiating_item_id INTEGER, answer_item_id INTEGER, ended_at TEXT)`);
@@ -49,4 +49,13 @@ test("a detached question counts as Input and an ended question does not", () =>
     (3, 'question', 'pending', 'message'), (3, 'question', 'cancelled', 'not_resumable')`);
   const row = all<{ id: number; pending_requests: number; pending_questions: number }>(THREADS_SQL, [10]).find((t) => t.id === 3);
   expect(row).toMatchObject({ pending_requests: 1, pending_questions: 1 });
+});
+
+test("open reads exclude completed chats and an unlimited read reaches beyond 100", () => {
+  sqlite.run("UPDATE harness_threads SET completed_at = '2026-11-16' WHERE id = 1");
+  for (let id = 4; id <= 110; id++) sqlite.run("INSERT INTO harness_threads(id, title) VALUES (?1, 'open')", [id]);
+  const threads = all<{ id: number }>(THREADS_SQL, [-1]);
+  expect(threads).toHaveLength(109);
+  expect(threads.some((t) => t.id === 1)).toBe(false);
+  expect(threads[0].id).toBe(110);
 });

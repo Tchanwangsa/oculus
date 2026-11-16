@@ -19,10 +19,10 @@ const PENDING_QUESTIONS =
   "(SELECT COUNT(*) FROM harness_requests q WHERE q.thread_id = t.id" +
   " AND q.kind = 'question' AND q.status = 'pending' AND q.responder IN ('live', 'message')) AS pending_questions";
 
-/** The thread list's read, newest first; `$1` is the limit. */
-export const THREADS_SQL = `SELECT t.*, ${SETTLED_AT}, ${PENDING_REQUESTS}, ${PENDING_QUESTIONS} FROM harness_threads t ORDER BY t.updated_at DESC, t.id DESC LIMIT $1`;
+/** Open threads, newest first; `$1` is the limit (-1 reads every open thread). */
+export const THREADS_SQL = `SELECT t.*, ${SETTLED_AT}, ${PENDING_REQUESTS}, ${PENDING_QUESTIONS} FROM harness_threads t WHERE t.completed_at IS NULL ORDER BY t.updated_at DESC, t.id DESC LIMIT $1`;
 
-export async function getHarnessThreads(limit = 100): Promise<HarnessThread[]> {
+export async function getHarnessThreads(limit = -1): Promise<HarnessThread[]> {
   const db = await getDb();
   return db.select<HarnessThread[]>(THREADS_SQL, [limit]);
 }

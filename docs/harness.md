@@ -913,6 +913,38 @@ writes it into the draft once and drops it from the route.
 Deleting a thread drops its retained live output, view holds and context-drift
 marker as well as rows and queue, so removed turns cannot leave the sidebar busy.
 
+## Completed chats leave the open list and remain searchable
+
+Completion is display state: `completed_at` on `harness_threads` never changes
+or releases a provider session. Complete and Reopen use the serialized command
+path and receipts (`app/src-tauri/src/harness/app/completed.rs`). Reopen clears
+the stamp and refreshes `updated_at`; an accepted send clears it in its own
+transaction, including queued and steered sends.
+
+A launch task waits for startup repair, then sweeps hourly
+(`app/src-tauri/src/harness/store/completed.rs`). It stamps open threads older
+than three days, excluding running threads, starting/running/queued runs,
+pending requests (questions included), and failures. Reads never complete a
+thread. Sweeps preserve `updated_at`, so the last activity still orders chats.
+
+`app/src/lib/harness/completedReads.ts` pages completed chats newest first,
+10 initially and 25 thereafter, with `COUNT(*)`, subject counts and a subject
+page (null is General). `getHarnessThreads` reads every open chat by default;
+`getLectureThreads` includes completed ones. Both commands and a sweep that
+changed rows emit `harness-threads-changed` with the changed ids so list
+consumers can refresh. The menu emits `menu-complete-chat` on ⌘E; as for
+Open Location, it is always enabled because Rust does not track the current
+page, and its frontend handler must act only on an open chat.
+
+`app/src/lib/harness/searchThreads.ts` combines title `LIKE` hits and the
+external-content FTS5 index `harness_items_fts`, maintained by insert, edit and
+delete triggers over user and assistant message text. Migration 61 backfills
+it; `unicode61 remove_diacritics 2` matches accents. Search quotes user tokens
+and adds prefix operators itself, so typed FTS syntax is literal input.
+Results include completed chats, one best hit per thread, title matches first,
+then message relevance and newest activity, capped at 50. Snippets are plain
+text with `**` around hits, for the UI to render as text and bold spans.
+
 ## One turn at a time
 
 A message sent mid-turn either waits until the turn closes or, where the
@@ -1283,8 +1315,8 @@ ownership, never by the provider's capabilities: every row carries the
 `attempt_id` it was written under (the question from `runs::begin`, a
 steer the attempt it corrects, the partial reply the superseded attempt,
 since `cut_short` commits it before the switch), and the run its
-`active_attempt_id`, live and loaded alike. A steer owned by an attempt
-that is no longer active ended that attempt: all of the attempt's rows,
+`active_attempt_id`, live and loaded alike. A steer owned by a superseded attempt
+ended that attempt: all of the attempt's rows,
 wherever their ids fall (the partial reply is written after its steer),
 fold together above its first correction as "Restarted after 5s", and
 every correction sits between the attempts. A steer still `restart`

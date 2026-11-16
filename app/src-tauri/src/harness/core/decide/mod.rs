@@ -93,6 +93,15 @@ pub(in crate::harness) fn decide(
             model,
             effort,
         } => select::decide(state, *provider, model.as_ref(), effort.as_ref()),
+        Kind::CompleteThread | Kind::ReopenThread => {
+            state.thread.as_ref().ok_or("completion with no thread")?;
+            Ok(Decision::Commit(Plan {
+                changes: vec![Change::SetCompleted {
+                    completed: matches!(command.kind, Kind::CompleteThread),
+                }],
+                text: None,
+            }))
+        }
         Kind::DeleteThread => delete::decide(state),
         Kind::EditQueued { run_id, text } => queue::edit(state, *run_id, text),
         Kind::RemoveQueued { run_id } => queue::remove(state, *run_id),

@@ -4,10 +4,13 @@
 
 mod apply;
 pub mod bindings;
+pub mod completed;
 mod items;
 mod naming;
 pub mod queue;
 mod runs;
+#[cfg(test)]
+mod search_tests;
 pub mod steer;
 pub mod threads;
 

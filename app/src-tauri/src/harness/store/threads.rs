@@ -100,6 +100,7 @@ fn title_from(text: &str) -> String {
 
 pub struct ThreadRow {
     pub id: i64,
+    pub completed_at: Option<String>,
     /// What the next send will use; a run records what it was sent with.
     pub provider: Provider,
     pub model: Option<String>,
@@ -126,7 +127,7 @@ pub struct LectureRef {
 
 pub async fn thread(pool: &SqlitePool, id: i64) -> Result<ThreadRow, String> {
     let r = sqlx::query(
-        "SELECT t.id, t.provider, t.model, t.effort, s.code AS subject_code,
+        "SELECT t.id, t.provider, t.model, t.effort, t.completed_at, s.code AS subject_code,
                 l.id AS lecture_id, l.title AS lecture_title, l.date AS lecture_date,
                 l.transcript_path
          FROM harness_threads t
@@ -156,6 +157,7 @@ pub async fn thread(pool: &SqlitePool, id: i64) -> Result<ThreadRow, String> {
         });
     Ok(ThreadRow {
         id: r.get("id"),
+        completed_at: r.get("completed_at"),
         provider: Provider::parse(&provider)
             .ok_or_else(|| format!("unknown provider {provider}"))?,
         model: r.get("model"),

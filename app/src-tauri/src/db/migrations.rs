@@ -966,6 +966,18 @@ INSERT OR IGNORE INTO task_tags (name, color, position) VALUES
             sql: include_str!("../harness/requests/questions.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 60,
+            description: "completed chats",
+            sql: include_str!("../harness/store/completed.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 61,
+            description: "chat message search",
+            sql: include_str!("../harness/store/search.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

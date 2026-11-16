@@ -94,7 +94,9 @@ impl Consumer {
                 }
                 // Whatever the saved runs now imply: the new run's start, or
                 // a message that joined an idle chat's queue going out.
-                self.drive(outcome.thread_id, provider, io);
+                if !matches!(command.kind, Kind::CompleteThread | Kind::ReopenThread) {
+                    self.drive(outcome.thread_id, provider, io);
+                }
                 Ok(Accepted::Done(outcome))
             }
             Decision::Ask(Ask::Rewind(ask)) => {
@@ -297,6 +299,7 @@ impl Consumer {
                 };
                 self.event(thread_id, provider, From::App, selected, None, io);
             }
+            Applied::Completion => io.threads_changed(vec![thread_id]),
             Applied::Queue => self.tell_queue(thread_id, provider, io),
             Applied::Steered(steered) => self.steered(thread_id, provider, *steered, io),
             Applied::Cards(cards) => {
