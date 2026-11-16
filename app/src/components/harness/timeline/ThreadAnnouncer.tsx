@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { awaitsApproval, createAnnouncer, lastTurnEnd, spokenStatus } from "@/lib/harness";
+import { awaitsApproval, createAnnouncer, waitingQuestions, lastTurnEnd, spokenStatus } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 
 /**
  * One polite live region per view of a thread, for screen readers: it says
- * "Working", "Needs approval", "Done", "Failed", "Stopped" (and, once a
- * bridge asks questions, "Needs your input") when the open thread's status
+ * "Working", "Needs approval", "Needs your input", "Done", "Failed",
+ * "Stopped" when the open thread's status
  * changes — never on mount or a thread switch, and never a message or a step.
  * A plain `aria-live="polite"` region, not `role="status"`.
  */
@@ -13,6 +13,7 @@ export function ThreadAnnouncer({ threadId }: { threadId: number }) {
   const [text, setText] = useState("");
   const running = useHarnessStore((s) => s.live[threadId]?.running ?? false);
   const approval = useHarnessStore((s) => awaitsApproval(s.requests[threadId]));
+  const input = useHarnessStore((s) => waitingQuestions(s.requests[threadId]).length > 0);
   const lastRun = useHarnessStore((s) => lastTurnEnd(s.live[threadId]?.ended, s.runs[threadId]));
   // Until the thread's runs are read, its status is unknown, not news.
   const loaded = useHarnessStore((s) => threadId in s.runs);
@@ -23,8 +24,8 @@ export function ThreadAnnouncer({ threadId }: { threadId: number }) {
     announcer.current?.reset();
   }, [threadId]);
   useEffect(() => {
-    if (loaded) announcer.current?.update(spokenStatus({ running, approval, input: false, lastRun }));
-  }, [threadId, loaded, running, approval, lastRun]);
+    if (loaded) announcer.current?.update(spokenStatus({ running, approval, input, lastRun }));
+  }, [threadId, loaded, running, approval, input, lastRun]);
   useEffect(() => () => announcer.current?.dispose(), []);
 
   return (

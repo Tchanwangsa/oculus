@@ -6,8 +6,8 @@ import { ANCHOR_ROW } from "@/hooks/ui/useStickToBottom";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { cn } from "@/lib/utils";
 import { LiveThinkingRow } from "./WorkRow";
-import { WAITING, Working } from "./Working";
-import { awaitsApproval, commandError, moveQueued, queuedLabel, runningSince, type QueuedMessage } from "@/lib/harness";
+import { Working } from "./Working";
+import { commandError, runWaitingOn, WAITING_LABEL, moveQueued, queuedLabel, runningSince, type QueuedMessage } from "@/lib/harness";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useRunCommand } from "@/components/harness/composer/useRunCommand";
@@ -36,7 +36,7 @@ export function LiveTail({
   })));
   // The run in flight's start; none for a turn the agent started itself.
   const since = useHarnessStore((s) => runningSince(s.runs[threadId]));
-  const waiting = useHarnessStore((s) => awaitsApproval(s.requests[threadId]));
+  const waiting = useHarnessStore((s) => runWaitingOn(s.requests[threadId]));
   const quiet = allowQuiet && running && !streaming && !thinking;
   const shown = text ? streaming : "";
   if (!thinking && !shown && !quiet) return null;
@@ -46,7 +46,7 @@ export function LiveTail({
       {shown && <Assistant text={shown} />}
       {quiet && (
         <div className="mt-1 px-2 text-xs leading-5 tabular-nums text-muted-foreground">
-          {waiting ? WAITING : <Working since={since} />}
+          {waiting ? WAITING_LABEL[waiting] : <Working since={since} />}
         </div>
       )}
     </div>

@@ -29,7 +29,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
 | Provider table (`PROVIDERS`), platform capabilities, types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/availability.ts`, `app/src/lib/harness/` |
 | What an agent asks mid-turn: the request table, its live routes, the protected-path check, the `Respond` and permission-mode commands | `app/src-tauri/src/harness/requests/`, `app/src-tauri/src/harness/core/decide/respond.rs`, `app/src-tauri/src/harness/app/consumer/requests.rs`, `app/src-tauri/src/harness/app/requests.rs` |
-| …their frontend: the row, the answer bar, the mode control, what each shows | `app/src/components/harness/timeline/request/`, `app/src/components/harness/composer/RequestBar.tsx`, `app/src/components/harness/composer/PermissionModeControl.tsx`, `app/src/lib/harness/requests.ts`, `app/src/lib/harness/permissionModes.ts` |
+| …their frontend: the row, the answer bar, the question panel, the mode control, what each shows | `app/src/components/harness/timeline/request/`, `app/src/components/harness/composer/RequestBar.tsx`, `app/src/components/harness/composer/QuestionPanel.tsx`, `app/src/components/harness/composer/useQuestionComposer.ts`, `app/src/components/harness/composer/PermissionModeControl.tsx`, `app/src/lib/harness/requests.ts`, `app/src/lib/harness/questions.ts`, `app/src/lib/harness/permissionModes.ts` |
 | A thread's selection, what a send does to its session (`decide_transition`), and the context handoff | `app/src-tauri/src/harness/core/decide/select.rs`, `app/src-tauri/src/harness/manager/transition.rs`, `app/src-tauri/src/harness/handoff/`, `app/src-tauri/src/harness/store/bindings.rs`, `app/src-tauri/src/harness/store/switching.sql` |
 | What each bridge can do (Stop, rewind, steering, switching), declared in Rust and read by the webview | `app/src-tauri/src/harness/providers/capabilities.rs`, `app/src/lib/harness/capabilities.ts`, `app/src/hooks/agents/useCapabilities.ts` |
 | Live state and event folding | `app/src/stores/chat/harnessStore.ts`, `app/src/hooks/backend/useBackendEvents.ts` |
@@ -1684,14 +1684,15 @@ The frontend data contract is `lib/harness/questions.ts` and the types in
 switches and webview reloads. `setQuestionDraft` accepts only known pending
 non-secret questions; confirmed resolution, rewind and deletion prune drafts.
 `waitingQuestions` selects the oldest answerable question, including message
-responders. Approval helpers select approvals only. Question panel rendering
-is a separate consumer of these types and store fields.
+responders. Approval helpers select approvals only. What the panel, the
+composer and the row decide from them (picks, readiness, the submission, the
+labels) is in `questions.ts` too; "In the chat" below says what is drawn.
 
 ### In the chat
 
-What the student sees is decided in `app/src/lib/harness/requests.ts` and
-`permissionModes.ts` (tested without a DOM) and drawn by
-`components/harness/timeline/request/` and two composer pieces.
+What the student sees is decided in `app/src/lib/harness/requests.ts`,
+`questions.ts` and `permissionModes.ts` (tested without a DOM) and drawn by
+`components/harness/timeline/request/` and the composer's pieces.
 
 - **The row** (`RequestRow`, the `request` item) reads its request from the
   store. While it waits it is a card: "Codex wants to run a command" (or
@@ -1715,11 +1716,44 @@ What the student sees is decided in `app/src/lib/harness/requests.ts` and
   `harnessRespond` and the bar is inert until it returns. A refusal is
   Rust's sentence under the bar. A delivery that failed comes back pending
   with "Your answer did not reach Codex. Answer again." on its row.
+- **A question** is answered in a panel on top of the composer
+  (`QuestionPanel`, in `Composer` and the lecture dock's box), driven by
+  `useQuestionComposer`. It takes the oldest waiting question request and
+  shows one question at a time: its header, "1/2" when there are more, the
+  text, and radio rows (single choice) or checkbox rows (multiple) with each
+  option's description and a key cap. Digits 1–9 pick, except while focus is
+  in an input, a textarea or an editable box, and only in the tab in front
+  with focus on nothing or inside the panel; a single choice moves to the
+  next question after 200 ms. The typed answer is the composer itself: while
+  a question waits the box is a separate editor for that question's text
+  (`QuestionEditor`), with "Type your answer", or only "Choose an option
+  above" when the question takes no typed answer. Enter and the send arrow
+  answer (Next, then Send answer or Send answers); they never send a
+  message, and the message draft, its attachments and the stash wait
+  underneath. On a single choice a typed answer replaces the pick, and a
+  pick made after typing moves the typed text to the message draft, said in
+  a muted line. "Dismiss question without answering" dismisses the request
+  when it has one question, and otherwise marks that question dismissed and
+  moves on; every question dismissed is the request dismissed. Back returns
+  to an earlier question. The whole request goes in one `harnessRespond`;
+  Rust's refusal is a red line inside the panel. A question whose session is
+  gone (`responder: "message"`) reads "Answer in a new message" on its last
+  button. Drafts are `harnessStore.questionDrafts`, so a chat switch or a
+  reload reopens at the first unanswered question.
+- **A question's row** (`QuestionRow`) waits as a card naming who asks
+  ("Codex asks 2 questions") with each question's header, text and options,
+  and, on a lost session, that the answer goes as a new message. Answered,
+  it stays open: each question, muted, over its answer, or "Dismissed".
+  A whole dismissal, an expiry or a cancellation is one line with the first
+  question, opening to all of them. Like an approval's, it is kept out of
+  the run's fold and its waiting row stays mounted.
 - **While a request waits** the run's fold and the live tail read "Waiting
-  for approval", steady, where they would say "Working for 8s"; the
-  announcer says "Needs approval" and the sidebar shows Approval. The box
-  stays usable: its hint says a message waits its turn, and a send queues
-  behind the request as any send during a run does. There is no
+  for approval", or "Waiting for your answer" for a question, steady, where
+  they would say "Working for 8s" (`runWaitingOn`, an approval first); the
+  announcer says "Needs approval" or "Needs your input" and the sidebar
+  shows Approval or Input. While only an approval waits the box stays
+  usable: its hint says a message waits its turn, and a send queues behind
+  the request as any send during a run does. There is no
   decline-with-message: Rust refuses feedback.
 - **The mode control** (`PermissionModeControl`, after the model picker,
   for an open thread only) is an icon-only button showing the chat's mode

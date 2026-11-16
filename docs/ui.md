@@ -328,7 +328,12 @@ themes are opt-in and keep the same structure.
   ([harness.md](./harness.md#one-turn-at-a-time)). An agent's request is
   answered from a card of the same look just above the box (`RequestBar`:
   Decline, Approve, More), its refusal on a line inside it; the run then
-  reads "Waiting for approval", steady, never shimmering
+  reads "Waiting for approval", steady, never shimmering. An agent's
+  question opens the same card as a panel (`QuestionPanel`): one question at
+  a time with its "1/2" count in `tabular-nums`, radio or checkbox rows with
+  a key cap each (digits pick), the box below as the typed answer, and
+  "Dismiss question without answering" as a muted text link beside the
+  answer button; the run reads "Waiting for your answer"
   ([harness.md](./harness.md#in-the-chat)).
 - **A long list's rows can skip layout off screen with `skip-offscreen`**
   (`content-visibility: auto`, remembering each row's drawn height), so a

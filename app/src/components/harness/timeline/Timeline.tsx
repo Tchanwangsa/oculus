@@ -1,6 +1,6 @@
 import { memo, useMemo, useState } from "react";
 import { copyAsMarkdown, dragAsMarkdown } from "@/lib/markdown/selection";
-import { waitingRequests, type HarnessItem, type Provider } from "@/lib/harness";
+import { waitingQuestions, waitingRequests, type HarnessItem, type Provider } from "@/lib/harness";
 import { useSignInStatus } from "@/hooks/agents/useSignInStatus";
 import { ANCHOR_ROW } from "@/hooks/ui/useStickToBottom";
 import { EXPANDABLE } from "@/lib/ui/expandable";
@@ -84,12 +84,19 @@ export const Timeline = memo(function Timeline({
     return { key: replyKey(at.run, at.ordinal), item };
   }, [streamsWidget, threadId, items]);
   const rows = useMemo(() => buildRows(items, running, { runs, streaming }), [items, running, runs, streaming]);
-  // The oldest waiting request's row: always mounted (`useRowWindow`).
-  const waitingRow = useHarnessStore((s) => (threadId == null ? null : waitingRequests(s.requests[threadId])[0]?.item_id ?? null));
+  // The oldest waiting request's row, approval or question: always mounted
+  // (`useRowWindow`).
+  const waitingRow = useHarnessStore((s) => {
+    if (threadId == null) return null;
+    const oldest = [waitingRequests(s.requests[threadId])[0], waitingQuestions(s.requests[threadId])[0]]
+      .filter((r) => r != null)
+      .sort((a, b) => a.id - b.id)[0];
+    return oldest?.item_id ?? null;
+  });
   const last = rows[rows.length - 1];
   // A working fold already says so; the tail's "Working…" would repeat it.
   // A waiting request's row sits below its run's fold, which then says
-  // "Waiting for approval" for both.
+  // "Waiting for approval" or "Waiting for your answer" for both.
   const folding = (last?.kind === "work" && last.state === "running") ||
     (waitingRow != null && rows.some((r) => r.kind === "work" && r.state === "running"));
   // Only the newest refusal is still a question; the ones above it are what
