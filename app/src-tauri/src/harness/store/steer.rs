@@ -491,7 +491,8 @@ pub async fn restart(
 
 /// Startup, inside `reconcile`'s transaction: a steer saved and never
 /// handed to its provider goes back to the head of its queue, held, as an
-/// unsent start does; one whose write was made stays where it is. A run a
+/// unsent start does; one whose write was made but never echoed stays where
+/// it is as `unknown`: it may have reached the turn, so it is never resent. A run a
 /// restart steer had taken back to `starting` is running for the repair
 /// that follows, which ends it interrupted with what it said.
 pub(super) async fn reconcile(tx: &mut SqliteConnection) -> Result<(), String> {
@@ -507,6 +508,8 @@ pub(super) async fn reconcile(tx: &mut SqliteConnection) -> Result<(), String> {
         requeue(&mut *tx, row.get("thread_id"), row.get("id"), Some(true)).await?;
     }
     for sql in [
+        "UPDATE harness_items SET meta = json_set(meta, '$.delivery', 'unknown')
+          WHERE kind = 'steer' AND json_extract(meta, '$.delivery') = 'written'",
         "UPDATE harness_attempts SET status = 'running'
           WHERE status = 'starting' AND ordinal > 1",
         "UPDATE harness_runs SET execution_status = 'running'

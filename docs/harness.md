@@ -1279,7 +1279,8 @@ the timeline and appears among the waiting messages.
 **After a restart** (`store::reconcile`) a steer still `sending` or
 `restart` was never handed to its provider: its run row goes back to the
 head of the queue, held, and its row goes, as an unsent start does. One
-already `written` stays where it was. A run a restart steer had taken back
+already `written` but never echoed stays where it was as `unknown`: it may
+have reached the turn, so it is never resent. A run a restart steer had taken back
 to `starting` is repaired with the running ones: interrupted, its partial
 text kept.
 

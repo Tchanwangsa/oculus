@@ -152,3 +152,44 @@ fn a_steer_saved_and_never_written_waits_held_after_a_restart() {
     assert_eq!(queued[0].id, outcome.steered.unwrap().message.to_string());
     let _ = rig.finish();
 }
+
+#[test]
+fn a_steer_written_and_never_echoed_is_unknown_after_a_restart_and_never_resent() {
+    let mut scenario = Scenario::recorded("codex-steer-tool");
+    // The question and the steer go out; the app quits before the echo.
+    scenario.fixture.expected_outbound.truncate(2);
+    let frames = scenario.frames.clone();
+    let steer = scenario.fixture.settings["steers"][0].clone();
+    let at = (0..frames.len())
+        .find(|i| gates(&steer, &frames, *i))
+        .unwrap();
+    let mut rig = Rig::start(scenario);
+    rig.open();
+    for frame in &frames[..at] {
+        rig.feed(frame);
+        rig.drain();
+    }
+    let text = steer["text"].as_str().unwrap();
+    let outcome = say(&mut rig, "steer", text, Mode::Auto);
+    let item = outcome.steered.unwrap().item_id;
+    rig.drain();
+    let of = |rig: &Rig| {
+        rig.runtime
+            .block_on(crate::harness::store::steer::delivery_of(&rig.pool, item))
+            .unwrap()
+    };
+    assert_eq!(
+        of(&rig).as_deref(),
+        Some("written"),
+        "taken, not yet echoed"
+    );
+    let rig = rig.restart();
+    rig.startup().unwrap();
+    assert_eq!(of(&rig).as_deref(), Some("unknown"));
+    let queued = crate::harness::store::queue::list(&rig.pool, rig.thread);
+    assert!(
+        rig.runtime.block_on(queued).unwrap().is_empty(),
+        "never resent"
+    );
+    let _ = rig.finish();
+}
