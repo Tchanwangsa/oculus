@@ -26,7 +26,7 @@ export interface ModeChoice {
 
 /** Auto's line where the bridge's reviewer is its own: Claude's classifier. */
 const AUTO_LINE: Partial<Record<Capabilities["provider"], string>> = {
-  claude: "Claude's classifier decides",
+  claude: "Classifier decides",
 };
 
 /** What the control shows for an agent: a note when it cannot ask at all,
