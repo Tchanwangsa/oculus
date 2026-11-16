@@ -77,7 +77,7 @@ export const ThreadRow = memo(function ThreadRow({
         className="flex w-full min-w-0 flex-col gap-px px-2.5 pt-[7px] pb-2 text-left"
       >
         {showSubject && (
-          <span className="flex h-[18px] min-w-0 items-center gap-1.5 text-[11.5px] text-muted-foreground">
+          <span className="flex h-[18px] w-full min-w-0 items-center gap-1.5 text-[11.5px] text-muted-foreground">
             <span
               className="relative flex shrink-0"
               title={subject ? displayName(subject.name, subject.code) : "Not scoped to a subject"}
@@ -92,7 +92,7 @@ export const ThreadRow = memo(function ThreadRow({
             <span className={cn("flex shrink-0", SIDE_NAV_FOLDS)}>{right}</span>
           </span>
         )}
-        <span className={cn("flex h-5 min-w-0 items-center gap-1.5 text-[13px]", SIDE_NAV_FOLDS)}>
+        <span className={cn("flex h-5 w-full min-w-0 items-center gap-1.5 text-[13px]", SIDE_NAV_FOLDS)}>
           <span
             className={cn(
               "min-w-0 flex-1 truncate",
@@ -106,7 +106,7 @@ export const ThreadRow = memo(function ThreadRow({
           )}
           {!showSubject && right}
         </span>
-        <span className={cn("flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground/85", SIDE_NAV_FOLDS)}>
+        <span className={cn("flex w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground/85", SIDE_NAV_FOLDS)}>
           <span className="min-w-0 flex-1 truncate">
             {status === "working" ? (
               <LiveLine threadId={t.id} fallback={preview} />
