@@ -1,6 +1,7 @@
 //! Restart steering against a fake bridge: the turn is stopped, its
 //! attempt superseded on the terminal it sends, and the run carries on as
-//! a second attempt with the correction. No real bridge restarts yet.
+//! a second attempt with the correction. The ACP transport checks live in
+//! `antigravity.rs`.
 
 use crate::harness::core::Kind;
 use crate::harness::manager::policy::Mode;
@@ -151,4 +152,42 @@ fn a_restart_on_a_bridge_that_cannot_restart_stops_the_turn_and_sends_first_afte
     );
     end(&mut bench, "1", "interrupted");
     assert_eq!(bench.starts()[1].text, "start over");
+}
+
+#[test]
+fn a_restart_cancel_that_misses_requeues_the_same_message_and_keeps_the_old_answer() {
+    let (mut bench, run) = running("restart-missed", false, true);
+    reply(&mut bench, "Finished first.");
+    let written = say(&mut bench, "s", "correction", Mode::Steer)
+        .unwrap()
+        .steered
+        .unwrap();
+    end(&mut bench, "1", "completed");
+    assert_eq!(
+        attempts(&bench, run.run_id),
+        [(1, "initial".into(), "completed".into())]
+    );
+    assert_eq!(told(&bench, "run_settled").len(), 1);
+    let starts = bench.starts();
+    assert_eq!(starts.len(), 2);
+    assert_eq!(starts[1].run.run_id, written.message);
+    assert_eq!(starts[1].text, "correction");
+    let answer: String = bench.runtime.block_on(sqlx::query_scalar(
+        "SELECT content FROM harness_items WHERE id = (SELECT answer_item_id FROM harness_runs WHERE id = ?1)"
+    ).bind(run.run_id).fetch_one(&bench.pool)).unwrap();
+    assert_eq!(answer, "Finished first.");
+}
+
+#[test]
+fn a_failed_restart_cancel_holds_its_correction_and_opens_no_attempt() {
+    let (mut bench, run) = running("restart-failed", false, true);
+    say(&mut bench, "s", "correction", Mode::Steer).unwrap();
+    end(&mut bench, "1", "failed");
+    assert_eq!(
+        attempts(&bench, run.run_id),
+        [(1, "initial".into(), "failed".into())]
+    );
+    assert_eq!(queue(&bench), [("correction".into(), true)]);
+    assert_eq!(bench.starts().len(), 1);
+    assert_eq!(told(&bench, "run_settled").len(), 1);
 }

@@ -84,7 +84,7 @@ pub struct AcpSession {
     /// `session/update` the timeline's: a load replays the conversation as
     /// updates, which are history.
     pub(super) prompting: AtomicBool,
-    /// Set by Stop until the prompt's reply.
+    /// Set by Stop or restart steering until the prompt's reply.
     pub(super) interrupting: AtomicBool,
     /// Killed, or its stdout ended: nothing more is answered.
     pub(super) closing: AtomicBool,
@@ -345,9 +345,9 @@ impl AcpSession {
         if !self.prompting.swap(false, Ordering::SeqCst) {
             return;
         }
-        let interrupted = self.interrupting.swap(false, Ordering::SeqCst);
+        self.interrupting.store(false, Ordering::SeqCst);
         self.end_callbacks();
-        let events = self.translator.lock().unwrap().finish(reply, interrupted);
+        let events = self.translator.lock().unwrap().finish(reply);
         self.emit(events);
     }
 

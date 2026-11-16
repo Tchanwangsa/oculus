@@ -369,16 +369,17 @@ pub enum Restart {
         work: Vec<i64>,
         delivered: Vec<i64>,
     },
-    /// The student stopped the run meanwhile: the corrections wait first in
-    /// the queue, held, and the terminal settles the run.
+    /// The cancel missed, failed, or the student stopped the run meanwhile:
+    /// the corrections wait first in the queue and the terminal settles
+    /// the run. Stop and failure hold them.
     Requeued { revision: i64 },
 }
 
-/// A run's turn ended with restart steers waiting on it: its attempt is
-/// superseded, what it said stays as work and never as the answer, and a
-/// new attempt (`steering_restart`) takes the run back to `starting` with
-/// the corrections as what its start step sends. One transaction with the
-/// thread's raised revision.
+/// An interrupted turn with restart steers waiting supersedes its attempt;
+/// completed or failed turns requeue the corrections instead. Superseded
+/// output stays as work and never as the answer. A new attempt
+/// (`steering_restart`) takes the run back to `starting` with the corrections
+/// as what its start step sends, with the thread's raised revision.
 pub async fn restart(
     pool: &SqlitePool,
     thread_id: i64,
@@ -401,15 +402,21 @@ pub async fn restart(
     .map_err(err)?;
     match stopped {
         None => return Ok(Restart::None),
-        Some(true) => {
+        Some(stopped) if stopped || status != "interrupted" => {
             for (item_id, _) in corrections.iter().rev() {
-                requeue(&mut tx, thread_id, *item_id, Some(true)).await?;
+                requeue(
+                    &mut tx,
+                    thread_id,
+                    *item_id,
+                    Some(stopped || status == "failed"),
+                )
+                .await?;
             }
             let revision = super::threads::raise_revision(&mut tx, thread_id).await?;
             tx.commit().await.map_err(err)?;
             return Ok(Restart::Requeued { revision });
         }
-        Some(false) => {}
+        Some(_) => {}
     }
     let text = corrections
         .iter()
@@ -446,7 +453,7 @@ pub async fn restart(
     .await
     .map_err(err)?;
     // What the superseded attempt said is kept, folded as work: never the
-    // answer, however the provider ended it (`status`).
+    // answer of the restarted run.
     let work: Vec<i64> = sqlx::query_scalar(
         "SELECT id FROM harness_items WHERE attempt_id = ?1 AND kind = 'assistant' ORDER BY id",
     )
@@ -455,12 +462,10 @@ pub async fn restart(
     .await
     .map_err(err)?;
     sqlx::query(
-        "UPDATE harness_items SET display_role = 'commentary',
-                lifecycle = CASE WHEN ?2 = 'completed' THEN lifecycle ELSE 'partial' END
+        "UPDATE harness_items SET display_role = 'commentary', lifecycle = 'partial'
           WHERE attempt_id = ?1 AND kind = 'assistant'",
     )
     .bind(superseded)
-    .bind(status)
     .execute(&mut *tx)
     .await
     .map_err(err)?;

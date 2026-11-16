@@ -438,6 +438,25 @@ impl Consumer {
             }
             _ => None,
         };
+        if pool.is_some() && thread_id > 0 {
+            // A restart steer waits on this turn: the run goes on as a
+            // new attempt, unsettled, and the queue stays behind it.
+            if let (
+                Some(Terminal::Run),
+                Some(run_id),
+                Some(attempt_id),
+                HarnessEvent::TurnFinished { status, turn },
+            ) = (terminal, tags.run_id, tags.attempt_id, &ev)
+            {
+                let (status, turn) = (status.clone(), turn.clone());
+                if self.restart(thread_id, provider, (run_id, attempt_id), &status, io) {
+                    self.runs
+                        .finished(thread_id, from, turn.as_ref(), Terminal::Stray);
+                    self.drive(thread_id, provider, io);
+                    return;
+                }
+            }
+        }
         if let Some(p) = &pool {
             if thread_id > 0 {
                 if store::writes(&ev) {
@@ -507,23 +526,6 @@ impl Consumer {
                         }
                     }
                     Err(e) => elog!("[oculus] harness store: {e}"),
-                }
-                // A restart steer waits on this turn: the run goes on as a
-                // new attempt, unsettled, and the queue stays behind it.
-                if let (
-                    Some(Terminal::Run),
-                    Some(run_id),
-                    Some(attempt_id),
-                    HarnessEvent::TurnFinished { status, turn },
-                ) = (terminal, tags.run_id, tags.attempt_id, &ev)
-                {
-                    let (status, turn) = (status.clone(), turn.clone());
-                    if self.restart(thread_id, provider, (run_id, attempt_id), &status, io) {
-                        self.runs
-                            .finished(thread_id, from, turn.as_ref(), Terminal::Stray);
-                        self.drive(thread_id, provider, io);
-                        return;
-                    }
                 }
                 settled = match (terminal, tags.run_id, tags.attempt_id, &ev) {
                     (

@@ -68,9 +68,9 @@ over a chat another provider started (`provider_handoff`,
 [Changing provider mid-chat](#changing-provider-mid-chat)), the request
 flags ([Requests](#requests): `approvals`, `auto_review`,
 `session_grants`, `mode_switch_in_session`, `questions`), and
-the steering flags (`active_steering`, `steer_by_restart`), which are false
-on every bridge. A flag for work that is not built starts false and turns
-true only with the recording under `fixtures/harness/` that shows the CLI
+the steering flags (`active_steering`: Codex and Claude;
+`steer_by_restart`: Antigravity). A flag for work that is not built starts
+false and turns true only with the recording under `fixtures/harness/` that shows the CLI
 doing it (`fixture`, checked by the module's tests). `harness_capabilities`
 serves the list; the webview keeps one cached answer (`capabilities` in
 `lib/harness/capabilities.ts`, `providerCapabilities` in `registry.ts`,
@@ -1126,8 +1126,8 @@ UUID the provider is written under and echoes back) and `delivery`:
 
 The consumer tells `Steer { text, message, client, delivery }` with the
 row (its envelope's `itemId` and `runId`), hands `Effect::Steer` to
-`app/steer.rs`, and tells each change as `SteerUpdated { item_id, message,
-delivery }`; a `written` report that an echo already overtook is not told.
+`app/src-tauri/src/harness/app/steer.rs`, and tells each change as
+`SteerUpdated { item_id, message, delivery }`; a `written` report that an echo already overtook is not told.
 `harness_load` returns the row with the others and lists no `steered` run.
 The webview (`harnessStore`) pushes the row as `kind: "steer"` with that
 `meta` (`SteerMeta`), rewrites its `delivery` on each update and drops it on
@@ -1188,15 +1188,18 @@ part before it, whatever its `terminal_reason` (`aborted_tools`,
 `aborted_streaming`, or `completed` for a steer written as the turn ended),
 and the turn, its ordinal and its run go on; the steer's own `result` ends
 them. A stop of ours ends the turn on the first. A running foreground tool
-is not cut short: the steer waits for it. opencode and Antigravity do not
-steer yet: a send queues.
+is not cut short: the steer waits for it. opencode has neither steering
+flag: a send queues.
 
 **Restart steering** is for a bridge that cannot take a message mid-turn
-but can stop and start again (`steer_by_restart`; no bridge sets it yet).
+but can stop and start again (`steer_by_restart`: Antigravity over ACP).
 The steer row is written with `delivery` `restart` and the consumer asks
-the provider to stop the turn once (`Effect::Interrupt`). When that turn's
-terminal comes, `Consumer::restart` reads the saved `restart` rows instead
-of settling: what streamed becomes a partial reply, the attempt is
+the provider to stop the turn once (`Effect::Interrupt`). Antigravity sends
+`session/cancel` on the running session and waits for that prompt's
+`stopReason: cancelled`; its process and native session stay alive. Only
+that interrupted terminal authorizes the restart; it closes the superseded
+attempt without storing or publishing a run-level Stop row. `Consumer::restart`
+reads the saved `restart` rows instead of settling: what streamed becomes a partial reply, the attempt is
 `superseded` and its replies `commentary` (never the answer), and a second
 attempt (`steering_restart`) takes the run back to `starting` with the
 corrections, joined, as `queued_text`. `AttemptRestarted { run_id,
@@ -1207,7 +1210,16 @@ next turn: after the old turn's terminal, never before, so two turns never
 write to one conversation. The run settles once, on the new attempt's
 terminal, with its answer from that attempt; the queue stays behind it the
 whole time. A run stopped meanwhile settles on that terminal and its
-corrections wait first in the queue, held.
+corrections wait first in the queue, held. If the cancelled prompt finishes
+first (`end_turn`), the steer missed: the old run completes with its own
+answer and each correction keeps its message identity as a new run at the
+head of the queue. An RPC error or process death fails the old run and holds
+the corrections there. Neither completion nor failure opens a restart
+attempt. Two corrections waiting on the same cancel are joined in send
+order in one new attempt; a correction during that new attempt waits for
+its own cancelled reply. A steer submitted during Stop queues as an ordinary
+new message: the send releases the queue hold, and it starts after the
+stopped turn ends.
 
 **After a restart** (`store::reconcile`) a steer still `sending` or
 `restart` was never handed to its provider: its run row goes back to the
@@ -2063,7 +2075,8 @@ the stage 5 probe; replayed by `testkit/agy_requests.rs`).
   `completed` is its lifecycle: a command whose `rawOutput.exit_code` is not
   0 is a failed row. A second prompt is never sent while one is out: one
   sent mid-tool steers the turn, and the first reply then says `end_turn`
-  while its tool still runs.
+  while its tool still runs. Corrections use the cancel-then-prompt path in
+  [Steering the running turn](#steering-the-running-turn).
 - **A model change** is told in the session: the next `send` sends
   `session/set_model` before its prompt (`model_switch_in_session`). A
   level change restarts the process and loads the session.

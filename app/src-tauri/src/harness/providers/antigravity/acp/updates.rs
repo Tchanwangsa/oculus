@@ -41,9 +41,8 @@ pub(super) struct Translator {
 }
 
 /// How a prompt ended, as the turn model names it.
-pub(super) fn status(stop_reason: &str, interrupted: bool) -> Result<&'static str, String> {
+pub(super) fn status(stop_reason: &str) -> Result<&'static str, String> {
     match stop_reason {
-        _ if interrupted => Ok("interrupted"),
         "cancelled" => Ok("interrupted"),
         "end_turn" | "max_tokens" | "max_turn_requests" => Ok("completed"),
         "refusal" => Err("Antigravity refused to go on with this turn.".into()),
@@ -211,19 +210,15 @@ impl Translator {
     }
 
     /// The prompt's reply: its stop reason, or the error it failed with.
-    /// `interrupted`: the student asked for the stop.
-    pub(super) fn finish(
-        &mut self,
-        reply: Result<Value, String>,
-        interrupted: bool,
-    ) -> Vec<HarnessEvent> {
+    /// A cancel request is not terminal evidence: `end_turn` can win the
+    /// race, and an RPC error cannot authorize a restart.
+    pub(super) fn finish(&mut self, reply: Result<Value, String>) -> Vec<HarnessEvent> {
         let mut out = Vec::new();
         let (status, error) = match &reply {
-            Ok(result) => match status(result["stopReason"].as_str().unwrap_or(""), interrupted) {
+            Ok(result) => match status(result["stopReason"].as_str().unwrap_or("")) {
                 Ok(s) => (s, None),
                 Err(e) => ("failed", Some(e)),
             },
-            Err(_) if interrupted => ("interrupted", None),
             Err(e) => ("failed", Some(e.clone())),
         };
         self.flush(&mut out, status == "completed", status == "interrupted");

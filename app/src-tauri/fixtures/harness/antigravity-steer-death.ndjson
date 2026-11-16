@@ -1,0 +1,3 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"c1e3f868-73fa-4696-945e-861027e169b4","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Write a numbered list of 2000 short facts about arithmetic. Do not use tools. Start immediately."}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"c1e3f868-73fa-4696-945e-861027e169b4","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"1."}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"c1e3f868-73fa-4696-945e-861027e169b4","update":{"sessionUpdate":"usage_update","used":9674,"size":1048576}}}
