@@ -1,8 +1,9 @@
 import { getDb } from "@/lib/db";
+import { HIT_CLOSE, HIT_OPEN } from "./snippet";
 import type { HarnessThread } from "./types";
 
 export interface ThreadSearchResult extends HarnessThread {
-  /** Plain text with matched spans delimited by **, never HTML. */
+  /** Plain text with matched spans between `HIT_OPEN` and `HIT_CLOSE`, never HTML. */
   snippet: string;
   subject_code: string | null;
   subject_name: string | null;
@@ -24,13 +25,13 @@ export function threadSearchBindings(q: string): [string, string] | null {
 // directly against the MATCH cursor, not in an aggregate/window context.
 export const SEARCH_THREADS_SQL = `WITH message_hits AS MATERIALIZED (
   SELECT i.thread_id, i.id AS item_id, bm25(harness_items_fts) AS score,
-    snippet(harness_items_fts, 0, '**', '**', '…', 24) AS snippet
+    snippet(harness_items_fts, 0, '${HIT_OPEN}', '${HIT_CLOSE}', '…', 24) AS snippet
   FROM harness_items_fts JOIN harness_items i ON i.id = harness_items_fts.rowid
   WHERE harness_items_fts MATCH $1 AND i.kind IN ('user', 'assistant')
 ), hits AS (
   SELECT thread_id, item_id, score, snippet FROM message_hits
   UNION ALL
-  SELECT t.id, 0, -1000000.0, '**' || t.title || '**'
+  SELECT t.id, 0, -1000000.0, '${HIT_OPEN}' || t.title || '${HIT_CLOSE}'
   FROM harness_threads t WHERE t.title LIKE $2 ESCAPE '\\'
 ), best AS (
   SELECT *, ROW_NUMBER() OVER (PARTITION BY thread_id ORDER BY score, item_id DESC) AS position FROM hits

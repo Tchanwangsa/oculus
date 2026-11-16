@@ -947,9 +947,11 @@ writes it into the draft once and drops it from the route.
   150 ms (`debouncedSearch`, a stale answer never lands), the view switch
   steps aside, Esc or × clears, Enter opens the first result. No ⌘ key:
   ⌘K is the app's Search. A result is a row's three lines: subject and age
-  ("Completed · 4d" for a completed chat), title, and the snippet, whose
-  `**` hits `snippetParts` turns into bold spans (an unpaired `**` stays
-  text; never HTML). None is one muted line.
+  ("Completed · 4d" for a completed chat), title, and the snippet. FTS
+  wraps hits in private-use markers (`HIT_OPEN`/`HIT_CLOSE`), so a
+  message's own `**bold**` is never a hit; `snippetParts` turns the pairs
+  into bold spans and drops markdown marks (never HTML). None is one muted
+  line.
 - **A thread row is three lines** (`ThreadRow`): the subject's glyph and
   `displayCode` (General for none) with the status or the age at the right
   ("25m", `shortAge`); the title, with the lecture glyph; and the newest

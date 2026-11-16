@@ -53,7 +53,7 @@ describe("Search results", () => {
   test("rows show the subject, the hit in bold as a span, and Completed for a completed chat", () => {
     const html = renderToStaticMarkup(
       <SearchResults
-        found={{ q: "eigen", results: [result(1, "…the **eigen**values <i>of</i> A…"), result(2, "plain", { completed_at: sqlite(1000) })] }}
+        found={{ q: "eigen", results: [result(1, "…the \uE000eigen\uE001values <i>of</i> A…"), result(2, "plain", { completed_at: sqlite(1000) })] }}
         activeId={null}
         onOpen={() => {}}
       />,

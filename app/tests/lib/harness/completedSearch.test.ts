@@ -52,8 +52,8 @@ test("search returns one best hit per chat, title first then relevance and newes
       (5,4,'tool','eigenvalues and matrices');`);
     const rows = db.query(sql(SEARCH_THREADS_SQL)).all(...threadSearchBindings("eigen")!) as { id: number; snippet: string; subject_code: string | null; completed_at: string | null }[];
     expect(rows.map((r) => r.id)).toEqual([1,2,3]);
-    expect(rows[0].snippet).toBe("**Eigen notes**");
-    expect(rows[1].snippet).toContain("**eigen");
+    expect(rows[0].snippet).toBe("\uE000Eigen notes\uE001");
+    expect(rows[1].snippet).toContain("\uE000eigen");
     expect(rows[1]).toMatchObject({ subject_code: "PHYS", completed_at: "2026-03-02" });
     expect(rows[2].subject_code).toBeNull();
   } finally { db.close(); }
