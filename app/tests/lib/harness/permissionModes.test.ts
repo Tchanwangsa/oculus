@@ -12,10 +12,10 @@ describe("the mode control's lines per bridge", () => {
     ]);
   });
 
-  test("Claude's Auto says its classifier decides and commands stay sandboxed", () => {
+  test("Claude's Auto says its classifier decides", () => {
     const { note, choices } = modeChoices({ provider: "claude", approvals: true, autoReview: true });
     expect(note).toBeNull();
-    expect(choices[1].line).toBe("Claude's classifier decides and commands stay sandboxed; you are not asked");
+    expect(choices[1].line).toBe("Claude's classifier decides");
     expect(choices[0].line).toBe("Asks you before the agent runs anything its sandbox blocks");
   });
 

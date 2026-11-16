@@ -1669,8 +1669,8 @@ What the student sees is decided in `app/src/lib/harness/requests.ts` and
 - **The mode control** (`PermissionModeControl`, after the model picker,
   for an open thread only) shows the chat's mode and opens to Ask, Auto
   and Don't ask, each with its line. Where the bridge has no reviewer
-  (`autoReview` false) Auto says it asks as Ask; on Claude it says the
-  classifier decides and commands stay sandboxed; where it has no
+  (`autoReview` false) Auto says it asks as Ask; on Claude, "Claude's
+  classifier decides"; where it has no
   `approvals` the menu says the agent cannot ask yet. A pick is saved with
   `harnessSetPermissionMode`; Rust's refusal (a request waiting) shows at
   the top of the open menu.
