@@ -1278,9 +1278,18 @@ header, closed, timed from the stretch's start to the steer ("Worked for
 (`w-<run>-<steer row>`; the first stretch keeps `w-<run>`, and a fold's
 open or closed choice is kept per fold). While the run works only a reply
 after the latest steer can be its provisional answer; settled, the run's
-one answer is `answer_item_id` as ever. On a bridge that steers by
-restart (`useRestartSteering`), or before a steer still `restart`, the
-stretch is the superseded attempt: "Restarted after 5s", partial work.
+one answer is `answer_item_id` as ever. A restart steer is told apart by
+ownership, never by the provider's capabilities: every row carries the
+`attempt_id` it was written under (the question from `runs::begin`, a
+steer the attempt it corrects, the partial reply the superseded attempt,
+since `cut_short` commits it before the switch), and the run its
+`active_attempt_id`, live and loaded alike. A steer owned by an attempt
+that is no longer active ended that attempt: all of the attempt's rows,
+wherever their ids fall (the partial reply is written after its steer),
+fold together above its first correction as "Restarted after 5s", and
+every correction sits between the attempts. A steer still `restart`
+marks the stretch before it the same way. Rows with no attempt keep the
+positional split.
 Under the bubble, until the provider echoes it, a line says how far it
 got (`steerStatus`): "Sending into the turn…" for `sending` and
 `written`, "Stopping the turn to restart with this…" for `restart`, and
@@ -1430,8 +1439,9 @@ thread. Ownership is
 assigned there, on the one ordered consumer: every later row on the thread
 gets the run, the attempt and a weak attempt-local `entity_ref` (`weak:0`,
 `weak:1`, …), which is no provider id. Envelopes add `runId`, `attemptId` and
-a row's `entityId`; the webview stamps `runId` on the rows it makes live, as
-`run_id` is stored, and folds by it (below). `SessionStarted`
+a row's `entityId`; the webview stamps `runId` and `attemptId` on live rows
+as `run_id` and `attempt_id`, the same ownership returned by `harness_load`,
+and folds by it (below). `SessionStarted`
 gives the binding its native session,
 and its own turn's `TurnFinished` settles the run
 ([Events say whose they are](#events-say-whose-they-are)). A turn the provider starts
@@ -1581,8 +1591,9 @@ carries its run's question (`asked`), which Retry sends again.
 | Ended with no stored interval | "Work details" | as its status says |
 
 A run the student steered splits its work at each steer
-([Steering from the composer](#steering-from-the-composer)): one fold per stretch, the steer
-between them.
+([Steering from the composer](#steering-from-the-composer)): native steers
+keep one fold per stretch; restart steers keep one per superseded attempt,
+with its corrections between attempts.
 
 Lifecycle lines — the stop, "Context compacted", a continuation ("Continued
 after “X” finished", a card's continuation), a delivery notice and a rewind's

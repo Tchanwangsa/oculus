@@ -411,3 +411,94 @@ fn a_restart_keeps_the_waiting_message_behind_the_same_run_until_its_final_termi
     );
     assert_eq!(replay.ledger["runs"][0]["execution_status"], "completed");
 }
+
+#[test]
+fn loaded_restart_rows_and_live_envelopes_keep_the_attempt_that_wrote_them() {
+    for name in [
+        "antigravity-steer-text",
+        "antigravity-steer-tool",
+        "antigravity-steer-two",
+        "antigravity-steer-successive",
+    ] {
+        let replay = drive(name, |rig, _| {
+            let snapshot = rig
+                .runtime
+                .block_on(crate::harness::core::load::read(&rig.pool, rig.thread))
+                .unwrap();
+            let stored = rig
+                .runtime
+                .block_on(super::super::snapshot::items(&rig.pool, rig.thread));
+            for row in &snapshot.items {
+                let original = stored.iter().find(|i| i["id"] == row.id).unwrap();
+                assert_eq!(row.attempt_id, original["attempt_id"].as_i64(), "{name}");
+                assert!(row.attempt_id.is_some(), "owned row {}: {name}", row.id);
+            }
+            let ledger = rig
+                .runtime
+                .block_on(super::super::snapshot::ledger(&rig.pool, rig.thread));
+            for run in &snapshot.runs {
+                let original = ledger["runs"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|r| r["id"] == run.id)
+                    .unwrap();
+                assert_eq!(
+                    run.active_attempt_id,
+                    original["active_attempt_id"].as_i64()
+                );
+            }
+        });
+        for row in &replay.items {
+            let attempt = row["attempt_id"].as_i64().expect("owned row");
+            let told = replay.envelopes.iter().find(|e| e["itemId"] == row["id"]);
+            if let Some(told) = told {
+                assert_eq!(told["attemptId"], attempt, "{name}: {row}");
+            }
+        }
+        for told in replay
+            .envelopes
+            .iter()
+            .filter(|e| e["event"]["type"] == "attempt_restarted")
+        {
+            let event = &told["event"];
+            assert_eq!(told["attemptId"], event["attempt_id"]);
+            for item in event["work_item_ids"].as_array().unwrap() {
+                let row = replay.items.iter().find(|r| r["id"] == *item).unwrap();
+                assert_eq!(row["attempt_id"], event["superseded"]);
+                assert_eq!(row["display_role"], "commentary");
+            }
+        }
+        // Corrections belong to the attempt they ended; the answer to the last.
+        let run = &replay.ledger["runs"][0];
+        let superseded: Vec<&Value> = replay
+            .envelopes
+            .iter()
+            .filter(|e| e["event"]["type"] == "attempt_restarted")
+            .map(|e| &e["event"]["superseded"])
+            .collect();
+        assert!(!superseded.is_empty(), "{name}");
+        for steer in replay.items.iter().filter(|r| r["kind"] == "steer") {
+            assert!(
+                superseded.contains(&&steer["attempt_id"]),
+                "{name}: {steer}"
+            );
+        }
+        let answer = replay
+            .items
+            .iter()
+            .find(|r| r["id"] == run["answer_item_id"])
+            .unwrap();
+        assert_eq!(answer["attempt_id"], run["active_attempt_id"], "{name}");
+        if name == "antigravity-steer-text" {
+            // The partial reply is saved after its correction, yet carries
+            // the superseded attempt, as the correction does.
+            let partial = replay.items.iter().find(|r| r["content"] == "1.").unwrap();
+            let steer = replay.items.iter().find(|r| r["kind"] == "steer").unwrap();
+            assert!(partial["id"].as_i64() > steer["id"].as_i64());
+            assert_eq!(partial["attempt_id"], *superseded[0]);
+            assert_eq!(steer["attempt_id"], *superseded[0]);
+            assert_ne!(partial["attempt_id"], run["active_attempt_id"]);
+        }
+    }
+}

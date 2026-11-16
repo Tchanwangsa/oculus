@@ -337,6 +337,8 @@ export interface HarnessItem {
   /** The student run that wrote it; null for an unprompted turn and for rows
    *  from before runs existed. */
   run_id?: number | null;
+  /** The attempt that wrote it; null for rows without attempt ownership. */
+  attempt_id?: number | null;
 }
 
 /** The earlier conversation a run's first prompt carried to a session that
@@ -362,6 +364,8 @@ export type RunStatus = "preparing" | "starting" | "running" | "completed" | "in
  *  and its stored wall-clock interval. */
 export interface HarnessRun {
   id: number;
+  /** Identifies superseded work even before the new attempt writes a row. */
+  active_attempt_id?: number | null;
   status: RunStatus;
   delivery: string;
   answer_item_id: number | null;

@@ -103,10 +103,6 @@ export interface RowContext {
   /** Text is streaming: it, not the latest committed reply, is the run's
    *  provisional answer. */
   streaming?: boolean;
-  /** Whether `run`'s bridge steers by stopping and starting again
-   *  (`steerByRestart` without `activeSteering`): the stretch before each of
-   *  its steers is a superseded attempt. */
-  restarts?: (run: HarnessRun) => boolean;
 }
 
 const isFoldable = (i: HarnessItem) => i.kind === "tool" || i.kind === "thinking" || i.kind === "assistant";
@@ -122,7 +118,6 @@ function runRows(
   before: HarnessRun | undefined,
   live: boolean,
   streaming: boolean,
-  restarts: boolean,
   out: ViewRow[],
 ): void {
   const state: RunState | null = runEnded(run) ? (run!.status as RunState) : live ? "running" : null;
@@ -131,7 +126,7 @@ function runRows(
   // A continuation heads its run like a question, but nothing re-asks it.
   const head = segment[0].kind === "user" || segment[0].kind === "continuation" ? segment[0] : null;
   const rest = head ? segment.slice(1) : segment;
-  const stretches = splitAtSteers(rest);
+  const stretches = splitAtAttempts(rest, run?.active_attempt_id);
   const tail = stretches[stretches.length - 1];
   let answer: HarnessItem | undefined;
   if (state === "running") {
@@ -155,7 +150,7 @@ function runRows(
     const next = stretches[n + 1]?.steer;
     if (work.length) {
       const startedMs = stretch.steer ? atMs(stretch.steer) : (run?.started_ms ?? null);
-      const cut = next ? (restarts || steerMeta(next).delivery === "restart" ? "restart" : "steer") : undefined;
+      const cut = stretch.superseded ? "restart" : next ? (steerMeta(next).delivery === "restart" ? "restart" : "steer") : undefined;
       out.push({
         kind: "work",
         // The first stretch keeps the run's own id, so a run steered later
@@ -181,13 +176,34 @@ function runRows(
   });
 }
 
-/** A run's rows after its question, cut at each steer: the first stretch has
- *  no steer, each later one starts with the steer that opened it. */
-function splitAtSteers(rest: HarnessItem[]): { steer?: HarnessItem; items: HarnessItem[] }[] {
-  const out: { steer?: HarnessItem; items: HarnessItem[] }[] = [{ items: [] }];
+interface Stretch {
+  steer?: HarnessItem;
+  items: HarnessItem[];
+  superseded?: boolean;
+}
+
+/** Native steers cut at their row. A superseded attempt's output belongs
+ *  before its corrections, even when cancellation saved its partial reply
+ *  after them. Null ownership keeps its position; it is never inferred. */
+function splitAtAttempts(rest: HarnessItem[], active: number | null | undefined): Stretch[] {
+  const out: Stretch[] = [{ items: [] }];
+  const ended = new Map<number, Stretch>();
+  const positions = new Map<HarnessItem, Stretch>();
   for (const item of rest) {
-    if (item.kind === "steer") out.push({ steer: item, items: [] });
-    else out[out.length - 1].items.push(item);
+    if (item.kind === "steer") {
+      if (item.attempt_id != null && active != null && item.attempt_id !== active && !ended.has(item.attempt_id)) {
+        const stretch = out[out.length - 1];
+        stretch.superseded = true;
+        ended.set(item.attempt_id, stretch);
+      }
+      out.push({ steer: item, items: [] });
+    } else positions.set(item, out[out.length - 1]);
+  }
+  // Move all rows of an ended attempt together, preserving their stored
+  // order inside its fold. Steers stay between attempts, in send order.
+  for (const [item, position] of positions) {
+    const target = item.attempt_id == null ? position : (ended.get(item.attempt_id) ?? position);
+    target.items.push(item);
   }
   return out;
 }
@@ -230,8 +246,7 @@ export function buildRows(items: HarnessItem[], running: boolean, ctx: RowContex
     } else {
       while (j < items.length && items[j].run_id === runId) j++;
       const run = runs[runId];
-      const restarts = !!run && !!ctx.restarts?.(run);
-      runRows(items.slice(i, j), run, before, running && j === items.length, !!ctx.streaming, restarts, out);
+      runRows(items.slice(i, j), run, before, running && j === items.length, !!ctx.streaming, out);
       before = runs[runId] ?? before;
     }
     i = j;

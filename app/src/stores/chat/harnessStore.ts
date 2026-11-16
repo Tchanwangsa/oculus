@@ -160,6 +160,7 @@ function rowFrom(env: HarnessEnvelope, kind: HarnessItem["kind"], content: strin
     meta: meta === undefined ? null : JSON.stringify(meta),
     created_at: new Date().toISOString(),
     run_id: env.runId ?? null,
+    attempt_id: env.attemptId ?? null,
   };
 }
 
@@ -455,7 +456,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           push(rowFrom(env, "user", event.text, event.at == null ? undefined : { at: event.at }));
           // Until `run_settled` brings the stored interval, the clock is ours.
           if (env.runId != null) {
-            setRun({ id: env.runId, status: "running", delivery: "unknown", answer_item_id: null, started_ms: Date.now(), ended_ms: null });
+            setRun({ id: env.runId, active_attempt_id: env.attemptId ?? null, status: "running", delivery: "unknown", answer_item_id: null, started_ms: Date.now(), ended_ms: null });
           }
           live = { ...prev, running: true };
           touchThread({ status: "running" });
@@ -463,7 +464,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         case "continued":
           push(rowFrom(env, "continuation", event.text, { proposal: event.proposal }));
           if (env.runId != null) {
-            setRun({ id: env.runId, status: "running", delivery: "unknown", answer_item_id: null, started_ms: Date.now(), ended_ms: null });
+            setRun({ id: env.runId, active_attempt_id: env.attemptId ?? null, status: "running", delivery: "unknown", answer_item_id: null, started_ms: Date.now(), ended_ms: null });
           }
           live = { ...prev, running: true };
           touchThread({ status: "running" });
@@ -504,6 +505,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
               ...(before?.resolved_model ? { resolved_model: before.resolved_model } : {}),
               ...(before?.handoff ? { handoff: before.handoff } : {}),
               id: env.runId,
+              active_attempt_id: env.attemptId ?? before?.active_attempt_id ?? null,
               status: event.status ?? "completed",
               delivery: event.delivery,
               answer_item_id: event.answer_item_id,
@@ -551,7 +553,9 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         case "attempt_restarted": {
           if (!held) break;
           const work = new Set(event.work_item_ids);
-          rows = rows.map((r) => (work.has(r.id) ? { ...r, display_role: "commentary" } : r));
+          const run = runs[event.run_id];
+          if (run) setRun({ ...run, active_attempt_id: event.attempt_id });
+          rows = rows.map((r) => (work.has(r.id) ? { ...r, attempt_id: event.superseded, display_role: "commentary" } : r));
           // What streamed under the old attempt is a row now; the run goes on.
           live = { ...prev, streaming: "", thinking: "", running: true };
           break;

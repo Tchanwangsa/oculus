@@ -46,6 +46,7 @@ pub struct Item {
     pub created_at: String,
     pub display_role: Option<String>,
     pub run_id: Option<i64>,
+    pub attempt_id: Option<i64>,
 }
 
 /// A `harness_runs` row, as `RunRow` in `app/src/lib/harness/runs.ts`. A run
@@ -55,6 +56,7 @@ pub struct Item {
 #[derive(Serialize)]
 pub struct Run {
     pub id: i64,
+    pub active_attempt_id: Option<i64>,
     pub execution_status: String,
     pub delivery_state: String,
     pub answer_item_id: Option<i64>,
@@ -82,7 +84,7 @@ pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String>
         .map_err(err)?
         .unwrap_or_default();
     let items = sqlx::query(
-        "SELECT id, thread_id, kind, ref_id, content, meta, created_at, display_role, run_id
+        "SELECT id, thread_id, kind, ref_id, content, meta, created_at, display_role, run_id, attempt_id
            FROM harness_items WHERE thread_id = ?1 ORDER BY id ASC",
     )
     .bind(thread_id)
@@ -100,11 +102,12 @@ pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String>
         created_at: r.get("created_at"),
         display_role: r.get("display_role"),
         run_id: r.get("run_id"),
+        attempt_id: r.get("attempt_id"),
     })
     .collect();
     let mut handoffs = handoff::views(&mut *tx, thread_id).await?;
     let runs = sqlx::query(
-        "SELECT r.id, r.execution_status, r.delivery_state, r.answer_item_id,
+        "SELECT r.id, r.active_attempt_id, r.execution_status, r.delivery_state, r.answer_item_id,
                 COALESCE(r.started_at, r.requested_at) AS started_at, r.ended_at,
                 r.stop_requested_at, b.provider, r.model, r.effort, r.resolved_model
            FROM harness_runs r JOIN harness_bindings b ON b.id = r.binding_id
@@ -119,6 +122,7 @@ pub async fn read(pool: &SqlitePool, thread_id: i64) -> Result<Snapshot, String>
     .iter()
     .map(|r| Run {
         id: r.get("id"),
+        active_attempt_id: r.get("active_attempt_id"),
         execution_status: r.get("execution_status"),
         delivery_state: r.get("delivery_state"),
         answer_item_id: r.get("answer_item_id"),

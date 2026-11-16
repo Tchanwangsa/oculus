@@ -206,9 +206,10 @@ pub async fn begin(tx: &mut SqliteConnection, send: &SendIntent) -> Result<RunSt
         .execute(&mut *tx)
         .await
         .map_err(err)?;
-    sqlx::query("UPDATE harness_items SET run_id = ?2 WHERE id = ?1")
+    sqlx::query("UPDATE harness_items SET run_id = ?2, attempt_id = ?3 WHERE id = ?1")
         .bind(item_id)
         .bind(run_id)
+        .bind(attempt_id)
         .execute(&mut *tx)
         .await
         .map_err(err)?;

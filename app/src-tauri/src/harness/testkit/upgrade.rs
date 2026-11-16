@@ -46,6 +46,14 @@ async fn legacy_upgrade_and_pruning_preserve_source_ids_and_frozen_sql() {
             .collect::<Vec<_>>(),
         vec![(40, "legacy widget source"), (41, "later source")]
     );
+    let loaded = crate::harness::core::load::read(&pool, 7).await.unwrap();
+    assert_eq!(loaded.items.len(), rows.len());
+    for row in loaded.items {
+        assert_eq!(row.attempt_id, None);
+        let serialized = serde_json::to_value(row).unwrap();
+        assert!(serialized.as_object().unwrap().contains_key("attempt_id"));
+        assert!(serialized["attempt_id"].is_null());
+    }
     // Migration 54 adds ownership; rows from before it stay unowned.
     for row in &rows {
         for column in ["run_id", "attempt_id", "entity_ref"] {

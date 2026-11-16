@@ -19,7 +19,6 @@ import { ThreadAnnouncer } from "./ThreadAnnouncer";
 import { AssistantSend } from "@/components/markdown/openui/assistant";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { useThreadViewed } from "@/hooks/agents/useThreadViewed";
-import { useRestartSteering } from "@/hooks/agents/useCapabilities";
 
 /** A ```widget fence opening in streamed text. */
 const WIDGET_FENCE = /(^|\n)[ \t]*(`{3,}|~{3,})[ \t]*widget\b/;
@@ -84,10 +83,9 @@ export const Timeline = memo(function Timeline({
     };
     return { key: replyKey(at.run, at.ordinal), item };
   }, [streamsWidget, threadId, items]);
-  const restarts = useRestartSteering();
   const rows = useMemo(
-    () => buildRows(items, running, { runs, streaming, restarts }),
-    [items, running, runs, streaming, restarts],
+    () => buildRows(items, running, { runs, streaming }),
+    [items, running, runs, streaming],
   );
   // The oldest waiting request's row, approval or question: always mounted
   // (`useRowWindow`).

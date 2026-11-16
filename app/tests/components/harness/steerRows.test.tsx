@@ -135,27 +135,101 @@ describe("a steer row in the running run", () => {
   });
 });
 
-describe("restart steering", () => {
-  const items = [row(1, "user", 0), row(2, "assistant", 3), row(3, "tool", 4), steer(4, 6), row(5, "assistant", 15)];
+describe("restart steering by attempt", () => {
+  const old = { attempt_id: 10 };
+  const next = { attempt_id: 20 };
+  // Cancellation commits the old attempt's partial reply after its steer.
+  const items = [
+    row(1, "user", 0, old), row(2, "tool", 2, old),
+    { ...steer(3, 6), ...old },
+    row(4, "assistant", 7, { ...old, display_role: "commentary" }),
+    row(5, "tool", 9, next), row(6, "assistant", 15, next),
+  ];
+  const run = { ...settled("completed", 6), active_attempt_id: 20 };
 
-  test("on a restart-class bridge the superseded attempt folds as partial work", () => {
-    const rows = buildRows(items, false, { runs: { [RUN]: settled("completed", 5) }, restarts: () => true });
+  test("loaded rows keep late partial output inside the superseded attempt's fold", () => {
+    const rows = buildRows(items, false, { runs: { [RUN]: run } });
+    expect(shape(rows)).toEqual(["item:1", "work:2,4", "item:3", "work:5", "item:6"]);
     const [first] = folds(rows);
-    expect(first.cut).toBe("restart");
+    expect([first.cut, first.state, foldOpens(first.state)]).toEqual(["restart", "completed", false]);
     expect(foldLabel(first)).toBe("Restarted after 6s");
-    expect(foldOpens(first.state)).toBe(false);
-    expect(answerOf(rows)).toMatchObject({ item: { id: 5 }, role: "answer" });
+    expect(answerOf(rows)).toMatchObject({ item: { id: 6 }, role: "answer" });
   });
 
-  test("a steer still waiting on its restart marks the stretch before it, on any bridge", () => {
-    const waiting = [...items.slice(0, 3), steer(4, 6, "restart")];
-    const [first] = folds(buildRows(waiting, true, { runs: { [RUN]: running } }));
-    expect(first.cut).toBe("restart");
+  test("before the new attempt writes anything the old partial cannot be a provisional answer", () => {
+    const rows = buildRows(items.slice(0, 4), true, { runs: { [RUN]: { ...run, status: "running", answer_item_id: null } } });
+    expect(shape(rows)).toEqual(["item:1", "work:2,4", "item:3"]);
+    expect(answerOf(rows)).toBeUndefined();
+    expect(folds(rows)[0].cut).toBe("restart");
   });
 
-  test("a native steer's earlier stretch is plain work", () => {
-    const [first] = folds(buildRows(items, false, { runs: { [RUN]: settled("completed", 5) }, restarts: () => false }));
-    expect(first.cut).toBe("steer");
+  test("two pending corrections keep one superseded fold and both steer rows between attempts", () => {
+    const two = [...items.slice(0, 3), { ...steer(7, 6), ...old }, ...items.slice(3)];
+    const rows = buildRows(two, false, { runs: { [RUN]: run } });
+    expect(shape(rows)).toEqual(["item:1", "work:2,4", "item:3", "item:7", "work:5", "item:6"]);
+    expect(folds(rows).map((f) => f.id)).toEqual([`w-${RUN}`, `w-${RUN}-7`]);
+  });
+
+  test("successive restarts each keep their own partial output before their correction", () => {
+    const three = [...items.slice(0, 5), { ...steer(7, 12), ...next },
+      row(8, "assistant", 13, { ...next, display_role: "commentary" }),
+      row(9, "tool", 14, { attempt_id: 30 }), row(10, "assistant", 15, { attempt_id: 30 })];
+    const rows = buildRows(three, false, { runs: { [RUN]: { ...run, active_attempt_id: 30, answer_item_id: 10 } } });
+    expect(shape(rows)).toEqual(["item:1", "work:2,4", "item:3", "work:5,8", "item:7", "work:9", "item:10"]);
+    expect(folds(rows).map((f) => f.cut)).toEqual(["restart", "restart", undefined]);
+  });
+
+  test("live restart events and a loaded snapshot produce the same folds, including at the restart boundary", () => {
+    const apply = (itemId: number | null, attemptId: number, event: object) => useHarnessStore.getState().apply(
+      { threadId: THREAD, provider: "antigravity", itemId, runId: RUN, attemptId, event } as never,
+    );
+    apply(1, 10, { type: "user_message", text: "question" });
+    apply(2, 10, { type: "tool_started", id: "t1", name: "Bash", kind: "bash", title: "command", input: "sleep 20" });
+    apply(3, 10, { type: "steer", text: "correction", message: 9, client: "c", delivery: "restart" });
+    apply(4, 10, { type: "assistant_message", text: "partial" });
+    apply(null, 20, { type: "steer_updated", item_id: 3, message: 9, delivery: "delivered" });
+    apply(null, 20, { type: "attempt_restarted", run_id: RUN, attempt_id: 20, superseded: 10, work_item_ids: [4] });
+    const liveRows = (running: boolean) => {
+      const s = useHarnessStore.getState();
+      return buildRows(s.items[THREAD], running, { runs: s.runs[THREAD] });
+    };
+    const loadedBoundary = buildRows(items.slice(0, 4), true, { runs: { [RUN]: { ...run, status: "running", answer_item_id: null } } });
+    expect(shape(liveRows(true))).toEqual(shape(loadedBoundary));
+    expect(folds(liveRows(true)).map((f) => f.cut)).toEqual(["restart"]);
+    expect(answerOf(liveRows(true))).toBeUndefined();
+    apply(5, 20, { type: "tool_started", id: "t2", name: "Bash", kind: "bash", title: "command", input: "pwd" });
+    apply(6, 20, { type: "assistant_message", text: "answer" });
+    apply(null, 20, { type: "run_settled", answer_item_id: 6, work_item_ids: [], delivery: "delivered", status: "completed", started_at: at(0), ended_at: at(30) });
+    const live = liveRows(false);
+    const loaded = buildRows(items, false, { runs: { [RUN]: run } });
+    expect(shape(live)).toEqual(shape(loaded));
+    expect(folds(live).map((f) => [f.id, f.cut, f.state])).toEqual(folds(loaded).map((f) => [f.id, f.cut, f.state]));
+    expect(useHarnessStore.getState().items[THREAD].map((i) => i.attempt_id)).toEqual([10, 10, 10, 10, 20, 20]);
+  });
+
+  test("a steer still waiting on cancellation marks its earlier work as restarted", () => {
+    const waiting = [...items.slice(0, 2), { ...steer(3, 6, "restart"), ...old }];
+    expect(folds(buildRows(waiting, true, { runs: { [RUN]: { ...running, active_attempt_id: 10 } } }))[0].cut).toBe("restart");
+  });
+
+  test("a native steer keeps positional grouping within the same attempt, including late work", () => {
+    const native = items.map((i) => ({ ...i, attempt_id: 10 }));
+    const rows = buildRows(native, false, { runs: { [RUN]: { ...run, active_attempt_id: 10 } } });
+    expect(shape(rows)).toEqual(["item:1", "work:2", "item:3", "work:4,5", "item:6"]);
+    expect(folds(rows)[0].cut).toBe("steer");
+  });
+
+  test("mixed null ownership stays at its stored position while known old output moves into its attempt", () => {
+    const mixed = [...items.slice(0, 2), row(8, "thinking", 3, { attempt_id: null }), items[2], row(7, "thinking", 6, { attempt_id: null }), ...items.slice(3)];
+    const rows = buildRows(mixed, false, { runs: { [RUN]: run } });
+    expect(shape(rows)).toEqual(["item:1", "work:2,8,4", "item:3", "work:7,5", "item:6"]);
+  });
+
+  test("null attempt ownership keeps positional grouping without inferring a restart", () => {
+    const legacy = items.map((i) => ({ ...i, attempt_id: null }));
+    const rows = buildRows(legacy, false, { runs: { [RUN]: run } });
+    expect(shape(rows)).toEqual(["item:1", "work:2", "item:3", "work:4,5", "item:6"]);
+    expect(folds(rows)[0].cut).toBe("steer");
   });
 });
 

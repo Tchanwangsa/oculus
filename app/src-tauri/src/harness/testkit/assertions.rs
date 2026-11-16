@@ -10,14 +10,9 @@ pub(super) fn stable(items: &[Value]) -> Vec<Value> {
             let object = v.as_object_mut().unwrap();
             object.remove("created_at");
             object.remove("anchor");
-            // The timeline folds by run; attempts and sources are Rust's.
-            for column in [
-                "attempt_id",
-                "entity_ref",
-                "source_ref",
-                "native_phase",
-                "lifecycle",
-            ] {
+            // Native source and lifecycle details stay in Rust. Run and
+            // attempt ownership must agree in live and loaded rows.
+            for column in ["entity_ref", "source_ref", "native_phase", "lifecycle"] {
                 object.remove(column);
             }
             // The role is compared: live settlement must match the stored one.

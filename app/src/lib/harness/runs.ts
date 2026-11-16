@@ -7,6 +7,7 @@ import type { HarnessRun, RunHandoff, RunStatus } from "./types";
  *  from its request. */
 export interface RunRow {
   id: number;
+  active_attempt_id?: number | null;
   execution_status: string;
   delivery_state: string;
   answer_item_id: number | null;
@@ -29,6 +30,7 @@ export function runFromRow(row: RunRow): HarnessRun {
   const status = STATUSES.has(row.execution_status as RunStatus) ? (row.execution_status as RunStatus) : "failed";
   return {
     id: row.id,
+    active_attempt_id: row.active_attempt_id ?? null,
     status,
     delivery: row.delivery_state,
     answer_item_id: row.answer_item_id,
