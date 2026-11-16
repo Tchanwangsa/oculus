@@ -8,6 +8,10 @@ import { THREAD_LIST_PANEL, ThreadList } from "@/components/harness/threads/Thre
 import { ThreadMap } from "@/components/harness/timeline/ThreadMap";
 import { JumpToLatest } from "@/components/harness/timeline/JumpToLatest";
 import { Timeline } from "@/components/harness/timeline/Timeline";
+import { ThreadInfoButton } from "@/components/harness/threadInfo/ThreadInfoButton";
+import { ThreadInfoCard, type ThreadInfoProps } from "@/components/harness/threadInfo/ThreadInfoCard";
+import { GAP, RAIL, RESERVE } from "@/components/harness/threadInfo/layout";
+import { useThreadInfo } from "@/components/harness/threadInfo/useThreadInfo";
 import { useThreadActions } from "@/components/harness/threads/useThreadActions";
 import { useComposerSelection } from "@/components/harness/threads/useComposerSelection";
 import { PageHeader, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
@@ -238,6 +242,21 @@ export default function ChatPage() {
     [store],
   );
   const onRestored = useCallback(() => setRestore(null), []);
+  // Thread info: floating in the chat area beside the column, or the header
+  // button's popover when the area has no room (`threadInfo/layout.ts`).
+  const info = useThreadInfo(scroll.outer);
+  const infoCard: ThreadInfoProps | null = thread && {
+    thread,
+    items,
+    subjects,
+    provider: selection.provider,
+    model: selection.model,
+    effort: selection.effort,
+    usage,
+  };
+  const floating = info.floating && infoCard != null;
+  // The column moves left to clear the card, the rail's gutter kept.
+  const shift = floating ? { paddingLeft: RAIL, paddingRight: RESERVE } : undefined;
   /** Pictures drop anywhere on the conversation, not only on the box. */
   const columnRef = useRef<HTMLDivElement>(null);
   const [dropping, setDropping] = useState(false);
@@ -294,6 +313,7 @@ export default function ChatPage() {
           <PaneTrail>
             <PaneTitle>{fresh ? "New thread" : thread ? thread.title?.trim() || "Untitled" : ""}</PaneTitle>
           </PaneTrail>
+          {infoCard && <ThreadInfoButton info={info} {...infoCard} />}
         </PageHeader>
 
         {fresh ? (
@@ -304,10 +324,10 @@ export default function ChatPage() {
             </div>
           </div>
         ) : (
-          <div className="relative min-h-0 flex-1">
+          <div ref={info.areaRef} className="relative min-h-0 flex-1">
             {/* `overflow-x-hidden` is load-bearing: `overflow-y: auto` makes x
                 `auto` too, so one wide row would scroll the whole thread. */}
-            <div ref={scroll.outer} className="h-full overflow-x-hidden overflow-y-auto px-6 pt-6 pb-10">
+            <div ref={scroll.outer} style={shift} className="h-full overflow-x-hidden overflow-y-auto px-6 pt-6 pb-10">
               <div ref={scroll.inner} className="mx-auto w-full max-w-[760px]">
                 <Timeline
                   items={items}
@@ -318,11 +338,19 @@ export default function ChatPage() {
                 />
               </div>
             </div>
-            <JumpToLatest show={scroll.showJump} onClick={scroll.scrollToBottom} />
+            {/* Centred under the column, wherever the card has moved it. */}
+            <div className="pointer-events-none absolute inset-0" style={floating ? { left: RAIL, right: RESERVE } : undefined}>
+              <JumpToLatest show={scroll.showJump} onClick={scroll.scrollToBottom} />
+            </div>
             <ThreadMap scrollRef={scroll.outer} contentRef={scroll.inner} markers={markers} />
+            {floating && (
+              <div className="absolute z-20" style={{ top: GAP, right: GAP + info.scrollbar }}>
+                <ThreadInfoCard {...infoCard} onHeight={info.onCardHeight} />
+              </div>
+            )}
           </div>
         )}
-        <div ref={composerRef} className="shrink-0 px-6 pb-4">
+        <div ref={composerRef} style={shift} className="shrink-0 px-6 pb-4">
           <div className="mx-auto max-w-[760px]">{composer}</div>
         </div>
 

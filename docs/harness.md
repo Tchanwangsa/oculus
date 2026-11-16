@@ -36,6 +36,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Row titles: a reasoning block's "Thought for 12s" and latest line, an `oculus …` command's "Saved a memory" | `app/src/lib/harness/thought.ts`, `app/src/lib/harness/oculusCli.ts`, `app/src-tauri/src/harness/app/thought_clock.rs` |
 | Page, thread list, recent list, timeline, rows, composer | `app/src/pages/tools/ChatPage.tsx`, `app/src/components/harness/` (`threads/`, `timeline/`, `composer/`; recent list: `threads/RecentThreads.tsx`) |
 | Unsent text per thread (and per new-thread box), and a new thread's chosen scope, kept across switches and relaunches | `app/src/stores/chat/draftStore.ts` |
+| Thread info: the card beside the chat, its header button and popover, the Work registry; Read and Made derived from the rows | `app/src/components/harness/threadInfo/`, `app/src/lib/harness/threadInfo/` |
 | Proposal dispatch context and confirmed jobs | `app/src-tauri/src/harness/app/proposal_context.rs`, `app/src-tauri/src/harness/app/proposal_jobs/` |
 | Local OpenUI Query tools and event refresh | `app/src/components/markdown/openui/query/` |
 | Seeded simulation and maths functions | `app/src/components/markdown/openui/functions/` |
@@ -844,6 +845,57 @@ message, because Claude's trims the leading space that says "new word".
   provider, model or level discards it. Codex and opencode only open a
   thread/session on their running server. The first suggestion is cold.
 - No timeout: a provider error rejects with its message.
+
+## Thread info sits beside the chat
+
+**Thread info** is a small card at the top right of an open thread
+(`components/harness/threadInfo/`). It is not the side panel, which is the
+split-screen stack beside a page ([shell.md](./shell.md#the-side-panel-is-a-stack-of-items-beside-the-page)).
+The button at the end of the chat header shows or hides it; the choice is kept
+in `oculus-thread-info-shown` (`useStoredState`), hidden until the student
+shows it.
+
+- **It floats only inside the chat pane.** While the timeline's scroller is
+  wide enough (`threadInfoFloats` in `threadInfo/layout.ts`: the rail's 44px
+  gutter, a column of at least 640px and the card's 304px reserve), the
+  scroller and the composer take that reserve as right padding, so the column
+  moves left and narrows rather than sitting under the card. The card keeps
+  clear of the scroller's scrollbar. With less room (a narrow window, the side
+  panel open), or when the card is taller than the pane, the button opens the
+  same card as its popover, aligned to the pane's right edge. Nothing floats
+  over another pane ([shell.md](./shell.md)).
+- **It never scrolls.** Each list shows five rows and ends in "Show N more".
+- **Every row opens its thing as a file chip does**: beside the chat
+  (`openCitation`, `openBeside`), or in a new tab on ⌘-click or a middle
+  click. A row in the popover closes it. Nothing in the card makes a model
+  call; model names come from the catalogues already read
+  (`useProviderModels` with `start: false`).
+
+The first group has no heading: the **Work** rows, then the thread's subject
+(`SubjectIcon` and `displayCode`, opening the subject), its model and
+reasoning, and its context-window use with the bar the composer's usage ring
+reads (`usageTint`). **Work** is a registry (`threadInfo/work.ts`): a feature
+calls `registerWorkKind({ id, useRows })` at module load, and `useRows` is a
+hook that returns that kind's rows for the thread (glyph, title, status in
+words, the route it opens). No kind is registered yet; with no rows the group
+draws nothing.
+
+**Read** and **Made** are projected from the thread's rows by
+`deriveThreadInfo` (`lib/harness/threadInfo/derive.ts`), with no query, one
+row per file, most recently touched first:
+
+| Group | From | Shown with |
+| --- | --- | --- |
+| Read | Read tool rows (a PDF's `pages`), `oculus read` (`-p`), `cat`/`sed`/`head` and the other shell readers, `@` mentions and attachments in the student's messages and steers, a lecture thread's lecture (always first) and the playhead each question was asked at | `p. 12`, `pp. 3, 12–19`, or a lecture's `12:20–31:05` |
+| Made | Write and Edit rows (Codex's `fileChange` paths, opencode's `apply_patch` headers), a shell line's files under `outputs/` other than those it only reads, `oculus memory write/append/fold` (the memory's file, or its bucket), `oculus studio render/narrate/frame` (the video) | `New` or `Edited` |
+
+A parsed `.md` is its PDF, and anything under `lectures/<id>/` is that
+lecture. Read keeps to `courses/`, `lectures/`, `agents/attachments/` and
+`agents/outputs/`, so the agent's own instructions, skills and memories are
+not listed; a file the thread made is listed under Made only. A Studio file
+opens its video, component or theme page. A failed or refused call counts for
+neither; a running one does. An `oculus read` of a fragment rather than a
+full path is not listed, since naming it takes a lookup.
 
 ## Each Chat tab owns its conversation, in its route
 

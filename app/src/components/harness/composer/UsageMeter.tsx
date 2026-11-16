@@ -8,7 +8,7 @@ const HOT = 90;
 const WARM = 75;
 
 /** Tokens as the model counts them: `106k`, `1M`, `1.5M`. */
-function fmtTokens(n: number) {
+export function fmtTokens(n: number) {
   if (n >= 1_000_000) {
     const m = n / 1_000_000;
     return `${Number.isInteger(m) ? m : Number(m.toFixed(1))}M`;
@@ -16,7 +16,8 @@ function fmtTokens(n: number) {
   return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
 }
 
-function tint(percent: number) {
+/** A context or rate bar's fill: brand, then warning, then destructive. */
+export function usageTint(percent: number) {
   if (percent >= HOT) return "bg-destructive";
   if (percent >= WARM) return "bg-warning";
   return "bg-brand";
@@ -75,7 +76,7 @@ function Meter({
       </div>
       <div className="h-1 w-full overflow-hidden rounded-full bg-secondary">
         <div
-          className={cn("h-full rounded-full transition-[width] duration-300", tint(p))}
+          className={cn("h-full rounded-full transition-[width] duration-300", usageTint(p))}
           style={{ width: `${p}%` }}
         />
       </div>
