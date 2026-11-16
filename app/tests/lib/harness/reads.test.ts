@@ -9,7 +9,7 @@ sqlite.run(`CREATE TABLE harness_items (id INTEGER PRIMARY KEY, thread_id INTEGE
 sqlite.run(`CREATE TABLE harness_runs (id INTEGER PRIMARY KEY, thread_id INTEGER, execution_status TEXT,
   initiating_item_id INTEGER, answer_item_id INTEGER, ended_at TEXT)`);
 sqlite.run(`CREATE TABLE harness_requests (id INTEGER PRIMARY KEY, thread_id INTEGER, status TEXT NOT NULL DEFAULT 'pending',
-  responder TEXT NOT NULL DEFAULT 'live')`);
+  responder TEXT NOT NULL DEFAULT 'live', kind TEXT NOT NULL DEFAULT 'approval')`);
 afterAll(() => sqlite.close());
 
 const all = <T,>(sql: string, bindings: number[]) => sqlite.query(sql.replace(/\$(\d+)/g, "?$1")).all(...bindings) as T[];
@@ -42,4 +42,11 @@ test("a preview is the newest answer of a run that ran, beside runs that only wa
   sqlite.run(`UPDATE harness_runs SET answer_item_id = 12 WHERE id = 1`);
   const previews = all<{ thread_id: number; content: string }>(previewsSql(3), [1, 2, 3]);
   expect(previews).toEqual([{ thread_id: 1, content: "the answer" }]);
+});
+
+test("a detached question counts as Input and an ended question does not", () => {
+  sqlite.run(`INSERT INTO harness_requests (thread_id, kind, status, responder) VALUES
+    (3, 'question', 'pending', 'message'), (3, 'question', 'cancelled', 'not_resumable')`);
+  const row = all<{ id: number; pending_requests: number; pending_questions: number }>(THREADS_SQL, [10]).find((t) => t.id === 3);
+  expect(row).toMatchObject({ pending_requests: 1, pending_questions: 1 });
 });

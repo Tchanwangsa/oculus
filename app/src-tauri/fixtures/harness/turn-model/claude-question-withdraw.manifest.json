@@ -1,0 +1,46 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.325",
+  "protocol": "print stream-json host permission prompts",
+  "model": "claude-haiku-5-5",
+  "capture_date": "2026-11-15",
+  "source": "claude/10-question-withdraw.jsonl lines 3-48; inbound frames",
+  "source_sha256": "3bf39f973f00e7d5191526ab74c0218f77bb87c7c1fb5e38531b0851f32db898",
+  "redaction": "Inbound turn frames only. Home paths become /Users/student; scratch suffixes become XXXXXX. Expected outbound uses the production bridge's send envelope. ",
+  "scenario": "claude-question-withdraw",
+  "evidence": "recorded",
+  "frames": 45,
+  "sha256": "4a6461679f2ec8908da9418c24a341da61c3a5db8c099dd065ace1e2836055ff",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "control_request",
+        "request_id": "oculus-1",
+        "request": {
+          "subtype": "interrupt"
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-question-withdraw.ndjson",
+  "native_session": "",
+  "permission_mode": "ask",
+  "settings": {
+    "question_answers": [],
+    "stop": true,
+    "derivation": ""
+  }
+}

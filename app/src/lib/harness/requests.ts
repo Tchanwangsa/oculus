@@ -260,7 +260,7 @@ export function diffLines(diff: string): DiffLine[] {
 }
 
 /** A request the student can still answer: pending, on a live route. */
-export const isAnswerable = (r: HarnessRequest) => r.status === "pending" && r.responder === "live";
+export const isAnswerable = (r: HarnessRequest) => r.status === "pending" && (r.responder === "live" || (r.kind === "question" && r.responder === "message"));
 
 /** How a request stands, as its row says it. */
 export interface RequestState {
@@ -342,7 +342,7 @@ export function requestActions(request: HarnessRequest): RequestActions {
 export function waitingRequests(requests: Record<number, HarnessRequest> | undefined): HarnessRequest[] {
   if (!requests) return [];
   return Object.values(requests)
-    .filter(isAnswerable)
+    .filter((r) => r.kind === "approval" && isAnswerable(r))
     .sort((a, b) => a.id - b.id);
 }
 
@@ -350,7 +350,7 @@ export function waitingRequests(requests: Record<number, HarnessRequest> | undef
 export function awaitsApproval(requests: Record<number, HarnessRequest> | undefined, runId?: number): boolean {
   if (!requests) return false;
   for (const r of Object.values(requests)) {
-    if (isAnswerable(r) && (runId === undefined || r.run_id === runId)) return true;
+    if (r.kind === "approval" && isAnswerable(r) && (runId === undefined || r.run_id === runId)) return true;
   }
   return false;
 }

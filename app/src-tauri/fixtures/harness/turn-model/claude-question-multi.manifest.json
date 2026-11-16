@@ -1,0 +1,90 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.325",
+  "protocol": "print stream-json host permission prompts",
+  "model": "claude-haiku-5-5",
+  "capture_date": "2026-11-15",
+  "source": "claude/09-question-multi.jsonl lines 3-61; inbound frames",
+  "source_sha256": "7901f1dacfeb0faec07f7556d9e4bd254e77d7010155200641db9e1930809fae",
+  "redaction": "Inbound turn frames only. Home paths become /Users/student; scratch suffixes become XXXXXX. Expected outbound uses the production bridge's send envelope. ",
+  "scenario": "claude-question-multi",
+  "evidence": "recorded",
+  "frames": 58,
+  "sha256": "1a23dec9418c3dfde2d84f0b658cb2823fef661bc27d8e2be95f8d7bbc0065b1",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "e563bf1a-96ec-4174-bf55-adbde084ab55",
+          "response": {
+            "behavior": "allow",
+            "updatedInput": {
+              "questions": [
+                {
+                  "question": "Choose tags?",
+                  "header": "Tags",
+                  "options": [
+                    {
+                      "label": "Red",
+                      "description": "Red tag color"
+                    },
+                    {
+                      "label": "Blue",
+                      "description": "Blue tag color"
+                    },
+                    {
+                      "label": "Green",
+                      "description": "Green tag color"
+                    }
+                  ],
+                  "multiSelect": true
+                }
+              ],
+              "answers": {
+                "Choose tags?": "Red, Blue"
+              }
+            }
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-question-multi.ndjson",
+  "native_session": "",
+  "permission_mode": "ask",
+  "settings": {
+    "question_answers": [
+      {
+        "native": "\"e563bf1a-96ec-4174-bf55-adbde084ab55\"",
+        "option": "answer",
+        "answers": [
+          {
+            "questionId": "Choose tags?",
+            "answers": [
+              "Red",
+              "Blue"
+            ],
+            "dismissed": false
+          }
+        ]
+      }
+    ],
+    "stop": false,
+    "derivation": ""
+  }
+}

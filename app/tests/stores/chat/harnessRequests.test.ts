@@ -1,11 +1,15 @@
 import { afterAll, beforeEach, expect, mock, test } from "bun:test";
 import type { HarnessEnvelope, HarnessRequest } from "@/lib/harness";
 
+const priorStorage = globalThis.localStorage;
+let storage = new Map<string, string>();
+
 let answer: (command: string, args: Record<string, unknown>) => Promise<unknown> = async () => {
   throw new Error("Tauri is not available");
 };
 mock.module("@tauri-apps/api/core", () => ({ invoke: (command: string, args: Record<string, unknown>) => answer(command, args) }));
 afterAll(() => {
+  Object.assign(globalThis, { localStorage: priorStorage });
   answer = async () => { throw new Error("Tauri is not available"); };
 });
 
@@ -24,6 +28,8 @@ const told = (revision: number, itemId: number | null, event: HarnessEnvelope["e
 });
 
 beforeEach(() => {
+  storage = new Map();
+  Object.assign(globalThis, { localStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => { storage.set(key, value); } } });
   useHarnessStore.getState().removed(THREAD);
   answer = async () => ({ revision: 1, items: [], runs: [], queued: [], requests: [] });
 });
@@ -104,4 +110,40 @@ test("a reload restores a live request as one the composer answers, and an ended
   const ended = s.requests[THREAD][4];
   expect(requestState(ended)).toMatchObject({ kind: "expired", notes: ["The app was closed."] });
   expect(requestActions(ended).approve).toBeNull();
+});
+
+test("question drafts survive chat switches and reload storage, then clear on submission", async () => {
+  const { readQuestionDrafts } = await import("@/stores/chat/questionDrafts");
+  const { waitingQuestions } = await import("@/lib/harness/questions");
+  await useHarnessStore.getState().load(THREAD);
+  const asked = request({ kind: "question", action: "question", payload: { questions: [{ id: "native", header: "Color", text: "Which color?", options: [{ label: "Red", description: "Warm" }], multi: false, allowsTypedAnswer: true, secret: false }] } });
+  useHarnessStore.getState().fold(told(2, 12, { type: "request_opened", request: asked, waiting: 1, waiting_questions: 1 }));
+  const draft = { selected: ["Red"], text: "typed", dismissed: false };
+  useHarnessStore.getState().setQuestionDraft(THREAD, 3, "native", draft);
+  useHarnessStore.getState().release(THREAD);
+  expect(useHarnessStore.getState().questionDrafts[THREAD][3].native).toEqual(draft);
+  expect(readQuestionDrafts()[THREAD][3].native).toEqual(draft);
+  answer = async () => ({ revision: 3, items: [], runs: [], queued: [], requests: [{ ...asked, responder: "message" }] });
+  await useHarnessStore.getState().load(THREAD);
+  expect(waitingQuestions(useHarnessStore.getState().requests[THREAD]).map((r) => r.id)).toEqual([3]);
+  expect(useHarnessStore.getState().questionDrafts[THREAD][3].native).toEqual(draft);
+  useHarnessStore.getState().fold(told(4, null, { type: "request_updated", request: { ...asked, status: "resolved", answers: [{ questionId: "native", answers: ["typed"], dismissed: false }] }, waiting: 0, waiting_questions: 0 }));
+  expect(useHarnessStore.getState().requests[THREAD][3].answers?.[0].answers).toEqual(["typed"]);
+  expect(readQuestionDrafts()[THREAD]).toBeUndefined();
+});
+
+test("Input follows question counts even for a listed thread whose rows were never loaded", () => {
+  useHarnessStore.setState({ threads: [{ id: THREAD, provider: "codex", pending_requests: 0, updated_at: "unchanged" } as never] });
+  useHarnessStore.getState().fold(told(2, 12, { type: "request_opened", request: request({ kind: "question", action: "question" }), waiting: 1, waiting_questions: 1 }));
+  expect(useHarnessStore.getState().threads[0]).toMatchObject({ pending_requests: 1, pending_questions: 1, updated_at: "unchanged" });
+});
+
+
+test("native question ids that match object properties round-trip as ordinary draft keys", async () => {
+  const { readQuestionDrafts, saveQuestionDrafts } = await import("@/stores/chat/questionDrafts");
+  const draft = { selected: ["Red"], text: "", dismissed: false };
+  saveQuestionDrafts({ [THREAD]: { 3: { ["__proto__"]: draft, constructor: draft } } });
+  const drafts = readQuestionDrafts()[THREAD][3];
+  expect(Object.keys(drafts)).toEqual(["__proto__", "constructor"]);
+  expect(drafts.__proto__).toEqual(draft);
 });

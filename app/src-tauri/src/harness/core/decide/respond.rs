@@ -21,9 +21,11 @@ pub(in crate::harness) const MODE_WHILE_PENDING: &str =
 
 pub(super) fn decide(
     state: &State,
+    command: &super::super::command::Command,
     request_id: i64,
     option_id: &str,
     feedback: Option<&String>,
+    answers: Option<&[crate::harness::requests::QuestionAnswer]>,
 ) -> Result<Decision, String> {
     let request = state.request.as_ref().ok_or(NOT_HERE)?;
     match request.status {
@@ -34,7 +36,8 @@ pub(super) fn decide(
             return Err(format!("This request can no longer be answered. {reason}"));
         }
     }
-    if request.responder != "live" || !state.live.route {
+    let message = request.kind == "question" && request.responder == "message";
+    if !message && (request.responder != "live" || !state.live.route) {
         return Err(GONE.into());
     }
     if !request.options.iter().any(|o| o.id == option_id) {
@@ -43,11 +46,40 @@ pub(super) fn decide(
     if feedback.is_some_and(|f| !f.trim().is_empty()) {
         return Err(NO_FEEDBACK.into());
     }
+    let answers = answers.unwrap_or_default();
+    if request.kind == "question" {
+        crate::harness::requests::QuestionPayload::read(&request.payload)?
+            .validate(option_id, answers)?;
+    } else if !answers.is_empty() {
+        return Err("An approval cannot take question answers.".into());
+    }
+    let mut changes = vec![Change::Respond {
+        request_id,
+        option_id: option_id.to_string(),
+        answers: (request.kind == "question").then(|| answers.to_vec()),
+    }];
+    if message && option_id == "answer" {
+        let payload = crate::harness::requests::QuestionPayload::read(&request.payload)?;
+        let text = payload.message(answers);
+        if state.held > 0 {
+            changes.push(Change::Unhold);
+        }
+        changes.push(if state.busy() || state.waiting > 0 {
+            Change::Enqueue {
+                text,
+                options: Default::default(),
+            }
+        } else {
+            Change::Begin {
+                text,
+                options: Default::default(),
+                receipt: command.id.clone(),
+                queued: None,
+            }
+        });
+    }
     Ok(Decision::Commit(Plan {
-        changes: vec![Change::Respond {
-            request_id,
-            option_id: option_id.to_string(),
-        }],
+        changes,
         text: None,
     }))
 }

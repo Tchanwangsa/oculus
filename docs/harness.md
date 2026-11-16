@@ -67,7 +67,7 @@ whether a live session takes another model with its next turn
 over a chat another provider started (`provider_handoff`,
 [Changing provider mid-chat](#changing-provider-mid-chat)), the request
 flags ([Requests](#requests): `approvals`, `auto_review`,
-`session_grants`, `mode_switch_in_session`), and
+`session_grants`, `mode_switch_in_session`, `questions`), and
 the steering flags (`active_steering`, `steer_by_restart`), which are false
 on every bridge. A flag for work that is not built starts false and turns
 true only with the recording under `fixtures/harness/` that shows the CLI
@@ -1540,17 +1540,20 @@ prompt and before the turn's first event.
 ## Requests
 
 When the CLI wants something its sandbox or its rules block (a command
-outside it, a file change, more access, a tool call it asks about) the
+outside it, a file change, more access, a tool call it asks about), or needs
+a decision through its question tool, the
 student is asked in the chat and the answer goes back to the same waiting
 call. One table, `harness_requests`
-(migration 58, `requests/requests.sql`), holds each request's state; its
+(migration 58, `requests/requests.sql`; answers in migration 59,
+`requests/questions.sql`), holds each request's state; its
 timeline row (kind `request`) holds only its id.
 
 **A request is saved with its route, or not at all.** A bridge turns its
 CLI's callback into `RequestAsked { request, route }`: a `NewRequest`
 (action, payload, the options this provider really takes, the callback id
 as JSON exactly as sent, the paths it names) and a `Route` back to the
-callback (`requests/route.rs`). The consumer (`app/consumer/requests.rs`)
+callback (`requests/route.rs`). The consumer
+(`app/src-tauri/src/harness/app/consumer/requests.rs`)
 saves it and its row in one transaction under the open run, registers the
 route in its `Registry` by request id, and tells `RequestOpened`. That is
 one consumer step, and a release is another, so a request is fully stored
@@ -1558,8 +1561,8 @@ before its session is released or never stored for that session. The
 CLI is told no, and the request is never shown, when:
 
 - no turn is open (a background agent asking after its turn closed);
-- the chat is saved as "Don't ask" when the callback arrives, whatever its
-  turn started under;
+- an approval arrives while the chat is saved as "Don't ask", whatever its
+  turn started under; questions are independent of permission mode;
 - it names a protected path, or a folder that holds the library, since a
   grant there reaches every protected folder inside (`requests/policy.rs`
   against `protected.rs`; relative paths are read against `agents/`). A
@@ -1568,7 +1571,7 @@ CLI is told no, and the request is never shown, when:
   name denies and `OCULUS_AGENT` keep refusing inside an approved command;
 - its session has ended (the event arrives stale), or it cannot be saved.
 
-**An answer is a command.** `Respond { request_id, option_id, feedback }`
+**An answer is a command.** `Respond { request_id, option_id, feedback, answers }`
 (`harness_respond`) is decided against the saved request: refused when it
 is not this chat's, was already answered, has ended (with its reason), its
 route is gone ("The agent that asked has gone …"), the option is not one it
@@ -1596,10 +1599,10 @@ keep their own commands.
 | --- | --- | --- |
 | the turn it waited in (`settle`, or a turn of the CLI's own) | `cancelled`, "The turn was stopped." after Stop, else "The turn ended before it was answered." | retires the callback itself after an interrupt; otherwise told no, since a spawned child may still be waiting |
 | `Release::Stopped` / `Replaced` | `cancelled` | told no (`Effect::Withdraw`), unless an answer is already on its way |
-| `Release::Exited` | `expired`, "The agent's process ended." | nothing to tell |
+| `Release::Exited` | approval: `expired`; pending question: stays `pending`, responder `message`, "The agent's process ended." | nothing to tell |
 | `Release::Deleted` | the rows go with the chat | told no |
 | `RequestRetired` with no answer sent | `expired`, "The agent withdrew this request." | |
-| startup (`store::reconcile`) | `expired`, "The app was closed."; an answer still `sending` becomes `uncertain` | no route survives a restart |
+| startup (`store::reconcile`) | approval: `expired`; pending question: stays `pending`, responder `message`, "The app was closed."; an answer still `sending` becomes `uncertain` | no live route survives a restart |
 
 An ended request's `responder` is `not_resumable` and its answer is
 refused. An answer still `sending` when its session ends becomes
@@ -1613,7 +1616,7 @@ never asked; a bridge with no reviewer, `auto_review` false, asks as `ask`).
 tells `PermissionMode`; it is refused while a request waits ("Answer the
 waiting request before changing how this chat asks."). The consumer reads
 the saved mode as each request arrives, so a change mid-turn decides the
-turn's next request: under `quiet` it is declined unseen, under `ask` or
+turn's next approval: under `quiet` it is declined unseen, under `ask` or
 `auto` it is shown. Auto's reviewer is a launch setting (Codex's on each
 `turn/start`, Claude's at spawn), so a switch to or from `auto` takes effect
 from the next turn's start, and on Claude, whose mode is fixed at spawn, by
@@ -1621,16 +1624,66 @@ restarting the session for it. The start step
 reads it off the row (`SendOptions::permission_mode`), as does a rewind
 that respawns the session, and it is part of
 the session's reuse key ([`decide_transition`](#changing-provider-mid-chat)).
-A bridge whose `approvals` flag is false declines every request, whatever
-the mode.
+A bridge whose `approvals` flag is false declines approvals, whatever
+the mode. `questions` separately gates question support.
 
 `harness_load` returns the thread's requests (`requests`), and the webview
 keeps them per thread (`requests` in `harnessStore`), replaced by each
 `request_opened` and `request_updated`. Each of those also carries
-`waiting`, the thread's requests still pending with a live responder once
+`waiting`, the thread's requests still pending with a live or message responder once
 the change is saved (`store::waiting`). The thread list reads the same
 count as `pending_requests` (`reads.ts`) and takes each event's `waiting`
 for every listed thread, open or not, without reordering the list.
+`waiting_questions` is the question subset; the list reads it as
+`pending_questions`, so questions show Input and approvals retain priority.
+
+### Questions keep their native keys
+
+`requests/questions.rs` defines the question payload: `questions` in provider
+order, each with `id`, `header`, `text`, `options` (label and description),
+`multi`, `allowsTypedAnswer` and `secret`. Secrets, duplicate ids and invalid
+payloads are declined before storage or display. `Respond` uses `answer` or
+`dismiss` and `answers: [{ questionId, answers: string[], dismissed }]`.
+Every question must have one answer entry; ids must be unique and belong to
+this request, values cannot be empty, single choice takes one value, and a
+choice-only question accepts only listed labels. A dismissed entry has no
+values; dismissing the whole request carries no entries. Answers are stored
+beside the request and returned by `harness_load` and request events.
+
+Codex 0.169.0's experimental `item/tool/requestUserInput` is enabled by
+`features.default_mode_request_user_input` on chat threads only. Its strict
+parser (`providers/codex/questions.rs`) refuses unknown fields, malformed
+values, optionless questions and unsupported automatic resolution with an
+explicit protocol-version error. Codex is single choice with Other when
+`isOther` is true. Replies are `{ answers: { [nativeId]: { answers: [...] } } }`.
+Both recorded `isBlocking` values use the same answer path; no timing or
+background-progress behavior is inferred from them.
+
+Claude 2.1.325's `AskUserQuestion` is routed before tool approvals
+(`providers/claude/questions.rs`). It permits typed answers and uses
+`multiSelect`. The allow preserves the original input and appends
+`updatedInput.answers`, keyed by exact question text; multiple values are
+joined with `", "`. A whole dismissal sends deny. One-off turns deny the tool
+on both bridges. opencode and Antigravity have `questions` false.
+
+A pending question whose process or app is lost keeps its payload and moves
+to `message`; it is excluded from later turn cleanup and native callback
+retirement. Failed terminals that precede process EOF leave questions to
+session cleanup. Stop, successful turn end, replacement and explicit
+withdrawal still cancel or expire unanswered live questions. An answer to a
+message responder claims the request and saves one ordinary new message run
+in the same command transaction (queued if busy); its delivery acknowledges
+the saved message, whose run tracks provider delivery. Retries and a second
+pane cannot enqueue it again. A detached dismissal creates no message.
+
+The frontend data contract is `lib/harness/questions.ts` and the types in
+`types.ts`. `harnessStore.questionDrafts[thread][request][nativeId]` keeps
+`{ selected, text, dismissed }` in memory and localStorage, through chat
+switches and webview reloads. `setQuestionDraft` accepts only known pending
+non-secret questions; confirmed resolution, rewind and deletion prune drafts.
+`waitingQuestions` selects the oldest answerable question, including message
+responders. Approval helpers select approvals only. Question panel rendering
+is a separate consumer of these types and store fields.
 
 ### In the chat
 
@@ -1768,8 +1821,7 @@ and `settings_json`:
 | `quiet` | `acceptEdits` | the same; the consumer declines each prompt unseen | false |
 | one-off turns | `default` | `--permission-prompts none`: the CLI denies them | false |
 
-A chat's launch also passes `--disallowedTools AskUserQuestion`: under host
-prompts the CLI would offer it, and nothing answers a question yet. Only Ask
+A chat offers `AskUserQuestion` through the host question route above. Only Ask
 lets a command ask to leave the sandbox: in Auto the classifier would be all
 that stands between a shell command and a protected folder, and in Don't ask
 nobody would approve one. The mode is fixed at spawn (the settings file
@@ -1801,8 +1853,8 @@ a change restarts the session at the next send.
   (`arguments`). A read names no `paths`: `protected.rs` keeps agents from
   writing, and the library is readable already. No such prompt has been
   recorded; `claude-approval-tool-decline` is derived from the write
-  recording. `AskUserQuestion` is declined unseen, as is every prompt of a
-  one-off turn and one that arrives while Stop is being asked. The CLI's
+  recording. `AskUserQuestion` is a question request. Every prompt of a
+  one-off turn and one that arrives while Stop is being asked is declined unseen. The CLI's
   suggested grants are never sent back: the network one would persist to
   `localSettings`. Approve once and Decline only.
 - **What reaches a prompt.** No rule in the launch refuses a read, a web

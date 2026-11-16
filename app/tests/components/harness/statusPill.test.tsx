@@ -57,3 +57,9 @@ describe("Approval in the sidebar", () => {
     expect(threadRowStatus(thread({}), true)).toBe("working");
   });
 });
+
+test("a question shows Input; an approval alongside it retains Approval priority", () => {
+  expect(threadRowStatus(thread({ pending_requests: 1, pending_questions: 1 }), true)).toBe("input");
+  expect(threadRowStatus(thread({ pending_requests: 2, pending_questions: 1 }), true)).toBe("approval");
+  expect(threadRowStatus(thread({ pending_requests: 1, pending_questions: 1 }), false)).toBe("input");
+});

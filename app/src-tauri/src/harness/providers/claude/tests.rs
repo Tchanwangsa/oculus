@@ -139,8 +139,6 @@ fn a_chat_asks_the_host_in_each_mode_and_a_one_off_turn_asks_nobody() {
                 "host",
                 "--permission-prompt-tool",
                 "stdio",
-                "--disallowedTools",
-                "AskUserQuestion",
             ]
         );
     }
@@ -645,4 +643,15 @@ fn the_classifier_and_a_deny_rule_are_shown_on_the_call_and_the_rest_is_not() {
             ("b".into(), "denied".into(), Some("rule".into())),
         ]
     );
+}
+
+#[test]
+fn a_one_off_question_is_denied_even_if_a_callback_arrives() {
+    let mut rig = rigged(true);
+    rig.feed(prompt("question", json!({"tool_name":"AskUserQuestion","input":{"questions":[{
+        "question":"Choose?","header":"Color","options":[{"label":"Red","description":"Warm"}],"multiSelect":false
+    }]}})));
+    assert!(rig.told().is_empty());
+    assert_eq!(rig.written()[0]["response"]["response"]["behavior"], "deny");
+    assert!(!rig.session.has_pending_request());
 }

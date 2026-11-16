@@ -214,6 +214,29 @@ CLI suggests granting the library, a pipe dying mid-reply, a restart with one
 pending, a mode change restarting the session, and, as a mutation, a prompt
 inside a turn the CLI started itself. A test that declines unseen rewrites
 the manifest's expected deny to Oculus's unseen message.
+`testkit/questions.rs` replays twelve question fixtures through the real
+command, decider and bridge reply path: Codex 0.169.0 single choice, two
+questions, non-blocking and blocking typed answers, Stop, and derived empty
+answer dismissal; Claude 2.1.325 single, multi, typed, two-question calls,
+Stop and derived deny dismissal. The generator
+`app/src-tauri/fixtures/harness/scripts/questions.mjs` wraps the probe assets,
+pins source hashes and labels derivations. The first four Codex excerpts
+substitute `false` for the probe's redacted `isSecret` string and are explicitly
+**derived, not recorded**; the blocking typed excerpt preserves its boolean.
+Dismissals use a recorded prefix and synthetic empty-answer/deny plus EOF;
+they do not establish live dismissal continuation.
+
+The tests also cut both bridges at a pending question and close the transport,
+or tear down and run the production startup gate. A question survives as a
+message responder; answering after restart creates exactly one ordinary run
+across repeated receipts and two panes. Validation refuses missing, unknown,
+duplicate, empty and excess single-choice answers before any write. Unit tests
+cover choice-only refusal, typed/multi acceptance, secrets, unknown Codex shapes,
+and one-off denial. Submitted answers persist with the request; TS store tests
+cover drafts through chat switches/reload storage, clearing after submission,
+and Input counts for unopened threads. These twelve fixtures run in the exact
+ignored release gate as well as the registry.
+
 `testkit/driver.rs` checks the driver through the rig: a crash before the
 start step (the message back in its queue, held, on all four bridges) and
 after it took the run, sends returning at their commit and going out one

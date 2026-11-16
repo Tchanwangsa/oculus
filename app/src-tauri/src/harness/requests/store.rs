@@ -11,7 +11,7 @@ use crate::harness::{Generation, Provider};
 use super::{reasons, Delivery, NewRequest, RequestView, Status};
 
 const COLUMNS: &str = "id, thread_id, run_id, item_id, provider, kind, action, payload, options,
-    status, responder, reason, response, delivery, created_at, resolved_at";
+    status, responder, reason, response, delivery, created_at, resolved_at, answers";
 
 fn err(e: sqlx::Error) -> String {
     e.to_string()
@@ -39,6 +39,10 @@ fn view(row: &SqliteRow) -> Result<RequestView, String> {
         responder: row.get("responder"),
         reason: row.get("reason"),
         response: row.get("response"),
+        answers: row
+            .get::<Option<String>, _>("answers")
+            .map(|s| serde_json::from_str(&s).map_err(|e| e.to_string()))
+            .transpose()?,
         delivery: Delivery::parse(&delivery).ok_or(format!("unknown delivery {delivery}"))?,
         created_at: row.get("created_at"),
         resolved_at: row.get("resolved_at"),
@@ -101,7 +105,7 @@ pub async fn open(
              (thread_id, run_id, attempt_id, binding_id, provider, kind, action, payload,
               options, responder, generation, native_ref)
          VALUES (?1, ?2, ?3, (SELECT binding_id FROM harness_runs WHERE id = ?2), ?4,
-                 'approval', ?5, ?6, ?7, 'live', ?8, ?9)
+                 ?10, ?5, ?6, ?7, 'live', ?8, ?9)
          RETURNING id",
     )
     .bind(thread_id)
@@ -113,6 +117,11 @@ pub async fn open(
     .bind(&options)
     .bind(generation as i64)
     .bind(&new.native_ref)
+    .bind(if new.action == super::Action::Question {
+        "question"
+    } else {
+        "approval"
+    })
     .fetch_one(&mut *tx)
     .await
     .map_err(err)?;
@@ -154,16 +163,24 @@ pub async fn respond(
     thread_id: i64,
     id: i64,
     option: &str,
+    answers: Option<&[super::QuestionAnswer]>,
 ) -> Result<Option<RequestView>, String> {
     let claimed = sqlx::query(
         "UPDATE harness_requests
-            SET status = 'resolved', response = ?3, delivery = 'sending',
+            SET status = 'resolved', response = ?3, answers = ?4,
+                delivery = CASE WHEN responder = 'message' THEN 'acknowledged' ELSE 'sending' END,
                 resolved_at = datetime('now')
           WHERE id = ?1 AND thread_id = ?2 AND status = 'pending'",
     )
     .bind(id)
     .bind(thread_id)
     .bind(option)
+    .bind(
+        answers
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|e| e.to_string())?,
+    )
     .execute(&mut *conn)
     .await
     .map_err(err)?
@@ -185,7 +202,7 @@ pub async fn delivered(
     let sql = match delivery {
         Delivery::Failed => {
             "UPDATE harness_requests
-                SET status = 'pending', response = NULL, resolved_at = NULL, delivery = 'failed'
+                SET status = 'pending', response = NULL, answers = NULL, resolved_at = NULL, delivery = 'failed'
               WHERE id = ?1 AND status = 'resolved' AND delivery = 'sending'
               RETURNING thread_id"
         }
@@ -227,20 +244,21 @@ pub async fn end(
     for id in ids {
         let moved = sqlx::query(
             "UPDATE harness_requests
-                SET status = CASE WHEN status = 'pending' THEN ?3 ELSE status END,
+                SET status = CASE WHEN status = 'pending' AND NOT (kind = 'question' AND ?5) THEN ?3 ELSE status END,
                     reason = CASE WHEN status = 'pending' THEN ?4 ELSE reason END,
-                    responder = CASE WHEN status = 'pending' THEN 'not_resumable'
-                                     ELSE responder END,
-                    resolved_at = CASE WHEN status = 'pending' THEN datetime('now')
+                    responder = CASE WHEN status = 'pending' AND kind = 'question' AND ?5 THEN 'message'
+                                     WHEN status = 'pending' THEN 'not_resumable' ELSE responder END,
+                    resolved_at = CASE WHEN status = 'pending' AND NOT (kind = 'question' AND ?5) THEN datetime('now')
                                        ELSE resolved_at END,
                     delivery = CASE WHEN delivery = 'sending' THEN 'uncertain' ELSE delivery END
               WHERE id = ?1 AND thread_id = ?2
-                AND (status = 'pending' OR delivery = 'sending')",
+                AND ((status = 'pending' AND responder = 'live') OR delivery = 'sending')",
         )
         .bind(id)
         .bind(thread_id)
         .bind(status.as_str())
         .bind(reason)
+        .bind(status == Status::Expired && reason != reasons::WITHDRAWN)
         .execute(&mut *tx)
         .await
         .map_err(err)?
@@ -268,7 +286,7 @@ pub async fn left_by(
 ) -> Result<Vec<i64>, String> {
     sqlx::query_scalar(
         "SELECT id FROM harness_requests
-          WHERE thread_id = ?1 AND run_id IS ?2 AND status = 'pending' ORDER BY id",
+          WHERE thread_id = ?1 AND run_id IS ?2 AND status = 'pending' AND responder = 'live' ORDER BY id",
     )
     .bind(thread_id)
     .bind(run_id)
@@ -289,7 +307,7 @@ pub async fn by_native(
     let id: Option<i64> = sqlx::query_scalar(
         "SELECT id FROM harness_requests
           WHERE thread_id = ?1 AND generation = ?2 AND native_ref = ?3
-            AND (status = 'pending' OR delivery = 'sending')
+            AND ((status = 'pending' AND responder = 'live') OR delivery = 'sending')
           ORDER BY id DESC LIMIT 1",
     )
     .bind(thread_id)
@@ -304,14 +322,16 @@ pub async fn by_native(
     }
 }
 
-/// Startup: no route survives a restart. A request still pending expired
-/// with the app, and an answer still `sending` may or may not have arrived.
+/// Startup: approvals expire, questions move to ordinary-message delivery.
+/// An answer still `sending` may or may not have arrived.
 pub async fn reconcile(conn: &mut SqliteConnection) -> Result<u64, String> {
     let expired = sqlx::query(
         "UPDATE harness_requests
-            SET status = 'expired', responder = 'not_resumable', reason = ?1,
-                resolved_at = datetime('now')
-          WHERE status = 'pending'",
+            SET status = CASE WHEN kind = 'question' THEN 'pending' ELSE 'expired' END,
+                responder = CASE WHEN kind = 'question' THEN 'message' ELSE 'not_resumable' END,
+                reason = ?1,
+                resolved_at = CASE WHEN kind = 'question' THEN NULL ELSE datetime('now') END
+          WHERE status = 'pending' AND responder = 'live'",
     )
     .bind(reasons::APP_CLOSED)
     .execute(&mut *conn)
@@ -331,7 +351,7 @@ pub async fn reconcile(conn: &mut SqliteConnection) -> Result<u64, String> {
 pub async fn waiting(pool: &SqlitePool, thread_id: i64) -> Result<u32, String> {
     sqlx::query_scalar(
         "SELECT COUNT(*) FROM harness_requests
-          WHERE thread_id = ?1 AND status = 'pending' AND responder = 'live'",
+          WHERE thread_id = ?1 AND status = 'pending' AND responder IN ('live', 'message')",
     )
     .bind(thread_id)
     .fetch_one(pool)
@@ -366,4 +386,9 @@ pub async fn set_mode(
         .await
         .map_err(err)?;
     Ok(())
+}
+
+pub async fn waiting_questions(pool: &SqlitePool, thread_id: i64) -> Result<u32, String> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM harness_requests WHERE thread_id = ?1 AND kind = 'question' AND status = 'pending' AND responder IN ('live', 'message')")
+        .bind(thread_id).fetch_one(pool).await.map_err(err)
 }

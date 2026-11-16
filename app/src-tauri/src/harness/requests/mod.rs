@@ -8,6 +8,8 @@
 //! request's `delivery`. docs/harness.md, "Requests".
 
 pub(in crate::harness) mod policy;
+mod questions;
+pub use questions::{Question, QuestionAnswer, QuestionOption, QuestionPayload};
 pub(in crate::harness) mod registry;
 pub(in crate::harness) mod route;
 pub(in crate::harness) mod store;
@@ -65,6 +67,7 @@ pub enum Action {
     Access,
     Tool,
     Rule,
+    Question,
 }
 
 impl Action {
@@ -77,6 +80,7 @@ impl Action {
             Action::Access => "access",
             Action::Tool => "tool",
             Action::Rule => "rule",
+            Action::Question => "question",
         }
     }
 }
@@ -210,7 +214,7 @@ pub struct RequestView {
     /// The timeline row that shows it.
     pub item_id: Option<i64>,
     pub provider: crate::harness::Provider,
-    /// `approval`; `question` comes with stage 3.
+    /// `approval` or `question`.
     pub kind: String,
     pub action: Action,
     pub payload: Value,
@@ -222,6 +226,8 @@ pub struct RequestView {
     pub reason: Option<String>,
     /// The option chosen.
     pub response: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answers: Option<Vec<QuestionAnswer>>,
     pub delivery: Delivery,
     pub created_at: String,
     pub resolved_at: Option<String>,

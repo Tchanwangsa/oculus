@@ -45,6 +45,7 @@ pub(in crate::harness) struct Reply {
     pub request_id: i64,
     pub route: LiveRoute,
     pub option: RequestOption,
+    pub answers: Vec<crate::harness::requests::QuestionAnswer>,
 }
 
 #[derive(Clone)]
@@ -121,8 +122,10 @@ pub(in crate::harness) async fn run(rt: &Runtime, effect: Effect) {
                 request_id,
                 route,
                 option,
+                answers,
             } = *reply;
-            let written = crate::runtime::blocking::run(move || Ok(route.0.reply(&option)));
+            let written =
+                crate::runtime::blocking::run(move || Ok(route.0.reply_answers(&option, &answers)));
             let reply = written
                 .await
                 .unwrap_or_else(crate::harness::requests::Reply::Uncertain);

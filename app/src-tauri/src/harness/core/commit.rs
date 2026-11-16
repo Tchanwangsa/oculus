@@ -83,6 +83,7 @@ pub(in crate::harness) enum Change {
     Respond {
         request_id: i64,
         option_id: String,
+        answers: Option<Vec<requests::QuestionAnswer>>,
     },
     /// How the chat asks from its next run on.
     SetMode {
@@ -270,10 +271,17 @@ pub(in crate::harness) async fn run(
             Change::Respond {
                 request_id,
                 option_id,
+                answers,
             } => {
                 let thread_id = thread.ok_or("an answer with no thread")?;
-                let claimed =
-                    requests::store::respond(&mut tx, thread_id, request_id, &option_id).await?;
+                let claimed = requests::store::respond(
+                    &mut tx,
+                    thread_id,
+                    request_id,
+                    &option_id,
+                    answers.as_deref(),
+                )
+                .await?;
                 let request = claimed.ok_or(crate::harness::core::decide::respond::ANSWERED)?;
                 outcome.answered = Some(request_id);
                 applied.push(Applied::Responded(Box::new(request)));

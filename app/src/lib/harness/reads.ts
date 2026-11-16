@@ -13,10 +13,14 @@ const SETTLED_AT =
  *  Rust counts them for each request event (`requests::store::waiting`). */
 const PENDING_REQUESTS =
   "(SELECT COUNT(*) FROM harness_requests q WHERE q.thread_id = t.id" +
-  " AND q.status = 'pending' AND q.responder = 'live') AS pending_requests";
+  " AND q.status = 'pending' AND q.responder IN ('live', 'message')) AS pending_requests";
+
+const PENDING_QUESTIONS =
+  "(SELECT COUNT(*) FROM harness_requests q WHERE q.thread_id = t.id" +
+  " AND q.kind = 'question' AND q.status = 'pending' AND q.responder IN ('live', 'message')) AS pending_questions";
 
 /** The thread list's read, newest first; `$1` is the limit. */
-export const THREADS_SQL = `SELECT t.*, ${SETTLED_AT}, ${PENDING_REQUESTS} FROM harness_threads t ORDER BY t.updated_at DESC, t.id DESC LIMIT $1`;
+export const THREADS_SQL = `SELECT t.*, ${SETTLED_AT}, ${PENDING_REQUESTS}, ${PENDING_QUESTIONS} FROM harness_threads t ORDER BY t.updated_at DESC, t.id DESC LIMIT $1`;
 
 export async function getHarnessThreads(limit = 100): Promise<HarnessThread[]> {
   const db = await getDb();
@@ -28,7 +32,7 @@ export async function getHarnessThreads(limit = 100): Promise<HarnessThread[]> {
 export async function getLectureThreads(lectureId: string, limit = 100): Promise<HarnessThread[]> {
   const db = await getDb();
   return db.select<HarnessThread[]>(
-    `SELECT t.*, ${SETTLED_AT}, ${PENDING_REQUESTS} FROM harness_threads t WHERE t.lecture_id = $1
+    `SELECT t.*, ${SETTLED_AT}, ${PENDING_REQUESTS}, ${PENDING_QUESTIONS} FROM harness_threads t WHERE t.lecture_id = $1
       ORDER BY t.updated_at DESC, t.id DESC LIMIT $2`,
     [lectureId, limit],
   );

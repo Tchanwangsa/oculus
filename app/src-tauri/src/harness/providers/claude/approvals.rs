@@ -12,7 +12,7 @@
 //! folders, and `SandboxNetworkAccess` for a new host. Any other tool (a read
 //! outside the allowed folders, a web fetch or search, an MCP tool) is asked
 //! as a `tool` request; no such prompt has been recorded, so its shape is the
-//! CLI's generic one. `AskUserQuestion` is declined unseen. The CLI's
+//! CLI's generic one. `AskUserQuestion` takes the question route. The CLI's
 //! suggested grants are never passed on: the network one would persist to
 //! `localSettings`.
 
@@ -40,8 +40,7 @@ const FILE_TOOLS: [&str; 4] = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
 /// The tools that read files or list folders.
 const READ_TOOLS: [&str; 5] = ["Read", "NotebookRead", "Glob", "Grep", "LS"];
 
-/// Questions are answered nowhere yet: a chat's launch disallows the tool,
-/// and a prompt for it is declined unseen.
+/// Questions use the same callback, before the approval path.
 const QUESTION: &str = "AskUserQuestion";
 
 /// What the agent is told when the student declines.
@@ -87,11 +86,15 @@ struct ClaudeRoute {
 
 impl ClaudeRoute {
     fn write(&self, decision: Decision, message: &str) -> Reply {
+        self.write_input(&self.input, decision, message)
+    }
+
+    fn write_input(&self, input: &Value, decision: Decision, message: &str) -> Reply {
         let Some(session) = self.session.upgrade().filter(|s| s.is_alive()) else {
             return Reply::Failed("the claude process is not running".into());
         };
         session.callbacks.lock().unwrap().remove(&self.wire_id);
-        let line = response(&self.wire_id, &self.input, decision, message);
+        let line = response(&self.wire_id, input, decision, message);
         match session.proc.write_line(&line) {
             Ok(()) => Reply::Acknowledged,
             Err(e) => Reply::Uncertain(e),
@@ -102,6 +105,24 @@ impl ClaudeRoute {
 impl Route for ClaudeRoute {
     fn reply(&self, option: &RequestOption) -> Reply {
         self.write(option.decision, DECLINED)
+    }
+
+    fn reply_answers(
+        &self,
+        option: &RequestOption,
+        answers: &[crate::harness::requests::QuestionAnswer],
+    ) -> Reply {
+        if option.decision == Decision::Decline || answers.is_empty() {
+            return self.reply(option);
+        }
+        let mut input = self.input.clone();
+        input["answers"] = Value::Object(
+            answers
+                .iter()
+                .map(|a| (a.question_id.clone(), json!(a.answers.join(", "))))
+                .collect(),
+        );
+        self.write_input(&input, option.decision, DECLINED)
     }
 
     fn withdraw(&self) {
@@ -234,7 +255,17 @@ pub(super) fn request_of(
             }
             (Action::Network, json!({ "host": host }), Vec::new())
         }
-        QUESTION => return None,
+        QUESTION => {
+            let mut asked = match super::questions::request(input, json!(wire_id).to_string()) {
+                Ok(request) => request,
+                Err(e) => {
+                    elog!("[oculus] claude: unsupported question: {e}");
+                    return None;
+                }
+            };
+            asked.payload["tool"] = json!(s(request, "tool_use_id"));
+            return Some(asked);
+        }
         t if FILE_TOOLS.contains(&t) => {
             let (path, change) = file_change(&tool, input)?;
             let mut paths = vec![path];

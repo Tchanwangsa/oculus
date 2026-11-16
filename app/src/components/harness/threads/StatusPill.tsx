@@ -22,14 +22,14 @@ export const STATUS_LOOK: Record<ThreadStatus, { icon: Icon; text: string; dot: 
 /** A listed thread's status. `running` comes from the page's running ids,
  *  not the store's live map, which changes on every streamed token.
  *  Approval is the row's `pending_requests`, so a thread never opened shows
- *  it too. No bridge asks questions yet, so input is never set. */
+ *  it too. Questions count separately for Input. */
 export function threadRowStatus(thread: HarnessThread, running: boolean): ThreadStatus | null {
   return threadStatus({
     running,
     failed: thread.status === "error",
     unread: threadUnread(thread),
-    approval: (thread.pending_requests ?? 0) > 0,
-    input: false,
+    approval: (thread.pending_requests ?? 0) > (thread.pending_questions ?? 0),
+    input: (thread.pending_questions ?? 0) > 0,
   });
 }
 

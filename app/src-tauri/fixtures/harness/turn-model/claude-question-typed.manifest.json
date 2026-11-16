@@ -1,0 +1,85 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.325",
+  "protocol": "print stream-json host permission prompts",
+  "model": "claude-haiku-5-5",
+  "capture_date": "2026-11-15",
+  "source": "claude/09-question-free.jsonl lines 3-56; inbound frames",
+  "source_sha256": "8522ace9b0c5652066c3fa9643fd5b4c1d19835f8b2289aa707196b80b7e79f2",
+  "redaction": "Inbound turn frames only. Home paths become /Users/student; scratch suffixes become XXXXXX. Expected outbound uses the production bridge's send envelope. ",
+  "scenario": "claude-question-typed",
+  "evidence": "recorded",
+  "frames": 53,
+  "sha256": "b492337f8c1bf0f664f15910e0aaa98a9abe106b3fe27cd0675a8c875e77cd84",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "7fe4098f-ffb0-4b3c-b331-8f9e3d7c1cc2",
+          "response": {
+            "behavior": "allow",
+            "updatedInput": {
+              "questions": [
+                {
+                  "question": "What nickname should I use?",
+                  "header": "Nickname",
+                  "options": [
+                    {
+                      "label": "Alice",
+                      "description": "Use the nickname Alice."
+                    },
+                    {
+                      "label": "Bob",
+                      "description": "Use the nickname Bob."
+                    }
+                  ],
+                  "multiSelect": false
+                }
+              ],
+              "answers": {
+                "What nickname should I use?": "Custom typed nickname Quokka"
+              }
+            }
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-question-typed.ndjson",
+  "native_session": "",
+  "permission_mode": "ask",
+  "settings": {
+    "question_answers": [
+      {
+        "native": "\"7fe4098f-ffb0-4b3c-b331-8f9e3d7c1cc2\"",
+        "option": "answer",
+        "answers": [
+          {
+            "questionId": "What nickname should I use?",
+            "answers": [
+              "Custom typed nickname Quokka"
+            ],
+            "dismissed": false
+          }
+        ]
+      }
+    ],
+    "stop": false,
+    "derivation": ""
+  }
+}

@@ -74,13 +74,14 @@ pub(in crate::harness) enum Kind {
     ForceStop {
         run_id: i64,
     },
-    /// Answer a request the agent is waiting on with one of its options.
+    /// Answer an approval or a set of questions, on its callback or as a message.
     /// `feedback` is a message for the agent with a decline, which no
     /// bridge takes yet.
     Respond {
         request_id: i64,
         option_id: String,
         feedback: Option<String>,
+        answers: Option<Vec<crate::harness::requests::QuestionAnswer>>,
     },
     /// How the chat asks from its next run on. Refused while a request
     /// waits: it was raised under the mode in force.

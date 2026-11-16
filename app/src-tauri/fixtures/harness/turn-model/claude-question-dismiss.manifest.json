@@ -1,0 +1,56 @@
+{
+  "provider": "claude",
+  "cli_version": "2.1.325",
+  "protocol": "print stream-json host permission prompts",
+  "model": "claude-haiku-5-5",
+  "capture_date": "2026-11-15",
+  "source": "claude/09-question-single.jsonl lines 3-55; inbound frames",
+  "source_sha256": "7103da44f45f6ad3a2427af0f7557c05b6f496547ed4052e2bfc7c40ed5dd172",
+  "redaction": "Inbound turn frames only. Home paths become /Users/student; scratch suffixes become XXXXXX. Expected outbound uses the production bridge's send envelope. Derived, not recorded: recorded prefix through its question; empty answer/deny and transport EOF are synthetic. ",
+  "scenario": "claude-question-dismiss",
+  "evidence": "derived, not recorded",
+  "frames": 36,
+  "sha256": "00fa227864c92f50023d028ed38765ec2bc29d5d9607e77bf286c996a103c3c2",
+  "expected_outbound": [
+    {
+      "frame": {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Replay request"
+        },
+        "parent_tool_use_id": null,
+        "session_id": ""
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "7567dc42-5251-447c-813f-5791415ca372",
+          "response": {
+            "behavior": "deny",
+            "message": "The student declined this. Do not retry it or try another way to do the same thing."
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "input": "../claude-question-dismiss.ndjson",
+  "native_session": "",
+  "permission_mode": "ask",
+  "settings": {
+    "question_answers": [
+      {
+        "native": "\"7567dc42-5251-447c-813f-5791415ca372\"",
+        "option": "dismiss",
+        "answers": []
+      }
+    ],
+    "stop": false,
+    "derivation": "Derived, not recorded: recorded prefix through its question; empty answer/deny and transport EOF are synthetic. "
+  }
+}

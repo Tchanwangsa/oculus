@@ -36,6 +36,8 @@ pub struct Capabilities {
     /// answer goes back to the waiting call (`requests/`). Where false,
     /// such a step is declined without a prompt, whatever the chat's mode.
     pub approvals: bool,
+    /// Native question callbacks can be answered by the student.
+    pub questions: bool,
     /// The CLI's own reviewer decides requests in the chat's Auto mode,
     /// and the student is never asked. Where false, Auto behaves as Ask.
     pub auto_review: bool,
@@ -75,6 +77,7 @@ pub const fn of(provider: Provider) -> Capabilities {
         // mode is fixed at spawn, so a change restarts the session.
         // opencode's and Antigravity's probes are stages 2.4 and 5.
         approvals: matches!(provider, Provider::Codex | Provider::Claude),
+        questions: matches!(provider, Provider::Codex | Provider::Claude),
         auto_review: matches!(provider, Provider::Codex | Provider::Claude),
         session_grants: matches!(provider, Provider::Codex),
         mode_switch_in_session: matches!(provider, Provider::Codex),
@@ -105,6 +108,8 @@ pub const fn fixture(provider: Provider, flag: Flag) -> Option<&'static str> {
         (Provider::Codex, Flag::AutoReview) => Some("codex-auto-review-denied"),
         (Provider::Codex, Flag::SessionGrants) => Some("codex-session-grant"),
         (Provider::Codex, Flag::ModeSwitchInSession) => Some("codex-mode-switch"),
+        (Provider::Codex, Flag::Questions) => Some("codex-question-typed-blocking"),
+        (Provider::Claude, Flag::Questions) => Some("claude-question-single"),
         (Provider::Claude, Flag::Approvals) => Some("claude-approval-escape"),
         (Provider::Claude, Flag::AutoReview) => Some("claude-auto-classifier"),
         _ => None,
@@ -120,6 +125,7 @@ pub enum Flag {
     SteerByRestart,
     ProviderHandoff,
     Approvals,
+    Questions,
     AutoReview,
     SessionGrants,
     ModeSwitchInSession,
@@ -144,6 +150,7 @@ mod tests {
                 (Flag::SteerByRestart, caps.steer_by_restart),
                 (Flag::ProviderHandoff, caps.provider_handoff),
                 (Flag::Approvals, caps.approvals),
+                (Flag::Questions, caps.questions),
                 (Flag::AutoReview, caps.auto_review),
                 (Flag::SessionGrants, caps.session_grants),
                 (Flag::ModeSwitchInSession, caps.mode_switch_in_session),

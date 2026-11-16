@@ -107,7 +107,7 @@ impl ConsumerIo for Io {
             // A bridge's write, made here as the production effect makes it
             // off the consumer's thread, and its proof sent back.
             Effect::Reply(reply) => {
-                let proved = reply.route.0.reply(&reply.option);
+                let proved = reply.route.0.reply_answers(&reply.option, &reply.answers);
                 let _ = self.bus.send(BusMsg::Replied {
                     thread_id: reply.thread_id,
                     provider: reply.provider,

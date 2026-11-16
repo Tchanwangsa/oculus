@@ -87,8 +87,8 @@ type HarnessEvent =
    *  to it: answered, its answer's delivery learned, or ended unanswered. */
   /** `waiting`: the thread's requests waiting on the student once this one
    *  is saved. */
-  | { type: "request_opened"; request: HarnessRequest; waiting: number }
-  | { type: "request_updated"; request: HarnessRequest; waiting: number }
+  | { type: "request_opened"; request: HarnessRequest; waiting: number; waiting_questions?: number }
+  | { type: "request_updated"; request: HarnessRequest; waiting: number; waiting_questions?: number }
   /** How the chat asks from its next run on (`harnessSetPermissionMode`). */
   | { type: "permission_mode"; mode: PermissionMode }
   /** The row saying an answer, or part of it, did not arrive. */
@@ -156,8 +156,11 @@ export interface HarnessThread {
   /** How the chat asks for what its sandbox blocks; `ask` when absent. */
   permission_mode?: PermissionMode;
   /** Its requests waiting on the student: read with the list (`reads.ts`),
-   *  then the `waiting` of each request event. The sidebar's Approval. */
+   *  then the `waiting` of each request event. Approval and Input use the
+   *  question subset below. */
   pending_requests?: number;
+  /** The question subset of pending_requests, including message responders. */
+  pending_questions?: number;
 }
 
 /** `ask` shows each request; `quiet` ("Don't ask") declines without one;
@@ -175,10 +178,37 @@ export interface RequestOption {
   scope?: string;
 }
 
+export interface QuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface AgentQuestion {
+  /** Native id on Codex, exact question text on Claude. */
+  id: string;
+  header: string;
+  text: string;
+  options: QuestionOption[];
+  multi: boolean;
+  allowsTypedAnswer: boolean;
+  secret: boolean;
+}
+
+export interface QuestionPayload {
+  questions: AgentQuestion[];
+  isBlocking?: boolean;
+}
+
+export interface QuestionAnswer {
+  questionId: string;
+  answers: string[];
+  dismissed: boolean;
+}
+
 /** What the agent asked mid-turn (`RequestView` in
  *  `app/src-tauri/src/harness/requests/mod.rs`). Answer a `pending` one with
- *  `harnessRespond`; `responder` other than `live` cannot be answered and
- *  `reason` says why. `delivery` is what is known of the answer's way to
+ *  `harnessRespond`; a question with `responder: "message"` sends one new
+ *  message. `not_resumable` cannot be answered and `reason` says why. `delivery` is what is known of the answer's way to
  *  the CLI: `uncertain` was never resent, `failed` may be answered again. */
 export interface HarnessRequest {
   id: number;
@@ -188,7 +218,7 @@ export interface HarnessRequest {
   item_id: number | null;
   provider: Provider;
   kind: "approval" | "question";
-  action: "command" | "file_change" | "permissions" | "network" | "access" | "tool" | "rule";
+  action: "command" | "file_change" | "permissions" | "network" | "access" | "tool" | "rule" | "question";
   /** Per action. A command: `command`, `cwd` (Codex), `reason`,
    *  `outsideSandbox`. A file change: `changes` (`path`, `diff`, `kind`),
    *  `reason`. Permissions: `permissions` (the profile asked for), `reason`.
@@ -204,6 +234,7 @@ export interface HarnessRequest {
   reason: string | null;
   /** The option chosen. */
   response: string | null;
+  answers?: QuestionAnswer[] | null;
   delivery: "none" | "sending" | "acknowledged" | "failed" | "uncertain";
   created_at: string;
   resolved_at: string | null;
