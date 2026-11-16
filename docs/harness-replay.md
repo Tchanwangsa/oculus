@@ -354,8 +354,35 @@ identity and its refusals, an approval declined by a steer, a question
 making a send wait, and the queue claim a steer never releases.
 `restart.rs` covers restart steering: the superseded attempt, the second
 attempt's start after the old terminal, one settlement, two corrections
-restarting once, Stop during a restart, and a restart on a bridge that
-cannot restart.
+restarting once, a cancel that loses to completion or fails, Stop during a
+restart, and a restart on a bridge that cannot restart.
+`antigravity.rs` drives nine ACP restart fixtures through the real command,
+manager, consumer and `AcpSession`. The generator
+`app/src-tauri/fixtures/harness/scripts/antigravity-steering.mjs` wraps
+`07-cancel.jsonl`: command cancellation (lines 10–23), text cancellation
+(lines 27–31), and a successful later prompt on the same session (lines
+37–41). Each manifest pins the source and input hashes. **All nine fixtures
+are derived, not recorded as complete restart exchanges**: `tool` and
+`text` splice the recorded continuation after the cancel and renumber its
+reply; `successive` keeps both cancellations in order, omitting an
+unsupported native-steer probe call; `two` joins synthetic corrections;
+`missed` changes the old terminal to `end_turn`; `stop` and `during-stop`
+insert Stop around the correction; `death` substitutes EOF for the reply;
+`error` substitutes an RPC error. Their manifests identify every derivation.
+No live restart timing is claimed.
+
+The checks require at most one unanswered prompt, the same native session,
+two attempts under one run with reason `steering_restart`, preserved partial
+text and a failed tool, one final answer and settlement, two pending
+corrections restarting once in order, a correction during the new attempt
+waiting on its own cancel, and an ordinary waiting message remaining queued
+until the final terminal. A repeated old reply cannot finish the new
+attempt. Completion starts the same missed correction once as its own run;
+Stop after a restart steer and failure hold it without another prompt; a
+message submitted during Stop queues as an ordinary new run. Registry replay checks
+live/reload equality for every fixture, and the exact ignored release gate
+runs all nine.
+
 `recorded.rs` replays the steering probes through the real `Send`, effect
 and bridge write: each manifest's `settings.steers` names the frame a steer
 was written before (`gate`) and its text, and the replay puts the client id
@@ -485,8 +512,9 @@ and live/reload equality. The incomplete Codex websearch recording deliberately
 keeps its missing-terminal failures visible.
 
 Authoritative gap replacement, transport reconnect offsets and actual
-fixed-protocol narration capture remain unverified, and so does restart
-steering on a real bridge (none sets `steer_by_restart`). The current event contract cannot represent several
+fixed-protocol narration capture remain unverified. Antigravity restart
+steering is replay-tested against the real bridge; its live timing and
+Stop/process-death races remain unverified. The current event contract cannot represent several
 of those facts. Artifact tests cover source visibility, the fence drawn once
 outside its fold with its original index, stable database keys, widget
 progress and absent Ask grants; proposal registration and Undo are covered

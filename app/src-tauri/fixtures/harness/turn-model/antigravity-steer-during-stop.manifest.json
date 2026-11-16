@@ -1,0 +1,77 @@
+{
+  "provider": "antigravity",
+  "cli_version": "1.5.9",
+  "protocol": "Agent Client Protocol v1 over agy acp",
+  "model": "gemini-3.8-flash-low",
+  "capture_date": "2026-11-15",
+  "source": "antigravity/07-cancel.jsonl: command cancellation lines 10-23, text cancellation lines 27-31, successful same-session continuation lines 37-41",
+  "source_sha256": "eb1e14395bb8d2b92c0f43d8b62b68c394bbeb47eecdcb56990a8e97666d5d84",
+  "evidence": "derived, not recorded",
+  "redaction": "Recorded inbound segments with home redaction; derived, not recorded: the correction is submitted after Stop and before the recorded cancelled terminal; it queues as an ordinary new message and starts after the stopped terminal, as the runtime send rule requires.",
+  "scenario": "antigravity-steer-during-stop",
+  "frames": 9,
+  "sha256": "d838da0505bf96b51610428eac3cbeb2782bfeeba4fba09211cd1c42b3ca7151",
+  "input": "../antigravity-steer-during-stop.ndjson",
+  "native_session": "c1e3f868-73fa-4696-945e-861027e169b4",
+  "permission_mode": "ask",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "session/prompt",
+        "params": {
+          "sessionId": "c1e3f868-73fa-4696-945e-861027e169b4",
+          "prompt": [
+            {
+              "type": "text",
+              "text": "Replay request"
+            }
+          ]
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "method": "session/cancel",
+        "params": {
+          "sessionId": "c1e3f868-73fa-4696-945e-861027e169b4"
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "session/prompt",
+        "params": {
+          "sessionId": "c1e3f868-73fa-4696-945e-861027e169b4",
+          "prompt": [
+            {
+              "type": "text",
+              "text": "Reply AFTER_CANCEL_OK only. No tools."
+            }
+          ]
+        }
+      },
+      "response": null
+    }
+  ],
+  "settings": {
+    "actions": [
+      {
+        "before": 3,
+        "kind": "stop"
+      },
+      {
+        "before": 3,
+        "kind": "steer",
+        "text": "Reply AFTER_CANCEL_OK only. No tools."
+      }
+    ],
+    "derivation": "derived, not recorded: the correction is submitted after Stop and before the recorded cancelled terminal; it queues as an ordinary new message and starts after the stopped terminal, as the runtime send rule requires."
+  }
+}

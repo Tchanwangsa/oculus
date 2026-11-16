@@ -188,12 +188,30 @@ impl Consumer {
             let mut conn = pool.acquire().await.map_err(|e| e.to_string())?;
             steer::restarts(&mut conn, run_id).await
         });
-        if waiting.map_or(true, |rows| rows.is_empty()) {
+        let Ok(waiting) = waiting else {
+            return false;
+        };
+        if waiting.is_empty() {
             return false;
         }
+        let messages: Vec<Written> = waiting
+            .iter()
+            .filter_map(|(item_id, _)| {
+                self.rt
+                    .block_on(steer::message_of(&pool, *item_id))
+                    .ok()
+                    .flatten()
+                    .map(|message| Written {
+                        message,
+                        item_id: *item_id,
+                    })
+            })
+            .collect();
         // What streamed under the old attempt is its partial reply.
-        for event in self.cut_short(run_id, "interrupted") {
-            self.event(thread_id, provider, From::App, event, None, io);
+        if status == "interrupted" {
+            for event in self.cut_short(run_id, "interrupted") {
+                self.event(thread_id, provider, From::App, event, None, io);
+            }
         }
         let restarted = steer::restart(&pool, thread_id, run_id, attempt_id, status);
         self.restarting.remove(&run_id);
@@ -204,10 +222,13 @@ impl Consumer {
                 work,
                 delivered,
             }) => (attempt, revision, work, delivered),
-            // Stopped meanwhile: the corrections wait, held, and the run
-            // settles on this terminal.
+            // Missed, failed or stopped meanwhile: the run settles and
+            // each correction becomes its own queued run.
             Ok(Restart::Requeued { revision }) => {
                 self.revisions.insert(thread_id, revision);
+                for written in messages {
+                    self.tell_steer(thread_id, provider, written, delivery::REQUEUED, io);
+                }
                 self.tell_queue(thread_id, provider, io);
                 return false;
             }

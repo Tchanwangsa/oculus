@@ -65,7 +65,9 @@ pub const fn of(provider: Provider) -> Capabilities {
         // Codex: `turn/steer` recorded on 0.169.0 (`codex-steer-*`). Claude:
         // a `priority: "now"` message on 2.1.325 (`claude-steer-*`).
         active_steering: matches!(provider, Provider::Codex | Provider::Claude),
-        steer_by_restart: false,
+        // ACP's cancelled prompt reply precedes the next prompt on the
+        // same session (`antigravity-steer-text`, derived replay).
+        steer_by_restart: matches!(provider, Provider::Antigravity),
         // Codex names the model in `turn/start`, opencode in each prompt
         // and `agy acp` in `session/set_model` before one; Claude takes
         // `--model` at spawn.
@@ -131,6 +133,7 @@ pub const fn fixture(provider: Provider, flag: Flag) -> Option<&'static str> {
         }
         (Provider::Codex, Flag::ActiveSteering) => Some("codex-steer-tool"),
         (Provider::Claude, Flag::ActiveSteering) => Some("claude-steer-tool"),
+        (Provider::Antigravity, Flag::SteerByRestart) => Some("antigravity-steer-text"),
         _ => None,
     }
 }
@@ -232,7 +235,13 @@ mod tests {
             .map(|c| c.provider)
             .collect();
         assert_eq!(steering, [Provider::Claude, Provider::Codex]);
-        assert!(all().iter().all(|c| !c.steer_by_restart));
+        let restarting: Vec<Provider> = all()
+            .into_iter()
+            .filter(|c| c.steer_by_restart)
+            .map(|c| c.provider)
+            .collect();
+        assert_eq!(restarting, [Provider::Antigravity]);
+        assert!(!of(Provider::Antigravity).active_steering);
         assert_eq!(wire["modelSwitchInSession"], true);
         assert_eq!(
             wire["providerHandoff"],

@@ -312,10 +312,9 @@ fn chunks_join_into_named_blocks_split_by_tools_and_closed_by_the_reply() {
     ] {
         events.extend(t.update(&u));
     }
-    events.extend(t.finish(
-        Ok(json!({ "stopReason": "end_turn", "usage": { "inputTokens": 7, "outputTokens": 3 } })),
-        false,
-    ));
+    events.extend(t.finish(Ok(
+        json!({ "stopReason": "end_turn", "usage": { "inputTokens": 7, "outputTokens": 3 } }),
+    )));
     let kept: Vec<Value> = events
         .iter()
         .filter(|e| {
@@ -360,7 +359,7 @@ fn a_stopped_reply_keeps_the_text_as_partial_with_no_gap_and_a_cut_off_one_gaps(
     let mut t = translator();
     t.turns.reserve();
     t.update(&chunk("agent_message_chunk", "1."));
-    let stopped = t.finish(Ok(json!({ "stopReason": "cancelled" })), false);
+    let stopped = t.finish(Ok(json!({ "stopReason": "cancelled" })));
     let json: Vec<Value> = stopped
         .iter()
         .map(|e| serde_json::to_value(e).unwrap())
@@ -391,7 +390,7 @@ fn a_refusal_or_an_unknown_stop_fails_the_turn_and_an_error_reply_does_too() {
     ] {
         let mut t = translator();
         t.turns.reserve();
-        let events = t.finish(reply, false);
+        let events = t.finish(reply);
         assert!(matches!(events[0], HarnessEvent::Error { .. }));
         assert!(matches!(
             events.last(),
@@ -614,4 +613,29 @@ fn an_agy_older_than_the_recorded_one_is_refused_with_how_to_update() {
     assert!(refused.contains("Settings"), "{refused}");
     assert_eq!(methods(&heard), ["initialize"], "no session was opened");
     assert!(events.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_cancel_request_cannot_mask_a_completed_or_failed_prompt_reply() {
+    for (reply, expected) in [
+        (json!({"result":{"stopReason":"end_turn"}}), "completed"),
+        (
+            json!({"error":{"code":-32603,"message":"failure"}}),
+            "failed",
+        ),
+    ] {
+        let spawn = base(Some("s"), None, None);
+        let (session, _, events) = scripted(&spawn, |_| json!({}));
+        session.open(&spawn, "").unwrap();
+        session
+            .send("one", &crate::harness::event::unbound())
+            .unwrap();
+        session.interrupt().unwrap();
+        let mut reply = reply;
+        reply["id"] = json!(4);
+        session.inbound(&reply);
+        assert!(events.lock().unwrap().iter().any(|e| matches!(e,
+            HarnessEvent::TurnFinished { status, .. } if status == expected)));
+        session.kill();
+    }
 }
