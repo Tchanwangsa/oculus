@@ -30,9 +30,15 @@ export interface SendOptions {
 }
 
 /** How a message should reach a chat that is mid-turn (`Mode` in
- *  `harness/manager/policy.rs`). The composer's plain send names none, which
- *  is `auto`; no bridge steers or restarts a turn yet, so every mode starts
- *  on an idle chat and queues on a busy one. */
+ *  `harness/manager/policy.rs`). Every mode starts on an idle chat. Into a
+ *  running turn, `auto` (the plain send) steers where the running run's
+ *  bridge has `activeSteering` and queues where not, never restarting by
+ *  itself; `queue` waits (⌘↩); `steer` falls back to a restart
+ *  (`steerByRestart`), then to the queue; `restart` stops the turn and
+ *  starts again with the message, or, where the bridge cannot restart,
+ *  stops it and sends the message first afterwards. A slash command, a
+ *  turn being stopped or not yet taken by its provider, a question
+ *  waiting, or a turn the CLI started itself always queue. */
 export type DeliveryMode = "auto" | "queue" | "steer" | "restart";
 
 type MessagingInvoke = <T>(command: string, args: Record<string, unknown>) => Promise<T>;
@@ -67,12 +73,13 @@ export function harnessSend(
   provider: Provider,
   text: string,
   options: SendOptions,
+  mode?: DeliveryMode,
 ): Promise<number> {
   const notebooks = openNotebookContext();
   const context = [options.context, notebooks].filter(Boolean).join("\n\n") || null;
   const skills = takePickedSkills(text);
   const withSkills = skills.length ? { ...options, skills } : options;
-  return messaging.send(threadId, provider, text, notebooks ? { ...withSkills, context } : withSkills);
+  return messaging.send(threadId, provider, text, notebooks ? { ...withSkills, context } : withSkills, mode);
 }
 
 /** Rewind to a question and send new text in its place. See docs/harness.md
@@ -129,6 +136,13 @@ export function harnessLoad(threadId: number): Promise<HarnessSnapshot> {
 
 export function harnessUnqueue(threadId: number, queueId: string): Promise<void> {
   return invoke("harness_unqueue", { commandId: commandId(), threadId, queueId });
+}
+
+/** "Send now": write a waiting message into the running turn, keeping its
+ *  identity (`steer` and `queue` events follow). Rejects with the reason
+ *  where the turn cannot take it; nothing changes then. */
+export function harnessSteerQueued(threadId: number, queueId: string): Promise<void> {
+  return invoke("harness_steer_queued", { commandId: commandId(), threadId, queueId });
 }
 
 export function harnessEditQueued(threadId: number, queueId: string, text: string): Promise<void> {

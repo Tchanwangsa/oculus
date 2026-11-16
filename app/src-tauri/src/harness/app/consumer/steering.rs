@@ -30,9 +30,15 @@ impl Consumer {
             client,
             restart,
         } = steered;
+        let delivery = match restart {
+            true => delivery::RESTART,
+            false => delivery::SENDING,
+        };
         let told = HarnessEvent::Steer {
             text: text.clone(),
             message: written.message,
+            client: client.clone(),
+            delivery: delivery.into(),
             item: Some(written.item_id),
         };
         self.event(thread_id, provider, From::App, told, None, io);
@@ -69,9 +75,14 @@ impl Consumer {
         };
         let state = match outcome {
             Steered::Accepted => {
-                // The claim wrote `written` with its own revision.
+                // The claim wrote `written` with its own revision; an echo
+                // read before this report has already moved it on.
                 if let Ok(revision) = self.rt.block_on(store::revision(&pool, thread_id)) {
                     self.revisions.insert(thread_id, revision);
+                }
+                let now = self.rt.block_on(steer::delivery_of(&pool, written.item_id));
+                if now.ok().flatten().as_deref() != Some(delivery::WRITTEN) {
+                    return;
                 }
                 delivery::WRITTEN
             }
@@ -186,8 +197,13 @@ impl Consumer {
         }
         let restarted = steer::restart(&pool, thread_id, run_id, attempt_id, status);
         self.restarting.remove(&run_id);
-        let (attempt, revision) = match self.rt.block_on(restarted) {
-            Ok(Restart::Restarted { attempt, revision }) => (attempt, revision),
+        let (attempt, revision, work, delivered) = match self.rt.block_on(restarted) {
+            Ok(Restart::Restarted {
+                attempt,
+                revision,
+                work,
+                delivered,
+            }) => (attempt, revision, work, delivered),
             // Stopped meanwhile: the corrections wait, held, and the run
             // settles on this terminal.
             Ok(Restart::Requeued { revision }) => {
@@ -205,8 +221,20 @@ impl Consumer {
         self.runs.restart(thread_id, attempt);
         self.started.remove(&run_id);
         self.accepted.remove(&run_id);
-        // Requests the old attempt still waited on end with it.
-        let ended = self.requests_left_by(thread_id, Some(run_id), "interrupted");
+        // Requests the old attempt still waited on end with it, and its
+        // corrections went out with the new one.
+        let mut ended = self.requests_left_by(thread_id, Some(run_id), "interrupted");
+        for item_id in delivered {
+            let message = self.rt.block_on(steer::message_of(&pool, item_id));
+            if let Ok(Some(message)) = message {
+                let updated = HarnessEvent::SteerUpdated {
+                    item_id,
+                    message,
+                    delivery: delivery::DELIVERED.into(),
+                };
+                ended.push((updated, None));
+            }
+        }
         let tags = Tags {
             run_id: Some(run_id),
             attempt_id: Some(attempt),
@@ -215,6 +243,7 @@ impl Consumer {
             run_id,
             attempt_id: attempt,
             superseded: attempt_id,
+            work_item_ids: work,
         };
         let stored = Stored {
             thread_id,

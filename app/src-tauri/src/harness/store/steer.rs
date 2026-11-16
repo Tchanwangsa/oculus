@@ -212,6 +212,28 @@ pub async fn by_client(
     }))
 }
 
+/// How far a steer got, as its row says.
+pub async fn delivery_of(pool: &SqlitePool, item_id: i64) -> Result<Option<String>, String> {
+    sqlx::query_scalar(
+        "SELECT json_extract(meta, '$.delivery') FROM harness_items WHERE id = ?1 AND kind = 'steer'",
+    )
+    .bind(item_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(err)
+}
+
+/// The message a steer row stands for.
+pub async fn message_of(pool: &SqlitePool, item_id: i64) -> Result<Option<i64>, String> {
+    sqlx::query_scalar(
+        "SELECT json_extract(meta, '$.message') FROM harness_items WHERE id = ?1 AND kind = 'steer'",
+    )
+    .bind(item_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(err)
+}
+
 /// A steer that missed its turn goes back to being a message of its own:
 /// its run row waits first in the queue, and its row leaves the run it
 /// never reached. It is held when `held` says so, or, with `None`, when
@@ -339,8 +361,14 @@ pub async fn restarts(
 pub enum Restart {
     /// None waited: the terminal settles the run.
     None,
-    /// The run goes on as `attempt`.
-    Restarted { attempt: i64, revision: i64 },
+    /// The run goes on as `attempt`; `work` are the superseded attempt's
+    /// replies, now work, and `delivered` the corrections it carries.
+    Restarted {
+        attempt: i64,
+        revision: i64,
+        work: Vec<i64>,
+        delivered: Vec<i64>,
+    },
     /// The student stopped the run meanwhile: the corrections wait first in
     /// the queue, held, and the terminal settles the run.
     Requeued { revision: i64 },
@@ -419,6 +447,13 @@ pub async fn restart(
     .map_err(err)?;
     // What the superseded attempt said is kept, folded as work: never the
     // answer, however the provider ended it (`status`).
+    let work: Vec<i64> = sqlx::query_scalar(
+        "SELECT id FROM harness_items WHERE attempt_id = ?1 AND kind = 'assistant' ORDER BY id",
+    )
+    .bind(superseded)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(err)?;
     sqlx::query(
         "UPDATE harness_items SET display_role = 'commentary',
                 lifecycle = CASE WHEN ?2 = 'completed' THEN lifecycle ELSE 'partial' END
@@ -445,7 +480,13 @@ pub async fn restart(
         .map_err(err)?;
     let revision = super::threads::raise_revision(&mut tx, thread_id).await?;
     tx.commit().await.map_err(err)?;
-    Ok(Restart::Restarted { attempt, revision })
+    let delivered = corrections.iter().map(|(id, _)| *id).collect();
+    Ok(Restart::Restarted {
+        attempt,
+        revision,
+        work,
+        delivered,
+    })
 }
 
 /// Startup, inside `reconcile`'s transaction: a steer saved and never

@@ -1143,10 +1143,15 @@ UUID the provider is written under and echoes back) and `delivery`:
 | `unknown` | the write broke partway; never written again |
 | `restart` | a correction waiting for its turn to stop (below) |
 
-The consumer tells `Steer { text, message }` with the row (its envelope's
-`itemId` and `runId`), hands `Effect::Steer` to `app/steer.rs`, and tells
-each change as `SteerUpdated { item_id, message, delivery }`. `harness_load`
-returns the row with the others and lists no `steered` run.
+The consumer tells `Steer { text, message, client, delivery }` with the
+row (its envelope's `itemId` and `runId`), hands `Effect::Steer` to
+`app/steer.rs`, and tells each change as `SteerUpdated { item_id, message,
+delivery }`; a `written` report that an echo already overtook is not told.
+`harness_load` returns the row with the others and lists no `steered` run.
+The webview (`harnessStore`) pushes the row as `kind: "steer"` with that
+`meta` (`SteerMeta`), rewrites its `delivery` on each update and drops it on
+`requeued`; `harnessSend` takes the `DeliveryMode` and `harnessSteerQueued`
+is "Send now" (`lib/harness/commands.ts`).
 
 **A steer that misses its turn is not lost.** The bridge says `Missed` (no
 turn of ours was open: it had ended, or had not been opened yet), the
@@ -1184,7 +1189,8 @@ of settling: what streamed becomes a partial reply, the attempt is
 `superseded` and its replies `commentary` (never the answer), and a second
 attempt (`steering_restart`) takes the run back to `starting` with the
 corrections, joined, as `queued_text`. `AttemptRestarted { run_id,
-attempt_id, superseded }` is told, `RunScope::restart` clears the run's
+attempt_id, superseded, work_item_ids }` is told after each correction's
+`SteerUpdated` (`delivered`), `RunScope::restart` clears the run's
 bound turn, and the driver's start step sends the correction as the run's
 next turn: after the old turn's terminal, never before, so two turns never
 write to one conversation. The run settles once, on the new attempt's

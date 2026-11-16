@@ -91,6 +91,16 @@ type HarnessEvent =
   | { type: "request_updated"; request: HarnessRequest; waiting: number; waiting_questions?: number }
   /** How the chat asks from its next run on (`harnessSetPermissionMode`). */
   | { type: "permission_mode"; mode: PermissionMode }
+  /** The student wrote into the running run (`env.runId`): its `steer` row
+   *  (`env.itemId`), whose `meta` is `SteerMeta`. `message` is the message's
+   *  own identity, which a missed steer keeps in the queue. */
+  | { type: "steer"; text: string; message: number; client: string; delivery: SteerDelivery }
+  /** What became of a steer. `requeued`: it missed its turn, its row is
+   *  gone, and the message waits first in the queue (a `queue` follows). */
+  | { type: "steer_updated"; item_id: number; message: number; delivery: SteerDelivery | "requeued" }
+  /** A restart steer superseded the run's attempt; the run goes on as
+   *  `attempt_id`, and `work_item_ids` (the old attempt's replies) are work. */
+  | { type: "attempt_restarted"; run_id: number; attempt_id: number; superseded: number; work_item_ids: number[] }
   /** The row saying an answer, or part of it, did not arrive. */
   | { type: "delivery_notice"; text: string }
   | { type: "compaction"; source?: string }
@@ -240,6 +250,22 @@ export interface HarnessRequest {
   resolved_at: string | null;
 }
 
+/** How far a steer got (`store/steer.rs`): `sending` until its write is
+ *  claimed, `written` once the provider took it, `delivered` once it echoed
+ *  it, `unknown` after a write that broke partway (never resent), `restart`
+ *  while it waits for its turn to stop and start again. */
+export type SteerDelivery = "sending" | "written" | "delivered" | "unknown" | "restart";
+
+/** A `steer` row's `meta`. */
+export interface SteerMeta {
+  /** The message's identity: its `steered` run, the queued run it came
+   *  from on "Send now", or the run it becomes when it misses its turn. */
+  message: number;
+  /** The id its provider knows it by. */
+  client: string;
+  delivery: SteerDelivery;
+}
+
 /** `interrupted` is an empty marker where a turn was stopped. */
 type ItemKind =
   | "user"
@@ -252,6 +278,9 @@ type ItemKind =
   | "permission"
   /** Marks a turn the agent started itself; `meta` is `{ after: string[] }`. */
   | "unprompted"
+  /** A message the student wrote into a running run (a steer); it belongs
+   *  to that run (`run_id`) and never starts one. `meta` is `SteerMeta`. */
+  | "steer"
   /** Heads a card's continuation run; `content` is its line ("Sync finished —
    *  continuing"), `meta` is `{ proposal: string }`. Never the student's words. */
   | "continuation"

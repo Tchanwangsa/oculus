@@ -455,6 +455,10 @@ pub enum HarnessEvent {
     Steer {
         text: String,
         message: i64,
+        /// The id its provider knows it by, and its first `delivery`
+        /// (`sending`, or `restart`), as the row's `meta` holds them.
+        client: String,
+        delivery: String,
         /// The row the commit wrote; never serialized.
         #[serde(skip)]
         item: Option<i64>,
@@ -480,6 +484,8 @@ pub enum HarnessEvent {
         run_id: i64,
         attempt_id: i64,
         superseded: i64,
+        /// The superseded attempt's replies, now work (`commentary`).
+        work_item_ids: Vec<i64>,
     },
     /// A completed run whose answer, or part of it, never reached Oculus.
     /// Persisted as a row; never followed by a resend.
