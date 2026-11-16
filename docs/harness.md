@@ -16,7 +16,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Tauri commands (setup, models, turns, suggestions) | `app/src-tauri/src/harness/app/` |
 | The event enum, tool classification (`classify`) and answer selection | `app/src-tauri/src/harness/event/mod.rs`, `app/src-tauri/src/harness/event/classify.rs`, `app/src-tauri/src/harness/event/answer.rs` |
 | Bridges: Claude (`claude -p`), Codex (`app-server`), opencode (`serve`), Antigravity (`agy acp`) | `app/src-tauri/src/harness/providers/claude/`, `app/src-tauri/src/harness/providers/codex/`, `app/src-tauri/src/harness/providers/opencode/`, `app/src-tauri/src/harness/providers/antigravity/` (`acp/`) |
-| Paths no agent may write; opencode's ruleset; what Rust answers agy | `app/src-tauri/src/harness/protected.rs`, `app/src-tauri/templates/OPENCODE.template.json`, `app/src-tauri/src/harness/providers/antigravity/acp/policy.rs` |
+| Paths no agent may write; opencode's ruleset; what Rust answers agy; taking back the agy rules earlier versions wrote | `app/src-tauri/src/harness/protected.rs`, `app/src-tauri/templates/OPENCODE.template.json`, `app/src-tauri/src/harness/providers/antigravity/acp/policy.rs`, `app/src-tauri/src/harness/providers/antigravity/cleanup.rs` |
 | Finding, installing, updating and signing in the CLIs | `app/src-tauri/src/harness/cli/discover/`, `app/src-tauri/src/harness/cli/install/`, `app/src-tauri/src/harness/cli/update/`, `app/src-tauri/src/harness/cli/signin/` |
 | …their frontend | `app/src/hooks/agents/useBridgeHealth.ts`, `app/src/hooks/agents/useSignInStatus.ts`, `app/src/components/settings/agents/InstallAgentDialog.tsx`, `app/src/components/settings/agents/UpdateAgents.tsx`, `app/src/components/harness/SignInDialog.tsx`, `app/src/pages/settings/integrations/AgentsPage.tsx` |
 | Hidden native processes, Windows job ownership and npm shim resolution | `app/src-tauri/src/runtime/platform/` |
@@ -1887,6 +1887,17 @@ command that fails on the sandbox is retried by the agent with
 `BypassSandbox`, which Rust asks the student about: a plain `oculus …` that
 writes the database is one of these, so in Ask the student approves it and
 in Don't ask it is declined.
+
+**Nothing is written to the student's agy settings.** Earlier versions kept
+Oculus's rules in `~/.gemini/antigravity-cli/settings.json` and recorded what
+they wrote in `antigravity-rules.json` at the library root. At each launch
+until that record is gone, `antigravity/cleanup.rs` (`lifecycle::reconcile`,
+off the startup gate) takes exactly the recorded `permissions.allow` and
+`deny` entries out, keeps every other key, entry and its order (a list or a
+`permissions` left empty goes), never rewrites a file that is not valid
+JSON, and deletes the record; the `antigravity_allowed_rules` settings row
+goes too. With no record nothing is touched. It is the only code that names
+that file (a test holds it to that).
 
 The student's own agy rules are neither read nor honoured: `agy` ignores
 them under ACP, and Oculus does not guess their meaning. A deny rule the

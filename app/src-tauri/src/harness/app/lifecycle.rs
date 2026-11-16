@@ -133,6 +133,33 @@ pub fn reconcile(app: &AppHandle) {
             let _ = startup.ready(crate::db::store::open_pool).await;
         }
     });
+    tauri::async_runtime::spawn(forget_antigravity_rules());
+}
+
+/// The rules earlier versions wrote into the student's agy settings come out
+/// once (`antigravity::cleanup`), with the approvals row; off the startup
+/// gate, since a settings file the student broke must not stop a chat.
+async fn forget_antigravity_rules() {
+    let library = crate::library::paths::data_dir();
+    let cleaned =
+        crate::runtime::blocking::run(move || crate::harness::antigravity::cleanup::run(&library))
+            .await;
+    match cleaned {
+        Ok(crate::harness::antigravity::cleanup::Cleaned::Removed(n)) => {
+            elog!("[oculus] antigravity: took {n} rule(s) Oculus wrote out of agy's settings");
+        }
+        Ok(_) => {}
+        Err(e) => elog!("[oculus] antigravity: its old rules stay for now: {e}"),
+    }
+    if crate::db::store::db_path().exists() {
+        let forgot = match crate::db::store::open_pool().await {
+            Ok(pool) => crate::harness::antigravity::cleanup::forget_approvals(&pool).await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = forgot {
+            elog!("[oculus] antigravity: its approvals row stays for now: {e}");
+        }
+    }
 }
 
 pub fn shutdown(app: &AppHandle) {

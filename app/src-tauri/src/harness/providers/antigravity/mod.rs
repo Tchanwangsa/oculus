@@ -4,6 +4,8 @@
 //! settings. See docs/harness.md, "Antigravity runs over ACP".
 
 pub mod acp;
+pub mod cleanup;
+mod json;
 mod models;
 mod skill;
 #[cfg(test)]
