@@ -1139,7 +1139,7 @@ UUID the provider is written under and echoes back) and `delivery`:
 | --- | --- |
 | `sending` | saved; the effect has not taken it |
 | `written` | the effect claimed it (`steer::claim`: only while its run is `running` and not stopped, saved with the revision before the write) and the provider took the write |
-| `delivered` | the provider echoed it (`SteerEchoed` from its bridge) |
+| `delivered` | the provider echoed it (`SteerEchoed`: Codex's `userMessage` item carrying the `clientId`) |
 | `unknown` | the write broke partway; never written again |
 | `restart` | a correction waiting for its turn to stop (below) |
 
@@ -1179,6 +1179,20 @@ student answered with words. While a question waits, typed text is its
 answer ([Questions](#questions-keep-their-native-keys)), so a send queues and
 "Send now" is refused. A turn the CLI started itself has no run to join, so
 a message sent during one queues. `/compact` and every slash command queue.
+
+**Which bridges steer.** Codex does (`active_steering`, recorded on 0.169.0
+in `codex-steer-tool` and `codex-steer-text-finish`): `CodexServer::steer`
+sends `turn/steer` with `expectedTurnId`, the turn the `turn/start` reply
+named (the id the route already trusts), and the steer's `client` as
+`clientUserMessageId`. A reply is `Accepted`; the server's "no active turn
+to steer" (-32600) is `Missed`, any other refusal `Declined`, and a write
+with no reply `Unknown`. The steer never cuts short a command the turn is
+running: its `item/completed` can come after the turn's `turn/completed`,
+even after the next run started, and updates its row in the first run
+(`ToolFinished` finds the row by its tool id). Text a steer cut off
+mid-stream never gets its `item/completed`; the echo commits what streamed
+as a partial reply (work, no gap), and the corrected answer follows as
+usual. Claude, opencode and Antigravity do not steer yet: a send queues.
 
 **Restart steering** is for a bridge that cannot take a message mid-turn
 but can stop and start again (`steer_by_restart`; no bridge sets it yet).

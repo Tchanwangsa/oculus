@@ -810,7 +810,7 @@ fn turn(bench: &Bench, id: &str, provider: Provider, text: &str) -> Vec<BusMsg> 
         provider,
         text: text.into(),
         options: SendOptions::default(),
-        mode: Default::default(),
+        mode: crate::harness::manager::policy::Mode::Queue,
     };
     let session = HarnessEvent::SessionStarted {
         provider_session_id: format!("{}-session", provider.as_str()),

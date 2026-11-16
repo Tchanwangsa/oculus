@@ -313,6 +313,22 @@ making a send wait, and the queue claim a steer never releases.
 attempt's start after the old terminal, one settlement, two corrections
 restarting once, Stop during a restart, and a restart on a bridge that
 cannot restart.
+`recorded.rs` replays the steering probes through the real `Send`, effect
+and bridge write: each manifest's `settings.steers` names the frame a steer
+was written before (`gate`) and its text, and the replay puts the client id
+Oculus minted into the recorded echo frames in place of the probe's (the
+manifest's expected write says `"Replay client"`, which matches any id; a
+`"rpc_error"` response comes back as the server's JSON-RPC error). The
+generator `fixtures/harness/scripts/steering.mjs` wraps the probe assets.
+`codex.rs` checks a steer during a 20 s command (one run, one answer, the
+steer delivered, the command's completion after the turn's terminal and
+after the next message started staying on its row in the first run), a
+steer mid-stream keeping the cut text as partial work with no gap, a steer
+the server refuses at the terminal becoming the next run once, and a steer
+saved but never written waiting held after a restart. These run in the
+registry and in the exact ignored release gate. A plain mid-turn send now
+steers on Codex, so `Rig::send` sends as a queued message (⌘↩); the
+recorded checks of the queue and Stop keep their meaning.
 
 `testkit/queue.rs` checks queued runs: a message sent mid-turn through a
 real bridge waiting as a run and starting as the same run, the queue's

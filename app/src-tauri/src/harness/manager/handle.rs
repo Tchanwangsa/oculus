@@ -143,8 +143,13 @@ impl Handle {
     /// Write `text` into the session's running turn, under `client`, the id
     /// the provider echoes back. Only the bridges whose `active_steering`
     /// is true can; the others decline it, and the decider never asks them.
-    pub(in crate::harness) fn steer(&self, _text: &str, _client: &str) -> Steered {
-        Steered::Declined("this agent cannot take a message mid-turn".into())
+    pub(in crate::harness) fn steer(&self, text: &str, client: &str) -> Steered {
+        match self {
+            Handle::Codex(server, tid, _) => server.steer(tid, text, client),
+            Handle::Claude(_) | Handle::Opencode(..) | Handle::Antigravity(_) => {
+                Steered::Declined("this agent cannot take a message mid-turn".into())
+            }
+        }
     }
 
     /// Antigravity refuses: its protocol has no way back to an earlier message.

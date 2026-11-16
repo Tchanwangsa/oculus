@@ -26,7 +26,7 @@ fn send(rig: &mut Rig, id: &str, thread: i64) {
         provider: rig.provider,
         text: "Replay request".into(),
         options: SendOptions::default(),
-        mode: Default::default(),
+        mode: crate::harness::manager::policy::Mode::Queue,
     };
     command(rig, id, thread, kind);
 }

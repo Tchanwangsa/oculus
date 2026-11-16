@@ -20,10 +20,13 @@ pub(in crate::harness) fn bridge(outbound: Outbound, sink: Sink, id: &str, root:
         CodexServer {
             proc: ChildProc::replay(Arc::new(move |frame: Value| {
                 let response = outbound.try_exchange(frame.clone())?;
+                // A recorded JSON-RPC error comes back as the server's error.
                 if frame.get("method").is_some() && frame.get("id").is_some() {
-                    weak.upgrade()
-                        .unwrap()
-                        .dispatch(json!({"id": frame["id"], "result": response}));
+                    let reply = match response.get("rpc_error") {
+                        Some(error) => json!({"id": frame["id"], "error": error}),
+                        None => json!({"id": frame["id"], "result": response}),
+                    };
+                    weak.upgrade().unwrap().dispatch(reply);
                 }
                 Ok(())
             })),

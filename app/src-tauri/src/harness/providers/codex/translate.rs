@@ -140,6 +140,17 @@ pub(super) fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<Ha
             let item = &p["item"];
             let id = s(item, "id");
             match s(item, "type").as_str() {
+                // A steer's echo carries the id it was written under. The
+                // text it cut off never gets an `item/completed` (probe
+                // `21`): kept as it streamed, partial and expected so.
+                "userMessage" => {
+                    if let Some(client) = item.get("clientId").and_then(|c| c.as_str()) {
+                        out.extend(stopped(st));
+                        out.push(HarnessEvent::SteerEchoed {
+                            client_id: client.to_string(),
+                        });
+                    }
+                }
                 "commandExecution" => {
                     let input = json!({ "command": s(item, "command"), "cwd": s(item, "cwd") });
                     let (kind, title) = classify("commandExecution", &input);

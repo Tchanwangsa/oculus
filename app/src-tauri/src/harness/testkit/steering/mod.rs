@@ -7,4 +7,5 @@ mod bench;
 mod claude;
 mod codex;
 mod fake;
+pub(super) mod recorded;
 mod restart;
