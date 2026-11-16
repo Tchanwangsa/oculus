@@ -372,6 +372,9 @@ items with the same front item and width.
   a hole the app opens, which hides anything inside `#root` drawn over the page
   ([architecture.md](./architecture.md#native-pages-show-through-holes-the-app-opens)),
   so the controls sit in the header and the focus marker on the seam.
+  A chat's Thread info card is not this panel: it floats in the chat pane's
+  own gutter, or becomes its header button's popover
+  ([harness.md](./harness.md#thread-info-sits-beside-the-chat)).
 - **Shell navigation leaves the panel open**: the sidebar, ⌘K and crumbs go to
   the focused pane.
 
