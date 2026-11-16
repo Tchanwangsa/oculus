@@ -320,9 +320,15 @@ themes are opt-in and keep the same structure.
 - **The composer says a turn's state in words, not only colour**
   (`SendControls`): Stop is an icon until pressed, then a disabled "Stopping"
   pill with a brand spinner; a held queue with an empty box turns the send
-  arrow into a filled "Resume thread" pill. Waiting messages say "Held" or
-  "Waiting" on an always-visible line above the bubble, with Move earlier and
-  Move later icon buttons, so nothing there fades in on hover. Notices about
+  arrow into a filled "Resume thread" pill. While a turn runs the main button
+  is the action a send takes, said before the press: the arrow for "Steer
+  message", a list-plus for "Queue message", named in its tooltip, and
+  flipped live while ⌘ is held. Waiting messages say "Held" or
+  "Waiting" on an always-visible line above the bubble, with Move earlier,
+  Move later and a "Send now" pill, so nothing there fades in on hover. A
+  steer is the student's bubble inside the run, and a line right under it
+  (not under its hover row) says it is sending, or warns in `text-warning`
+  that it may not have arrived ([harness.md](./harness.md#steering-from-the-composer)). Notices about
   a held queue or an agent ignoring Stop are `BannerLane` cards, and a failed
   command is said in the card or on a line by the control, never in a toast
   ([harness.md](./harness.md#one-turn-at-a-time)). An agent's request is

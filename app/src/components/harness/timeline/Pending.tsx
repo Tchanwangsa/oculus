@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CaretDown, CaretUp, Clock, Pause } from "@phosphor-icons/react";
+import { ArrowUp, CaretDown, CaretUp, Clock, Pause } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
 import { useShallow } from "zustand/react/shallow";
 import { ANCHOR_ROW } from "@/hooks/ui/useStickToBottom";
@@ -7,7 +7,20 @@ import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { cn } from "@/lib/utils";
 import { LiveThinkingRow } from "./WorkRow";
 import { Working } from "./Working";
-import { commandError, runWaitingOn, WAITING_LABEL, moveQueued, queuedLabel, runningSince, type QueuedMessage } from "@/lib/harness";
+import {
+  commandError,
+  isSlashCommand,
+  moveQueued,
+  queuedLabel,
+  runningSince,
+  runWaitingOn,
+  SEND_NOW,
+  steerHint,
+  WAITING_LABEL,
+  type QueuedMessage,
+  type SteerKind,
+} from "@/lib/harness";
+import { useSteerKind } from "@/hooks/agents/useSteerKind";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useRunCommand } from "@/components/harness/composer/useRunCommand";
@@ -57,12 +70,14 @@ export function LiveTail({
  *  (`harness/store/queue.rs`), editable, removable and movable until sent.
  *  Each says above its bubble whether it is held or only waiting: after a
  *  stop, a failed turn or a restart they stay listed, held, and go out on
- *  Resume or with the next message. A command that fails says why under
- *  the list. */
+ *  Resume or with the next message. While the running turn can take a
+ *  message, each that is not a command offers "Send now". A command that
+ *  fails says why under the list. */
 export function Pending({ threadId, actions }: { threadId: number; actions: PendingActions }) {
   const queued = useHarnessStore((s) => s.queued[threadId]);
+  const steer = useSteerKind(threadId);
   if (!queued?.length) return null;
-  return <PendingList threadId={threadId} queued={queued} actions={actions} />;
+  return <PendingList threadId={threadId} queued={queued} actions={actions} steer={steer} />;
 }
 
 /** `Pending`'s list, given the messages. */
@@ -70,14 +85,19 @@ export function PendingList({
   threadId,
   queued,
   actions,
+  steer = null,
 }: {
   threadId: number;
   queued: QueuedMessage[];
   actions: PendingActions;
+  /** How the running turn takes a message; null offers no "Send now". */
+  steer?: SteerKind;
 }) {
   // A reorder is one at a time (the arrows rest while it is out); an edit
   // or a removal goes at once, and the newest failure is the one shown.
   const reorder = useRunCommand();
+  // One "Send now" at a time: the buttons rest while it is out.
+  const sendNow = useRunCommand();
   const [error, setError] = useState<string | null>(null);
   const { clear } = reorder;
   useEffect(() => {
@@ -96,7 +116,13 @@ export function PendingList({
     setError(null);
     command().catch((e) => setError(`${what}: ${commandError(e)}`));
   };
-  const shown = error ?? (reorder.error ? `Couldn't reorder: ${reorder.error}` : null);
+  const now = (id: string) => {
+    reorder.clear();
+    setError(null);
+    void sendNow.run(() => actions.steerQueued(id));
+  };
+  const shown = error ??
+    (reorder.error ? `Couldn't reorder: ${reorder.error}` : sendNow.error ? `Couldn't send it now: ${sendNow.error}` : null);
   return (
     <>
       {queued.map((q, i) => (
@@ -108,6 +134,7 @@ export function PendingList({
             first={i === 0}
             last={i === queued.length - 1}
             busy={reorder.pending}
+            sendNow={steer && !isSlashCommand(q.text) ? { hint: steerHint(steer), busy: sendNow.pending, onClick: () => now(q.id) } : undefined}
           />
           <QuestionBubble
             text={q.text}
@@ -125,8 +152,9 @@ export function PendingList({
   );
 }
 
-/** The line above a waiting message: its order controls when there is more
- *  than one, and its state in words. Always shown, so nothing fades. */
+/** The line above a waiting message: "Send now" where the running turn can
+ *  take it, its order controls when there is more than one, and its state in
+ *  words. Always shown, so nothing fades. */
 function QueuedState({
   held,
   earlier,
@@ -134,6 +162,7 @@ function QueuedState({
   first,
   last,
   busy,
+  sendNow,
 }: {
   held: boolean;
   earlier?: () => void;
@@ -141,10 +170,29 @@ function QueuedState({
   first: boolean;
   last: boolean;
   busy: boolean;
+  sendNow?: { hint: string; busy: boolean; onClick: () => void };
 }) {
   const StateIcon = held ? Pause : Clock;
   return (
     <div className="flex h-6 items-center justify-end gap-0.5 text-[11px] text-muted-foreground">
+      {sendNow && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={sendNow.busy}
+              onClick={sendNow.onClick}
+              aria-description={sendNow.hint}
+              className="will-change-[opacity]"
+            >
+              <ArrowUp aria-hidden />
+              {SEND_NOW}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{sendNow.hint}</TooltipContent>
+        </Tooltip>
+      )}
       {earlier && <MoveButton label="Move earlier" icon={CaretUp} disabled={first || busy} onClick={earlier} />}
       {later && <MoveButton label="Move later" icon={CaretDown} disabled={last || busy} onClick={later} />}
       <span className="inline-flex items-center gap-1 px-1.5">

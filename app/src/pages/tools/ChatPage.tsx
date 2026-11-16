@@ -27,6 +27,7 @@ import {
   parseUsage,
   scopeSubject,
   type ChatScope,
+  type DeliveryMode,
 } from "@/lib/harness";
 import { itemsFor, useHarnessStore } from "@/stores/chat/harnessStore";
 import { draftKey, useDraftStore } from "@/stores/chat/draftStore";
@@ -170,13 +171,17 @@ export default function ChatPage() {
     },
   });
   const send = useCallback(
-    (text: string) =>
-      sendTurn(text, () => {
-        if (activeRef.current != null) return {};
-        const chosen = useDraftStore.getState().scopeFor(newKey, store.getState().subjects);
-        // None chosen: the composer holds the send, and Rust refuses one anyway.
-        return chosen == null ? {} : { chatScope: chosen };
-      }),
+    (text: string, mode?: DeliveryMode) =>
+      sendTurn(
+        text,
+        () => {
+          if (activeRef.current != null) return {};
+          const chosen = useDraftStore.getState().scopeFor(newKey, store.getState().subjects);
+          // None chosen: the composer holds the send, and Rust refuses one anyway.
+          return chosen == null ? {} : { chatScope: chosen };
+        },
+        mode,
+      ),
     [sendTurn, store, newKey],
   );
 

@@ -17,12 +17,13 @@ const actions = {
   editQueued: async () => {},
   unqueue: async () => {},
   reorder: async () => {},
+  steerQueued: async () => {},
 };
 
-function render(queued: { id: string; text: string; held: boolean }[]) {
+function render(queued: { id: string; text: string; held: boolean }[], steer: "native" | "restart" | null = null) {
   return renderToStaticMarkup(
     <TooltipProvider>
-      <PendingList threadId={1} queued={queued} actions={actions} />
+      <PendingList threadId={1} queued={queued} actions={actions} steer={steer} />
     </TooltipProvider>,
   );
 }
@@ -52,6 +53,32 @@ describe("Pending", () => {
     const html = render([{ id: "1", text: "only", held: true }]);
     expect(html).not.toContain("Move earlier");
     expect(html).toContain("Held");
+  });
+
+  test("Send now on each message the running turn can take, its tooltip saying where it goes", () => {
+    const html = render([
+      { id: "1", text: "first", held: false },
+      { id: "2", text: "second", held: false },
+    ], "native");
+    expect(html.match(/>Send now</g)?.length).toBe(2);
+    expect(html.match(/aria-description="Send into the current turn"/g)?.length).toBe(2);
+    // It sits on the message's own line, above its bubble.
+    expect(html.indexOf("Send now")).toBeLessThan(html.indexOf("first"));
+  });
+
+  test("on a restart-class bridge Send now says it stops and restarts the turn", () => {
+    const html = render([{ id: "1", text: "first", held: false }], "restart");
+    expect(html).toContain('aria-description="Stops and restarts the turn"');
+  });
+
+  test("no Send now where nothing can be steered, nor on a slash command", () => {
+    expect(render([{ id: "1", text: "first", held: true }], null)).not.toContain("Send now");
+    const html = render([
+      { id: "1", text: "/compact", held: false },
+      { id: "2", text: "plain", held: false },
+    ], "native");
+    expect(html.match(/>Send now</g)?.length).toBe(1);
+    expect(html.indexOf("Send now")).toBeGreaterThan(html.indexOf("/compact"));
   });
 
   test("nothing waiting draws nothing", () => {

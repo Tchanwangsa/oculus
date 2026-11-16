@@ -12,7 +12,9 @@ import { foldFindText, foldLabel, foldMatches, foldOpens, foldRows, type WorkFol
 
 /**
  * One run's work — earlier replies, reasoning and tools — as one disclosure
- * above its answer. Open while the run works and after a stop or failure;
+ * above its answer, or one stretch of it where the student steered the run
+ * (`cut`: closed, "Worked for", or "Restarted after" for an attempt a restart
+ * superseded). Open while the run works and after a stop or failure;
  * closed once it completes, unless the student chose otherwise
  * (`runFolds.ts`). Its rows read as one flat list under a ruled header. A
  * find that matches a folded reply opens it until the query stops matching. Widget fences are drawn outside (`ArtifactRow`); here
@@ -23,7 +25,7 @@ export const RunWorkGroup = memo(
     const live = fold.state === "running";
     // A request of this run waits on the student: the run is not working.
     const waiting = useHarnessStore((s) => (live ? runWaitingOn(s.requests[fold.thread], fold.run) : null));
-    const [chosen, setChosen] = useState(() => foldChoice(fold.thread, fold.run));
+    const [chosen, setChosen] = useState(() => foldChoice(fold.thread, fold.id));
     const [found, setFound] = useState(false);
     const open = found || (chosen ?? foldOpens(fold.state));
     const ref = useRef<HTMLDivElement>(null);
@@ -49,7 +51,7 @@ export const RunWorkGroup = memo(
     const toggle = () => {
       setFound(false);
       setChosen(!open);
-      chooseFold(fold.thread, fold.run, !open);
+      chooseFold(fold.thread, fold.id, !open);
     };
     return (
       <div ref={ref} {...{ [EXPANDABLE]: "" }} className="min-w-0">
@@ -97,6 +99,7 @@ export const RunWorkGroup = memo(
     prev.fold.state === next.fold.state &&
     prev.fold.startedMs === next.fold.startedMs &&
     prev.fold.endedMs === next.fold.endedMs &&
+    prev.fold.cut === next.fold.cut &&
     prev.fold.items.length === next.fold.items.length &&
     prev.fold.items.every((item, i) => item === next.fold.items[i]),
 );

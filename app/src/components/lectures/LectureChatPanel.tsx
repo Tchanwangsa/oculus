@@ -14,7 +14,7 @@ import { useProviderModels } from "@/hooks/agents/useProviderModels";
 import { useStickToBottom } from "@/hooks/ui/useStickToBottom";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
 import { fmtAgo, sqliteUtcToMs } from "@/lib/format/format";
-import { defaultSelection, getLectureThreads, parseUsage, type HarnessThread } from "@/lib/harness";
+import { defaultSelection, getLectureThreads, parseUsage, type DeliveryMode, type HarnessThread } from "@/lib/harness";
 import { itemsFor, useHarnessStore } from "@/stores/chat/harnessStore";
 import { draftKey } from "@/stores/chat/draftStore";
 import { cn } from "@/lib/utils";
@@ -169,13 +169,17 @@ export const LectureChatPanel = memo(function LectureChatPanel({
   }, [selection.model, active, onModel, onReasoning]);
   // No moment on follow-ups: an approval is not a question about the recording.
   const send = useCallback(
-    (text: string) =>
-      sendTurn(text, async () => {
-        // Read the playhead now: this is the second the bubble will carry.
-        const at = moment ? Math.max(0, Math.floor(atRef.current)) : null;
-        const context = at == null ? null : await buildMoment(at);
-        return { lectureId, context, at };
-      }),
+    (text: string, mode?: DeliveryMode) =>
+      sendTurn(
+        text,
+        async () => {
+          // Read the playhead now: this is the second the bubble will carry.
+          const at = moment ? Math.max(0, Math.floor(atRef.current)) : null;
+          const context = at == null ? null : await buildMoment(at);
+          return { lectureId, context, at };
+        },
+        mode,
+      ),
     [sendTurn, moment, atRef, buildMoment, lectureId],
   );
 

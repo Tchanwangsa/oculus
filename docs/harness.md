@@ -52,6 +52,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Studio's thread column and New video box, which use `Composer`'s `leading` (chips after the subject's) and `placeholder` | `app/src/components/studio/thread/ThreadColumn.tsx`, `app/src/components/studio/new/NewVideo.tsx` ([studio-page.md](./studio-page.md)) |
 | Voice dictation, microphone capture and cleanup job | `app/src/components/harness/dictation/`, `app/src/lib/dictation/recording.ts`, `app/src-tauri/src/harness/app/dictation.rs` |
 | Send, queue, stop and resume controls shared by both composers, the rule that picks them, and the held-queue notice | `app/src/components/harness/composer/SendControls.tsx`, `app/src/lib/harness/runControls.ts`, `app/src/components/harness/composer/useRunControls.ts`, `app/src/components/harness/composer/ThreadBanners.tsx` |
+| Steer or queue into a running turn: the send mode, ⌘↩ and ⌘⇧↩, "Send now", the steer row, Settings → Chat | `app/src/pages/settings/integrations/ChatPage.tsx`, `app/src/lib/harness/sendMode.ts`, `app/src/components/harness/composer/useSendMode.ts`, `app/src/hooks/agents/useSteerKind.ts`, `app/src/components/harness/timeline/SteerRow.tsx`, `app/src/stores/chat/chatPrefsStore.ts`, `app/src/components/settings/chat/FollowUpSection.tsx` |
 | Files pasted or dropped into a composer: writing them, their chips, the shelf, their names | `app/src-tauri/src/harness/attach.rs`, `app/src/hooks/agents/useAttachments.ts`, `app/src/hooks/gestures/useFileDrop.ts`, `app/src/components/markdown/AttachmentChip.tsx`, `app/src/components/harness/attachments/AttachmentStrip.tsx`, `app/src/stores/chat/attachmentNames.ts` |
 | Long pastes held as text cards: format, card, editor and viewer | `app/src/lib/harness/attachments.ts`, `app/src/components/harness/attachments/PastedText.tsx`, `app/src/components/harness/attachments/PastedTextEditor.tsx` |
 | Library paths and attachments in rows and prose (`splitLibraryPaths`); copy as markdown | `app/src/lib/files/libraryPaths.ts`, `app/src/lib/files/openFile.ts`, `app/src/lib/markdown/selection.ts` |
@@ -1066,6 +1067,9 @@ drawn by `SendControls` in every composer):
   command is out, it reads "Stopping" in words beside a spinner and takes
   no click; for a turn with no run, a stop that went through reads the same
   until the turn ends.
+- **Steer or queue.** While a turn is open the main button is what a send
+  will do ([Steering from the composer](#steering-from-the-composer)): "Steer message" (the
+  arrow) or "Queue message" (a list-plus), its tooltip naming it.
 - **Resume.** With the chat idle, a held queue and an empty box, the main
   button is a "Resume thread" pill sending `harness_resume`. With words in
   the box it stays the send arrow, labelled "Send after the waiting
@@ -1087,7 +1091,9 @@ drawn by `SendControls` in every composer):
   view) each say "Held" or "Waiting" in words above the bubble, and keep
   Edit and Remove either way. With more than one, Move earlier and Move
   later buttons send the whole new order (`moveQueued`,
-  `harness_reorder_queued`); they rest while a reorder is out.
+  `harness_reorder_queued`); they rest while a reorder is out. Where the
+  running turn can take a message, each that is not a command also has
+  "Send now" ([Steering from the composer](#steering-from-the-composer)).
 - **A command that fails** says why where the student acted: Stop and the
   main button's Resume on a line above the box, a notice's Resume or Force
   stop in the notice, an edit, removal or reorder under the waiting messages. Nothing stays pending: each control is inert only while its own
@@ -1208,6 +1214,67 @@ write to one conversation. The run settles once, on the new attempt's
 terminal, with its answer from that attempt; the queue stays behind it the
 whole time. A run stopped meanwhile settles on that terminal and its
 corrections wait first in the queue, held.
+
+### Steering from the composer
+
+`sendMode.ts` decides, tested without a DOM; `useSendMode` reads it for
+both composers (Chat's and the lecture dock's).
+
+- **What the running turn can take** (`steerKind`, `useSteerKind`): read
+  from the run on screen and that run's own bridge (`run.provider`, else
+  the thread's), never the composer's pick. `native` where the bridge has
+  `activeSteering`, `restart` where it has only `steerByRestart`, none on
+  an idle chat, a turn the CLI started itself, a run being stopped or
+  while a question waits. A run its provider has not taken yet looks
+  running here; Rust queues a steer into it.
+- **Enter follows the chat's follow-up behaviour**, Settings → Chat
+  ("While the agent works": Steer the current turn, the default, or Queue
+  for after it; the `chat_follow_up` row of SQLite's `settings`, read by
+  `chatPrefsStore`). ⌘↩ (Ctrl+Enter off macOS) does the other, and a
+  ⌘-click on the send button too. Where nothing can be steered every send
+  queues, and a slash command always queues. An idle chat sends as ever.
+  The send carries the mode (`steer` or `queue`, none when idle) and Rust
+  decides again against the turn as it is when the send lands; a
+  restart-class bridge gets `steer`, which Rust turns into a restart.
+- **The button shows the action before the press.** "Steer message" with
+  the arrow and the tooltip "Send into the current turn" (on a
+  restart-class bridge "Stops and restarts the turn"), or "Queue message"
+  with a list-plus. Holding ⌘ flips it live (`useModHeld`, listened for
+  only while a steer is possible; a window blur lifts it). The empty box
+  names the keys: "Working… ↵ to steer, ⌘↵ to queue"; the dock says only
+  "Working…".
+- **⌘⇧↩** steers the oldest waiting message (`harnessSteerQueued` with the
+  first queued id), leaving the draft alone; a refusal is a line above the
+  box.
+- **"Send now"** on each waiting message that is not a command, while a
+  steer is possible, with the same tooltip as the button's steer. It sends
+  `harnessSteerQueued`; one at a time, and Rust's refusal is said under the
+  waiting messages.
+- **An approval waiting.** Where a send would steer, the empty box reads
+  "Send a message to decline and redirect the agent": Rust declines the
+  request and steers with the words. Where it would queue, the box keeps
+  "Waiting for your approval… a message waits its turn".
+- **A question waiting** keeps the box as its typed answer
+  ([In the chat](#in-the-chat)); nothing is steerable, so "Send now" is
+  not offered.
+
+**In the timeline** (`buildRows`, `SteerRow`) a steer is the student's
+bubble at its place among the run's rows, with no Edit or Rewind. Each
+steer ends a stretch of the run: the work before it folds under its own
+header, closed, timed from the stretch's start to the steer ("Worked for
+6s"), then the steer, then the work after it under a fold of its own
+(`w-<run>-<steer row>`; the first stretch keeps `w-<run>`, and a fold's
+open or closed choice is kept per fold). While the run works only a reply
+after the latest steer can be its provisional answer; settled, the run's
+one answer is `answer_item_id` as ever. On a bridge that steers by
+restart (`useRestartSteering`), or before a steer still `restart`, the
+stretch is the superseded attempt: "Restarted after 5s", partial work.
+Under the bubble, until the provider echoes it, a line says how far it
+got (`steerStatus`): "Sending into the turn…" for `sending` and
+`written`, "Stopping the turn to restart with this…" for `restart`, and
+for `unknown` a warning that it may not have reached the agent and won't
+be sent again. Once `delivered` the line goes. A `requeued` steer leaves
+the timeline and appears among the waiting messages.
 
 **After a restart** (`store::reconcile`) a steer still `sending` or
 `restart` was never handed to its provider: its run row goes back to the
@@ -1499,6 +1566,10 @@ carries its run's question (`asked`), which Retry sends again.
 | Stopped | "You stopped after 23s", open | headed "Partial response", then the divider "Run interrupted · Stopped by you" |
 | Failed | "Failed after 23s", open | "Partial response", then the error or sign-in card |
 | Ended with no stored interval | "Work details" | as its status says |
+
+A run the student steered splits its work at each steer
+([Steering from the composer](#steering-from-the-composer)): one fold per stretch, the steer
+between them.
 
 Lifecycle lines — the stop, "Context compacted", a continuation ("Continued
 after “X” finished", a card's continuation), a delivery notice and a rewind's
@@ -1855,9 +1926,10 @@ What the student sees is decided in `app/src/lib/harness/requests.ts`,
   they would say "Working for 8s" (`runWaitingOn`, an approval first); the
   announcer says "Needs approval" or "Needs your input" and the sidebar
   shows Approval or Input. While only an approval waits the box stays
-  usable: its hint says a message waits its turn, and a send queues behind
-  the request as any send during a run does. There is no
-  decline-with-message: Rust refuses feedback.
+  usable. Where a send would steer, it declines the request and steers
+  with the words ([Steering from the composer](#steering-from-the-composer)); elsewhere it
+  queues behind the request. `harnessRespond` carries no feedback: Rust
+  refuses it.
 - **The mode control** (`PermissionModeControl`, after the model picker,
   for an open thread only) is an icon-only button showing the chat's mode
   (its name in the tooltip) and opens a "Permission mode" menu of Ask, Auto

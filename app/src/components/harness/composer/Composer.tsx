@@ -16,12 +16,17 @@ import { QuestionPanel } from "@/components/harness/composer/QuestionPanel";
 import { QuestionEditor } from "@/components/harness/composer/QuestionEditor";
 import { useQuestionComposer } from "@/components/harness/composer/useQuestionComposer";
 import { PermissionModeControl } from "@/components/harness/composer/PermissionModeControl";
-import { canSend, enterAction, UNSCOPED_PLACEHOLDER, WAITING_PLACEHOLDER } from "@/components/harness/composer/sendGate";
+import { canSend, UNSCOPED_PLACEHOLDER } from "@/components/harness/composer/sendGate";
 import { useRunControls } from "@/components/harness/composer/useRunControls";
+import { useSendMode } from "@/components/harness/composer/useSendMode";
 import { type Subject } from "@/lib/db";
 import {
   awaitsApproval,
+  busyPlaceholder,
   defaultSelection,
+  enterKey,
+  modClick,
+  type DeliveryMode,
   providerLabel,
   scopeSubject,
   type Provider,
@@ -37,6 +42,7 @@ import { signInState, useSignInStatus } from "@/hooks/agents/useSignInStatus";
 import { SignInDialog, useSignIn } from "@/components/harness/SignInDialog";
 import { useDictation } from "@/components/harness/dictation/useDictation";
 import { DictationBar, DictationMic, DictationFeedback } from "@/components/harness/dictation/DictationControls";
+import { isMac } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
 /** The empty box's hint, naming its two menus. */
@@ -44,10 +50,12 @@ export const COMPOSER_PLACEHOLDER = "Ask anything. @ files, / skills";
 
 /**
  * The chat box: text, then model picker / usage / send+stop. Enter sends,
- * Shift+Enter breaks. While a turn runs a send waits as a queued run
- * (`harness/store/queue.rs`); Stop names the run on screen and holds that
- * queue, and with the box empty the main button resumes it. A rewind hands
- * its question back as `restore`.
+ * Shift+Enter breaks. While a turn runs, Enter steers it or queues behind
+ * it as Settings → Chat says, ⌘↩ does the other and ⌘⇧↩ steers the oldest
+ * waiting message (`useSendMode`); the send button shows which before the
+ * press. Stop names the run on screen and holds the queue, and with the box
+ * empty the main button resumes it. A rewind hands its question back as
+ * `restore`.
  * Scope is chosen above the box, only while the thread is new; a new Chat
  * thread chooses it in `NewThreadDialog` and, while it has none,
  * the box is `unscoped`: it keeps collecting but will not send. `@` mentions
@@ -118,7 +126,8 @@ export function Composer({
   onProvider: (p: Provider) => void;
   onModel: (m: string | null) => void;
   onReasoning: (level: string | null) => void;
-  onSend: (text: string) => void;
+  /** `mode`: how the message enters a running turn; none on an idle chat. */
+  onSend: (text: string, mode?: DeliveryMode) => void;
   /** Stop the run the box showed (null: a turn the CLI started itself). */
   onStop: (runId: number | null) => Promise<void> | void;
   /** Lift the hold on the open thread's queue; without it the box never
@@ -195,18 +204,22 @@ export function Composer({
   const question = useQuestionComposer(threadId, draftKey);
 
   const ready = text.trim().length > 0 || att.items.length > 0 || att.texts.length > 0;
+  const mode = useSendMode({ threadId, running, text });
   const controls = useRunControls({
     threadId,
     running,
     hasDraft: ready,
     ready: canSend({ ready, unscoped }),
     writing: att.writing,
+    action: mode.shown,
     onStop,
     onResume,
   });
 
-  /** Send or queue; while a file is still being written the box is kept as is. */
-  const send = async () => {
+  /** Send, queue or steer (`flip`: ⌘ held, the opposite of the chat's
+   *  follow-up behaviour); while a file is still being written the box is
+   *  kept as is. */
+  const send = async (flip: boolean) => {
     if (dictation.busy || unscoped) return;
     const message = await att.prepare(text);
     if (message == null) return;
@@ -214,8 +227,8 @@ export function Composer({
     notePickedSkills(message, ref.current?.pickedSkills() ?? []);
     ref.current?.clear();
     mentions.close();
-    // Rust decides send-now vs queue.
-    onSend(message);
+    // Rust re-checks the mode against the turn as it is when the send lands.
+    onSend(message, mode.modeFor(flip));
   };
 
   return (
@@ -244,8 +257,8 @@ export function Composer({
       {att.error && (
         <div className="px-0.5 text-[11px] text-destructive">{att.error}</div>
       )}
-      {controls.error && (
-        <div className="px-0.5 text-[11px] text-destructive">{controls.error}</div>
+      {(controls.error ?? mode.error) && (
+        <div className="px-0.5 text-[11px] text-destructive">{controls.error ?? mode.error}</div>
       )}
       {/* The open picker shows its own refusal; once it closes, the box does. */}
       {refused && !tools.modelOpen && (
@@ -334,15 +347,14 @@ export function Composer({
                   stash.keyDown(e);
                   history.keyDown(e);
                   if (e.defaultPrevented) return;
-                  const action = enterAction(e, unscoped);
+                  const action = enterKey(e, unscoped, isMac);
                   if (action) e.preventDefault();
-                  if (action === "send") void send();
+                  if (action === "send" || action === "flip") void send(action === "flip");
+                  if (action === "steer-oldest") mode.steerOldest();
                 }}
                 placeholder={
-                  asking
-                    ? WAITING_PLACEHOLDER
-                    : running
-                    ? "Working… your next message waits its turn"
+                  asking || running
+                    ? busyPlaceholder({ approval: asking, plain: mode.plain, steer: mode.steer })
                     : unscoped
                       ? UNSCOPED_PLACEHOLDER
                       : (placeholder ?? COMPOSER_PLACEHOLDER)
@@ -375,7 +387,7 @@ export function Composer({
             stop={controls.stop}
             send={question ? { kind: "send", label: question.primaryLabel, disabled: !question.ready || question.busy } : controls.send}
             onStop={controls.stopNow}
-            onSend={question ? question.primary : () => void send()}
+            onSend={question ? question.primary : (e) => void send(modClick(e, isMac))}
             onResume={controls.resumeNow}
           />
         </div>}

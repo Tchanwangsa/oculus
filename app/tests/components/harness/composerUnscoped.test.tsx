@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { canSend, enterAction, UNSCOPED_PLACEHOLDER } from "@/components/harness/composer/sendGate";
+import { canSend, UNSCOPED_PLACEHOLDER } from "@/components/harness/composer/sendGate";
+import { enterKey } from "@/lib/harness/sendMode";
 
 // The composer's import graph reaches modules that listen on `window` and
 // `document` at load; they get inert stand-ins for the import, then the
@@ -16,7 +17,8 @@ Object.assign(globals, before);
 const noop = () => {};
 // Server rendering reads the stores' initial state, so the box renders empty
 // here: these check what the box says, and `canSend`/`enterAction` below are
-// the gate it applies to typed words.
+// the gate it applies to typed words (`enterKey` is tested with the send
+// modes in tests/lib/harness/sendMode.test.ts).
 function render(unscoped: boolean, placeholder?: string) {
   return renderToStaticMarkup(
     <Composer
@@ -58,10 +60,11 @@ test("a box with no onSubject shows no subject chip: Chat's headline picks it", 
 });
 
 test("Enter is swallowed while unscoped; Shift+Enter still breaks the line", () => {
-  expect(enterAction({ key: "Enter", shiftKey: false }, true)).toBe("hold");
-  expect(enterAction({ key: "Enter", shiftKey: false }, false)).toBe("send");
-  expect(enterAction({ key: "Enter", shiftKey: true }, true)).toBeNull();
-  expect(enterAction({ key: "a", shiftKey: false }, true)).toBeNull();
+  const key = (k: string, shiftKey: boolean) => ({ key: k, shiftKey, metaKey: false, ctrlKey: false });
+  expect(enterKey(key("Enter", false), true, true)).toBe("hold");
+  expect(enterKey(key("Enter", false), false, true)).toBe("send");
+  expect(enterKey(key("Enter", true), true, true)).toBeNull();
+  expect(enterKey(key("a", false), true, true)).toBeNull();
 });
 
 test("the button needs something to send and a chosen scope", () => {

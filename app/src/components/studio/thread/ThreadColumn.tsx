@@ -9,7 +9,7 @@ import { useComposerSelection } from "@/components/harness/threads/useComposerSe
 import { DropOverlay } from "@/components/ui/layout/DropOverlay";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
 import { useStickToBottom } from "@/hooks/ui/useStickToBottom";
-import { parseUsage } from "@/lib/harness";
+import { parseUsage, type DeliveryMode } from "@/lib/harness";
 import { draftKey } from "@/stores/chat/draftStore";
 import { itemsFor, useHarnessStore } from "@/stores/chat/harnessStore";
 
@@ -67,7 +67,7 @@ export function ThreadColumn({ threadId, onTurnEnd }: { threadId: number; onTurn
     onRestore: (text) => setRestore((r) => ({ text, n: (r?.n ?? 0) + 1 })),
     onCreated: () => {},
   });
-  const onSend = useCallback((text: string) => void send(text), [send]);
+  const onSend = useCallback((text: string, mode?: DeliveryMode) => void send(text, undefined, mode), [send]);
 
   return (
     <div ref={columnRef} className="relative flex h-full min-w-0 flex-1 flex-col">

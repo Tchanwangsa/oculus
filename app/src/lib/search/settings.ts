@@ -1,4 +1,5 @@
 import {
+  ChatCircle,
   FilePdf,
   Globe,
   GraduationCap,
@@ -35,6 +36,7 @@ export type SettingsPageId =
   | "device-sharing"
   | "storage"
   | "agents"
+  | "chat"
   | "opencode"
   | "jobs"
   | "parsing"
@@ -66,6 +68,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "device-sharing", label: "Device sharing", icon: ShareNetwork, group: "General" },
   { id: "storage", label: "Storage", icon: HardDrives, group: "General" },
   { id: "agents", label: "Agents", icon: Robot, group: "AI" },
+  { id: "chat", label: "Chat", icon: ChatCircle, group: "AI" },
   { id: "opencode", label: "opencode", icon: OpencodeIcon, group: "AI", fullBleed: true },
   { id: "jobs", label: "Jobs", icon: Lightning, group: "AI" },
   { id: "parsing", label: "Parsing", icon: FilePdf, group: "Library" },
@@ -167,6 +170,11 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   page("agents", ["ai", "cli"]),
   ...section("agents", "CLI agents", ["claude code", "codex", "opencode", "antigravity", "install", "sign in", "update", "upgrade", "version"]),
   ...section("agents", "Antigravity approvals", ["permissions", "revoke"]),
+
+  page("chat", ["composer", "send", "enter"]),
+  ...rows("chat", "Chat", [
+    ["While the agent works", ["steer", "queue", "follow-up", "follow up", "interrupt", "mid-turn", "enter"]],
+  ]),
 
   page("opencode", ["ai", "models", "providers"]),
   // The page's two tabs; it switches to the one a result names.

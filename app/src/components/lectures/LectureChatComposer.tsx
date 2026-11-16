@@ -20,11 +20,21 @@ import { QuestionPanel } from "@/components/harness/composer/QuestionPanel";
 import { QuestionEditor } from "@/components/harness/composer/QuestionEditor";
 import { useQuestionComposer } from "@/components/harness/composer/useQuestionComposer";
 import { PermissionModeControl } from "@/components/harness/composer/PermissionModeControl";
-import { WAITING_PLACEHOLDER } from "@/components/harness/composer/sendGate";
 import { useRunControls } from "@/components/harness/composer/useRunControls";
+import { useSendMode } from "@/components/harness/composer/useSendMode";
 import { AttachmentStrip } from "@/components/harness/attachments/AttachmentStrip";
 import { useAttachments } from "@/hooks/agents/useAttachments";
-import { awaitsApproval, type Provider, type RateWindow, type ThreadUsage } from "@/lib/harness";
+import {
+  awaitsApproval,
+  busyPlaceholder,
+  enterKey,
+  modClick,
+  type DeliveryMode,
+  type Provider,
+  type RateWindow,
+  type ThreadUsage,
+} from "@/lib/harness";
+import { isMac } from "@/lib/platform";
 import { fmtClockSecs } from "@/lib/lectures/media";
 import { cn } from "@/lib/utils";
 import { useDraftStore } from "@/stores/chat/draftStore";
@@ -92,9 +102,11 @@ const LECTURE_PLACEHOLDER = "Ask about this lecture. @ files, / skills";
  * to the lecture's subject (`MentionInput`, `useComposerTools`). Attachments
  * are shared outright (`useAttachments`, `AttachmentStrip`).
  *
- * Enter sends, Shift+Enter breaks a line. While a turn runs a send is queued by
- * Rust, so stop and send sit side by side; Stop holds the queue and, with the
- * box empty, the main button resumes it (`SendControls`, as Chat's). Unsent text lives in `draftStore`,
+ * Enter sends, Shift+Enter breaks a line. While a turn runs, Enter steers or
+ * queues as Settings → Chat says, ⌘↩ does the other and ⌘⇧↩ steers the
+ * oldest waiting message (`useSendMode`, as Chat's), so stop and send sit
+ * side by side; Stop holds the queue and, with the box empty, the main
+ * button resumes it (`SendControls`). Unsent text lives in `draftStore`,
  * and so do long pastes, held as cards in the attachment strip.
  */
 export function LectureChatComposer({
@@ -153,7 +165,8 @@ export function LectureChatComposer({
   onProvider: (p: Provider) => void;
   onModel: (m: string | null) => void;
   onReasoning: (level: string | null) => void;
-  onSend: (text: string) => void;
+  /** `mode`: how the message enters a running turn; none on an idle chat. */
+  onSend: (text: string, mode?: DeliveryMode) => void;
   /** Stop the run the box showed (null: a turn the CLI started itself). */
   onStop: (runId: number | null) => Promise<void> | void;
   /** Lift the hold on the open thread's queue. */
@@ -190,7 +203,17 @@ export function LectureChatComposer({
 
   /** Whether there is a message at all: words, pastes, pictures. */
   const ready = text.trim().length > 0 || att.items.length > 0 || att.texts.length > 0;
-  const controls = useRunControls({ threadId, running, hasDraft: ready, ready, writing: att.writing, onStop, onResume });
+  const mode = useSendMode({ threadId, running, text });
+  const controls = useRunControls({
+    threadId,
+    running,
+    hasDraft: ready,
+    ready,
+    writing: att.writing,
+    action: mode.shown,
+    onStop,
+    onResume,
+  });
 
   // Put back before anything already typed, because it was typed first; its
   // pasted blocks go back to being cards.
@@ -207,8 +230,9 @@ export function LectureChatComposer({
 
   const dictation = useDictation(draftKey, (transcript) => (answerRef.current ?? ref.current)?.append(transcript));
 
-  // While a file is still being written the box is kept as it was.
-  const send = async () => {
+  // While a file is still being written the box is kept as it was. `flip`:
+  // ⌘ was held, the opposite of the chat's follow-up behaviour.
+  const send = async (flip: boolean) => {
     if (dictation.busy) return;
     const message = await att.prepare(text);
     if (message == null) return;
@@ -216,8 +240,8 @@ export function LectureChatComposer({
     notePickedSkills(message, ref.current?.pickedSkills() ?? []);
     ref.current?.clear();
     mentions.close();
-    // Rust decides whether this sends now or queues.
-    onSend(message);
+    // Rust re-checks the mode against the turn as it is when the send lands.
+    onSend(message, mode.modeFor(flip));
   };
 
   return (
@@ -226,7 +250,9 @@ export function LectureChatComposer({
       <ComposerMenu {...mentions.menu} />
       <DictationFeedback dictation={dictation} />
       {att.error && <div className="px-0.5 text-[11px] text-destructive">{att.error}</div>}
-      {controls.error && <div className="px-0.5 text-[11px] text-destructive">{controls.error}</div>}
+      {(controls.error ?? mode.error) && (
+        <div className="px-0.5 text-[11px] text-destructive">{controls.error ?? mode.error}</div>
+      )}
       {/* The open picker shows its own refusal; once it closes, the box does. */}
       {refused && !tools.modelOpen && (
         <div role="alert" className="px-0.5 text-[11px] text-destructive">{refused}</div>
@@ -290,12 +316,16 @@ export function LectureChatComposer({
                 stash.keyDown(e);
                 history.keyDown(e);
                 if (e.defaultPrevented) return;
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void send();
-                }
+                const action = enterKey(e, false, isMac);
+                if (action) e.preventDefault();
+                if (action === "send" || action === "flip") void send(action === "flip");
+                if (action === "steer-oldest") mode.steerOldest();
               }}
-              placeholder={asking ? WAITING_PLACEHOLDER : running ? "Working…" : LECTURE_PLACEHOLDER}
+              placeholder={
+                asking || running
+                  ? busyPlaceholder({ approval: asking, plain: mode.plain, steer: mode.steer, compact: true })
+                  : LECTURE_PLACEHOLDER
+              }
             />
           </>
         )}
@@ -322,7 +352,7 @@ export function LectureChatComposer({
             <DictationMic dictation={dictation} />
             <SendControls stop={controls.stop}
               send={question ? { kind: "send", label: question.primaryLabel, disabled: !question.ready || question.busy } : controls.send}
-              onStop={controls.stopNow} onSend={question ? question.primary : () => void send()} onResume={controls.resumeNow} />
+              onStop={controls.stopNow} onSend={question ? question.primary : (e) => void send(modClick(e, isMac))} onResume={controls.resumeNow} />
           </div>
         </div>}
       </div>

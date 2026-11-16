@@ -5,6 +5,7 @@ import { CLI_ICON, ErrorRow, RowShell, ThinkingRow, ToolRow, TOOL_ICON } from ".
 import { Compacted, Continued, DeliveryNotice, FoldedReply, Reply, Stopped, Unprompted, User } from "./Messages";
 import { PermissionCard } from "./PermissionCard";
 import { RequestRow } from "./request/RequestRow";
+import { SteerRow } from "./SteerRow";
 import { bundleLabel, type ReplyRole } from "./rows";
 import type { QuestionActions } from "./types";
 
@@ -72,6 +73,8 @@ export const Item = memo(function Item({
       return <PermissionCard item={item} />;
     case "request":
       return <RequestRow item={item} />;
+    case "steer":
+      return <SteerRow item={item} />;
   }
 });
 

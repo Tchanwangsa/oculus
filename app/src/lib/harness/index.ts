@@ -25,5 +25,6 @@ export * from "./usageLimit";
 export * from "./commands";
 export * from "./signin";
 export * from "./runControls";
+export * from "./sendMode";
 
 export * from "./questions";

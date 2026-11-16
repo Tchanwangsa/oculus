@@ -131,6 +131,7 @@ export const routes: RouteObject[] = [
           { path: "device-sharing", lazy: page(() => import("@/pages/settings/integrations/DeviceSharingPage")) },
           { path: "storage", lazy: page(() => import("@/pages/settings/library/StoragePage")) },
           { path: "agents", lazy: page(() => import("@/pages/settings/integrations/AgentsPage")) },
+          { path: "chat", lazy: page(() => import("@/pages/settings/integrations/ChatPage")) },
           { path: "opencode", lazy: page(() => import("@/pages/settings/integrations/OpencodePage")) },
           { path: "jobs", lazy: page(() => import("@/pages/settings/library/JobsPage")) },
           { path: "parsing", lazy: page(() => import("@/pages/settings/library/ParsingPage")) },

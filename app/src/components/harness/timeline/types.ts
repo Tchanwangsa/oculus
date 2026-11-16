@@ -21,4 +21,6 @@ export interface PendingActions {
   unqueue: (queueId: string) => Promise<void>;
   /** Every waiting message's id, first to go out first. */
   reorder: (order: string[]) => Promise<void>;
+  /** "Send now": the message into the running turn (`harnessSteerQueued`). */
+  steerQueued: (queueId: string) => Promise<void>;
 }

@@ -1,3 +1,4 @@
+import { QUEUE_LABEL, STEER_LABEL, steerHint, type SendAction } from "./sendMode";
 import type { HarnessRun, QueuedMessage } from "./types";
 
 /** What the composer's Stop button is: its words, whether it takes a click,
@@ -8,12 +9,14 @@ export interface StopControl {
   runId: number | null;
 }
 
-/** What the composer's main button does: start or queue the draft, or lift
- *  the hold on a queue (`resume`). */
+/** What the composer's main button does: start, queue or steer the draft,
+ *  or lift the hold on a queue (`resume`). `hint` is its tooltip where the
+ *  label alone does not say what happens (a steer). */
 export interface SendControl {
-  kind: "send" | "queue" | "resume";
+  kind: "send" | "queue" | "steer" | "resume";
   label: string;
   disabled: boolean;
+  hint?: string;
 }
 
 export interface RunControlInputs {
@@ -31,6 +34,9 @@ export interface RunControlInputs {
   ready: boolean;
   /** Attachments are still being written to the library. */
   writing: boolean;
+  /** What the draft would do into an open turn (`sendAction`); a queue
+   *  when not given. */
+  action?: SendAction;
 }
 
 export const RESUME = "Resume";
@@ -45,17 +51,18 @@ export function resumeLabel(draftEmpty: boolean): string {
 /**
  * The composer's Stop and main button. Stop shows while a turn is open and
  * reads "Stopping", inert, once the run is marked or a stop is on its way.
- * The main button queues into an open turn, resumes a held queue when the
- * box is empty, and otherwise sends; a draft sent past a held queue lifts
- * the hold and goes out after the waiting messages (`docs/harness.md`).
+ * The main button queues or steers into an open turn, as `action` says,
+ * resumes a held queue when the box is empty, and otherwise sends; a draft
+ * sent past a held queue lifts the hold and goes out after the waiting
+ * messages (`docs/harness.md`).
  */
 export function runControls(i: RunControlInputs): { stop: StopControl | null; send: SendControl | null } {
   if (i.running) {
     const stopping = i.stopSent || !!i.liveRun?.stopping;
     return {
       stop: { label: stopping ? "Stopping" : "Stop generation", stopping, runId: i.liveRun?.id ?? null },
-      // Nothing to queue: the box keeps only Stop, as it always has.
-      send: i.ready ? { kind: "queue", label: "Queue message", disabled: i.writing } : null,
+      // Nothing to send: the box keeps only Stop, as it always has.
+      send: i.ready ? intoTurn(i.action ?? { kind: "queue" }, i.writing) : null,
     };
   }
   if (i.held && !i.hasDraft) {
@@ -69,6 +76,11 @@ export function runControls(i: RunControlInputs): { stop: StopControl | null; se
       disabled: !i.ready || i.writing,
     },
   };
+}
+
+function intoTurn(action: SendAction, writing: boolean): SendControl {
+  if (action.kind !== "steer") return { kind: "queue", label: QUEUE_LABEL, disabled: writing };
+  return { kind: "steer", label: STEER_LABEL, hint: steerHint(action.restart ? "restart" : "native"), disabled: writing };
 }
 
 /** Whether any of the chat's waiting messages is held. */

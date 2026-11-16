@@ -1,9 +1,11 @@
 import { mayHoldWidget } from "@/components/markdown/openui/remarkWidgets";
+import { sqliteUtcToMs } from "@/lib/format/format";
 import {
   describeOculusCli,
   elapsedText,
   runEnded,
   runSwitch,
+  steerMeta,
   parseToolMeta,
   thoughtLabel,
   thoughtMs,
@@ -22,16 +24,22 @@ export type ReplyRole = "answer" | "provisional" | "partial";
  *  with nothing running) is drawn as steps, never folded. */
 export type RunState = "running" | "completed" | "interrupted" | "failed";
 
-/** One run's work above its answer: earlier replies, reasoning and tools. */
+/** One run's work above its answer: earlier replies, reasoning and tools.
+ *  A run the student steered has one per stretch between its steers. */
 export interface WorkFold {
   kind: "work";
   id: string;
   thread: number;
   run: number;
   items: HarnessItem[];
+  /** For a stretch a steer ended (`cut`), `completed`: it is not the run's
+   *  live work, whatever the run is doing. */
   state: RunState;
   startedMs: number | null;
   endedMs: number | null;
+  /** The stretch ended at a steer (`steer`), or was the attempt a restart
+   *  steer superseded (`restart`: partial work, never the answer). */
+  cut?: "steer" | "restart";
 }
 
 /** A run that changed agent, model or level from the run before it, or
@@ -95,15 +103,26 @@ export interface RowContext {
   /** Text is streaming: it, not the latest committed reply, is the run's
    *  provisional answer. */
   streaming?: boolean;
+  /** Whether `run`'s bridge steers by stopping and starting again
+   *  (`steerByRestart` without `activeSteering`): the stretch before each of
+   *  its steers is a superseded attempt. */
+  restarts?: (run: HarnessRun) => boolean;
 }
 
-/** One run's rows (docs/harness.md, "A run's work folds above its answer"). */
+const isFoldable = (i: HarnessItem) => i.kind === "tool" || i.kind === "thinking" || i.kind === "assistant";
+const atMs = (i: HarnessItem) => sqliteUtcToMs(i.created_at) ?? null;
+
+/** One run's rows (docs/harness.md, "A run's work folds above its answer").
+ *  Each steer the student wrote into it ends a stretch: the work before it
+ *  folds, closed, then the steer row, then what came after under a fold of
+ *  its own. The run's one answer stays the last thing it drew. */
 function runRows(
   segment: HarnessItem[],
   run: HarnessRun | undefined,
   before: HarnessRun | undefined,
   live: boolean,
   streaming: boolean,
+  restarts: boolean,
   out: ViewRow[],
 ): void {
   const state: RunState | null = runEnded(run) ? (run!.status as RunState) : live ? "running" : null;
@@ -112,38 +131,65 @@ function runRows(
   // A continuation heads its run like a question, but nothing re-asks it.
   const head = segment[0].kind === "user" || segment[0].kind === "continuation" ? segment[0] : null;
   const rest = head ? segment.slice(1) : segment;
+  const stretches = splitAtSteers(rest);
+  const tail = stretches[stretches.length - 1];
   let answer: HarnessItem | undefined;
   if (state === "running") {
-    answer = streaming ? undefined : [...rest].reverse().find((i) => i.kind === "assistant");
+    // Replies before the latest steer answered something the student has
+    // since corrected: they are work, never the provisional answer.
+    answer = streaming ? undefined : [...tail.items].reverse().find((i) => i.kind === "assistant");
   } else {
     answer = rest.find((i) => i.id === run!.answer_item_id) ?? rest.find((i) => i.display_role === "answer");
   }
-  const work = rest.filter((i) => i !== answer && (i.kind === "tool" || i.kind === "thinking" || i.kind === "assistant"));
-  const folded = new Set(work);
   const change = run && (run.handoff || runSwitch(before, run)) ? { before, run } : undefined;
   if (head) out.push({ kind: "item", item: head, dim: false, ...(change && { change }) });
-  if (work.length) {
-    out.push({
-      kind: "work",
-      id: `w-${run?.id ?? segment[0].id}`,
-      thread: segment[0].thread_id,
-      run: run?.id ?? segment[0].run_id!,
-      items: work,
-      state,
-      startedMs: run?.started_ms ?? null,
-      endedMs: state === "running" ? null : (run?.ended_ms ?? null),
-    });
-    for (const item of work) {
-      if (item.kind === "assistant" && mayHoldWidget(item.content)) out.push({ kind: "artifacts", id: `a-${item.id}`, item });
-    }
-  }
-  const role: ReplyRole = state === "running" ? "provisional" : state === "completed" ? "answer" : "partial";
+  const keys = new Map<HarnessItem, string>();
   let replies = 0;
+  for (const item of rest) if (item.kind === "assistant") keys.set(item, replyKey(item.run_id!, replies++));
+  const role: ReplyRole = state === "running" ? "provisional" : state === "completed" ? "answer" : "partial";
+  const runId = run?.id ?? segment[0].run_id!;
+  stretches.forEach((stretch, n) => {
+    if (stretch.steer) out.push({ kind: "item", item: stretch.steer, dim: false });
+    const work = stretch.items.filter((i) => i !== answer && isFoldable(i));
+    const folded = new Set(work);
+    const next = stretches[n + 1]?.steer;
+    if (work.length) {
+      const startedMs = stretch.steer ? atMs(stretch.steer) : (run?.started_ms ?? null);
+      const cut = next ? (restarts || steerMeta(next).delivery === "restart" ? "restart" : "steer") : undefined;
+      out.push({
+        kind: "work",
+        // The first stretch keeps the run's own id, so a run steered later
+        // keeps its fold and the student's choice for it.
+        id: stretch.steer ? `w-${runId}-${stretch.steer.id}` : `w-${runId}`,
+        thread: segment[0].thread_id,
+        run: runId,
+        items: work,
+        state: cut ? "completed" : state,
+        startedMs,
+        endedMs: next ? atMs(next) : state === "running" ? null : (run?.ended_ms ?? null),
+        ...(cut && { cut }),
+      });
+      for (const item of work) {
+        if (item.kind === "assistant" && mayHoldWidget(item.content)) out.push({ kind: "artifacts", id: `a-${item.id}`, item });
+      }
+    }
+    for (const item of stretch.items) {
+      const key = keys.get(item);
+      if (item === answer) out.push({ kind: "item", item, dim: false, role, ...(head?.kind === "user" && { asked: head }), ...(key && { key }) });
+      else if (!folded.has(item)) out.push({ kind: "item", item, dim: false });
+    }
+  });
+}
+
+/** A run's rows after its question, cut at each steer: the first stretch has
+ *  no steer, each later one starts with the steer that opened it. */
+function splitAtSteers(rest: HarnessItem[]): { steer?: HarnessItem; items: HarnessItem[] }[] {
+  const out: { steer?: HarnessItem; items: HarnessItem[] }[] = [{ items: [] }];
   for (const item of rest) {
-    const key = item.kind === "assistant" ? replyKey(item.run_id!, replies++) : undefined;
-    if (item === answer) out.push({ kind: "item", item, dim: false, role, ...(head?.kind === "user" && { asked: head }), ...(key && { key }) });
-    else if (!folded.has(item)) out.push({ kind: "item", item, dim: false });
+    if (item.kind === "steer") out.push({ steer: item, items: [] });
+    else out[out.length - 1].items.push(item);
   }
+  return out;
 }
 
 /** A run's reply's row key: its run and its place among the run's replies.
@@ -183,7 +229,9 @@ export function buildRows(items: HarnessItem[], running: boolean, ctx: RowContex
       stepRows(items.slice(i, j), running && j === items.length, out);
     } else {
       while (j < items.length && items[j].run_id === runId) j++;
-      runRows(items.slice(i, j), runs[runId], before, running && j === items.length, !!ctx.streaming, out);
+      const run = runs[runId];
+      const restarts = !!run && !!ctx.restarts?.(run);
+      runRows(items.slice(i, j), run, before, running && j === items.length, !!ctx.streaming, restarts, out);
       before = runs[runId] ?? before;
     }
     i = j;
@@ -212,13 +260,15 @@ export function foldRows(items: HarnessItem[], live = false): ViewRow[] {
 }
 
 /** Open while the run works, and after a stop or failure: what went wrong is
- *  in the work. Closed once it completes. */
+ *  in the work. Closed once it completes, and so is a stretch a steer ended. */
 export const foldOpens = (state: RunState) => state !== "completed";
 
-/** "Worked for 12s" from the run's stored interval; "Work details" without one. */
-export function foldLabel(fold: Pick<WorkFold, "state" | "startedMs" | "endedMs">): string {
-  if (fold.startedMs == null || fold.endedMs == null) return "Work details";
+/** "Worked for 12s" from the run's stored interval; "Work details" without
+ *  one. A stretch a restart steer superseded says it was cut short. */
+export function foldLabel(fold: Pick<WorkFold, "state" | "startedMs" | "endedMs" | "cut">): string {
+  if (fold.startedMs == null || fold.endedMs == null) return fold.cut === "restart" ? "Restarted" : "Work details";
   const t = elapsedText(Math.max(0, fold.endedMs - fold.startedMs));
+  if (fold.cut === "restart") return `Restarted after ${t}`;
   if (fold.state === "interrupted") return `You stopped after ${t}`;
   return fold.state === "failed" ? `Failed after ${t}` : `Worked for ${t}`;
 }

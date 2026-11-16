@@ -9,9 +9,11 @@ import {
   harnessResume,
   harnessRewind,
   harnessSend,
+  harnessSteerQueued,
   harnessUnqueue,
   threadSelection,
   type Provider,
+  type DeliveryMode,
   type Selection,
   type SendOptions,
 } from "@/lib/harness";
@@ -40,16 +42,17 @@ export function useThreadActions(opts: ThreadActionsOptions) {
   const ref = useRef(opts);
   ref.current = opts;
 
-  /** `extra` runs after the thread id is read, for options that take a while. */
+  /** `extra` runs after the thread id is read, for options that take a while.
+   *  `mode`: how the message enters a running turn (`useSendMode`). */
   const send = useCallback(
-    async (text: string, extra: () => SendOptions | Promise<SendOptions> = () => ({})) => {
+    async (text: string, extra: () => SendOptions | Promise<SendOptions> = () => ({}), mode?: DeliveryMode) => {
       const s = store.getState();
       const o = ref.current;
       const id = o.threadId();
       const more = await extra();
       const { provider, model, effort } = o.selection;
       try {
-        const newId = await harnessSend(id, provider, text, { model, reasoningEffort: effort, ...more });
+        const newId = await harnessSend(id, provider, text, { model, reasoningEffort: effort, ...more }, mode);
         // The send carried the composer's pick; Rust stored it with the message.
         if (id != null) usePickStore.getState().sent(id);
         if (id == null) {
@@ -163,6 +166,10 @@ export function useThreadActions(opts: ThreadActionsOptions) {
       reorder: async (order) => {
         const id = ref.current.threadId();
         if (id != null) await harnessReorderQueued(id, order);
+      },
+      steerQueued: async (queueId) => {
+        const id = ref.current.threadId();
+        if (id != null) await harnessSteerQueued(id, queueId);
       },
     }),
     [],

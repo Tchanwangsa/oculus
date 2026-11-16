@@ -1,5 +1,5 @@
 import { isProvider } from "./providers";
-import type { ErrorMeta, HarnessItem, ThreadUsage, HarnessThread, ToolMeta } from "./types";
+import type { ErrorMeta, HarnessItem, SteerDelivery, SteerMeta, ThreadUsage, HarnessThread, ToolMeta } from "./types";
 
 const TOOL_KINDS = ["read", "edit", "write", "bash", "search", "oculus_cli", "task", "web", "plan", "other"] as const;
 export type ToolKind = (typeof TOOL_KINDS)[number];
@@ -85,6 +85,20 @@ export function parseErrorMeta(item: HarnessItem): ErrorMeta {
 export function unpromptedAfter(item: HarnessItem): string[] {
   const { after } = parseItemMeta(item);
   return Array.isArray(after) ? after.filter((a): a is string => typeof a === "string" && !!a) : [];
+}
+
+const STEER_DELIVERIES = new Set<SteerDelivery>(["sending", "written", "delivered", "unknown", "restart"]);
+
+/** A `steer` row's `meta`; a delivery that does not parse reads `unknown`,
+ *  which claims nothing about whether it arrived. */
+export function steerMeta(item: HarnessItem): SteerMeta {
+  const m = parseItemMeta(item);
+  const delivery = STEER_DELIVERIES.has(m.delivery as SteerDelivery) ? (m.delivery as SteerDelivery) : "unknown";
+  return {
+    message: typeof m.message === "number" ? m.message : 0,
+    client: typeof m.client === "string" ? m.client : "",
+    delivery,
+  };
 }
 
 /** A `permission` row's `meta`. A row that does not parse draws as a refusal

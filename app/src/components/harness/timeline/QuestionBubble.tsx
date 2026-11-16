@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowCounterClockwise, CaretDown, PencilSimple, X } from "@phosphor-icons/react";
 import { AttachmentChip } from "@/components/markdown/AttachmentChip";
 import { CheckedFileChip } from "@/components/markdown/CheckedFileChip";
@@ -32,6 +32,7 @@ export function QuestionBubble({
   onSubmit,
   onRemove,
   onRewind,
+  status,
 }: {
   /** The row id, for the rail to measure. Absent on a queued message. */
   msgId?: number;
@@ -44,6 +45,9 @@ export function QuestionBubble({
   onSubmit?: (text: string) => void;
   onRemove?: () => void;
   onRewind?: () => void;
+  /** An always-visible line right under the bubble, above its hover row
+   *  (a steer's delivery), so it reads as this message's. */
+  status?: ReactNode;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -212,6 +216,7 @@ export function QuestionBubble({
           </div>
         )}
       </div>
+      {status}
       <MessageActions when={pending ? "Queued" : when} at={pending ? null : at} side="right">
         <CopyAction text={text} />
         {onSubmit && <Action label="Edit" icon={PencilSimple} onClick={() => setEditing(text)} />}

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SendControls } from "@/components/harness/composer/SendControls";
-import { runControls, type RunControlInputs } from "@/lib/harness";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { RESTART_HINT, runControls, type RunControlInputs } from "@/lib/harness";
 
 const noop = () => {};
 const idle: RunControlInputs = {
@@ -14,7 +15,11 @@ const idle: RunControlInputs = {
   writing: false,
 };
 const render = (i: RunControlInputs) =>
-  renderToStaticMarkup(<SendControls {...runControls(i)} onStop={noop} onSend={noop} onResume={noop} />);
+  renderToStaticMarkup(
+    <TooltipProvider>
+      <SendControls {...runControls(i)} onStop={noop} onSend={noop} onResume={noop} />
+    </TooltipProvider>,
+  );
 
 describe("SendControls", () => {
   test("running: an icon Stop labelled Stop generation", () => {
@@ -45,5 +50,21 @@ describe("SendControls", () => {
   test("idle: Send message; queueing: Queue message", () => {
     expect(render({ ...idle, hasDraft: true, ready: true })).toContain('aria-label="Send message"');
     expect(render({ ...idle, running: true, hasDraft: true, ready: true })).toContain('aria-label="Queue message"');
+  });
+
+  test("steering: Steer message with the arrow; queueing: Queue message with a list-plus, so the icon flips with ⌘", () => {
+    const working = { ...idle, running: true, liveRun: { id: 3, stopping: false }, hasDraft: true, ready: true };
+    const steer = render({ ...working, action: { kind: "steer", restart: false } });
+    const queue = render({ ...working, action: { kind: "queue" } });
+    expect(steer).toContain('aria-label="Steer message"');
+    expect(steer).toContain('aria-description="Send into the current turn"');
+    expect(queue).toContain('aria-label="Queue message"');
+    const icon = (html: string) => html.match(/<svg[^>]*>([\s\S]*?)<\/svg>/g)?.at(-1);
+    expect(icon(steer)).not.toEqual(icon(queue));
+  });
+
+  test("a restart-class steer says it stops and restarts the turn", () => {
+    const html = render({ ...idle, running: true, liveRun: { id: 3, stopping: false }, hasDraft: true, ready: true, action: { kind: "steer", restart: true } });
+    expect(html).toContain(`aria-description="${RESTART_HINT}"`);
   });
 });

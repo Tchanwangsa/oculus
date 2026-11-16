@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { liveRunId, queueHeld, runControls } from "@/lib/harness";
+import { liveRunId, queueHeld, runControls, type SendAction } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { useRunCommand } from "./useRunCommand";
 
@@ -23,6 +23,7 @@ export function useRunControls({
   hasDraft,
   ready,
   writing,
+  action,
   onStop,
   onResume,
 }: {
@@ -31,6 +32,8 @@ export function useRunControls({
   hasDraft: boolean;
   ready: boolean;
   writing: boolean;
+  /** What the draft does into an open turn (`useSendMode`). */
+  action?: SendAction;
   onStop: (runId: number | null) => Promise<void> | void;
   onResume?: () => Promise<void>;
 }) {
@@ -68,6 +71,7 @@ export function useRunControls({
     hasDraft,
     ready,
     writing,
+    action,
   });
   // Pending only while out: the button reads Resume thread again on failure.
   if (controls.send?.kind === "resume" && resume.pending) controls.send = { ...controls.send, disabled: true };
