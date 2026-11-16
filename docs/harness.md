@@ -1663,8 +1663,10 @@ Claude 2.1.325's `AskUserQuestion` is routed before tool approvals
 (`providers/claude/questions.rs`). It permits typed answers and uses
 `multiSelect`. The allow preserves the original input and appends
 `updatedInput.answers`, keyed by exact question text; multiple values are
-joined with `", "`. A whole dismissal sends deny. One-off turns deny the tool
-on both bridges. opencode and Antigravity have `questions` false.
+joined with `", "`. A whole dismissal sends deny with a message saying the
+student dismissed the question, so the agent carries on rather than reading
+it as a refusal. One-off turns deny the tool on both bridges. opencode and
+Antigravity have `questions` false.
 
 A pending question whose process or app is lost keeps its payload and moves
 to `message`; it is excluded from later turn cleanup and native callback

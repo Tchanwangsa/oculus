@@ -47,6 +47,9 @@ const QUESTION: &str = "AskUserQuestion";
 pub(super) const DECLINED: &str =
     "The student declined this. Do not retry it or try another way to do the same thing.";
 
+/// What the agent is told when the student dismisses its question.
+pub(super) const DISMISSED: &str = "The student dismissed the question without answering. Carry on with your best judgement, or ask in your reply.";
+
 /// What the agent is told when Oculus declines without asking: the chat is
 /// set to Don't ask, no turn is open, the call names a protected path, Oculus
 /// does not ask about this kind of call, or its session has ended.
@@ -112,6 +115,9 @@ impl Route for ClaudeRoute {
         option: &RequestOption,
         answers: &[crate::harness::requests::QuestionAnswer],
     ) -> Reply {
+        if option.id == "dismiss" {
+            return self.write(Decision::Decline, DISMISSED);
+        }
         if option.decision == Decision::Decline || answers.is_empty() {
             return self.reply(option);
         }

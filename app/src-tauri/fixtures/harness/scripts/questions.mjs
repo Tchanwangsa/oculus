@@ -87,6 +87,6 @@ for (const base of [single,claude]) {
  const at = frames.findIndex((f)=> f.method === "item/tool/requestUserInput" || f.type === "control_request");
  const f = frames[at];
  const native = JSON.stringify(base.provider === "codex" ? f.id : f.request_id);
- const answer = base.provider === "codex" ? {jsonrpc:"2.0",id:f.id,result:{answers:{}}} : {type:"control_response",response:{subtype:"success",request_id:f.request_id,response:{behavior:"deny",message:"The student declined this. Do not retry it or try another way to do the same thing."}}};
+ const answer = base.provider === "codex" ? {jsonrpc:"2.0",id:f.id,result:{answers:{}}} : {type:"control_response",response:{subtype:"success",request_id:f.request_id,response:{behavior:"deny",message:"The student dismissed the question without answering. Carry on with your best judgement, or ask in your reply."}}};
  save(`${base.provider}-question-dismiss`,base.provider,base.metadata,frames.slice(0,at+1),[base.outbound[0],{frame:answer,response:null}],[{native,option:"dismiss",answers:[]}],"Derived, not recorded: recorded prefix through its question; empty answer/deny and transport EOF are synthetic. " + base.derived);
 }

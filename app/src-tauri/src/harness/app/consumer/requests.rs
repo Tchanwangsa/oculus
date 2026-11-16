@@ -403,7 +403,7 @@ impl Consumer {
         }
     }
 
-    /// The thread's requests waiting on the student, read after a change
+    /// The thread's questions waiting on the student, read after a change
     /// is saved; 0 when it cannot be read.
     fn waiting_questions(&self, thread_id: i64) -> u32 {
         let Some(pool) = &self.pool else {
@@ -414,6 +414,8 @@ impl Consumer {
             .unwrap_or_default()
     }
 
+    /// The thread's requests waiting on the student, read after a change
+    /// is saved; 0 when it cannot be read.
     fn waiting(&self, thread_id: i64) -> u32 {
         let Some(pool) = self.pool.as_ref() else {
             return 0;

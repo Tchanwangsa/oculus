@@ -388,7 +388,16 @@ pub async fn set_mode(
     Ok(())
 }
 
+/// The thread's questions waiting on the student, live or answerable as a
+/// message; the sidebar's Input.
 pub async fn waiting_questions(pool: &SqlitePool, thread_id: i64) -> Result<u32, String> {
-    sqlx::query_scalar("SELECT COUNT(*) FROM harness_requests WHERE thread_id = ?1 AND kind = 'question' AND status = 'pending' AND responder IN ('live', 'message')")
-        .bind(thread_id).fetch_one(pool).await.map_err(err)
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM harness_requests
+          WHERE thread_id = ?1 AND kind = 'question' AND status = 'pending'
+            AND responder IN ('live', 'message')",
+    )
+    .bind(thread_id)
+    .fetch_one(pool)
+    .await
+    .map_err(err)
 }
