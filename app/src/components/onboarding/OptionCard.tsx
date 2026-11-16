@@ -71,7 +71,7 @@ export function OptionCard({
       <div className="flex items-center gap-3.5">
         <span
           className={cn(
-            "flex size-10 shrink-0 items-center justify-center rounded-lg border transition-[color,background-color,border-color] [&>svg]:size-5",
+            "flex size-10 shrink-0 items-center justify-center rounded-lg border transition-[color,background-color,border-color] [&>img]:size-5 [&>svg]:size-5",
             selected
               ? "border-brand/20 bg-brand-muted text-brand"
               : "border-border-subtle bg-surface text-foreground",

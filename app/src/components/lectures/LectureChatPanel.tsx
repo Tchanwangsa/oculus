@@ -220,7 +220,7 @@ export const LectureChatPanel = memo(function LectureChatPanel({
                       : "text-muted-foreground hover:bg-accent hover:text-foreground",
                   )}
                 >
-                  <ProviderMark provider={t.provider} className="size-3.5 shrink-0 opacity-70" />
+                  <ProviderMark provider={t.provider} className="size-3.5 shrink-0" />
                   <span className="min-w-0 flex-1 truncate">{t.title || "Untitled"}</span>
                   <span className="shrink-0 text-[10px] tabular-nums opacity-60">
                     {fmtAgo(sqliteUtcToMs(t.updated_at))}
@@ -250,7 +250,7 @@ export const LectureChatPanel = memo(function LectureChatPanel({
               // No suggestion chips: the dock is too narrow.
               resolved && (
                 <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
-                  <ProviderMark provider={activeProvider} className="size-5 text-muted-foreground opacity-60" />
+                  <ProviderMark provider={activeProvider} className="size-5" />
                   <p className="text-[11px] leading-relaxed text-muted-foreground">
                     Ask about this lecture. Each message can carry the moment you are at.
                   </p>

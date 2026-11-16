@@ -220,6 +220,13 @@ themes are opt-in and keep the same structure.
 - **Icons are Phosphor.** One Phosphor lacks is drawn in
   `app/src/components/icons/` on its `IconBase`, so it takes the same `size`
   and `weight` props.
+- **A CLI agent's mark is in its vendor's colours** (`ProviderMark`, files in
+  `app/src/assets/providers/`), the one exception to the single accent:
+  Claude's clay fill, Antigravity's gradient arch, OpenAI's blossom in full
+  `foreground` (never muted), and opencode's light or dark file switched on
+  `.dark`. Files with mask or filter ids (Antigravity, opencode) are `<img>`s,
+  since inline copies in every row would share those ids. Callers size it
+  and never tint it; `mono` draws it in `currentColor` for a spot that must.
 - **Inline references have content colours** through `reference-*` tokens:
   red PDFs, purple pages and notes, blue documents and discussions, green
   tasks, amber projects, pink lectures and teal lessons. These glyphs identify linked
