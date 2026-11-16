@@ -24,7 +24,7 @@ fn recorded_registry_runs_every_provider_through_store_and_rows() {
         verify_fixture(name);
         count += 1;
     }
-    assert_eq!(count, 66, "every fixture needs a registered runner");
+    assert_eq!(count, 71, "every fixture needs a registered runner");
 }
 
 fn verify_fixture(name: &str) {

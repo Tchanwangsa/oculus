@@ -4,7 +4,7 @@ use crate::harness::requests::{QuestionAnswer, RequestView};
 
 use super::{replay::Replay, rig::Rig, scenario::Scenario};
 
-pub(super) const NAMES: [&str; 12] = [
+pub(super) const NAMES: [&str; 17] = [
     "codex-question-single",
     "codex-question-two",
     "codex-question-nonblocking",
@@ -17,6 +17,11 @@ pub(super) const NAMES: [&str; 12] = [
     "claude-question-two",
     "claude-question-withdraw",
     "claude-question-dismiss",
+    "antigravity-question-single",
+    "antigravity-question-typed",
+    "antigravity-question-multi-two",
+    "antigravity-question-dismiss",
+    "antigravity-question-stop",
 ];
 
 pub(super) fn requests(rig: &Rig) -> Vec<RequestView> {
@@ -65,7 +70,8 @@ pub(super) fn recorded(name: &str) -> Replay {
     for frame in &frames {
         rig.feed(frame);
         rig.drain();
-        if frame["method"] == "item/tool/requestUserInput"
+        if frame["method"] == "elicitation/create"
+            || frame["method"] == "item/tool/requestUserInput"
             || (frame["type"] == "control_request"
                 && frame["request"]["tool_name"] == "AskUserQuestion")
         {
@@ -88,7 +94,10 @@ pub(super) fn recorded(name: &str) -> Replay {
                 }
             } else {
                 let a = &answers[given];
-                let native = if rig.provider == crate::harness::Provider::Codex {
+                let native = if matches!(
+                    rig.provider,
+                    crate::harness::Provider::Codex | crate::harness::Provider::Antigravity
+                ) {
                     frame["id"].to_string()
                 } else {
                     frame["request_id"].to_string()
@@ -168,8 +177,12 @@ fn codex_questions_are_single_choice_with_other_and_keep_both_blocking_shapes() 
 /// A transport EOF while a question waits must preserve its answer route,
 /// even when the bridge reports the failed terminal before Exited.
 #[test]
-fn a_process_exit_leaves_a_question_answerable_as_a_message_on_both_bridges() {
-    for name in ["codex-question-single", "claude-question-single"] {
+fn a_process_exit_leaves_a_question_answerable_as_a_message_on_all_question_bridges() {
+    for name in [
+        "codex-question-single",
+        "claude-question-single",
+        "antigravity-question-single",
+    ] {
         let scenario = prefix(name);
         let mut rig = Rig::start(scenario);
         rig.open();
@@ -196,7 +209,8 @@ pub(super) fn prefix(name: &str) -> Scenario {
         .frames
         .iter()
         .position(|f| {
-            f["method"] == "item/tool/requestUserInput"
+            f["method"] == "elicitation/create"
+                || f["method"] == "item/tool/requestUserInput"
                 || (f["type"] == "control_request"
                     && f["request"]["tool_name"] == "AskUserQuestion")
         })
@@ -209,7 +223,11 @@ pub(super) fn prefix(name: &str) -> Scenario {
 #[test]
 fn a_lost_session_answer_is_one_new_run_after_exit_or_restart_even_after_retries() {
     for restart in [false, true] {
-        for name in ["codex-question-single", "claude-question-single"] {
+        for name in [
+            "codex-question-single",
+            "claude-question-single",
+            "antigravity-question-single",
+        ] {
             let mut rig = Rig::start(prefix(name));
             rig.open();
             rig.resume();
@@ -225,10 +243,10 @@ fn a_lost_session_answer_is_one_new_run_after_exit_or_restart_even_after_retries
                 rig
             };
             assert_eq!(requests(&rig)[0].responder, "message");
-            let mut next = rig.recording(if rig.provider == crate::harness::Provider::Codex {
-                "codex-ls"
-            } else {
-                "claude-ls"
+            let mut next = rig.recording(match rig.provider {
+                crate::harness::Provider::Codex => "codex-ls",
+                crate::harness::Provider::Antigravity => "antigravity-acp-ls",
+                _ => "claude-ls",
             });
             if rig.provider == crate::harness::Provider::Codex {
                 next.expected[0].frame["params"]["approvalPolicy"] =
@@ -324,4 +342,40 @@ fn invalid_answers_are_refused_before_any_write() {
     rig.close();
     rig.drain();
     rig.finish();
+}
+
+#[test]
+fn antigravity_questions_are_answerable_in_quiet_and_auto_modes() {
+    for mode in [
+        crate::harness::requests::PermissionMode::Quiet,
+        crate::harness::requests::PermissionMode::Auto,
+    ] {
+        let mut scenario = Scenario::recorded("antigravity-question-single");
+        scenario.fixture.permission_mode = Some(mode);
+        let frames = scenario.frames.clone();
+        let mut rig = Rig::start(scenario);
+        rig.open();
+        for frame in &frames {
+            rig.feed(frame);
+            rig.drain();
+            if frame["method"] == "elicitation/create" {
+                let r = requests(&rig).pop().unwrap();
+                answer(
+                    &mut rig,
+                    "answer",
+                    r.id,
+                    "answer",
+                    vec![QuestionAnswer {
+                        question_id: "q1".into(),
+                        answers: vec!["Blue".into()],
+                        dismissed: false,
+                    }],
+                )
+                .unwrap();
+            }
+        }
+        rig.close();
+        rig.drain();
+        rig.finish();
+    }
 }

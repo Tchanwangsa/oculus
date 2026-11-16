@@ -1,4 +1,4 @@
-//! The way back to one `session/request_permission` the student was asked.
+//! The guarded write back to an approval or question the student was asked.
 //! agy offers Allow (`allow_once`) and Deny (`reject_once`) only, and sends
 //! nothing back for an answer, so a line the pipe took is all the proof
 //! there is. An answer is admitted only while the session is not being
@@ -60,7 +60,7 @@ pub(super) struct AcpRoute {
 }
 
 impl AcpRoute {
-    fn write(&self, option: Option<&str>) -> Reply {
+    pub(super) fn write(&self, result: Value) -> Reply {
         let Some(session) = self.session.upgrade() else {
             return Reply::Failed("the agy process is gone".into());
         };
@@ -76,7 +76,7 @@ impl AcpRoute {
                 return Reply::Failed("it was already answered".into());
             }
         }
-        match session.rpc.answer(&self.id, outcome(option)) {
+        match session.rpc.answer(&self.id, result) {
             Ok(()) => Reply::Acknowledged,
             Err(e) => Reply::Uncertain(e),
         }
@@ -87,13 +87,13 @@ impl Route for AcpRoute {
     fn reply(&self, option: &RequestOption) -> Reply {
         match option.decision {
             Decision::Accept | Decision::AcceptForSession => {
-                self.write(self.options.allow.as_deref())
+                self.write(outcome(self.options.allow.as_deref()))
             }
-            Decision::Decline => self.write(self.options.reject.as_deref()),
+            Decision::Decline => self.write(outcome(self.options.reject.as_deref())),
         }
     }
 
     fn withdraw(&self) {
-        let _ = self.write(self.options.reject.as_deref());
+        let _ = self.write(outcome(self.options.reject.as_deref()));
     }
 }

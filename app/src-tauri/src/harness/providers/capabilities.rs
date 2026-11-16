@@ -83,7 +83,10 @@ pub const fn of(provider: Provider) -> Capabilities {
             provider,
             Provider::Codex | Provider::Claude | Provider::Antigravity
         ),
-        questions: matches!(provider, Provider::Codex | Provider::Claude),
+        questions: matches!(
+            provider,
+            Provider::Codex | Provider::Claude | Provider::Antigravity
+        ),
         auto_review: matches!(provider, Provider::Codex | Provider::Claude),
         session_grants: matches!(provider, Provider::Codex),
         mode_switch_in_session: matches!(provider, Provider::Codex | Provider::Antigravity),
@@ -116,6 +119,7 @@ pub const fn fixture(provider: Provider, flag: Flag) -> Option<&'static str> {
         (Provider::Codex, Flag::ModeSwitchInSession) => Some("codex-mode-switch"),
         (Provider::Codex, Flag::Questions) => Some("codex-question-typed-blocking"),
         (Provider::Claude, Flag::Questions) => Some("claude-question-single"),
+        (Provider::Antigravity, Flag::Questions) => Some("antigravity-question-single"),
         (Provider::Claude, Flag::Approvals) => Some("claude-approval-escape"),
         (Provider::Claude, Flag::AutoReview) => Some("claude-auto-classifier"),
         (Provider::Antigravity, Flag::Interrupt) => Some("antigravity-acp-cancel"),

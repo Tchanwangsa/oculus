@@ -14,7 +14,7 @@ pub struct QuestionOption {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Question {
-    /// Codex's native id; Claude's question text, which its reply keys by.
+    /// Codex's native id, Claude's question text, or agy's schema property.
     pub id: String,
     pub header: String,
     pub text: String,

@@ -482,8 +482,8 @@ fn a_new_session_carries_the_brief_and_takes_its_model_level_and_mode() {
     let frames = heard.lock().unwrap().clone();
     assert_eq!(
         frames[0]["params"]["clientCapabilities"],
-        json!({ "fs": { "readTextFile": false, "writeTextFile": false }, "terminal": false }),
-        "no client services and no elicitation are offered"
+        json!({ "fs": { "readTextFile": false, "writeTextFile": false }, "terminal": false, "elicitation": {"form":{}} }),
+        "only form elicitation is offered"
     );
     assert_eq!(
         frames[1]["params"]["_meta"]["antigravity"]["systemPrompt"]["append"],

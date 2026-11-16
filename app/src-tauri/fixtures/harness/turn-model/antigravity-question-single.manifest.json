@@ -1,0 +1,69 @@
+{
+  "provider": "antigravity",
+  "cli_version": "1.5.9",
+  "protocol": "Agent Client Protocol v1 elicitation/create forms over agy acp",
+  "model": "gemini-3.8-flash-low",
+  "capture_date": "2026-11-15",
+  "source": "antigravity/05-questions.jsonl lines 9-25; inbound frames and exact recorded accept reply",
+  "source_sha256": "d1fe0ea96c02b606a173c390d50148af03e6f7b958518beec1d3af9ec6fb365f",
+  "evidence": "recorded",
+  "redaction": "Home paths become /Users/student. Replay starts at the first prompt; initialization is tested separately. ",
+  "scenario": "antigravity-question-single",
+  "frames": 15,
+  "sha256": "207f38274603489a7da38c5aa6af391dd10e8e01e91e9fc721ef4ad5c650eb86",
+  "input": "../antigravity-question-single.ndjson",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "session/prompt",
+        "params": {
+          "sessionId": "72d17f9a-9191-4e6b-a508-f57127b7be3a",
+          "prompt": [
+            {
+              "type": "text",
+              "text": "Replay request"
+            }
+          ]
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "result": {
+          "action": "accept",
+          "content": {
+            "q1": "2",
+            "q1_other": "Blue"
+          }
+        }
+      },
+      "response": null
+    }
+  ],
+  "native_session": "72d17f9a-9191-4e6b-a508-f57127b7be3a",
+  "permission_mode": "ask",
+  "settings": {
+    "question_answers": [
+      {
+        "native": "\"1\"",
+        "option": "answer",
+        "answers": [
+          {
+            "questionId": "q1",
+            "answers": [
+              "Blue"
+            ],
+            "dismissed": false
+          }
+        ]
+      }
+    ],
+    "stop": false,
+    "derivation": ""
+  }
+}

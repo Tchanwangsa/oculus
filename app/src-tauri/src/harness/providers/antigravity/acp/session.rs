@@ -68,6 +68,12 @@ pub(super) struct Models {
     pub(super) applied: Option<String>,
 }
 
+pub(super) struct Callback {
+    id: Value,
+    cancel: Value,
+    pub(super) tool: Option<String>,
+}
+
 pub struct AcpSession {
     pub(in crate::harness) rpc: Rpc,
     pub(super) sink: Sink,
@@ -84,11 +90,11 @@ pub struct AcpSession {
     pub(super) closing: AtomicBool,
     /// Its session was opened, so its end is the chat's to hear.
     pub(super) opened: AtomicBool,
-    /// Permission requests put to the student, by their id as JSON, with
+    /// Approvals and questions put to the student, by their id as JSON, with
     /// the id as sent and the generation they were asked under. A stop, a
     /// turn's end and teardown bump the generation and empty the map, so an
     /// answer is written only to a request of the live generation.
-    pub(super) callbacks: Mutex<(u64, HashMap<String, Value>)>,
+    pub(super) callbacks: Mutex<(u64, HashMap<String, Callback>)>,
     pub(super) one_off: bool,
     pub(super) library: PathBuf,
     pub(super) cwd: PathBuf,
@@ -187,16 +193,20 @@ impl AcpSession {
 
     /// `initialize`, then a new session or the chat's own loaded, then its
     /// settings. No client file or terminal service is offered (the agent's
-    /// own tools do the work, and ask first), and no elicitation yet.
+    /// own tools do the work, and ask first). Chat offers form elicitation.
     pub(super) fn open(&self, base: &ThreadSpawn, brief: &str) -> Result<(), OpenError> {
+        let mut capabilities = json!({
+            "fs": { "readTextFile": false, "writeTextFile": false },
+            "terminal": false,
+        });
+        if !self.one_off {
+            capabilities["elicitation"] = json!({"form":{}});
+        }
         let init = self.rpc.request(
             "initialize",
             json!({
                 "protocolVersion": 1,
-                "clientCapabilities": {
-                    "fs": { "readTextFile": false, "writeTextFile": false },
-                    "terminal": false,
-                },
+                "clientCapabilities": capabilities,
                 "clientInfo": { "name": "oculus", "title": "Oculus", "version": env!("CARGO_PKG_VERSION") },
             }),
         )?;
@@ -341,12 +351,25 @@ impl AcpSession {
         self.emit(events);
     }
 
-    /// Every permission request still put to the student, taken out under
+    /// Every callback still put to the student, taken out under
     /// a new generation: an answer to one of them is no longer admitted.
-    fn end_callbacks(&self) -> Vec<Value> {
+    fn end_callbacks(&self) -> Vec<Callback> {
         let mut callbacks = self.callbacks.lock().unwrap();
         callbacks.0 += 1;
-        callbacks.1.drain().map(|(_, id)| id).collect()
+        callbacks.1.drain().map(|(_, callback)| callback).collect()
+    }
+
+    pub(super) fn register_callback(&self, id: &Value, cancel: Value, tool: Option<String>) -> u64 {
+        let mut callbacks = self.callbacks.lock().unwrap();
+        callbacks.1.insert(
+            id.to_string(),
+            Callback {
+                id: id.clone(),
+                cancel,
+                tool,
+            },
+        );
+        callbacks.0
     }
 
     /// One line from the agent.
@@ -360,6 +383,14 @@ impl AcpSession {
                 if !self.prompting.load(Ordering::SeqCst) {
                     return;
                 }
+                let update = &v["params"]["update"];
+                if update["sessionUpdate"] == "tool_call_update"
+                    && matches!(update["status"].as_str(), Some("completed" | "failed"))
+                {
+                    if let Some(tool) = update["toolCallId"].as_str() {
+                        self.retire_question(tool);
+                    }
+                }
                 let events = self
                     .translator
                     .lock()
@@ -368,6 +399,7 @@ impl AcpSession {
                 self.emit(events);
             }
             ("session/request_permission", Some(id)) => self.permission(id, &v["params"]),
+            ("elicitation/create", Some(id)) => self.question(id, &v["params"]),
             (method, Some(id)) => {
                 elog!("[oculus] agy: refused its {method} request");
                 let message = format!("Oculus does not answer {method}");
@@ -412,11 +444,7 @@ impl AcpSession {
             Verdict::Ask(mut request) => {
                 let wire = id.to_string();
                 request.native_ref = wire.clone();
-                let generation = {
-                    let mut callbacks = self.callbacks.lock().unwrap();
-                    callbacks.1.insert(wire.clone(), id.clone());
-                    callbacks.0
-                };
+                let generation = self.register_callback(id, outcome(None), None);
                 let route = AcpRoute {
                     session: self.me.clone(),
                     id: id.clone(),
@@ -433,7 +461,8 @@ impl AcpSession {
     }
 
     /// Stop the turn: `session/cancel`, then, as ACP asks of a client, every
-    /// permission request still open is answered `cancelled`. The prompt's
+    /// permission request still open is answered `cancelled`; questions are
+    /// declined. The prompt's
     /// reply (`cancelled`) ends the turn; the process lives on.
     pub fn interrupt(&self) -> Result<(), String> {
         if !self.is_alive() || !self.prompting.load(Ordering::SeqCst) {
@@ -442,8 +471,8 @@ impl AcpSession {
         self.interrupting.store(true, Ordering::SeqCst);
         self.rpc
             .notify("session/cancel", json!({ "sessionId": self.session_id() }))?;
-        for id in self.end_callbacks() {
-            if let Err(e) = self.rpc.answer(&id, outcome(None)) {
+        for callback in self.end_callbacks() {
+            if let Err(e) = self.rpc.answer(&callback.id, callback.cancel) {
                 elog!("[oculus] agy: cancelling a request: {e}");
             }
         }

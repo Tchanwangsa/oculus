@@ -1643,8 +1643,9 @@ Claude 2.1.325's `AskUserQuestion` is routed before tool approvals
 `updatedInput.answers`, keyed by exact question text; multiple values are
 joined with `", "`. A whole dismissal sends deny with a message saying the
 student dismissed the question, so the agent carries on rather than reading
-it as a refusal. One-off turns deny the tool on both bridges. opencode and
-Antigravity have `questions` false.
+it as a refusal. One-off turns deny the tool on both bridges. Antigravity's
+forms use the same payload and panel ([below](#antigravity-asks-over-acp));
+opencode has `questions` false.
 
 A pending question whose process or app is lost keeps its payload and moves
 to `message`; it is excluded from later turn cleanup and native callback
@@ -1911,8 +1912,9 @@ the stage 5 probe; replayed by `testkit/agy_requests.rs`).
 `providers/antigravity/acp/`: `client.rs` (requests and replies by id),
 `session.rs`, `updates.rs` (the timeline), `policy.rs` and `route.rs`.
 
-- **A session.** `initialize` offers no client service (no file or
-  terminal methods, and no `elicitation`: questions are stage 3's), then
+- **A session.** `initialize` offers no file or terminal service. Chat
+  sessions advertise `clientCapabilities.elicitation.form = {}` (one-off
+  jobs never do), then
   `session/new` with the chat's folder as `cwd` and the brief in
   `_meta.antigravity.systemPrompt.append`, or `session/load` with the
   chat's session id (and the brief again). A load replays the conversation
@@ -1943,10 +1945,35 @@ the stage 5 probe; replayed by `testkit/agy_requests.rs`).
   `session/set_model` before its prompt (`model_switch_in_session`). A
   level change restarts the process and loads the session.
 - **Stop** is `session/cancel`; then every permission request still open
-  is answered `cancelled`, as ACP asks of a client. The reply comes back
+  is answered `cancelled`, as ACP asks of a client; waiting forms get
+  `{action: "decline"}`. The reply comes back
   `cancelled` (in under a second during a command, the probe measured) and
   the process takes the next message. The text streamed so far is kept as
   partial, with no gap. Force stop kills the process.
+
+**Questions** arrive as `elicitation/create`, `mode: "form"` on agy 1.5.9,
+not as permission requests (`acp/questions.rs`). The recorded
+`antigravity-question-single` fixture gates `questions`. Each schema property
+becomes a question whose id is that property's name, header is its title,
+and text is its description or title. `oneOf` titles become option labels
+(descriptions are retained); the route maps labels back to native string
+constants. Array properties use `items.oneOf` and permit several selections.
+A sibling `<id>_other` string permits typed answers. Unknown fields, secret
+formats, ambiguous options, orphan Other properties and unsupported shapes
+produce an RPC error and a visible error naming **agy 1.5.9**.
+
+Answers return `{action: "accept", content: {…}}`: the native constant (an
+array for multi), with answer text in `_other` when present, as in the
+recording. Typed-only answers use `_other`; individually dismissed questions
+are omitted. Whole dismissal and withdrawal return `{action: "decline"}`.
+Questions use the approvals' callback generation guard. A terminal tool update
+withdraws an unanswered question; Stop and teardown retire its callback so a
+late answer cannot write. Process exit and app restart retain pending
+questions as message responders under the shared rules above. One-off jobs
+decline a stray form without showing a request. Questions remain answerable
+in every approval mode. Multi, typed, dismiss and Stop wire cases are derived,
+not live recordings; the recorded single-choice exchange establishes native
+accept and continuation.
 
 **Rust's answer is the only gate.** In mode `default` every write and
 every command sends `session/request_permission` first, and under ACP

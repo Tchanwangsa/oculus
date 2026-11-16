@@ -26,7 +26,7 @@ fn a_failed_load_starts_new_with_one_full_handoff_and_the_next_send_uses_its_id(
             "initialize",
             json!({
                 "protocolVersion":1,
-                "clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false},
+                "clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false,"elicitation":{"form":{}}},
                 "clientInfo":{"name":"oculus","title":"Oculus","version":env!("CARGO_PKG_VERSION")},
             }),
             json!({"agentInfo":{"version":"1.5.9"}}),

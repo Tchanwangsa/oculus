@@ -1,0 +1,61 @@
+{
+  "provider": "antigravity",
+  "cli_version": "1.5.9",
+  "protocol": "Agent Client Protocol v1 elicitation/create forms over agy acp",
+  "model": "gemini-3.8-flash-low",
+  "capture_date": "2026-11-15",
+  "source": "antigravity/05-questions.jsonl lines 9-25; inbound frames and exact recorded accept reply",
+  "source_sha256": "d1fe0ea96c02b606a173c390d50148af03e6f7b958518beec1d3af9ec6fb365f",
+  "evidence": "derived, not recorded",
+  "redaction": "Home paths become /Users/student. Replay starts at the first prompt; initialization is tested separately. Derived, not recorded: recorded prefix, session/cancel, decline and cancelled terminal; no live question-cancellation ordering is claimed.",
+  "scenario": "antigravity-question-stop",
+  "frames": 10,
+  "sha256": "a7546ad459cf96105890582217cfe6f56598970b940d9817962eef73f6648bf5",
+  "input": "../antigravity-question-stop.ndjson",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "session/prompt",
+        "params": {
+          "sessionId": "72d17f9a-9191-4e6b-a508-f57127b7be3a",
+          "prompt": [
+            {
+              "type": "text",
+              "text": "Replay request"
+            }
+          ]
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "method": "session/cancel",
+        "params": {
+          "sessionId": "72d17f9a-9191-4e6b-a508-f57127b7be3a"
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "result": {
+          "action": "decline"
+        }
+      },
+      "response": null
+    }
+  ],
+  "native_session": "72d17f9a-9191-4e6b-a508-f57127b7be3a",
+  "permission_mode": "ask",
+  "settings": {
+    "question_answers": [],
+    "stop": true,
+    "derivation": "Derived, not recorded: recorded prefix, session/cancel, decline and cancelled terminal; no live question-cancellation ordering is claimed."
+  }
+}

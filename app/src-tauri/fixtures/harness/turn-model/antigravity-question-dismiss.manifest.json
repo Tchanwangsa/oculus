@@ -1,0 +1,57 @@
+{
+  "provider": "antigravity",
+  "cli_version": "1.5.9",
+  "protocol": "Agent Client Protocol v1 elicitation/create forms over agy acp",
+  "model": "gemini-3.8-flash-low",
+  "capture_date": "2026-11-15",
+  "source": "antigravity/05-questions.jsonl lines 9-25; inbound frames and exact recorded accept reply",
+  "source_sha256": "d1fe0ea96c02b606a173c390d50148af03e6f7b958518beec1d3af9ec6fb365f",
+  "evidence": "derived, not recorded",
+  "redaction": "Home paths become /Users/student. Replay starts at the first prompt; initialization is tested separately. Derived, not recorded: recorded prefix, decline and transport EOF; no live dismissal continuation is claimed.",
+  "scenario": "antigravity-question-dismiss",
+  "frames": 9,
+  "sha256": "95aa508fae8aba4601ebc99d619cfd22252275d41d93911e730bd8a9517797cc",
+  "input": "../antigravity-question-dismiss.ndjson",
+  "expected_outbound": [
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "session/prompt",
+        "params": {
+          "sessionId": "72d17f9a-9191-4e6b-a508-f57127b7be3a",
+          "prompt": [
+            {
+              "type": "text",
+              "text": "Replay request"
+            }
+          ]
+        }
+      },
+      "response": null
+    },
+    {
+      "frame": {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "result": {
+          "action": "decline"
+        }
+      },
+      "response": null
+    }
+  ],
+  "native_session": "72d17f9a-9191-4e6b-a508-f57127b7be3a",
+  "permission_mode": "ask",
+  "settings": {
+    "question_answers": [
+      {
+        "native": "\"1\"",
+        "option": "dismiss",
+        "answers": []
+      }
+    ],
+    "stop": false,
+    "derivation": "Derived, not recorded: recorded prefix, decline and transport EOF; no live dismissal continuation is claimed."
+  }
+}
