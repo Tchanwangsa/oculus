@@ -1952,7 +1952,7 @@ policy (`policy.rs`, `judge`) answers before anyone is asked:
 | a write (ACP kind `edit`, `delete`, `move`, or a writing tool) naming a protected path (`requests/policy.rs` over `protected.rs`), a folder that holds the library, or the database (`oculus.db*` at the library root) | Deny, unseen |
 | a write that names no path | Deny, unseen: it cannot be checked |
 | a write whose every path (its `locations`, which agy resolves through symlinks, its diffs' and its input's) is under `agents/` or `studio/`; a relative path is read from both the library root and `agents/`, and both readings must pass | Allow, unseen |
-| a plain `oculus …` or `ls …` (no `;`, `&`, `|`, redirect, substitution or escape, no `BypassSandbox`) | Allow, unseen |
+| a plain `oculus …` (including `BypassSandbox`), or `ls …` inside the sandbox; neither may contain `;`, `&`, `|`, redirects, substitution or escapes | Allow, unseen |
 | any other write, command, read, fetch or tool | a request: `file_change` with the diffs, `command` (with `outsideSandbox` when it sets `BypassSandbox`), or `tool` (`read`, `fetch`, `other`) |
 
 A request then goes where every bridge's does: the consumer declines it
@@ -1973,9 +1973,14 @@ else) is refused with `-32601`.
 root, not the session's `cwd`, and refuses its writes there (EPERM; measured
 2026-11-16 on 1.5.9, and it let a write to `/private/tmp` through). A
 command that fails on the sandbox is retried by the agent with
-`BypassSandbox`, which Rust asks the student about: a plain `oculus …` that
-writes the database is one of these, so in Ask the student approves it and
-in Don't ask it is declined.
+`BypassSandbox`. Rust allows a plain `oculus …` retry unasked so it can
+write `oculus.db`. This matches Claude, whose sandbox permits database writes
+and whose rules allow `Bash(oculus:*)`: the CLI's `OCULUS_AGENT` guard protects
+the library on every bridge. `ls` remains sandbox-only; a bypassed `ls` or
+any command with shell syntax still asks.
+
+`agy acp` has no `--disable-slash-commands`. A message starting with one of
+agy's own slash commands, such as `/compact`, runs that command.
 
 **Nothing is written to the student's agy settings.** Earlier versions kept
 Oculus's rules in `~/.gemini/antigravity-cli/settings.json` and recorded what

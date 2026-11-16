@@ -222,12 +222,21 @@ fn any_other_command_is_asked_and_a_sandbox_bypass_says_so() {
     assert_eq!(request.payload["command"], "touch x");
     assert_eq!(request.payload["reason"], "Do it");
     assert_eq!(request.payload["outsideSandbox"], false);
-    let mut bypass = command("oculus search x");
+    let mut bypass = command("ls");
     bypass["toolCall"]["rawInput"]["BypassSandbox"] = json!(true);
     let Verdict::Ask(request) = verdict(&bypass) else {
-        panic!("an allowed command leaving the sandbox is asked");
+        panic!("ls leaving the sandbox is asked");
     };
     assert_eq!(request.payload["outsideSandbox"], true);
+}
+
+#[test]
+fn a_plain_oculus_bypass_is_allowed_but_shell_syntax_still_asks() {
+    let mut plain = command("oculus memory add fact");
+    plain["toolCall"]["rawInput"]["BypassSandbox"] = json!(true);
+    assert_eq!(verdict(&plain), Verdict::Allow);
+    plain["toolCall"]["rawInput"]["CommandLine"] = json!("oculus x; rm -rf ~");
+    assert!(matches!(verdict(&plain), Verdict::Ask(_)));
 }
 
 #[test]

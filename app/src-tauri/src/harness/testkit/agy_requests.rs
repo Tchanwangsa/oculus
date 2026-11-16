@@ -641,6 +641,54 @@ fn a_one_off_turn_answers_by_policy_alone_and_finishes_without_asking() {
 }
 
 #[test]
+fn a_one_off_bypassed_oculus_command_is_allowed_without_a_question() {
+    let scratch = super::guard::scratch("agy-oculus-bypass");
+    let scenario = Scenario::recorded("antigravity-acp-full-turn");
+    let mut params = scenario
+        .frames
+        .iter()
+        .find(|f| permission(f) && f["params"]["toolCall"]["name"] == "run_command")
+        .unwrap()["params"]
+        .clone();
+    params["toolCall"]["rawInput"]["CommandLine"] = json!("oculus memory add fact");
+    params["toolCall"]["rawInput"]["BypassSandbox"] = json!(true);
+    let outbound = Outbound::new(
+        vec![
+            scenario.fixture.expected_outbound[0].clone(),
+            Expected {
+                frame: json!({"jsonrpc":"2.0","id":"bypass","result":{"outcome":{"outcome":"selected","optionId":"allow"}}}),
+                response: Value::Null,
+                error: None,
+                any_prompt: false,
+            },
+        ],
+        &scratch,
+    );
+    let events: Arc<Mutex<Vec<HarnessEvent>>> = Arc::default();
+    let heard = events.clone();
+    let session = crate::harness::antigravity::acp::replay::session(
+        outbound.clone(),
+        Arc::new(move |e| heard.lock().unwrap().push(e)),
+        &scenario.fixture.native_session,
+        &scratch,
+        true,
+    );
+    session
+        .send("Replay request", &crate::harness::event::unbound())
+        .unwrap();
+    session.inbound(&json!({"jsonrpc":"2.0","id":"bypass","method":"session/request_permission","params":params}));
+    outbound.finish(true);
+    assert!(!events
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|e| matches!(e, HarnessEvent::RequestAsked { .. })));
+    session.kill();
+    drop(session);
+    let _ = std::fs::remove_dir_all(scratch);
+}
+
+#[test]
 fn every_acp_recording_replays_with_its_answers_written_exactly() {
     for (name, answers, stop) in NAMES {
         let replay = recorded(name);

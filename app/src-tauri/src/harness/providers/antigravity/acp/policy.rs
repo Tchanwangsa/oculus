@@ -258,7 +258,10 @@ pub(super) fn judge(params: &Value, library: &Path, cwd: &Path) -> Verdict {
                 .unwrap_or("")
                 .to_string();
             let bypass = input["BypassSandbox"] == true;
-            if !bypass && allowed_command(&line) {
+            // agy's sandbox refuses database writes even through our CLI.
+            // OCULUS_AGENT guards oculus itself, including a bypassed retry.
+            let oculus = line.split_whitespace().next() == Some("oculus");
+            if allowed_command(&line) && (!bypass || oculus) {
                 return Verdict::Allow;
             }
             let payload = json!({
