@@ -1,6 +1,7 @@
 pub(crate) mod drive;
 pub(crate) mod files;
 pub mod layout;
+pub mod migrate;
 pub mod paths;
 pub mod pdf_render;
 pub(crate) mod pdf_view;

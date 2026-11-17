@@ -49,6 +49,7 @@ agent queries and plans through. Flags are in
 | `studio voices download`, `studio voices delete` | Kokoro's `voice-kokoro` and `g2p-en-us` packs (101 MB) and its 20 voices (510 KB each) in `<app data>/models/voice/`; named voices or `--all` touch only voices | Checked against their pinned sha256 before they get their names; `voices` alone writes nothing |
 | `studio aligner download`, `studio aligner delete` | The aligner model in `<app data>/models/align/` (378 MB) | Checked against its pinned sha256 before it gets its name; `status` writes nothing |
 | `widget check` | Nothing | Reads one TSX file or stdin; exits 1 on any finding ([widgets.md](./widgets.md#checking-a-widget-before-it-is-sent)) |
+| `library migrate` | Moves an old library into the Drive tree and rewrites its paths; `--dry-run` writes nothing | Every other command (bar `docs --stdout`) runs the same move first when it finds the old layout, and exits 1 if it fails ([library-move.md](./library-move.md)) |
 | `docs` | The library's `agents/` folder | [Below](#oculus-docs-writes-the-agents-folder) |
 | `keyd install`, `keyd uninstall` | macOS: the LaunchAgent, copied helper app and stamp; Windows: uninstall stops the verified resident broker and removes its registration and stamp, while CLI install cannot start it | Keeps the vault and its master key ([below](#keyd-lifetime-follows-the-platform)) |
 | `keyd status` | Nothing | Pings keyd; macOS launchd can activate it, while Windows only checks an existing broker. Prints no secret |
@@ -67,7 +68,9 @@ whole story ([chapters.md](./chapters.md)). `--json` is the only global flag.
 
 A CLI sync shows up in the app and vice versa. Schema belongs to the app's
 migrations, so on a fresh machine the app must open once first; until then
-`run` scrapes to disk and says so.
+`run` scrapes to disk and says so. The one exception is the library move,
+which brings an existing database's schema up before rewriting its paths
+([library-move.md](./library-move.md)).
 
 - `auth login` launches the app for the SAML browser step, because a push or
   biometric challenge needs a human, and waits for keyd to report the sign-in

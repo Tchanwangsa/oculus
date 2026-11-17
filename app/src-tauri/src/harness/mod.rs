@@ -32,6 +32,7 @@ mod transport;
 
 pub use cli::{discover, install, signin, update};
 pub use event::{HarnessEvent, Provider, ToolKind};
+pub use manager::write_opencode_config;
 pub use manager::{
     instructions, run_once, thread_cwd, thread_sections, Generation, Harness, LectureBrief,
     OneSink, OwnTurns, RawLog, Release, RewindTo, SendError, SendOptions, Sinks, Steered,

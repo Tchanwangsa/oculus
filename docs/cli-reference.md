@@ -18,6 +18,7 @@ Commands:
   list        List subjects or lectures
   run         Scrape Canvas content or sync lectures
   index       Re-parse and re-embed PDFs already on record
+  library     Move an old library into the Drive tree, or preview the move
   search      Search the library by meaning (needs network and an API key)
   grep        Search the library by pattern (offline, no model)
   read        Print the text of one library file
@@ -386,6 +387,51 @@ Options:
       --reparse
           Parse again every PDF whose record predates the current parser version. Spends
           MinerU allowance; embeddings are kept
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `oculus library`
+
+```
+Move an old library into the Drive tree, or preview the move
+
+Usage: oculus library <COMMAND>
+
+Commands:
+  migrate  Move an old library into the Drive tree, or show what the move would do
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus library migrate`
+
+```
+Move an old library into the Drive tree, or show what the move would do
+
+Every command (and the app) runs this move first when it finds the old layout, so
+running it by hand is only needed to watch it or preview it. Synced folders go into each
+subject's Course/ folder, the student's own folders flatten into the subject's root,
+lecture recordings move from lectures/<id>/ into Course/Recordings/<date>-<slug>/, parse
+records into .oculus/derived/, and the database's paths are rewritten to match. Old
+paths stay readable through the path_moves table. Once done, a marker in the data
+folder's .library-move/ makes it a no-op.
+
+Usage: oculus library migrate [OPTIONS]
+
+Options:
+      --dry-run
+          Print the plan (counts per kind and the first moves) without moving, writing
+          or locking anything
+
+      --show <SHOW>
+          How many moves the dry run lists
+
+          [default: 40]
 
   -h, --help
           Print help (see a summary with '-h')

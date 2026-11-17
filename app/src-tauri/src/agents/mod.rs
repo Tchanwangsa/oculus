@@ -37,7 +37,7 @@ const SKILL_DOC_NAME: &str = "SKILL.md";
 const TASTE_DOC_NAME: &str = "TASTE.md";
 /// The index beside the memories, in both buckets.
 const MEMORY_INDEX_NAME: &str = "MEMORY.md";
-const MEMORIES_DIR: &str = "memories";
+pub const MEMORIES_DIR: &str = "memories";
 
 /// From a course folder to the one central copy; relative so the library can move.
 const AGENTS_DOC_REL: &str = "../../agents/AGENTS.md";

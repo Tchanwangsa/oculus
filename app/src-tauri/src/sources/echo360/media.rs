@@ -121,7 +121,7 @@ pub fn cleanup_partial_downloads(data_dir: &Path) {
         for file in files.flatten() {
             let name = file.file_name();
             let name = name.to_string_lossy();
-            if name.starts_with("raw") && name.ends_with(".mp4") {
+            if is_partial_download(&name) {
                 elog!(
                     "[oculus] cleanup: removing orphaned {}",
                     file.path().display()
@@ -135,6 +135,11 @@ pub fn cleanup_partial_downloads(data_dir: &Path) {
 /// Where a trimmed stream lives.
 pub fn source_path(dir: &Path, source: SourceNum) -> PathBuf {
     dir.join(format!("source{source}.mp4"))
+}
+
+/// True for a file name `partial_path` gives: a download not yet trimmed.
+pub fn is_partial_download(name: &str) -> bool {
+    name.starts_with("raw") && name.ends_with(".mp4")
 }
 
 /// The untrimmed download, one per source so both can run at once.

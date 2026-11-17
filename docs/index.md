@@ -26,6 +26,7 @@ the root `CLAUDE.md` holds only the rules.
 | [projects.md](./projects.md) | Projects and tasks: the Overview, board, table, timeline and the universal Tasks view |
 | [chapters.md](./chapters.md) | Lecture chapters and where a lecture ends: the detector and the two model jobs |
 | [onboarding.md](./onboarding.md) | First-run setup: the launch gate, the `onboarding` settings row, the steps, *Run setup again* |
+| [library-move.md](./library-move.md) | The one-shot move of an old library into the Drive tree at launch: plan, journal, renames, the database rewrite, `path_moves` |
 | [frontend.md](./frontend.md) | The frontend's data side: backend events, settings, parse state, library files |
 | [shell.md](./shell.md) | Per-pane routers, tabs, the side panel, window shortcuts, ⌘F, search |
 | [ui.md](./ui.md) | The UI system: design rules, and the WebKit and CSS traps |

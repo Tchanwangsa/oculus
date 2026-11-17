@@ -7,6 +7,7 @@
 use crate::*;
 
 mod lecture;
+mod library;
 mod memory;
 mod misc;
 mod planning;
@@ -16,6 +17,7 @@ mod studio;
 mod widget;
 
 pub(crate) use lecture::*;
+pub(crate) use library::*;
 pub(crate) use memory::*;
 pub(crate) use misc::*;
 pub(crate) use planning::*;
@@ -63,6 +65,11 @@ pub(crate) enum Command {
     Run(RunArgs),
     /// Re-parse and re-embed PDFs already on record
     Index(IndexArgs),
+    /// Move an old library into the Drive tree, or preview the move
+    Library {
+        #[command(subcommand)]
+        action: LibraryAction,
+    },
     // No doc comments here: clap would let the variant's text shadow the fuller
     // help on the Args struct.
     Search(SearchArgs),

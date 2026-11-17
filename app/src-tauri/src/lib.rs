@@ -37,6 +37,13 @@ use sync::subjects::SubjectsState;
 pub fn run() {
     // Before anything opens a file in the data dir (`storage::storage_start_over`).
     library::storage::finish_start_over(&library::paths::data_dir());
+    // An old library moves into the Drive tree before any window, job or
+    // watcher can touch it (docs/library-move.md); a failure is said in
+    // `setup` and the app closes.
+    let library_move = library::migrate::at_startup(&library::paths::data_dir());
+    if let Err(e) = &library_move {
+        elog!("[oculus] library move failed: {e}");
+    }
     // No credential goes through keyd until it serves the profile's university.
     keyd_core::client::bound::bind(sources::institution::bound);
     tauri::Builder::default()
@@ -58,7 +65,11 @@ pub fn run() {
         .manage(shell::usage::UsageState::default())
         .manage(music::MusicState::default())
         .manage(sources::ed::workspace_session::EdWorkspaces::default())
-        .setup(|app| {
+        .setup(move |app| {
+            if let Err(e) = &library_move {
+                library::migrate::refuse_to_start(app, e);
+                return Ok(());
+            }
             // WebKit's WebCrypto master key comes from keyd. First, so the
             // default store has its delegate before any page can ask.
             #[cfg(target_os = "macos")]

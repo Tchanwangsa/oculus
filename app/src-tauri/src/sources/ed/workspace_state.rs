@@ -25,11 +25,12 @@ pub struct WorkspaceState {
     pub files: BTreeMap<String, String>,
 }
 
+/// The data-dir folder holding one record per challenge.
+pub const DIR: &str = "ed-workspaces";
+
 /// Where a challenge's record lives.
 pub fn path(data_dir: &Path, challenge_id: i64) -> PathBuf {
-    data_dir
-        .join("ed-workspaces")
-        .join(format!("{challenge_id}.json"))
+    data_dir.join(DIR).join(format!("{challenge_id}.json"))
 }
 
 /// The challenge's record, `None` when it has none or it cannot be read

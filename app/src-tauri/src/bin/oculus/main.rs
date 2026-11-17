@@ -46,6 +46,20 @@ fn main() {
         }
         std::process::exit(1);
     }
+    // An old library moves into the Drive tree before any command reads it
+    // (docs/library-move.md). `library migrate` runs or previews it itself;
+    // `docs --stdout` must not touch the data dir.
+    let moves_itself = matches!(
+        cli.command,
+        Some(Command::Library {
+            action: LibraryAction::Migrate(_)
+        })
+    ) || matches!(&cli.command, Some(Command::Docs(a)) if a.stdout);
+    if !moves_itself {
+        if let Err(e) = app_lib::library::migrate::at_startup(&paths::data_dir()) {
+            fail(cli.json, &format!("the library move failed: {e}"));
+        }
+    }
     let ctx = Ctx::new(cli.json);
 
     let result = match cli.command {
@@ -74,6 +88,9 @@ fn main() {
         Some(Command::List(args)) => ctx.list(args),
         Some(Command::Run(args)) => ctx.run(args),
         Some(Command::Index(args)) => ctx.index(&args),
+        Some(Command::Library { action }) => match action {
+            LibraryAction::Migrate(a) => ctx.library_migrate(&a),
+        },
         Some(Command::Search(args)) => ctx.search(&args),
         Some(Command::Grep(args)) => ctx.grep(&args),
         Some(Command::Read(args)) => ctx.read(&args),
@@ -131,13 +148,18 @@ fn main() {
     };
 
     if let Err(e) = result {
-        if cli.json {
-            eprintln!("{}", serde_json::json!({ "error": e }));
-        } else {
-            eprintln!("{} {e}", paint("error:", RED));
-        }
-        std::process::exit(1);
+        fail(cli.json, &e);
     }
+}
+
+/// The error on stderr, as JSON when asked, and exit 1.
+fn fail(json: bool, e: &str) -> ! {
+    if json {
+        eprintln!("{}", serde_json::json!({ "error": e }));
+    } else {
+        eprintln!("{} {e}", paint("error:", RED));
+    }
+    std::process::exit(1);
 }
 
 fn read_line(prompt: &str) -> Result<String, String> {

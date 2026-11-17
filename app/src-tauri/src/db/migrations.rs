@@ -991,6 +991,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS lectures_folder_rel
                         "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 64,
+            description: "path_moves: where the library move put each old path",
+            // Old data-dir-relative prefixes (`courses/X/files`,
+            // `lectures/<id>`) and where they went; the longest prefix a path
+            // starts with wins (`library::migrate::resolve_moved`).
+            sql: r#"
+CREATE TABLE IF NOT EXISTS path_moves (
+    old_prefix TEXT PRIMARY KEY,
+    new_prefix TEXT NOT NULL
+);
+                        "#,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

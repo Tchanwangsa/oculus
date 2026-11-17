@@ -10,6 +10,7 @@ import { readCourseFile } from "@/lib/files/courseFiles";
 import { lecturePagePath } from "@/lib/lectures";
 import { citedPage, fullCitation, quoteFromLines, type Citation } from "@/lib/citations";
 import { isCoursePath, recordingOf } from "@/lib/files/libraryLayout";
+import { resolveMoved } from "@/lib/files/pathMoves";
 
 /** Categories whose rows carry real filenames, not Canvas slugs. */
 const REAL_FILENAME = new Set(["file", "image", "upload"]);
@@ -160,13 +161,15 @@ let locateSeq = 0;
  * to the system viewer; a path in a lecture's recording folder opens the lecture. `newTab` is the
  * ⌘-click, answered here rather than through `data-tab-href` because the
  * route is a database lookup away. Pictures under `agents/` are the caller's
- * to show (the lightbox in `components/markdown/Citation.tsx`).
+ * to show (the lightbox in `components/markdown/Citation.tsx`). A path
+ * written before the library move opens where the move put it.
  */
 export function openCitation(cite: Citation, newTab = false): void {
   openCitationAsync(cite, newTab).catch(console.error);
 }
 
-async function openCitationAsync(cite: Citation, newTab: boolean): Promise<void> {
+async function openCitationAsync(cited: Citation, newTab: boolean): Promise<void> {
+  const cite = { ...cited, path: await currentPath(cited.path) };
   const system = () => invoke<void>("open_course_file", { relativePath: cite.path });
   const folder = recordingOf(cite.path);
   if (folder) {
@@ -186,6 +189,13 @@ async function openCitationAsync(cite: Citation, newTab: boolean): Promise<void>
     return;
   }
   openFileSmart(file, locate);
+}
+
+/** A path as it is now: one the library holds as written, or else where the
+ *  library move put it (`path_moves`), for a citation written before it. */
+async function currentPath(path: string): Promise<string> {
+  if (recordingOf(path) || (await getFileByRelativePath(path))) return path;
+  return (await resolveMoved(path).catch(() => null)) ?? path;
 }
 
 /** Where in `file` the citation points. A line of a parsed `.md` becomes its

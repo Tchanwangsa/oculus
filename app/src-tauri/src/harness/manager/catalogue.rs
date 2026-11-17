@@ -13,8 +13,7 @@ use crate::harness::discover;
 use crate::harness::opencode::{self, OpencodeServer, OpencodeSpawn, ProviderList};
 use crate::harness::Provider;
 
-use super::instructions::{instructions, thread_cwd};
-use super::naming::NAMING_INSTRUCTIONS;
+use super::instructions::thread_cwd;
 use super::raw_log::RawLog;
 use super::Harness;
 
@@ -126,19 +125,7 @@ impl Harness {
         }
         let bin = discover::binary(Provider::Opencode)?;
         let directory = thread_cwd(&self.data_dir);
-        opencode::write_config(
-            &directory,
-            &self.data_dir,
-            &instructions(&self.data_dir, None, None, None),
-            &opencode::OneOffPrompts {
-                naming: NAMING_INSTRUCTIONS,
-                writer: crate::harness::suggest::INSTRUCTIONS,
-                lecture_end: crate::lectures::lecture_end::INSTRUCTIONS,
-            },
-            &crate::harness::studio_agents::opencode_agents_fragment(
-                &crate::harness::studio_agents::assigned_now(Provider::Opencode),
-            ),
-        )?;
+        super::opencode_config::write_opencode_config(&self.data_dir)?;
         let server = OpencodeServer::spawn(OpencodeSpawn {
             bin,
             directory,

@@ -8,7 +8,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use super::roots::COURSES_DIR;
-use super::shape::CURRENT;
+use super::shape::{Shape, CURRENT};
 use super::zone::same_name;
 
 /// What parsing and embedding derive from a PDF.
@@ -33,26 +33,33 @@ impl DerivedKind {
 /// A spreadsheet's text is `<name>.md`, the Markdown of its `<name>.pdf`. A
 /// PDF outside any subject keeps every artifact beside it.
 pub fn derived(pdf: &Path, kind: DerivedKind) -> PathBuf {
-    let beside = match kind {
-        DerivedKind::Markdown => pdf.with_extension("md"),
-        DerivedKind::Pages => pdf.with_extension("pages.json"),
-        DerivedKind::Embeddings => pdf.with_extension("emb.json"),
-        DerivedKind::Images => {
-            let stem = pdf
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            pdf.with_file_name(format!("{stem}_images"))
-        }
-    };
-    let (Some(hidden), DerivedKind::Pages | DerivedKind::Embeddings) = (CURRENT.derived, kind)
-    else {
-        return beside;
-    };
-    let (Some((root, folder)), Some(name)) = (subject_split(pdf), beside.file_name()) else {
-        return beside;
-    };
-    root.join(hidden).join(folder).join(name)
+    CURRENT.derived(pdf, kind)
+}
+
+impl Shape {
+    /// `derived` in this layout: `LEGACY` keeps every artifact beside the PDF.
+    pub fn derived(&self, pdf: &Path, kind: DerivedKind) -> PathBuf {
+        let beside = match kind {
+            DerivedKind::Markdown => pdf.with_extension("md"),
+            DerivedKind::Pages => pdf.with_extension("pages.json"),
+            DerivedKind::Embeddings => pdf.with_extension("emb.json"),
+            DerivedKind::Images => {
+                let stem = pdf
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                pdf.with_file_name(format!("{stem}_images"))
+            }
+        };
+        let (Some(hidden), DerivedKind::Pages | DerivedKind::Embeddings) = (self.derived, kind)
+        else {
+            return beside;
+        };
+        let (Some((root, folder)), Some(name)) = (subject_split(pdf), beside.file_name()) else {
+            return beside;
+        };
+        root.join(hidden).join(folder).join(name)
+    }
 }
 
 /// `derived` for a data-dir-relative path, with `/` separators.

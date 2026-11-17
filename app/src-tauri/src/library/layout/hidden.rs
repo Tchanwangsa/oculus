@@ -21,3 +21,7 @@ pub fn agents_under(course_root: &Path) -> PathBuf {
 pub fn agents_rel(code: &str) -> String {
     format!("{}/{}", course_rel(code), CURRENT.agents)
 }
+
+/// The guidance a student may leave for the agents in a subject's agent
+/// workspace; the harness names it in a scoped thread's brief.
+pub const SUBJECT_INSTRUCTIONS: &str = "INSTRUCTIONS.md";

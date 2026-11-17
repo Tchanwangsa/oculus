@@ -13,6 +13,7 @@
 mod category;
 mod derived;
 mod hidden;
+mod moves;
 mod own;
 mod recordings;
 mod roots;
@@ -26,6 +27,7 @@ mod tests;
 pub use category::*;
 pub use derived::*;
 pub use hidden::*;
+pub use moves::*;
 pub use own::*;
 pub use recordings::*;
 pub use roots::*;

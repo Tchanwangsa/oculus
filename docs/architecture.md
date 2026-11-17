@@ -369,6 +369,8 @@ uses the shared profile folder described in [windows.md](./windows.md). Inside:
 - `vault.bin` and its `vault.bin.lock`, `keyd.sock` (launchd's), and `bin/`
   with a dev-installed `Oculus Helper.app` and keyd's `oculus-keyd.stamp`
   ([above](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
+- `.library-move/` — the library move's journal, lock and `done` marker
+  ([library-move.md](./library-move.md)).
 - `start-over` — present only between Start over and the next launch, which
   empties the directory but for the two usage files, `models/` and keyd's
   own ([auth.md](./auth.md#one-institution-profile-says-which-university)).
@@ -395,7 +397,9 @@ courses/<code>/
 
 `LEGACY` in `shape.rs` is the layout before this one (synced folders at the
 subject root, one folder per own kind, `lectures/<media id>/` in the data
-dir); nothing in the app reads it, it is there to recognise old paths.
+dir); nothing in the app reads it. The one-shot move at launch recognises an
+old library by it and moves it into this tree (`moves.rs` pairs each old
+folder with its new place; [library-move.md](./library-move.md)).
 
 - **`zone_of(rel)` is the question every guard asks** of a data-dir-relative
   path: `Synced`, `Own`, `Hidden` (inside the data dir, not a library file)
@@ -448,7 +452,9 @@ on disk holds the name (`layout::new_recording_rel`).
 `db::store::recording_folder` chooses it the first time anything of the
 lecture is written (a download, a transcript, chapter frames) and stores it
 data-dir-relative in `lectures.folder_rel` (unique ignoring case), so a
-later title change never moves it; every reader takes it from the row.
+later title change never moves it; every reader takes it from the row. A
+recording from before the Drive tree gets its folder from the library move
+([library-move.md](./library-move.md)).
 `lectures.video_path`, `video2_path` and `transcript_path` stay absolute and
 point into it.
 
@@ -464,7 +470,9 @@ answer rather than retrying into a database without them.
 In the app the *frontend* writes the scrape tables, upserting through
 `app/src/lib/db/` as scrape events arrive. Headless, `app/src-tauri/src/db/store/` writes the
 same rows with the same SQL, so a CLI sync looks like an app sync. The CLI
-never creates the database, so a fresh machine opens the app once first.
+never creates the database, so a fresh machine opens the app once first. The
+library move applies the app's own migrations to an existing database before
+it rewrites paths, in either process ([library-move.md](./library-move.md)).
 
 - `pages` (markdown + embedding per PDF page) is the retrieval substrate. Its
   `embed_model`/`embed_dim` columns filter every scan, because a dot product

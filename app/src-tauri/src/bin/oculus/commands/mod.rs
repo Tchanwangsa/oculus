@@ -6,6 +6,7 @@ mod auth;
 mod docs;
 mod keyd;
 mod lecture;
+mod library;
 mod memory;
 mod planning;
 pub(crate) mod query;
