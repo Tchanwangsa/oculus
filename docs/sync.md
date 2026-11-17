@@ -218,7 +218,7 @@ cannot write it — see [cli.md](./cli.md).
 
 Migration 62 adds nullable `files.source_created_at` and
 `files.source_updated_at`. `app/src-tauri/src/sync/dates.rs` normalizes valid
-RFC 3339 timestamps to UTC ISO 8601 with fixed nanosecond precision; missing
+RFC 3339 timestamps to UTC ISO 8601 with millisecond precision (what WebKit's `Date` parses); missing
 or malformed dates are unknown, never the sync's clock.
 
 | Library row | `source_created_at` | `source_updated_at` |

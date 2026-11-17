@@ -3,7 +3,7 @@ use serde_json::json;
 use super::SourceDates;
 
 fn utc(day: u8) -> String {
-    format!("2026-10-{day:02}T00:00:00.000000000Z")
+    format!("2026-10-{day:02}T00:00:00.000Z")
 }
 
 #[test]
@@ -17,7 +17,7 @@ fn canvas_dates_use_source_visibility_and_normalize_offsets() {
     let dates = SourceDates::file(&file);
     assert_eq!(
         dates.source_created_at.as_deref(),
-        Some("2026-10-02T01:00:00.000000000Z")
+        Some("2026-10-02T01:00:00.000Z")
     );
     assert_eq!(dates.source_updated_at, Some(utc(4)));
     let earlier_unlock = json!({"created_at": utc(3), "unlock_at": utc(1), "updated_at": utc(4)});
@@ -90,7 +90,7 @@ fn ed_activity_is_the_latest_nested_reply_not_an_edit_or_roster_date() {
         SourceDates::thread(&listing, &detail),
         SourceDates {
             source_created_at: Some(utc(2)),
-            source_updated_at: Some("2026-10-05T00:00:00.123456000Z".into()),
+            source_updated_at: Some("2026-10-05T00:00:00.123Z".into()),
         }
     );
     assert_eq!(
@@ -113,10 +113,7 @@ fn ed_activity_is_the_latest_nested_reply_not_an_edit_or_roster_date() {
     })
     .unwrap();
     assert_eq!(encoded["source_created_at"], utc(2));
-    assert_eq!(
-        encoded["source_updated_at"],
-        "2026-10-05T00:00:00.123456000Z"
-    );
+    assert_eq!(encoded["source_updated_at"], "2026-10-05T00:00:00.123Z");
     assert!(
         encoded.get("source_dates").is_none(),
         "the TS writer consumes flat fields"

@@ -14,7 +14,7 @@ fn timestamp(value: &Value) -> Option<String> {
         .ok()
         .map(|date| {
             date.with_timezone(&Utc)
-                .to_rfc3339_opts(SecondsFormat::Nanos, true)
+                .to_rfc3339_opts(SecondsFormat::Millis, true)
         })
 }
 

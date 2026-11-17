@@ -17,7 +17,7 @@ impl Reporter for Files {
 }
 
 fn utc(day: u8) -> String {
-    format!("2026-10-{day:02}T00:00:00.000000000Z")
+    format!("2026-10-{day:02}T00:00:00.000Z")
 }
 
 async fn record(pool: &SqlitePool, event: &FileEvent) {

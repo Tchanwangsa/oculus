@@ -25,13 +25,13 @@ test("source dates backfill existing rows, update independently, and survive und
   sqlite.exec("UPDATE files SET first_seen_at = 'first'");
   const row = () => sqlite.query("SELECT first_seen_at, source_created_at, source_updated_at FROM files WHERE relative_path = ?").get(path);
   expect(row()).toEqual({ first_seen_at: "first", source_created_at: null, source_updated_at: null });
-  const created = "2026-10-01T00:00:00.000000000Z";
-  const updated = "2026-10-03T00:00:00.000000000Z";
+  const created = "2026-10-01T00:00:00.000Z";
+  const updated = "2026-10-03T00:00:00.000Z";
   await upsertFile(1, "slides.pdf", path, "pdf", 10, "file", 1, undefined, created, updated);
   expect(row()).toEqual({ first_seen_at: "first", source_created_at: created, source_updated_at: updated });
   await upsertFile(1, "slides.pdf", path, "pdf", 10, "file");
   expect(row()).toEqual({ first_seen_at: "first", source_created_at: created, source_updated_at: updated });
-  const newer = "2026-10-05T00:00:00.000000000Z";
+  const newer = "2026-10-05T00:00:00.000Z";
   await upsertFile(1, "slides.pdf", path, "pdf", 10, "file", 1, undefined, null, newer);
   expect(row()).toEqual({ first_seen_at: "first", source_created_at: created, source_updated_at: newer });
 });
