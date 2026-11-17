@@ -1,130 +1,102 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { ArrowRight } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
 import { SubjectLoading, SubjectPage } from "@/components/subjects/SubjectPage";
+import { useSubjectOverview } from "@/hooks/data/overview";
 import { useSubjectFiles } from "@/hooks/data/useSubjectFiles";
+import { useNow } from "@/hooks/ui/useNow";
 import { useSubject } from "@/layouts/SubjectLayout";
-import { getRecents, type RecentEntry } from "@/lib/activity/recents";
-import { dateFromSlug, fmtShortDate, humanizeSlug } from "@/lib/format/format";
-import { lecturePagePath } from "@/lib/lectures";
-import { getLectures, type Lecture } from "@/lib/db";
-import { OverviewAskBar } from "./overview/AskBar";
+import { lecturePagePath } from "@/lib/lectures/pagePath";
+import { openBeside } from "@/lib/shell/tabRouters";
+import { ActivityList } from "./overview/ActivityList";
+import { AskDock } from "./overview/AskDock";
+import { BehindWarning } from "./overview/BehindWarning";
+import { ComingUpList } from "./overview/ComingUpList";
 import { EmptyState } from "./overview/EmptyState";
-import { FileLink, MoreLink, Section } from "./overview/parts";
-import { RecentsCarousel } from "./overview/RecentsCarousel";
+import { weekName, weekRange } from "./overview/format";
+import { OverviewHeader } from "./overview/Header";
+import { useOverviewOpener } from "./overview/open";
+import { SectionHeading } from "./overview/rows";
+import { SideColumn } from "./overview/SideColumn";
+import { WeekStrip } from "./overview/WeekStrip";
 
 /**
- * Subject home: where you left off, then what's new, with the ask bar
- * (`OverviewAskBar`) docked at the bottom. Counts and per-tab stats
- * deliberately don't live here — the tabs themselves are one click away.
+ * A subject's "this week": the behind warning, the term's week strip, the
+ * selected week's activity, the next deadlines, and beside them (below them in
+ * a narrow pane) its events and the student's own work. The ask bar docks at
+ * the bottom in the same column. Data is `useSubjectOverview`.
  */
 export default function SubjectOverviewPage() {
   const subject = useSubject();
-  const { files, loading: filesLoading, byCategory } = useSubjectFiles(subject.id);
-  const [lectures, setLectures] = useState<Lecture[] | null>(null);
-  // Read synchronously so the row never flashes empty on first paint.
-  const [recents] = useState<RecentEntry[]>(() => getRecents(subject.id));
+  // Not persisted: a fresh Overview always opens on the current week.
+  const [picked, setPicked] = useState<number | null>(null);
+  const data = useSubjectOverview(subject.id, picked);
+  const { files, loaded: filesLoaded, error: filesError } = useSubjectFiles(subject.id);
+  const opener = useOverviewOpener(files);
+  const now = useNow();
 
-  useEffect(() => {
-    let cancelled = false;
-    getLectures(subject.id)
-      .then((rows) => !cancelled && setLectures(rows))
-      .catch(() => !cancelled && setLectures([]));
-    return () => {
-      cancelled = true;
-    };
-  }, [subject.id]);
+  // Only the first load shows skeletons; a reload keeps the rows on screen.
+  const [ready, setReady] = useState(false);
+  if (!ready && !data.loading && (filesLoaded || filesError != null)) setReady(true);
 
-  const recentAnnouncements = useMemo(
-    () =>
-      [...byCategory.announcement]
-        .sort((a, b) => b.filename.localeCompare(a.filename)) // date-prefixed
-        .slice(0, 4),
-    [byCategory.announcement],
-  );
+  // Stamped on leaving, so this visit's dots stay up while the page is open.
+  const { markVisited } = data;
+  useEffect(() => markVisited, [markVisited]);
 
-  const nextLecture = useMemo(() => {
-    const rows = lectures ?? [];
-    return rows.find((l) => !l.completed) ?? null;
-  }, [lectures]);
+  const { weeks, current } = data.weeks;
+  const pickedIndex = picked == null ? -1 : weeks.findIndex((week) => week.key === picked);
+  // A reload that drops the picked week falls back to the current one.
+  if (picked != null && pickedIndex < 0 && !data.loading) setPicked(null);
 
-  if (filesLoading && files.length === 0) {
-    return <SubjectLoading count={2} rowClassName="h-24" spacing="space-y-3" />;
-  }
+  if (!ready) return <SubjectLoading count={4} rowClassName="h-10" />;
 
-  const nothingSynced = files.length === 0 && (lectures?.length ?? 0) === 0;
+  const selected = pickedIndex >= 0 ? pickedIndex : current;
+  const week = weeks[selected];
+  const thisWeek = selected === current;
+  const nothingSynced = files.length === 0 && data.progress.every((p) => p.total === 0);
 
   return (
-    <SubjectPage className="flex min-h-full flex-col pt-6 pb-0">
-      <div className="space-y-8">
-        {nothingSynced && <EmptyState />}
-
-        {recents.length > 0 && (
-          <Section title="Recently visited">
-            <RecentsCarousel recents={recents} files={files} subjectId={subject.id} />
-          </Section>
+    // Chat's column is 760px of content: the bar warps into a composer its own width.
+    <SubjectPage className="flex min-h-full max-w-[808px] flex-col pt-6 pb-0">
+      <div className="@container min-w-0 space-y-5">
+        <OverviewHeader subject={subject} revisionDue={data.revisionDue} />
+        {data.error && (
+          <p role="alert" className="px-0.5 text-[12px] text-destructive">
+            Part of this page didn't load: {data.error}
+          </p>
         )}
-
-        {nextLecture && (
-          <Section title="Up next">
-            <Link
-              to={lecturePagePath(nextLecture)}
-              className="flex items-center gap-3 rounded-lg border border-border px-3.5 py-3 hover:bg-surface transition-colors"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-medium text-foreground truncate">
-                  {nextLecture.title}
-                </p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">
-                  {fmtShortDate(new Date(nextLecture.date))}
-                  {nextLecture.progress_seconds > 5 ? " · in progress" : ""}
-                </p>
-              </div>
-              <ArrowRight size={13} className="text-muted-foreground shrink-0" />
-            </Link>
-          </Section>
-        )}
-
-        {(byCategory.home.length > 0 || byCategory.syllabus.length > 0) && (
-          <Section title="Start here">
-            <div className="space-y-0.5">
-              {byCategory.home.map((f) => (
-                <FileLink key={f.id} file={f} label="Course overview" />
-              ))}
-              {byCategory.syllabus.map((f) => (
-                <FileLink key={f.id} file={f} label="Syllabus" />
-              ))}
-            </div>
-          </Section>
-        )}
-
-        {recentAnnouncements.length > 0 && (
-          <Section title="Announcements">
-            <div className="space-y-0.5">
-              {recentAnnouncements.map((f) => {
-                const posted = dateFromSlug(f.filename);
-                return (
-                  <FileLink
-                    key={f.id}
-                    file={f}
-                    label={humanizeSlug(f.filename)}
-                    meta={posted ? fmtShortDate(posted) : undefined}
-                  />
-                );
-              })}
-            </div>
-            {byCategory.announcement.length > recentAnnouncements.length && (
-              <MoreLink to="announcements" label="All announcements" />
+        {nothingSynced ? <EmptyState /> : (
+          <>
+            <BehindWarning
+              behind={data.behind}
+              onCatchUp={(lecture) => openBeside(lecturePagePath(lecture))}
+              catchUpHref={data.behind.lectures[0] ? lecturePagePath(data.behind.lectures[0]) : undefined}
+            />
+            {week && (
+              <WeekStrip strip={data.weeks} progress={data.progress} selected={selected} onSelect={setPicked} />
             )}
-          </Section>
+            <div className="grid gap-x-8 gap-y-7 @2xl:grid-cols-[minmax(0,1fr)_13rem]">
+              <div className="min-w-0 space-y-7">
+                <section>
+                  <SectionHeading aside={week ? weekRange(week) : undefined}>
+                    {thisWeek || !week ? "This week" : weekName(week)}
+                  </SectionHeading>
+                  <ActivityList
+                    items={data.activity}
+                    opener={opener}
+                    empty={!week ? "No weeks yet: the timetable hasn't synced."
+                      : thisWeek ? "Nothing new this week yet." : "Nothing new that week."}
+                  />
+                </section>
+                <section>
+                  <SectionHeading>Coming up</SectionHeading>
+                  <ComingUpList items={data.comingUp} opener={opener} now={now} />
+                </section>
+              </div>
+              <SideColumn events={data.events} yours={data.yours} opener={opener} now={now} thisWeek={thisWeek} />
+            </div>
+          </>
         )}
       </div>
-
-      {/* Docked at the bottom of the pane, in the page's own column, so the
-          bar and the content above share one width. */}
-      <div className="sticky bottom-0 mt-auto bg-card pt-4 pb-4">
-        <OverviewAskBar subject={subject} />
-      </div>
+      <AskDock subject={subject} />
     </SubjectPage>
   );
 }
