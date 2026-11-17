@@ -6,9 +6,9 @@
 //! It is written from `oculus docs` and from every sync, so the rules about what
 //! may be overwritten live here.
 //!
-//! Both memory buckets live under `agents/` because it is the only place an
-//! in-app thread may write; [`link_dir`] leaves a symlink in each course folder
-//! so the old per-course path lands in the same store. Nothing here reads the
+//! Both memory buckets live under `agents/` because an in-app thread may write
+//! it and not a subject's `.oculus/`; [`link_dir`] leaves a symlink in each
+//! course folder so the per-course path lands in the same store. Nothing here reads the
 //! memory layer back or writes a memory — [`crate::agents::memory`] owns the contents.
 //!
 //! `agents/skills/` is the one copy of the skills: Claude Code and Codex find it

@@ -1,16 +1,56 @@
-//! What no agent may write, whichever CLI runs it. Claude
-//! (`providers/claude/settings.rs`) renders these into its rule syntax;
-//! Rust refuses them at every request (`requests/policy.rs`), which is
-//! Antigravity's only gate; opencode's copy is static in
-//! `templates/OPENCODE.template.json`, held to these by the test below.
+//! What no agent may write, whichever CLI runs it. Each bridge renders these
+//! in its own mechanism: Claude (`providers/claude/settings.rs`) as `Edit`
+//! denies its sandbox also takes; Codex (`providers/codex/mod.rs`) as the
+//! writable roots it is given; opencode's copy is static in
+//! `templates/OPENCODE.template.json`, held to these by the test below; Rust
+//! refuses them at every request (`requests/policy.rs`), which is
+//! Antigravity's only gate.
+//!
+//! The library's own zone — everything in a subject beside `Course/` and
+//! `.oculus/` (`layout::Zone::Own`) — is writable without a request.
 
-/// Library folders an agent reads but never writes: the library's own
-/// (`layout::library_roots`) and an earlier version's session folder.
+use std::path::{Path, PathBuf};
+
+use crate::library::layout;
+
+/// Data-dir folders an agent reads but never writes, whole: a recordings
+/// folder outside the subjects (none in the Drive tree) and an earlier
+/// version's session folder. `courses/` is not one: its subjects' own files
+/// are writable.
 pub fn library_dirs() -> Vec<&'static str> {
-    crate::library::layout::library_roots()
+    layout::library_roots()
         .into_iter()
+        .filter(|d| *d != layout::COURSES_DIR)
         .chain(["canvas-session"])
         .collect()
+}
+
+/// The data-dir folder holding the subjects: writable, but for each
+/// subject's `SUBJECT_DIRS` and anything directly inside it that is not in a
+/// subject.
+pub fn subjects_dir(library: &Path) -> PathBuf {
+    layout::courses_dir(library)
+}
+
+/// Inside every subject, the folders no agent writes: `Course/` (what the
+/// sync owns) and `.oculus/` (app state).
+pub fn subject_dirs() -> Vec<&'static str> {
+    layout::reserved_names()
+}
+
+/// `subject_dirs` as data-dir-relative rule patterns, `*` standing for any
+/// one subject: `courses/*/Course`.
+pub fn subject_dir_globs() -> Vec<String> {
+    subject_dirs()
+        .into_iter()
+        .map(|d| format!("{}/*/{d}", layout::COURSES_DIR))
+        .collect()
+}
+
+/// Whether a data-dir-relative path is in the own zone, which an agent
+/// writes without asking.
+pub fn own_zone(rel: &str) -> bool {
+    layout::zone_of(rel) == layout::Zone::Own
 }
 
 /// App-owned folders inside the writable `agents/` folder: generated skills
@@ -111,6 +151,12 @@ mod tests {
                 .iter()
                 .map(|g| format!("{{{{LIBRARY}}}}/{g}")),
         );
+        for glob in subject_dir_globs() {
+            want.push(format!("{{{{LIBRARY}}}}/{glob}"));
+            want.push(format!("{{{{LIBRARY}}}}/{glob}/*"));
+        }
+        // Anything in `courses/` outside a subject's own zone.
+        want.push(format!("{{{{LIBRARY}}}}/{}/**", layout::COURSES_DIR));
         for w in &want {
             assert!(
                 denied.contains(&w.as_str()),
@@ -130,5 +176,37 @@ mod tests {
                 "the template denies {k}, which the Rust list does not"
             );
         }
+    }
+
+    #[test]
+    fn the_own_zone_is_everything_in_a_subject_but_course_and_oculus() {
+        for rel in [
+            "courses/X/notes.md",
+            "courses/X/Exam prep/deep/scan.pdf",
+            "courses/Y/board.canvas",
+            "courses/X/.assets/p.png",
+        ] {
+            assert!(own_zone(rel), "{rel}");
+        }
+        for rel in [
+            "courses",
+            "courses/X",
+            "courses/X/Course/Files/a.pdf",
+            "courses/X/course/home.md",
+            "courses/X/.oculus/agents/INSTRUCTIONS.md",
+            "agents/notes.md",
+            "oculus.db",
+            "courses/X/../../oculus.db",
+        ] {
+            assert!(!own_zone(rel), "{rel}");
+        }
+        assert_eq!(
+            subject_dir_globs(),
+            ["courses/*/Course", "courses/*/.oculus"]
+        );
+        assert!(
+            !library_dirs().contains(&layout::COURSES_DIR),
+            "the subjects' folder is not protected whole"
+        );
     }
 }

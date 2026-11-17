@@ -6,8 +6,9 @@ use super::{
     MEMORY_INDEX_NAME, SKILL_DOC_NAME, TASTE_DOC_NAME,
 };
 
-/// One `AGENTS.md` for every subject. Per-subject additions go in that folder's
-/// `agents/INSTRUCTIONS.md`, which nothing here writes.
+/// One `AGENTS.md` for every subject. Per-subject additions go in that
+/// folder's `.oculus/agents/INSTRUCTIONS.md` (`layout::agents_rel`), which
+/// nothing here writes.
 pub const AGENTS_DOC: &str = include_str!("../../templates/AGENTS.template.md");
 const OCULUS_DOC: &str = include_str!("../../templates/OCULUS.template.md");
 pub(super) const TASTE_DOC: &str = include_str!("../../templates/TASTE.template.md");

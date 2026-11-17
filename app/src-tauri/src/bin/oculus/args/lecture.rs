@@ -11,6 +11,10 @@ pub(crate) enum LectureAction {
 }
 
 /// List real lecture ids for citations and live widgets, across every subject.
+///
+/// Each line ends with the recording's folder, from the library root
+/// (`courses/<code>/Course/Recordings/<date>-<slug>/`), where its
+/// `transcript.vtt` and `outline.md` are, once anything of it is on disk.
 #[derive(Args)]
 pub(crate) struct LectureListArgs {
     /// Only this subject; unique prefixes work, with the current term preferred

@@ -160,6 +160,67 @@ mod tests {
         }
     }
 
+    /// opencode's `edit` rules as its runner reads them: in file order, the
+    /// last match deciding, `*` matching any run of characters, `/` included.
+    fn edit_decision(rendered: &str, path: &str) -> String {
+        let edit_block = &rendered[rendered.find("\"edit\": {").unwrap()..];
+        let edit_block = &edit_block[..edit_block.find('}').unwrap()];
+        let mut decision = String::from("unset");
+        for line in edit_block.lines().skip(1) {
+            let Some((k, v)) = line.trim().trim_end_matches(',').split_once("\": ") else {
+                continue;
+            };
+            let pattern = k.trim_start_matches('"');
+            let re = format!("^{}$", regex::escape(pattern).replace("\\*", ".*"));
+            if regex::Regex::new(&re).unwrap().is_match(path) {
+                decision = v.trim_matches('"').to_owned();
+            }
+        }
+        decision
+    }
+
+    /// Every subject's own files are allowed, `*.json` among them, while its
+    /// `Course/` and `.oculus/`, the subjects' folder itself and anything in
+    /// it outside a subject stay denied.
+    #[test]
+    fn the_own_zone_is_allowed_and_course_and_oculus_are_denied() {
+        let lib = "/Users/x/Library/Application Support/com.tchan.oculus";
+        let rendered = render_config(
+            Path::new(lib),
+            "p",
+            &OneOffPrompts {
+                naming: "n",
+                writer: "w",
+                lecture_end: "l",
+            },
+            "",
+        );
+        for inner in [
+            "courses/A/notes.md",
+            "courses/A/Exam prep/deep/summary.md",
+            "courses/B/data.json",
+            "courses/A/board.canvas",
+            "studio/videos/v/video.json",
+        ] {
+            let path = format!("{lib}/{inner}");
+            assert_eq!(edit_decision(&rendered, &path), "allow", "{inner}");
+        }
+        for inner in [
+            "courses/A/Course/Files/a.pdf",
+            "courses/A/Course",
+            "courses/A/Course/Recordings/2026-09-08-l1/transcript.vtt",
+            "courses/A/.oculus/agents/INSTRUCTIONS.md",
+            "courses/A",
+            "courses/loose.pdf",
+            "canvas-session/x",
+            "oculus.db",
+            "settings.json",
+        ] {
+            let path = format!("{lib}/{inner}");
+            assert_eq!(edit_decision(&rendered, &path), "deny", "{inner}");
+        }
+    }
+
     /// The Studio subagents land in `agent` beside the primary ones, as
     /// subagents on their job's model with no permission of their own, so
     /// they run under the parent session's.
@@ -221,6 +282,8 @@ mod tests {
         );
         for sib in [
             "courses/**",
+            "courses/*/Course/*",
+            "courses/*/.oculus/*",
             "canvas-session/**",
             "oculus.db*",
             "vault.bin*",

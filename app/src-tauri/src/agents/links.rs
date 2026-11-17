@@ -127,6 +127,7 @@ fn subject_memories_rel(name: &str) -> PathBuf {
 /// in place rather than overwriting what is filed.
 fn adopt_course_memories(course_agents: &Path, bucket: &Path, name: &str) -> Result<(), String> {
     let old = course_agents.join(MEMORIES_DIR);
+    let shown = format!("{}/{MEMORIES_DIR}", layout::agents_rel(name));
     #[cfg(windows)]
     if junction::exists(&old).unwrap_or(false) {
         if junction::get_target(&old)
@@ -137,7 +138,7 @@ fn adopt_course_memories(course_agents: &Path, bucket: &Path, name: &str) -> Res
             return Ok(());
         }
         // junction::delete removes only the reparse point; its empty directory remains.
-        junction::delete(&old).map_err(|e| format!("cannot relink {name}/agents/memories: {e}"))?;
+        junction::delete(&old).map_err(|e| format!("cannot relink {shown}: {e}"))?;
         std::fs::remove_dir(&old).map_err(|e| e.to_string())?;
     }
     match std::fs::symlink_metadata(&old) {
@@ -147,8 +148,7 @@ fn adopt_course_memories(course_agents: &Path, bucket: &Path, name: &str) -> Res
             if std::fs::read_link(&old).is_ok_and(|t| t == want) {
                 return Ok(());
             }
-            std::fs::remove_file(&old)
-                .map_err(|e| format!("cannot relink {name}/agents/memories: {e}"))?;
+            std::fs::remove_file(&old).map_err(|e| format!("cannot relink {shown}: {e}"))?;
         }
         Ok(meta) if meta.is_dir() => {
             for entry in std::fs::read_dir(&old).into_iter().flatten().flatten() {
@@ -156,12 +156,8 @@ fn adopt_course_memories(course_agents: &Path, bucket: &Path, name: &str) -> Res
                 if to.exists() {
                     continue;
                 }
-                std::fs::rename(entry.path(), &to).map_err(|e| {
-                    format!(
-                        "cannot move {name}/agents/memories/{:?}: {e}",
-                        entry.file_name()
-                    )
-                })?;
+                std::fs::rename(entry.path(), &to)
+                    .map_err(|e| format!("cannot move {shown}/{:?}: {e}", entry.file_name()))?;
             }
             // Only if emptied: a folder beats a link that hides unplaced files.
             if std::fs::read_dir(&old)
@@ -173,8 +169,7 @@ fn adopt_course_memories(course_agents: &Path, bucket: &Path, name: &str) -> Res
             {
                 return Ok(());
             }
-            std::fs::remove_dir(&old)
-                .map_err(|e| format!("cannot replace {name}/agents/memories: {e}"))?;
+            std::fs::remove_dir(&old).map_err(|e| format!("cannot replace {shown}: {e}"))?;
         }
         // A real file called `memories` is somebody's.
         Ok(_) => return Ok(()),
@@ -182,11 +177,9 @@ fn adopt_course_memories(course_agents: &Path, bucket: &Path, name: &str) -> Res
     }
     let target = subject_memories_rel(name).join(name);
     #[cfg(unix)]
-    std::os::unix::fs::symlink(&target, &old)
-        .map_err(|e| format!("cannot link {name}/agents/memories: {e}"))?;
+    std::os::unix::fs::symlink(&target, &old).map_err(|e| format!("cannot link {shown}: {e}"))?;
     #[cfg(windows)]
-    junction::create(bucket, &old)
-        .map_err(|e| format!("cannot link {name}/agents/memories: {e}"))?;
+    junction::create(bucket, &old).map_err(|e| format!("cannot link {shown}: {e}"))?;
     #[cfg(not(unix))]
     let _ = target;
     Ok(())
@@ -204,7 +197,7 @@ fn link_dir(data_dir: &Path, dir: &Path) -> Result<Link, String> {
         .map_err(|e| format!("cannot create agents/memories/{name}: {e}"))?;
     let course_agents = layout::agents_under(dir);
     std::fs::create_dir_all(&course_agents)
-        .map_err(|e| format!("cannot create {name}/agents: {e}"))?;
+        .map_err(|e| format!("cannot create {}: {e}", layout::agents_rel(&name)))?;
     adopt_course_memories(&course_agents, &bucket, &name)?;
 
     // Named for the subject so the bucket is unmistakable. Written after the

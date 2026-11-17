@@ -515,15 +515,19 @@ fn a_request_before_its_tool_row_is_shown_and_the_tool_row_follows() {
 fn a_request_naming_a_protected_path_never_reaches_the_student() {
     let mut bench = turn_open("request-protected");
     let library = bench.library();
-    let protected = library.join("courses/maths/notes.md");
+    let protected = library.join("courses/maths/Course/home.md");
     let (fake, asked) = ask(&bench, json!(0), &[protected.to_str().unwrap()]);
     let outside = library.join("agents/scratch.md");
     let (allowed, fine) = ask(&bench, json!(1), &[outside.to_str().unwrap()]);
-    bench.play(vec![asked, fine]);
+    // A subject's own file is the student's to grant where a sandbox could not.
+    let own = library.join("courses/maths/new-summary.md");
+    let (own_fake, own_asked) = ask(&bench, json!(2), &[own.to_str().unwrap()]);
+    bench.play(vec![asked, fine, own_asked]);
     assert_eq!(fake.withdrawn(), 1, "the CLI is told no");
     assert_eq!(allowed.withdrawn(), 0);
-    assert_eq!(told(&bench, "request_opened").len(), 1);
-    assert_eq!(requests(&bench).len(), 1);
+    assert_eq!(own_fake.withdrawn(), 0, "an own file is asked about");
+    assert_eq!(told(&bench, "request_opened").len(), 2);
+    assert_eq!(requests(&bench).len(), 2);
 }
 
 #[test]

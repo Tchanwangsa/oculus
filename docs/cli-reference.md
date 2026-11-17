@@ -322,7 +322,8 @@ Options:
           List subjects (default)
 
   -l, --lectures
-          List lectures, optionally filtered to the given subject codes
+          List lectures, optionally filtered to the given subject codes, each with its
+          recording folder once anything of it is on disk
 
       --refresh
           Refresh the subject list from Canvas before printing
@@ -1641,7 +1642,11 @@ Options:
 ### `oculus lecture list`
 
 ```
-List real lecture ids for citations and live widgets, across every subject
+List real lecture ids for citations and live widgets, across every subject.
+
+Each line ends with the recording's folder, from the library root
+(`courses/<code>/Course/Recordings/<date>-<slug>/`), where its `transcript.vtt` and
+`outline.md` are, once anything of it is on disk.
 
 Usage: oculus lecture list [OPTIONS]
 

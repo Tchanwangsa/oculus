@@ -6,7 +6,8 @@
 //! - A write naming a protected path (`protected.rs`, by way of
 //!   `requests/policy.rs`) or the database is refused, unseen.
 //! - A write whose every path is under the chat's write root (`agents/`,
-//!   `studio/`) is allowed, unseen, and so is a plain `oculus …` or `ls …`.
+//!   `studio/`) or in a subject's own files (`policy::in_own_zone`) is
+//!   allowed, unseen, and so is a plain `oculus …` or `ls …`.
 //! - Anything else is put to the student (a request), or refused where
 //!   nobody can be asked.
 
@@ -241,7 +242,10 @@ pub(super) fn judge(params: &Value, library: &Path, cwd: &Path) -> Verdict {
         }
         let mut roots = vec![cwd.to_path_buf()];
         roots.extend(crate::library::paths::agent_write_dirs(library));
-        if paths.iter().all(|p| within(&roots, cwd, p)) {
+        if paths
+            .iter()
+            .all(|p| within(&roots, cwd, p) || policy::in_own_zone(library, cwd, p))
+        {
             return Verdict::Allow;
         }
         let payload = json!({

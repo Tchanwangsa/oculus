@@ -9,6 +9,9 @@ pub struct LectureRow {
     pub duration_seconds: i64,
     pub has_video: bool,
     pub has_transcript: bool,
+    /// Its recording folder, data-dir-relative, once anything of it was
+    /// written (`recording_folder`).
+    pub folder: Option<String>,
 }
 
 pub async fn upsert_lectures(
@@ -235,7 +238,7 @@ pub async fn chapters(
 
 pub async fn lectures(pool: &SqlitePool, subject_id: i64) -> Result<Vec<LectureRow>, String> {
     let rows = sqlx::query(
-        "SELECT id, title, date, duration_seconds, video_path, transcript_path
+        "SELECT id, title, date, duration_seconds, video_path, transcript_path, folder_rel
          FROM lectures WHERE subject_id = ?1 ORDER BY date ASC",
     )
     .bind(subject_id)
@@ -252,6 +255,7 @@ pub async fn lectures(pool: &SqlitePool, subject_id: i64) -> Result<Vec<LectureR
             duration_seconds: r.get("duration_seconds"),
             has_video: r.get::<Option<String>, _>("video_path").is_some(),
             has_transcript: r.get::<Option<String>, _>("transcript_path").is_some(),
+            folder: r.get("folder_rel"),
         })
         .collect())
 }

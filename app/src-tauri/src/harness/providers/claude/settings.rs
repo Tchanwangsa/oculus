@@ -2,11 +2,18 @@
 
 use std::path::Path;
 
-use crate::harness::protected::{library_dirs, ROOT_FILE_GLOBS, WORKSPACE_DIRS};
+use crate::harness::protected::{
+    library_dirs, subject_dir_globs, subject_dirs, subjects_dir, ROOT_FILE_GLOBS, WORKSPACE_DIRS,
+};
+use crate::library::layout;
 
 /// The inline `--settings` document; docs/harness.md explains each part.
 /// `//` prefixes an absolute path in the CLI's rule syntax. Root files are
 /// denied by suffix, because a bare `*` also denied everything under `agents/`.
+/// The subjects' folder is writable but for each subject's `Course/` and
+/// `.oculus/`: denied by glob (`*` is one segment, so a subject synced
+/// mid-thread is covered), and by name for each subject on disk now, which
+/// makes the sandbox refuse moving that subject's folder too.
 /// `hosts` (`host:port`) are the network destinations a sandboxed command
 /// may reach: the TTS server's, or none. `unsandboxed` lets a command ask to
 /// run outside the sandbox (`session::unsandboxed_commands`).
@@ -22,9 +29,22 @@ pub(super) fn settings_json(
     let abs = root.trim_start_matches('/');
     // Never `oculus.db*`: the CLI merges `Edit(...)` denies into the
     // sandbox's `denyWrite`, which would cancel `allowWrite` below.
+    let named = layout::subjects_on_disk(library)
+        .into_iter()
+        .flat_map(|code| {
+            subject_dirs()
+                .into_iter()
+                .map(move |d| layout::in_course(&code, d))
+        });
     let mut deny: Vec<String> = library_dirs()
         .iter()
         .map(|d| format!("{d}/**"))
+        .chain(
+            subject_dir_globs()
+                .into_iter()
+                .flat_map(|g| [g.clone(), format!("{g}/**")]),
+        )
+        .chain(named)
         .chain(ROOT_FILE_GLOBS.iter().map(|g| g.to_string()))
         .chain(WORKSPACE_DIRS.iter().map(|d| format!("agents/{d}/**")))
         .map(|p| format!("Edit(//{abs}/{p})"))
@@ -40,11 +60,12 @@ pub(super) fn settings_json(
         allow.push(format!("Bash({}:*)", cli.display()));
     }
 
-    // `agents/`, the database's three files (`paths::db_write_paths`) and
-    // `studio/` (`paths::agent_write_dirs`).
+    // `agents/`, the database's three files (`paths::db_write_paths`),
+    // `studio/` (`paths::agent_write_dirs`) and the subjects' own files.
     let write: Vec<String> = std::iter::once(cwd.to_path_buf())
         .chain(crate::library::paths::db_write_paths(library))
         .chain(crate::library::paths::agent_write_dirs(library))
+        .chain([subjects_dir(library)])
         .map(|p| p.display().to_string())
         .collect();
     // `oculus` reaches its keys only through keyd's socket; without this the
@@ -94,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    fn the_settings_document_opens_the_database_and_studio_and_nothing_else() {
+    fn the_settings_document_opens_the_database_studio_and_the_own_zone_and_nothing_else() {
         let library = Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
         let cwd = library.join("agents");
         let v: serde_json::Value =
@@ -110,8 +131,10 @@ mod tests {
                 "/Users/x/Library/Application Support/com.tchan.oculus/oculus.db-wal",
                 "/Users/x/Library/Application Support/com.tchan.oculus/oculus.db-shm",
                 "/Users/x/Library/Application Support/com.tchan.oculus/studio",
+                "/Users/x/Library/Application Support/com.tchan.oculus/courses",
             ]),
-            "the cwd, the database's three files and studio/ — nothing else in the library"
+            "the cwd, the database's three files, studio/ and the subjects (less Course/ and \
+             .oculus/) — nothing else in the library"
         );
         assert!(
             v.pointer("/sandbox/network/allowedDomains").is_none(),
@@ -143,7 +166,10 @@ mod tests {
             .filter_map(|r| r.as_str())
             .collect();
         for rule in [
-            "Edit(//Users/x/Library/Application Support/com.tchan.oculus/courses/**)",
+            "Edit(//Users/x/Library/Application Support/com.tchan.oculus/courses/*/Course)",
+            "Edit(//Users/x/Library/Application Support/com.tchan.oculus/courses/*/Course/**)",
+            "Edit(//Users/x/Library/Application Support/com.tchan.oculus/courses/*/.oculus)",
+            "Edit(//Users/x/Library/Application Support/com.tchan.oculus/courses/*/.oculus/**)",
             "Edit(//Users/x/Library/Application Support/com.tchan.oculus/agents/skills/**)",
             "Edit(//Users/x/Library/Application Support/com.tchan.oculus/agents/.claude/**)",
             "Edit(//Users/x/Library/Application Support/com.tchan.oculus/*.cookie)",
@@ -243,6 +269,72 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// Every subject's own files are writable and no deny covers one; its
+    /// `Course/` and `.oculus/` are denied by glob, and by name for each
+    /// subject on disk.
+    #[test]
+    fn the_own_zone_is_writable_and_course_and_oculus_are_denied_in_every_subject() {
+        let library = crate::test_support::Scratch::new("claude-own-zone");
+        for code in ["MAST10006_2026_SM1", "COMP30026_2026_SM2"] {
+            std::fs::create_dir_all(library.join("courses").join(code).join("Course")).unwrap();
+        }
+        let v: serde_json::Value = serde_json::from_str(&settings_json(
+            &library,
+            &library.join("agents"),
+            None,
+            &[],
+            false,
+            true,
+        ))
+        .unwrap();
+        let root = library.display().to_string();
+        let write = v.pointer("/sandbox/filesystem/allowWrite").unwrap();
+        assert!(
+            write
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|w| *w == format!("{root}/courses")),
+            "{write}"
+        );
+        let deny: Vec<&str> = v
+            .pointer("/permissions/deny")
+            .and_then(|d| d.as_array())
+            .unwrap()
+            .iter()
+            .filter_map(|r| r.as_str())
+            .filter_map(|r| r.strip_prefix("Edit(/").and_then(|r| r.strip_suffix(')')))
+            .collect();
+        for code in ["MAST10006_2026_SM1", "COMP30026_2026_SM2"] {
+            for name in ["Course", ".oculus"] {
+                let named = format!("{root}/courses/{code}/{name}");
+                assert!(deny.contains(&named.as_str()), "{named} in {deny:?}");
+            }
+        }
+        let covered = |path: &str| {
+            deny.iter()
+                .any(|rule| crate::harness::protected::glob_covers(rule, path))
+        };
+        for inner in [
+            "Course/Files/a.pdf",
+            "Course/Recordings/2026-09-08-l1/transcript.vtt",
+            "Course",
+            ".oculus/agents/INSTRUCTIONS.md",
+        ] {
+            let path = format!("{root}/courses/NEW_SUBJECT/{inner}");
+            assert!(covered(&path), "{path} is denied, even in a new subject");
+        }
+        for inner in [
+            "notes.md",
+            "Exam prep/summary.md",
+            "data.json",
+            "Exam prep/Course notes.md",
+        ] {
+            let path = format!("{root}/courses/MAST10006_2026_SM1/{inner}");
+            assert!(!covered(&path), "{path} is writable");
         }
     }
 

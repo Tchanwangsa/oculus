@@ -1,6 +1,6 @@
 ---
 name: oculus-library
-description: Finds and reads coursework in an Oculus course library — searches slides and readings by meaning or by pattern, lists what a subject has, and prints a page. Use for "find where it says X", "which slide covers Y", "read page 12", "open the assignment brief", "what files are in this subject", or any question answered from a PDF, a Canvas page, an announcement or an Ed thread.
+description: Finds and reads coursework in an Oculus course library — searches slides and readings by meaning or by pattern, lists what a subject has, prints a page, and knows where each kind of file sits on disk (a parsed PDF's markdown beside it, the read-only Course folder, the student's own files). Use for "find where it says X", "which slide covers Y", "read page 12", "open the assignment brief", "what files are in this subject", or any question answered from a PDF, a Canvas page, an announcement or an Ed thread.
 ---
 
 # Finding and reading
@@ -25,14 +25,38 @@ Two consequences worth holding on to:
 - **Neither reaches a recording.** Lectures are files on disk that no index
   covers — that is the `oculus-lectures` skill, not this one.
 
+## Where things are on disk
+
+From the chat's working directory a subject is `../courses/<CODE>/`:
+
+- `Course/` is what Oculus syncs, and it is read-only: `Files/` (slide decks
+  and downloads), `Pages/`, `Announcements/`, `Assignments/`, `Quizzes/`,
+  `Modules/`, `Discussion/` (Ed threads), `Lessons/` (Ed Lessons), `Media/`
+  (module videos), `Recordings/` (lectures, the `oculus-lectures` skill),
+  `home.md` and `syllabus.md`.
+- **A parsed PDF's text is `<stem>.md` beside the PDF**, its pictures in
+  `<stem>_images/`: `Course/Files/13.pdf` has `Course/Files/13.md`. One file
+  holds the whole document, so it is what your own file tools and `rg` read;
+  the page numbers are in the database, which `oculus grep` and `oculus read
+  --pages` use. No `.md` beside a PDF means it has not been parsed.
+- Everything beside `Course/` is the **student's own** — uploads, notes
+  (`.md`), drawings (`.canvas`) and notebooks (`.notebook`), in any folders
+  they made.
+- `.oculus/` is the app's, hidden; ripgrep skips it, and nothing to read is
+  there.
+
+`oculus files`, `grep` and `read` see only files the app has a record of. A
+file written straight into a subject's folder is on disk at once but may have
+no record yet, so read such a file by path.
+
 ## The two passes
 
 `oculus grep` is a **locator, not a reader**. Its snippets are truncated and
 it has no context flag on purpose — what it gives you is an *address*:
 
 ```
-courses/COMP30022_2026_SM2/ed/0068-workshop-swap.md:L200: Groundzero Universe…
-courses/COMP30022_2026_SM2/files/SE_Project_Idea.pdf:p1: Design the experience…
+courses/COMP30022_2026_SM2/Course/Discussion/0068-workshop-swap.md:L200: Groundzero Universe…
+courses/COMP30022_2026_SM2/Course/Files/SE_Project_Idea.pdf:p1: Design the experience…
 ```
 
 `:L200` for markdown, **`:p1` for a PDF** — and that page number is the one
@@ -42,9 +66,12 @@ returned address to read the source.
 So the shape is always locate, then read:
 
 - a `.pdf` hit → `oculus read <file> -p <page>`
-- a `.md` hit → the file is right there on disk. Read it, or use native `rg`
+- a `.md` hit → the file is right there on disk, at that path from the
+  library root (`../` from the chat's folder). Read it, or use native `rg`
   on **that path** if you want context lines. `rg` is the better tool once you
   know which file you are in; it just cannot find the file for you.
+- a `.pdf` hit you want context for → its `<stem>.md` beside it is the whole
+  document's text; search it for the phrase.
 
 ## `oculus grep` — exact, offline, free
 
@@ -65,9 +92,10 @@ fallback whenever `search` cannot run.
   say `stopped at N matches` when this happens — treat that as "narrow the
   pattern or add `-s`", not as "that is all there is".
 - **`-c` narrows to one kind of thing before the limit bites** — `-c ed`,
-  `-c announcement`, `-c assignment`, `-c file` (the slide decks and
-  downloads), `-c page`, `-c module`, `-c quiz`, `-c syllabus`, `-c home`,
-  `-c image`, `-c upload` (what the student added themselves). It is
+  `-c announcement`, `-c assignment`, `-c file` (the slide decks, downloads
+  and module videos), `-c page`, `-c module`, `-c quiz`, `-c lessons`,
+  `-c syllabus`, `-c home`, `-c image`, and for the student's own files
+  `-c upload`, `-c document` (their notes), `-c canvas`, `-c notebook`. It is
   repeatable: `-c ed -c announcement`. This is the fix for the ordering bias
   above. A word that is **not a category is refused, naming the real ones**, so
   a typo never comes back as "not in the library"; a real category this
@@ -109,9 +137,9 @@ oculus files INFO30006 -m assignment
 
 Use it to *locate* before reading, when a filename is half-remembered.
 `-c/--category` is the same flag `oculus grep` takes, spelled the same way and
-repeatable: `file`, `page`, `announcement`, `ed`, `module`, `assignment`,
-`quiz`, `syllabus`, `home`, `image`, `upload`, `document`, `canvas`, `notebook`, `other`. `--indexed` keeps only
-what retrieval can see.
+repeatable: `home`, `syllabus`, `upload`, `document`, `canvas`, `notebook`,
+`page`, `assignment`, `quiz`, `announcement`, `ed`, `lessons`, `file`,
+`module`, `image`, `other`. `--indexed` keeps only what retrieval can see.
 
 **The `indexed` column is how many pages are searchable.** A PDF showing none
 has never been parsed — a real state, not a bug, and not something to work
@@ -142,8 +170,8 @@ longer fragment or `-s`; do not pick for it.
 ## A notebook — the student's handwritten working
 
 The student writes assignments and derivations by hand in an Oculus
-**notebook**: a `.notebook` file under `notebooks/`, one or more pages, sometimes
-laid over a copy of the assignment. It is not text, so `oculus read` prints
+**notebook**: a `.notebook` file among their own files, one or more pages,
+sometimes laid over a copy of the assignment. It is not text, so `oculus read` prints
 its **page pictures** instead:
 
 ```bash
@@ -166,7 +194,7 @@ inside it are megabytes of base64.
 - A picture older than the student's last edit is stale; if the age looks wrong
   for what they say they just wrote, say so rather than commenting on old work.
 - `oculus read` says so when a notebook has no pictures yet (never opened
-  since it was made); relay that, do not retry. A canvas (`canvases/`) is a
+  since it was made); relay that, do not retry. A canvas (`.canvas`) is a
   whiteboard drawing with neither pages nor text.
 
 ## The argument that is not where you expect

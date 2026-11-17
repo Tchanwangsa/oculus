@@ -6,10 +6,9 @@ pub fn db_path(data_dir: &std::path::Path) -> PathBuf {
 
 /// The database plus the two files SQLite keeps beside it in WAL mode.
 ///
-/// The harness sandboxes' one exception to "nothing outside `agents/` is
-/// writable", so `oculus project`/`task` can write: SQLite needs the `-wal` and
-/// `-shm` files too, or it reports a readonly database. Files, not the
-/// directory, which also holds the credential vault.
+/// Writable to every harness sandbox, so `oculus project`/`task` can write:
+/// SQLite needs the `-wal` and `-shm` files too, or it reports a readonly
+/// database. Files, not the directory, which also holds the credential vault.
 pub fn db_write_paths(data_dir: &std::path::Path) -> Vec<PathBuf> {
     let db = db_path(data_dir);
     let sidecar = |suffix: &str| {

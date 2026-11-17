@@ -344,8 +344,9 @@ uses the shared profile folder described in [windows.md](./windows.md). Inside:
 - `downloads/.incoming/` — browser download staging ([viewers.md](./viewers.md#downloads-wait-for-a-destination-while-their-bytes-arrive)).
 - `agents/` — the docs, skills and memory layer a coding agent reads and
   writes ([cli.md](./cli.md#oculus-docs-writes-the-agents-folder)); the
-  working directory and only writable root of every chat thread, with raw
-  provider output in `agents/threads/<id>.ndjson` ([harness.md](./harness.md)).
+  working directory of every chat thread, which writes there and in the
+  subjects' own files, with raw provider output in
+  `agents/threads/<id>.ndjson` ([harness.md](./harness.md)).
 - `models/` — downloaded local models, never bundled: `whisper/` for local
   transcription ([viewers.md](./viewers.md#local-whisper-whispercpp-with-a-downloaded-model)), `align/` for Studio's
   narration aligner ([studio.md](./studio.md#narration-timing-is-forced-alignment-on-the-cpu))

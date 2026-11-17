@@ -20,11 +20,15 @@ impl Ctx {
         }
         for row in rows {
             println!(
-                "{}  {}  {}  {}",
+                "{}  {}  {}  {}{}",
                 row.id,
                 row.subject_code.as_deref().unwrap_or("unknown subject"),
                 clock(row.duration_seconds.max(0) as u32),
-                row.title
+                row.title,
+                row.folder
+                    .as_deref()
+                    .map(|f| format!("  {f}/"))
+                    .unwrap_or_default()
             );
         }
         Ok(())
@@ -554,6 +558,9 @@ struct ListedLecture {
     duration_seconds: i64,
     has_video: bool,
     has_transcript: bool,
+    /// The recording folder, data-dir-relative, once anything of it was
+    /// written: where `transcript.vtt` and `outline.md` are.
+    folder: Option<String>,
 }
 
 async fn lecture_list_rows(
@@ -561,7 +568,7 @@ async fn lecture_list_rows(
     subject: Option<i64>,
 ) -> Result<Vec<ListedLecture>, String> {
     let rows = sqlx::query(
-        "SELECT l.id,l.title,l.subject_id,s.code AS subject_code,l.date,l.duration_seconds,l.video_path,l.transcript_path
+        "SELECT l.id,l.title,l.subject_id,s.code AS subject_code,l.date,l.duration_seconds,l.video_path,l.transcript_path,l.folder_rel
          FROM lectures l LEFT JOIN subjects s ON s.id=l.subject_id
          WHERE (?1 IS NULL OR l.subject_id=?1) ORDER BY l.date,l.id",
     ).bind(subject).fetch_all(pool).await.map_err(|e| e.to_string())?;
@@ -576,6 +583,7 @@ async fn lecture_list_rows(
             duration_seconds: row.get("duration_seconds"),
             has_video: row.get::<Option<String>, _>("video_path").is_some(),
             has_transcript: row.get::<Option<String>, _>("transcript_path").is_some(),
+            folder: row.get("folder_rel"),
         })
         .collect())
 }
@@ -591,10 +599,15 @@ mod list_tests {
             .connect("sqlite::memory:")
             .await
             .unwrap();
-        sqlx::raw_sql("CREATE TABLE subjects (id INTEGER PRIMARY KEY,code TEXT); CREATE TABLE lectures (id TEXT PRIMARY KEY,subject_id INTEGER,title TEXT,date TEXT,duration_seconds INTEGER,video_path TEXT,transcript_path TEXT); INSERT INTO subjects VALUES (1,'TEST101_2026'),(2,'TEST102_2026'); INSERT INTO lectures VALUES ('lecture-full-id-a',1,'Limits','2026-10-20',3600,NULL,NULL),('lecture-full-id-b',2,'Proofs','2026-10-19',5400,'video.mp4','captions.vtt');").execute(&pool).await.unwrap();
+        sqlx::raw_sql("CREATE TABLE subjects (id INTEGER PRIMARY KEY,code TEXT); CREATE TABLE lectures (id TEXT PRIMARY KEY,subject_id INTEGER,title TEXT,date TEXT,duration_seconds INTEGER,video_path TEXT,transcript_path TEXT,folder_rel TEXT); INSERT INTO subjects VALUES (1,'TEST101_2026'),(2,'TEST102_2026'); INSERT INTO lectures VALUES ('lecture-full-id-a',1,'Limits','2026-10-20',3600,NULL,NULL,NULL),('lecture-full-id-b',2,'Proofs','2026-10-19',5400,'video.mp4','captions.vtt','courses/TEST102_2026/Course/Recordings/2026-10-19-proofs');").execute(&pool).await.unwrap();
         let rows = lecture_list_rows(&pool, None).await.unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].id, "lecture-full-id-b");
+        assert_eq!(
+            serde_json::to_value(&rows[0]).unwrap()["folder"],
+            "courses/TEST102_2026/Course/Recordings/2026-10-19-proofs",
+            "the folder its transcript is in"
+        );
         let rows = lecture_list_rows(&pool, Some(1)).await.unwrap();
         assert_eq!(rows.len(), 1);
         let json = serde_json::to_value(&rows[0]).unwrap();
@@ -603,6 +616,7 @@ mod list_tests {
         assert_eq!(json["duration_seconds"], 3600);
         assert_eq!(json["has_video"], false);
         assert_eq!(json["has_transcript"], false);
+        assert!(json["folder"].is_null(), "nothing written, no folder");
         assert!(lecture_list_rows(&pool, Some(3)).await.unwrap().is_empty());
     }
 

@@ -1,5 +1,6 @@
 use crate::library::layout::{
-    own_dir_rel, own_file_ok, own_files, own_kind_of, own_path_ok, OwnKind,
+    own_dir_rel, own_file_ok, own_files, own_kind_of, own_path_ok, own_top_level, subjects_on_disk,
+    OwnKind,
 };
 use crate::test_support::Scratch;
 
@@ -122,6 +123,42 @@ fn the_walk_lists_own_files_only() {
             "courses/X/Exam prep/b.pdf",
             "courses/X/Exam prep/deep/c.canvas",
             "courses/X/a.md",
+        ]
+    );
+}
+
+#[test]
+fn the_top_level_own_entries_of_every_subject_leave_out_course_and_oculus() {
+    let dir = Scratch::new("layout-own-top");
+    for rel in [
+        "courses/X/a.md",
+        "courses/X/Exam prep/b.pdf",
+        "courses/X/Course/Files/synced.pdf",
+        "courses/X/.oculus/agents/INSTRUCTIONS.md",
+        "courses/X/.assets/p.png",
+        "courses/Y/c.canvas",
+    ] {
+        let path = dir.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "x").unwrap();
+    }
+    std::fs::create_dir_all(dir.join("courses/.trash")).unwrap();
+    std::fs::write(dir.join("courses/loose.pdf"), "x").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("../../agents/AGENTS.md", dir.join("courses/X/AGENTS.md")).unwrap();
+
+    assert_eq!(subjects_on_disk(&dir), ["X", "Y"]);
+    let found: Vec<String> = own_top_level(&dir)
+        .iter()
+        .map(|p| crate::library::paths::slash_path(p.strip_prefix(&*dir).unwrap()))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            "courses/X/.assets",
+            "courses/X/Exam prep",
+            "courses/X/a.md",
+            "courses/Y/c.canvas",
         ]
     );
 }

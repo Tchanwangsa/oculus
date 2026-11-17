@@ -131,7 +131,8 @@ pub(crate) struct ListArgs {
     /// List subjects (default)
     #[arg(short = 's', long)]
     pub(crate) subjects: bool,
-    /// List lectures, optionally filtered to the given subject codes
+    /// List lectures, optionally filtered to the given subject codes, each with
+    /// its recording folder once anything of it is on disk
     #[arg(short = 'l', long)]
     pub(crate) lectures: bool,
     /// Refresh the subject list from Canvas before printing

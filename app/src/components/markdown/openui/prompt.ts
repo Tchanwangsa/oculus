@@ -32,7 +32,7 @@ c1 = Card("Net ATP from glycolysis?", "**2 ATP** per glucose (4 made, 2 spent)")
 c2 = Card("Rate-limiting enzyme?", "Phosphofructokinase-1 (PFK-1)")
 c3 = Card("End product under aerobic conditions?", "Two pyruvate, which enter the mitochondria")`;
 
-const QUIZ = `root = Stack([quiz, PageRef("courses/COMP20003/Week 3 Sorting.pdf", 14)])
+const QUIZ = `root = Stack([quiz, PageRef("courses/COMP20003_2026_SM2/Course/Files/Week 3 Sorting.pdf", 14)])
 quiz = Quiz("Sorting complexity", [q1, q2])
 q1 = Question("Worst case of quicksort with a first-element pivot?", [Option("$O(n \\\\log n)$"), Option("$O(n^2)$", true), Option("$O(n)$")], "An already-sorted input splits $n-1$ / $0$ every time.")
 q2 = Question("Which sort is stable?", [Option("Heapsort"), Option("Merge sort", true), Option("Quicksort")])`;

@@ -364,8 +364,10 @@ fn write_into_library(file: &str) -> Rig {
 #[test]
 fn a_write_naming_a_protected_path_or_the_database_never_reaches_the_student() {
     for file in [
-        "courses/maths/native.txt",
+        "courses/maths/Course/Files/native.txt",
         "courses/maths/Course/Recordings/x/native.txt",
+        "courses/maths/.oculus/agents/native.txt",
+        "courses/native.txt",
         "settings.json",
         "vault.bin",
         "agents/skills/x/SKILL.md",
@@ -745,4 +747,60 @@ fn a_stop_agy_never_answers_reaches_force_stop_which_kills_only_that_chats_proce
     rig.close();
     rig.drain();
     rig.finish();
+}
+
+/// A write into a subject's own files is the chat's to make: Rust allows it
+/// and nobody is asked, in any subject.
+#[test]
+fn a_write_into_a_subjects_own_files_is_allowed_unasked() {
+    for file in [
+        "courses/maths/summary.md",
+        "courses/physics/Exam prep/table.json",
+    ] {
+        let scratch = super::guard::scratch("agy-own-zone");
+        let scenario = Scenario::recorded("antigravity-acp-write-decline");
+        let target = scratch.join(file).display().to_string();
+        let raw = scenario.frames.iter().find(|f| permission(f)).unwrap()["params"]
+            .to_string()
+            .replace("/private/tmp/oculus-agy-outside-XXXXXX/native.txt", &target)
+            .replace("/tmp/oculus-agy-outside-XXXXXX/native.txt", &target);
+        let params: Value = serde_json::from_str(&raw).unwrap();
+        let outbound = Outbound::new(
+            vec![
+                scenario.fixture.expected_outbound[0].clone(),
+                Expected {
+                    frame: json!({"jsonrpc":"2.0","id":"own","result":{"outcome":{"outcome":"selected","optionId":"allow"}}}),
+                    response: Value::Null,
+                    error: None,
+                    any_prompt: false,
+                },
+            ],
+            &scratch,
+        );
+        let events: Arc<Mutex<Vec<HarnessEvent>>> = Arc::default();
+        let heard = events.clone();
+        let session = crate::harness::antigravity::acp::replay::session(
+            outbound.clone(),
+            Arc::new(move |e| heard.lock().unwrap().push(e)),
+            &scenario.fixture.native_session,
+            &scratch,
+            false,
+        );
+        session
+            .send("Replay request", &crate::harness::event::unbound())
+            .unwrap();
+        session.inbound(&json!({"jsonrpc":"2.0","id":"own","method":"session/request_permission","params":params}));
+        outbound.finish(true);
+        assert!(
+            !events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, HarnessEvent::RequestAsked { .. })),
+            "{file}: nobody was asked"
+        );
+        session.kill();
+        drop(session);
+        let _ = std::fs::remove_dir_all(scratch);
+    }
 }

@@ -26,16 +26,7 @@ pub fn instructions(
     lecture: Option<&LectureBrief>,
     studio: Option<&StudioBrief>,
 ) -> String {
-    let mut courses: Vec<String> = std::fs::read_dir(layout::courses_dir(data_dir))
-        .map(|rd| {
-            rd.flatten()
-                .filter(|e| e.path().is_dir())
-                .filter_map(|e| e.file_name().to_str().map(String::from))
-                .filter(|n| !n.starts_with('.'))
-                .collect()
-        })
-        .unwrap_or_default();
-    courses.sort();
+    let courses = layout::subjects_on_disk(data_dir);
     let courses = if courses.is_empty() {
         "none synced yet".to_string()
     } else {
