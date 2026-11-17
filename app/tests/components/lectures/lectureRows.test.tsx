@@ -11,7 +11,7 @@ const lecture = {
 } as unknown as Lecture;
 const noop = () => {};
 
-function render(progress: Record<string, DlProgress>, active: Record<string, boolean> = {}) {
+function render(progress: Record<string, DlProgress>, active: Record<string, boolean> = {}, muted = false) {
   // Zustand's server hook reads the initial snapshot instead of the live one.
   const snapshot = useLectureDownloads.getInitialState();
   const original = { progress: snapshot.progress, active: snapshot.active };
@@ -19,7 +19,7 @@ function render(progress: Record<string, DlProgress>, active: Record<string, boo
   snapshot.active = active;
   try {
     return renderToStaticMarkup(
-      <LectureRow lecture={lecture} active={false} onSelect={noop} onDownload={noop} onDelete={noop} onToggleDone={noop} />,
+      <LectureRow lecture={lecture} active={false} muted={muted} onSelect={noop} onDownload={noop} onDelete={noop} onToggleDone={noop} />,
     );
   } finally {
     snapshot.progress = original.progress;
@@ -32,6 +32,15 @@ const progress = (source: 1 | 2, phase: DlProgress["phase"]) => ({
 }) as DlProgress;
 
 describe("lecture catalogue download controls", () => {
+  test("untimetabled rows are grey while keeping navigation and actions enabled", () => {
+    const html = render({}, {}, true);
+    expect(html).not.toContain("text-reference-lecture");
+    expect(html).toContain('data-tab-href=');
+    expect(html).toContain('aria-label="Download video"');
+    expect(html).toContain('aria-label="Mark as done"');
+    expect(html).not.toContain("disabled");
+  });
+
   test("shows the primary source percentage using the source-qualified progress key", () => {
     const html = render({ [dlKey(lecture.id)]: progress(1, "downloading") });
     expect(html).toContain("43%");

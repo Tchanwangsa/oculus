@@ -1,57 +1,62 @@
 import { describe, expect, test } from "bun:test";
-import type { DbCalendarEvent, Lecture } from "@/lib/db";
 import { groupLecturesByWeek } from "@/lib/lectures/weeks";
+import { subjectWeeks, type SubjectWeeksInput } from "@/lib/weeks";
+import { event, lecture, subject } from "../weeks/fixtures";
 
-const lecture = (date: string, id = date) => ({ id, date, subject_id: 1 }) as Lecture;
-const event = (date: string, title = "Lecture", extra: Partial<DbCalendarEvent> = {}) => ({
-  subject_id: 1, kind: "class", title, start_at: new Date(date).toISOString(), all_day: 0, ...extra,
-}) as DbCalendarEvent;
-const shape = (lectures: Lecture[], calendar: DbCalendarEvent[] = []) =>
-  groupLecturesByWeek(lectures, calendar).map((group) => [group.week, group.isBreak, group.lectures.map((row) => row.id)]);
+const groups = (extra: Partial<SubjectWeeksInput> = {}) => {
+  const input = {
+    subjectId: 1, subjects: [subject(1), subject(2)], classes: [], lectures: [],
+    now: new Date("2026-09-21T12:00:00"), ...extra,
+  };
+  return groupLecturesByWeek(input.lectures, subjectWeeks(input));
+};
+const shape = (extra: Partial<SubjectWeeksInput>) => groups(extra)
+  .map((group) => [group.label, group.isBreak, group.lectures.map((row) => row.id)]);
 
-describe("lecture teaching weeks", () => {
-  test("a capture inside a timetable gap stays in a break, and teaching numbers resume", () => {
-    const rows = [lecture("2026-09-21T12:05:00", "before"), lecture("2026-09-30T09:05:00", "break"), lecture("2026-10-05T12:05:00", "after")];
-    expect(shape(rows, [event("2026-09-21T12:00:00"), event("2026-10-05T12:00:00")])).toEqual([
-      [1, false, ["before"]], [null, true, ["break"]], [2, false, ["after"]],
+describe("lecture groups use the shared teaching strip", () => {
+  test("term numbering starts before the subject's first recording", () => {
+    expect(shape({ classes: [event("2026-09-14T11:00:00", 2), event("2026-09-21T11:00:00")],
+      lectures: [lecture("2026-09-21T11:05:00", 1, "recording")],
+    })).toEqual([
+      ["Week 1", false, []], ["Week 2", false, ["recording"]],
+      ["+1", false, []], ["+2", false, []], ["+3", false, []],
     ]);
   });
 
-  test("an empty break appears, while unrelated deadlines, subjects and tutorials do not fill it", () => {
-    const rows = [lecture("2026-09-21T12:05:00", "before"), lecture("2026-10-05T12:05:00", "after")];
-    expect(shape(rows, [
-      event("2026-09-21T12:00:00"), event("2026-10-05T12:00:00"),
-      event("2026-09-30T12:00:00", "Assignment", { kind: "due" }),
-      event("2026-09-30T12:00:00", "Lecture", { subject_id: 2 }),
-      event("2026-09-30T12:00:00", "Tutorial"),
-      event("2026-09-30T12:00:00", "Announcement", { all_day: 1 }),
-    ])).toEqual([[1, false, ["before"]], [null, true, []], [2, false, ["after"]]]);
-  });
-
-  test("missing recordings with scheduled classes still count as a teaching week", () => {
-    const rows = [lecture("2026-09-21T12:05:00", "before"), lecture("2026-10-05T12:05:00", "after")];
-    expect(shape(rows, [event("2026-09-21T12:00:00"), event("2026-09-30T12:00:00"), event("2026-10-05T12:00:00")])).toEqual([
-      [1, false, ["before"]], [2, false, []], [3, false, ["after"]],
-    ]);
-    expect(shape(rows)).toEqual([[1, false, ["before"]], [2, false, []], [3, false, ["after"]]]);
-  });
-
-  test("gaps outside the timetable coverage are not called breaks", () => {
-    const rows = [lecture("2026-09-21T12:05:00", "before"), lecture("2026-10-05T12:05:00", "after")];
-    expect(shape(rows, [event("2026-09-21T12:00:00")])).toEqual([
-      [1, false, ["before"]], [2, false, []], [3, false, ["after"]],
+  test("recordings inside breaks stay playable and teaching numbers resume", () => {
+    expect(shape({ classes: [event("2026-09-21T11:00:00"), event("2026-10-05T11:00:00")],
+      lectures: [lecture("2026-09-30T11:05:00", 1, "break")],
+    })).toEqual([
+      ["Week 1", false, []], ["Break", true, ["break"]], ["Week 2", false, []],
+      ["+1", false, []], ["+2", false, []], ["+3", false, []],
     ]);
   });
 
-  test("local Mondays and Sundays stay together across UTC boundaries and DST", () => {
-    expect(shape([
-      lecture("2026-10-05T00:05:00", "monday"), lecture("2026-10-11T23:55:00", "sunday"),
-      lecture("2026-10-12T00:05:00", "next"), lecture("2026-09-28T00:05:00", "previous"),
-    ])).toEqual([[1, false, ["previous"]], [2, false, ["monday", "sunday"]], [3, false, ["next"]]]);
+  test("dates outside the strip fold into its edges without extending it", () => {
+    const result = groups({ classes: [event("2026-09-21T11:00:00")], lectures: [
+      lecture("2028-01-01T11:05:00", 1, "late"), lecture("2026-08-01T11:05:00", 1, "early"),
+      lecture("2026-09-21T11:05:00", 1, "class"),
+    ] });
+    expect(result).toHaveLength(4);
+    expect(result[0].lectures.map((row) => row.id)).toEqual(["early", "class"]);
+    expect(result[3].lectures.map((row) => row.id)).toEqual(["late"]);
   });
 
-  test("undated recordings are kept even when no dated recording exists", () => {
-    expect(shape([lecture("bad", "undated")])).toEqual([[null, false, ["undated"]]]);
-    expect(shape([])).toEqual([]);
+  test("recording fallback fills empty weeks and keeps undated recordings", () => {
+    expect(shape({ lectures: [lecture("2026-09-21T11:00:00", 1, "first"), lecture("2026-10-05T11:00:00", 1, "last"), lecture("bad", 1, "undated")] })).toEqual([
+      ["Week 1", false, ["first"]], ["Week 2", false, []], ["Week 3", false, ["last"]],
+      ["+1", false, []], ["+2", false, []], ["+3", false, []], ["Undated", false, ["undated"]],
+    ]);
+  });
+
+  test("empty and undated-only catalogues need no fabricated week", () => {
+    expect(groups()).toEqual([]);
+    expect(shape({ lectures: [lecture("bad", 1, "undated")] })).toEqual([["Undated", false, ["undated"]]]);
+  });
+
+  test("recordings remain visible when the term has no qualifying week", () => {
+    expect(shape({ subjects: [subject(1), subject(2), subject(3)], classes: [
+      event("2026-09-07T11:00:00", 1), event("2026-09-14T11:00:00", 2), event("2026-09-21T11:00:00", 3),
+    ], lectures: [lecture("2026-09-07T11:05:00", 1, "recording")] })).toEqual([["Recordings", false, ["recording"]]]);
   });
 });

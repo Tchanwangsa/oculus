@@ -123,12 +123,10 @@ Subject file and content rows use flat divided lists without a surrounding
 card. Downloaded files and Canvas module items use a single list level. Module
 rows stay individually collapsible; the newest TOC for each Canvas position
 wins when an old position path remains, and exact repeated TOCs appear once.
-Lecture recordings are grouped by local Monday–Sunday weeks from the first
-available lecture date (`app/src/lib/lectures/weeks.ts`). Gaps inside the
-subject's synced class timetable render grey as **Break** and do not advance
-the teaching-week number; recordings in those gaps remain accessible. Named
-lecture events take precedence over other class types. Without a timetable,
-missing recordings do not imply a break. Undated recordings stay in their own
+Lecture recordings use the shared
+[term teaching weeks](./calendar.md#teaching-weeks-are-shared-across-a-term),
+presented by `app/src/lib/lectures/weeks.ts`. Rows outside the subject's
+timetable are grey and remain playable; undated recordings have their own
 group. File glyphs use
 the `reference-*` tokens: PDFs red, Office documents blue, notes purple,
 spreadsheets teal, and lecture videos pink. Search remains in the subject

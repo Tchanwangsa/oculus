@@ -20,13 +20,10 @@ import { useWindowEvent } from "@/hooks/backend/useEvents";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
-  getLectures,
-  getCalendarEvents,
   setLectureDone,
   upsertLectures,
   type Lecture,
   type LectureData,
-  type DbCalendarEvent,
 } from "@/lib/db";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { sideFront, useTabStore } from "@/stores/shell/tabStore";
@@ -41,13 +38,14 @@ import {
   lecturePagePath,
 } from "@/lib/lectures";
 import { groupLecturesByWeek } from "@/lib/lectures/weeks";
-import { CALENDAR_UPDATED_EVENT } from "@/lib/planning/calendar/model";
+import { recordingStatus } from "@/lib/weeks";
+import { useSubjectWeeks } from "@/hooks/data/useSubjectWeeks";
 
 /** The subject's lectures. Selecting one opens its page in the side panel. */
 export default function SubjectLecturesPage() {
   const subject = useSubject();
-  const [lectures, setLectures] = useState<Lecture[]>([]);
-  const [calendar, setCalendar] = useState<DbCalendarEvent[]>([]);
+  const { weeks: stripWeeks, current, source, lectures: termLectures, classes, error: weeksError, reload: refreshLectures } = useSubjectWeeks(subject.id);
+  const lectures = useMemo(() => termLectures.filter((lecture) => lecture.subject_id === subject.id), [termLectures, subject.id]);
   // The row lit is the lecture in front of this tab's side panel, so sending
   // it to the back or closing the panel un-highlights it.
   const { tabId } = usePaneTab();
@@ -59,35 +57,21 @@ export default function SubjectLecturesPage() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Lecture | null>(null);
   const [collapsedWeeks, setCollapsedWeeks] = useState<Set<number>>(new Set());
-  const weeks = useMemo(() => groupLecturesByWeek(lectures, calendar), [lectures, calendar]);
-
-  const refreshLectures = useCallback(async () => {
-    const rows = await getLectures(subject.id);
-    setLectures(rows);
-    findStartedLectureEnds(rows);
-  }, [subject.id]);
+  const weeks = useMemo(() => groupLecturesByWeek(lectures, { weeks: stripWeeks, current, source }), [lectures, stripWeeks, current, source]);
+  const statuses = useMemo(() => new Map(lectures.map((lecture) => [lecture.id, recordingStatus(lecture, classes)])), [lectures, classes]);
 
   useEffect(() => {
-    refreshLectures();
-  }, [refreshLectures]);
+    findStartedLectureEnds(lectures);
+  }, [lectures]);
 
-  const refreshCalendar = useCallback(async () => {
-    const rows = await getCalendarEvents();
-    setCalendar(rows.filter((event) => event.subject_id === subject.id));
-  }, [subject.id]);
   useEffect(() => {
     setCollapsedWeeks(new Set());
-    setCalendar([]);
-    refreshCalendar().catch((e) => setSyncError(`Could not load the calendar: ${e}`));
-  }, [refreshCalendar]);
-  useWindowEvent(CALENDAR_UPDATED_EVENT, () => {
-    refreshCalendar().catch((e) => setSyncError(`Could not load the calendar: ${e}`));
-  });
+  }, [subject.id]);
 
   // Re-read on any lecture write: a player beside the list (the side panel)
   // saving progress, a download once the finished file is in the DB.
   useWindowEvent(
-    [LECTURES_CHANGED_EVENT, LECTURE_DOWNLOADED_EVENT, LECTURE_PROGRESS_EVENT],
+    [LECTURE_DOWNLOADED_EVENT, LECTURE_PROGRESS_EVENT],
     () => refreshLectures(),
   );
 
@@ -128,7 +112,7 @@ export default function SubjectLecturesPage() {
         canvasCourseId: subject.id,
       });
       await upsertLectures(subject.id, data);
-      await refreshLectures();
+      window.dispatchEvent(new CustomEvent(LECTURES_CHANGED_EVENT));
     } catch (e) {
       setSyncError(String(e));
     } finally {
@@ -157,11 +141,11 @@ export default function SubjectLecturesPage() {
           </Button>
         </div>
 
-        {syncError && (
+        {(syncError || weeksError) && (
           <Alert variant="destructive" className="mb-3 w-auto px-2.5 py-2">
             <WarningCircle />
             <AlertDescription className="text-[11px] break-words">
-              {syncError}
+              {syncError || `Could not load teaching weeks: ${weeksError}`}
             </AlertDescription>
           </Alert>
         )}
@@ -173,7 +157,7 @@ export default function SubjectLecturesPage() {
           </div>
         ) : (
           <div>
-            {weeks.map(({ key, week, isBreak, lectures: weekLectures, start, end }) => {
+            {weeks.map(({ key, label, isBreak, lectures: weekLectures, start, end }) => {
               const open = !collapsedWeeks.has(key);
               return (
                 <section key={key} className={`mb-5 last:mb-0 ${isBreak ? "rounded-lg bg-muted/40 px-2" : ""}`}>
@@ -190,7 +174,7 @@ export default function SubjectLecturesPage() {
                     className="mb-1 flex w-full items-center gap-2 py-2 text-left"
                   >
                     {weekLectures.length === 0 ? <span className="w-3" /> : open ? <CaretDown size={12} className="text-muted-foreground" /> : <CaretRight size={12} className="text-muted-foreground" />}
-                    <span className={`text-[13px] font-medium ${isBreak ? "text-muted-foreground" : "text-foreground"}`}>{isBreak ? "Break" : week === null ? "Undated" : `Week ${week}`}</span>
+                    <span className={`text-[13px] font-medium ${isBreak ? "text-muted-foreground" : "text-foreground"}`}>{label}</span>
                     <span className="text-[11px] text-muted-foreground">
                       {weekLectures.length > 0 ? `${weekLectures.length} ${weekLectures.length === 1 ? "lecture" : "lectures"}` : isBreak ? "No scheduled lectures" : "No recordings"}
                       {start && (start === end ? ` · ${start}` : ` · ${start} – ${end}`)}
@@ -202,7 +186,7 @@ export default function SubjectLecturesPage() {
                         <LectureRow
                           key={lec.id}
                           lecture={lec}
-                          muted={isBreak}
+                          muted={statuses.get(lec.id) === "untimetabled"}
                           active={selectedId === lec.id}
                           onSelect={handleSelectLecture}
                           onDownload={handleDownload}
