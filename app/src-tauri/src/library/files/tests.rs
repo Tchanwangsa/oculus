@@ -4,7 +4,8 @@ use super::commands::file_has_content;
 use super::documents::{
     document_asset_ref, document_assets_dir, document_name, note_temp_path, write_note,
 };
-use super::uploads::{free_name, step_aside};
+use super::uploads::step_aside;
+use crate::library::drive::ops::names::free_name;
 
 #[test]
 fn content_metadata_distinguishes_files_and_stays_inside_the_library() {
@@ -78,12 +79,23 @@ fn a_note_is_replaced_whole() {
 fn an_upload_never_lands_on_a_name_already_taken() {
     let dir = crate::test_support::Scratch::new("uploads");
 
-    assert_eq!(free_name(&dir, "notes.pdf", b"one"), "notes.pdf");
+    let holds =
+        |bytes: &'static [u8]| move |path: &Path| std::fs::read(path).is_ok_and(|b| b == bytes);
+    assert_eq!(
+        free_name(&dir, "notes.pdf", false, holds(b"one")),
+        "notes.pdf"
+    );
     std::fs::write(dir.join("notes.pdf"), b"one").unwrap();
 
-    assert_eq!(free_name(&dir, "notes.pdf", b"one"), "notes.pdf");
-    assert_eq!(free_name(&dir, "notes.pdf", b"two"), "notes-2.pdf");
-    assert_eq!(free_name(&dir, "README", b"x"), "README");
+    assert_eq!(
+        free_name(&dir, "notes.pdf", false, holds(b"one")),
+        "notes.pdf"
+    );
+    assert_eq!(
+        free_name(&dir, "notes.pdf", false, holds(b"two")),
+        "notes (2).pdf"
+    );
+    assert_eq!(free_name(&dir, "README", false, holds(b"x")), "README");
 }
 
 #[test]

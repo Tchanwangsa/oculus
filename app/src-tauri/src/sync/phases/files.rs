@@ -155,7 +155,7 @@ impl Engine {
         if let Some(ext) = office {
             match office_to_pdf(&bytes, ext) {
                 Ok(pdf) => {
-                    paths::write_course_bytes(
+                    super::output::write_synced(
                         &self.data_dir,
                         &c.code,
                         &format!("{inner}.pdf"),

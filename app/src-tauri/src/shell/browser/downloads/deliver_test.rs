@@ -18,11 +18,12 @@ fn stage(data: &Path, folder: &str, name: &str, bytes: &[u8]) -> PathBuf {
 fn oculus(code: &str) -> Target {
     Target::Oculus {
         subject_code: code.into(),
+        target_dir: None,
     }
 }
 
 #[test]
-fn any_file_lands_in_the_subjects_uploads_and_the_staged_copy_goes() {
+fn any_file_lands_in_the_subject_s_root_and_the_staged_copy_goes() {
     let data = Scratch::new("download-oculus");
     let staged = stage(&data, "1-1", "data set.zip", b"PK zip");
     let saved = deliver(&data, &staged, &oculus("COMP10001")).unwrap();
@@ -35,7 +36,7 @@ fn any_file_lands_in_the_subjects_uploads_and_the_staged_copy_goes() {
     };
     assert_eq!(subject_code, "COMP10001");
     let file = outcome.file.expect("landed");
-    assert_eq!(file.relative_path, "courses/COMP10001/data_set.zip");
+    assert_eq!(file.relative_path, "courses/COMP10001/data set.zip");
     assert_eq!(file.file_type, "zip");
     assert_eq!(
         outcome.error, None,
@@ -69,8 +70,37 @@ fn uploads_rules_apply_a_taken_name_steps_aside_and_same_bytes_dedupe() {
     );
     assert_eq!(
         rel(deliver(&data, &other, &code).unwrap()),
-        "courses/MAST20004/notes-2.txt"
+        "courses/MAST20004/notes (2).txt"
     );
+}
+
+#[test]
+fn a_chosen_folder_of_the_student_s_takes_the_download() {
+    let data = Scratch::new("download-oculus-folder");
+    std::fs::create_dir_all(data.join("courses/COMP10001/Exam prep")).unwrap();
+    let staged = stage(&data, "1-1", "past paper.pdf", b"%PDF");
+    let to = Target::Oculus {
+        subject_code: "COMP10001".into(),
+        target_dir: Some("courses/COMP10001/Exam prep".into()),
+    };
+    let SavedTo::Oculus { outcome, .. } = deliver(&data, &staged, &to).unwrap() else {
+        panic!("not an upload");
+    };
+    assert_eq!(
+        outcome.file.unwrap().relative_path,
+        "courses/COMP10001/Exam prep/past paper.pdf"
+    );
+
+    let staged = stage(&data, "1-2", "x.pdf", b"%PDF");
+    let course = Target::Oculus {
+        subject_code: "COMP10001".into(),
+        target_dir: Some("courses/COMP10001/Course/Files".into()),
+    };
+    assert!(
+        deliver(&data, &staged, &course).is_err(),
+        "never into Course"
+    );
+    assert!(staged.exists(), "a refused delivery keeps the staged copy");
 }
 
 #[test]

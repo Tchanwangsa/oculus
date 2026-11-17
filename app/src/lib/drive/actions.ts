@@ -3,7 +3,7 @@ import { addUploads } from "@/lib/files/uploads";
 import { parseFile } from "@/lib/files/courseFiles";
 import { isPipelineFile } from "@/lib/files/fileTypes";
 import { copyToOwn, createFolder, deleteEntries, driveErrorText, moveEntries, renameEntry } from "./commands";
-import { announceDriveChange } from "./listing";
+import { announceDriveChange, listFolder } from "./listing";
 import { baseName, freeName, subjectFolderOf, subjectForFolder } from "./paths";
 
 /**
@@ -64,11 +64,25 @@ async function copyInto(rels: string[], targetDir: string, subjects: readonly Su
   const copies = await copyToOwn(rels, targetDir);
   const subject = subjectOf(targetDir, subjects);
   if (!subject) return;
-  for (const rel of copies) {
+  for (const rel of await filesOf(copies)) {
     if (isPipelineFile(baseName(rel))) {
       parseFile(subject.id, subject.code, rel).catch((e) => console.warn(`[drive] parse ${rel}: ${e}`));
     }
   }
+}
+
+/** The files among `rels`, a copied folder standing for every file below it.
+ *  Rust has written each one's row already. */
+async function filesOf(rels: string[]): Promise<string[]> {
+  const files: string[] = [];
+  for (const rel of rels) {
+    try {
+      files.push(...(await listFolder(rel, true)).files.map((f) => f.relativePath));
+    } catch {
+      files.push(rel);
+    }
+  }
+  return files;
 }
 
 /** Synced entries copied into the student's `targetDir`. */

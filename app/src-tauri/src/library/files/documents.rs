@@ -1,5 +1,5 @@
-//! Markdown notes among the student's own files, created in the folder
-//! `layout::own_dir` gives documents: Rust moves
+//! Markdown notes among the student's own files, created in a folder of the
+//! student's (`targetDir`) or the subject's root: Rust moves
 //! the bytes, the frontend writes the `files` row. A note is rewritten on save
 //! and moves on rename, so every mutating command checks the path's shape
 //! (`layout::own_file_ok`) before resolving it.
@@ -8,6 +8,7 @@ use std::path::Path;
 
 use super::uploads::step_aside;
 use super::ImportedFile;
+use crate::library::drive::ops::guard::{own_target, Target};
 use crate::library::layout::{self, OwnKind};
 
 /// A title's filename: sanitised, `Untitled` when only underscores survive,
@@ -23,10 +24,6 @@ pub(super) fn document_name(title: &str) -> String {
         stem
     };
     format!("{stem}.md")
-}
-
-fn documents_dir(data_dir: &Path, code: &str) -> std::path::PathBuf {
-    layout::own_dir(data_dir, code, OwnKind::Document)
 }
 
 /// A document's absolute path, or an error — the one place the guard runs.
@@ -53,22 +50,12 @@ pub(super) fn document_asset_ref(name: &str) -> String {
 }
 
 fn document_file(relative_path: String, size_bytes: u64) -> ImportedFile {
-    let filename = relative_path
-        .rsplit('/')
-        .next()
-        .unwrap_or_default()
-        .to_string();
-    ImportedFile {
-        filename,
-        relative_path,
-        file_type: "md".to_string(),
-        size_bytes,
-    }
+    ImportedFile::new(relative_path, "md", size_bytes)
 }
 
 /// Whether `wanted` already names the file at `current` — on a
 /// case-insensitive volume a case-only rename would otherwise step aside.
-fn same_entry(current: &Path, wanted: &Path) -> bool {
+pub(crate) fn same_entry(current: &Path, wanted: &Path) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
@@ -104,31 +91,38 @@ fn same_entry(current: &Path, wanted: &Path) -> bool {
     }
 }
 
-/// Create an empty note under a subject.
+/// Create an empty note in `target_dir` (data-dir-relative, in the subject),
+/// or the subject's root.
 #[tauri::command]
-pub fn create_document(subject_code: String, title: String) -> Result<ImportedFile, String> {
-    create_document_body_in(
-        &crate::library::paths::data_dir(),
-        &subject_code,
-        &title,
-        b"",
-    )
+pub fn create_document(
+    subject_code: String,
+    title: String,
+    target_dir: Option<String>,
+) -> Result<ImportedFile, String> {
+    let data_dir = crate::library::paths::data_dir();
+    let target = own_target(&data_dir, &subject_code, target_dir.as_deref())?;
+    create_document_in(&target, &title, b"")
 }
 
-/// Reserve a distinct note and write its complete body. `create_new` is the
-/// final authority, so two views choosing the same title never overwrite one
-/// another or an existing document.
+/// A note with its whole body at the subject's root.
 pub(crate) fn create_document_body_in(
     data_dir: &Path,
     code: &str,
     title: &str,
     body: &[u8],
 ) -> Result<ImportedFile, String> {
+    let target = own_target(data_dir, code, None).map_err(|e| e.message)?;
+    create_document_in(&target, title, body)
+}
+
+/// Reserve a distinct note in `target` and write its complete body.
+/// `create_new` is the final authority, so two views choosing the same title
+/// never overwrite one another or an existing document.
+fn create_document_in(target: &Target, title: &str, body: &[u8]) -> Result<ImportedFile, String> {
     use std::io::Write;
-    let dir = documents_dir(data_dir, code);
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let dir = &target.path;
     loop {
-        let name = step_aside(&dir, &document_name(title), |_| false);
+        let name = step_aside(dir, &document_name(title), |_| false);
         let path = dir.join(&name);
         let mut file = match std::fs::OpenOptions::new()
             .write(true)
@@ -144,10 +138,7 @@ pub(crate) fn create_document_body_in(
             let _ = std::fs::remove_file(&path);
             return Err(e.to_string());
         }
-        return Ok(document_file(
-            format!("{}/{name}", layout::own_dir_rel(code, OwnKind::Document)),
-            body.len() as u64,
-        ));
+        return Ok(document_file(target.child_rel(&name), body.len() as u64));
     }
 }
 

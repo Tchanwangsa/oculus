@@ -242,7 +242,12 @@ selected.
   refuses anything inside `.assets/` (a dot-name), so nothing can edit it as
   a note. The asset protocol's scope in `tauri.conf.json` sets
   `requireLiteralLeadingDot: false`, or a `**` glob would never match the
-  dot-folder and the pictures would draw broken.
+  dot-folder and the pictures would draw broken. A note Drive moves to
+  another folder takes the pictures it links into that folder's `.assets/`
+  (`app/src-tauri/src/library/drive/ops/pictures.rs`): moved, or copied when
+  a note left behind links the same file; a name taken there by other bytes
+  steps aside to `<stem>-2.<ext>` and the link is rewritten. A copied note's
+  pictures are copied; a folder moves or copies with its `.assets/`.
 - **`@` mentions a library file**
   (`app/src/components/documents/editor/chrome/mentions.ts`): at a word start,
   outside maths, code and frontmatter, the query after it (the chat's caps)

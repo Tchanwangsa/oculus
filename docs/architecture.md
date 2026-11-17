@@ -404,9 +404,16 @@ dir); nothing in the app reads it, it is there to recognise old paths.
   `Course` and `.oculus` are reserved at a subject's root (`reserved_name`).
 - **The student's files are everything else in a subject, at any depth.**
   Their kind is their extension: `.md` a note, `.canvas`, `.notebook`, else an
-  upload. A new one with no folder chosen lands at the subject's root
-  (`own_dir`); `own_files` walks them all for the Documents and drawing
-  listings, skipping `Course/`, `.oculus/`, dot-names and symlinks.
+  upload. Every creator (imports, notes, canvases, notebooks, browser
+  downloads) takes a target folder, checked by `own_target`
+  (`app/src-tauri/src/library/drive/ops/guard.rs`): the subject's root or an
+  existing folder of the student's in that subject; with none it lands at the
+  root. `own_files` walks them all for the Documents and drawing listings,
+  skipping `Course/`, `.oculus/`, dot-names and symlinks.
+- **The sync writes only into `Course/`.** Its one writer (`write_synced` in
+  `app/src-tauri/src/sync/phases/output.rs`) refuses any path outside the
+  synced zone, whatever a phase computes; `the_sync_writes_only_into_course`
+  holds it.
 - **`own_file_ok(rel, kind)` is the guard of every command that writes,
   renames or deletes the student's files** (notes, uploads, canvases,
   notebooks): in the own zone, the kind's extension, no dot-name (staging
@@ -434,6 +441,19 @@ dir); nothing in the app reads it, it is there to recognise old paths.
   folders a `<stem>.md` only when the parser wrote it (a parse record for it,
   or a spreadsheet's text). `purge_parse_artifacts` deletes that list and
   Drive's `list_folder` hides it ([frontend.md](./frontend.md#drive-is-one-folder-browser-over-the-disk)).
+  `artifact_slots` is the same list tagged by slot, with an Office file's
+  converted PDF, and `artifact_at` says where a slot lives for another path.
+- **A file moves with everything derived from it.** Drive's move and rename
+  (`app/src-tauri/src/library/drive/ops/`) take each artifact to its slot for
+  the new path: the text, pictures and converted PDF beside it, the records
+  to the derived folder mirroring the new folder (another subject's, across
+  subjects). The `files` row is updated in place by id, so `pages`,
+  `document_versions` and `task_files` stay, and the file needs no re-parse.
+  A rename that changes the stem relinks the `<stem>_images/` links in the
+  text, the record (its block offsets shifted) and the `pages` rows; a new
+  name with no slot for an artifact (`.docx` to `.txt`) drops it, its pages
+  and its parse state. A delete removes the row with its pages, versions,
+  task links and page pictures, then the artifacts.
 - **Synced files link to each other relatively** (`link_between`): a module
   TOC in `Course/Modules/` links `../Files/x.pdf`, a page's picture is
   `../Images/<id>.png`, `home.md`'s is `Images/<id>.png`.

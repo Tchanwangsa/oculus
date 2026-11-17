@@ -1,9 +1,15 @@
-//! Copied into a subject's uploads folder (`layout::own_dir`); the rest of the
-//! pipeline keys off the path alone.
+//! Files and folders brought in from outside the library: copied into one of
+//! the student's folders (`targetDir`, else the subject's root), a folder
+//! with everything inside it. The rest of the pipeline keys off the path.
 
 use std::path::Path;
 
+use crate::library::drive::ops::guard::{own_target, Target};
+use crate::library::drive::ops::names::{entry_name, free_name};
 use crate::library::layout::{self, OwnKind};
+
+/// A picked folder is read this many folders down.
+const MAX_DEPTH: usize = 32;
 
 /// One file that landed, in the shape the frontend writes its row from.
 #[derive(Clone, Debug, serde::Serialize)]
@@ -12,68 +18,157 @@ pub struct ImportedFile {
     pub relative_path: String,
     pub file_type: String,
     pub size_bytes: u64,
+    /// The row's `files.category`, from its path (`layout::category_of`):
+    /// a dropped `.md` is a note, a `.canvas` a canvas.
+    pub category: String,
+}
+
+impl ImportedFile {
+    pub fn new(relative_path: String, file_type: &str, size_bytes: u64) -> Self {
+        Self {
+            filename: relative_path
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .to_string(),
+            category: layout::category_of(layout::within_course(&relative_path)).to_string(),
+            relative_path,
+            file_type: file_type.to_string(),
+            size_bytes,
+        }
+    }
 }
 
 /// What became of one picked file. `file` and `error` are both set when the
 /// bytes landed but the PDF conversion did not.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ImportOutcome {
-    /// The name the user picked it under.
+    /// The name the user picked it under; inside a picked folder, its path
+    /// from that folder (`Week 1/slides.pdf`).
     pub source: String,
     pub file: Option<ImportedFile>,
     pub error: Option<String>,
 }
 
-/// Copy picked files into a subject's uploads folder; one failure does not
-/// fail the rest.
+/// Copy picked files and folders into `target_dir` (data-dir-relative, in
+/// the subject), or its root; one outcome per file, and one failure does not
+/// fail the rest. A target that is not the student's is the whole command's
+/// typed error (`DriveError`).
 #[tauri::command]
 pub async fn import_uploads(
     subject_code: String,
     paths: Vec<String>,
+    target_dir: Option<String>,
 ) -> Result<Vec<ImportOutcome>, String> {
     crate::runtime::blocking::run(move || {
         let data_dir = crate::library::paths::data_dir();
+        let target = own_target(&data_dir, &subject_code, target_dir.as_deref())?;
         let paths: Vec<&Path> = paths.iter().map(Path::new).collect();
-        Ok(import_files(&data_dir, &subject_code, &paths))
+        Ok(import_into(&data_dir, &target, &paths))
     })
     .await
 }
 
-/// Stores each of `paths` as an upload of `code`, the one way files enter
-/// the uploads folder (picked files, and browser downloads). Imports share name
-/// allocation, so one lock keeps simultaneous batches from choosing the same
-/// unused name while conversion runs.
-pub(crate) fn import_files(data_dir: &Path, code: &str, paths: &[&Path]) -> Vec<ImportOutcome> {
+fn picked_name(src: &Path) -> String {
+    src.file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| src.display().to_string())
+}
+
+/// Stores each of `paths` in `target`, the one way files enter the student's
+/// folders from outside (picked files and folders, Finder drops, browser
+/// downloads). Imports share name allocation, so one lock keeps simultaneous
+/// batches from choosing the same unused name while conversion runs.
+pub(crate) fn import_into(data_dir: &Path, target: &Target, paths: &[&Path]) -> Vec<ImportOutcome> {
     static IMPORT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = IMPORT_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    paths
-        .iter()
-        .map(|src| {
-            let source = src
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| src.display().to_string());
-            match store_upload(data_dir, code, src) {
-                Ok((file, error)) => ImportOutcome {
-                    source,
-                    file: Some(file),
-                    error,
-                },
-                Err(e) => ImportOutcome {
-                    source,
-                    file: None,
-                    error: Some(e),
-                },
+    let mut out = Vec::new();
+    for src in paths {
+        let source = picked_name(src);
+        if std::fs::metadata(src).is_ok_and(|m| m.is_dir()) {
+            import_folder(data_dir, target, src, &source, 0, &mut out);
+        } else {
+            out.push(import_one(data_dir, target, src, source));
+        }
+    }
+    out
+}
+
+fn import_one(data_dir: &Path, target: &Target, src: &Path, source: String) -> ImportOutcome {
+    match store_upload(data_dir, target, src) {
+        Ok((file, error)) => ImportOutcome {
+            source,
+            file: Some(file),
+            error,
+        },
+        Err(e) => ImportOutcome {
+            source,
+            file: None,
+            error: Some(e),
+        },
+    }
+}
+
+/// A picked folder as a new folder in `target` (` (2)` when the name is
+/// taken), everything in it below. Dot-names and symlinks are left out.
+fn import_folder(
+    data_dir: &Path,
+    target: &Target,
+    src: &Path,
+    source: &str,
+    depth: usize,
+    out: &mut Vec<ImportOutcome>,
+) {
+    let name = free_name(&target.path, &folder_name(target, src), true, |_| false);
+    let folder = Target {
+        rel: target.child_rel(&name),
+        path: target.path.join(&name),
+    };
+    if let Err(e) = std::fs::create_dir(&folder.path) {
+        out.push(ImportOutcome {
+            source: source.to_string(),
+            file: None,
+            error: Some(format!("could not make the folder — {e}")),
+        });
+        return;
+    }
+    let Ok(read) = std::fs::read_dir(src) else {
+        return;
+    };
+    let mut children: Vec<_> = read
+        .flatten()
+        .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+        .filter(|e| e.file_type().is_ok_and(|t| !t.is_symlink()))
+        .collect();
+    children.sort_by_key(|e| e.file_name());
+    for child in children {
+        let child_source = format!("{source}/{}", child.file_name().to_string_lossy());
+        let path = child.path();
+        if child.file_type().is_ok_and(|t| t.is_dir()) {
+            if depth + 1 < MAX_DEPTH {
+                import_folder(data_dir, &folder, &path, &child_source, depth + 1, out);
             }
-        })
-        .collect()
+        } else {
+            out.push(import_one(data_dir, &folder, &path, child_source));
+        }
+    }
+}
+
+/// A picked folder's name; at a subject's root never one the layout keeps.
+fn folder_name(target: &Target, src: &Path) -> String {
+    let name = entry_name(&picked_name(src));
+    if target.is_subject_root() && layout::reserved_name(&name) {
+        format!("{name} (2)")
+    } else {
+        name
+    }
 }
 
 fn store_upload(
     data_dir: &Path,
-    code: &str,
+    target: &Target,
     src: &Path,
 ) -> Result<(ImportedFile, Option<String>), String> {
     let picked = src
@@ -82,17 +177,20 @@ fn store_upload(
         .ok_or_else(|| "that file has no name".to_string())?;
     let bytes = std::fs::read(src).map_err(|e| format!("could not read it — {e}"))?;
 
-    let dir = layout::own_dir(data_dir, code, OwnKind::Upload);
-    let name = free_name(&dir, &upload_name(picked), &bytes);
-
-    let rel = format!("{}/{name}", layout::own_dir_rel(code, OwnKind::Upload));
-    let course_rel = layout::within_course(&rel).to_string();
-    let (rel, size, action) =
-        crate::library::paths::write_course_bytes(data_dir, code, &course_rel, &bytes)?;
+    let name = free_name(
+        &target.path,
+        &upload_name(target, picked),
+        false,
+        |existing| std::fs::read(existing).is_ok_and(|b| b == bytes),
+    );
+    let rel = target.child_rel(&name);
+    let path = target.path.join(&name);
+    let unchanged = std::fs::read(&path).is_ok_and(|b| b == bytes);
 
     // A reused name may hold a stale parse (a pass in flight across a delete).
-    // Only `Unchanged` — identical bytes — provably keeps its own.
-    if action != crate::library::paths::WriteAction::Unchanged {
+    // Only identical bytes provably keep their own.
+    if !unchanged {
+        std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
         crate::library::paths::purge_parse_artifacts(data_dir, &rel);
     }
 
@@ -103,12 +201,8 @@ fn store_upload(
         None => None,
         Some(ext) => match crate::sync::office_to_pdf(&bytes, ext) {
             Ok(pdf) => {
-                crate::library::paths::write_course_bytes(
-                    data_dir,
-                    code,
-                    &format!("{course_rel}.pdf"),
-                    &pdf,
-                )?;
+                std::fs::write(target.path.join(format!("{name}.pdf")), &pdf)
+                    .map_err(|e| e.to_string())?;
                 None
             }
             Err(e) => Some(format!("added, but not converted for search — {e}")),
@@ -119,32 +213,22 @@ fn store_upload(
         .rsplit_once('.')
         .map(|(_, e)| e.to_ascii_lowercase())
         .unwrap_or_default();
-
     Ok((
-        ImportedFile {
-            filename: name,
-            relative_path: rel,
-            file_type,
-            size_bytes: size,
-        },
+        ImportedFile::new(rel, &file_type, bytes.len() as u64),
         warning,
     ))
 }
 
-/// A picked file's name in the library: sanitised, and never a dot-name,
-/// which the own-file guard refuses (so it could never be deleted).
-fn upload_name(picked: &str) -> String {
-    let safe = crate::library::paths::safe_filename(picked);
-    match safe.trim_start_matches('.') {
-        "" => "file".to_string(),
-        name => name.to_string(),
+/// A picked file's name in the library (`entry_name`: never a dot-name,
+/// which the own-file guard refuses, so it could never be deleted); at a
+/// subject's root never a name the layout keeps.
+fn upload_name(target: &Target, picked: &str) -> String {
+    let name = entry_name(picked);
+    if target.is_subject_root() && layout::reserved_name(&name) {
+        format!("{name} (2)")
+    } else {
+        name
     }
-}
-
-/// A name in `dir` for these bytes: never overwrites a different file
-/// (`notes-2.pdf`), but identical bytes reuse the name and keep their parse.
-pub(super) fn free_name(dir: &Path, name: &str, bytes: &[u8]) -> String {
-    step_aside(dir, name, |existing| existing == bytes)
 }
 
 /// `name`, else `stem-2.ext`, `stem-3.ext`… — the first free, or that `ours`

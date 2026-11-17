@@ -180,8 +180,7 @@ state. `DriveTree({ current, folderHref })` is the nav column's tree beside
 it: subjects under Subjects, the rest folded under Past subjects, each opening
 in place to its folders, read when first opened; which rows are open is a
 `useStoredSet`. With `onPick` and a subject `root` the same tree is the folder
-picker of Copy to my files… and Move to…. Neither is routed yet: the Drive
-plan's stage 6 puts them in the rail section and the Files tab.
+picker of Copy to my files… and Move to…. Neither is routed yet.
 
 - **`list_folder({ rel, recursive? })` reads the disk**
   (`app/src-tauri/src/library/drive/`), so empty folders show and a file
@@ -249,9 +248,10 @@ plan's stage 6 puts them in the rail section and the Files tab.
 - **Failures are a line above the entries** (`DRIVE_PROBLEM_EVENT`), never a
   toast.
 
-The folder commands Drive calls are typed in `app/src/lib/drive/commands.ts`;
-all are data-dir-relative and refuse anything outside the student's own
-files:
+The folder commands Drive calls are typed in `app/src/lib/drive/commands.ts`
+and live in `app/src-tauri/src/library/drive/ops/`. All take data-dir-relative
+paths and touch only the student's own files (`layout::own_path_ok`); a
+target folder is a subject's root or an existing folder of the student's:
 
 | Command | Arguments | Returns |
 | --- | --- | --- |
@@ -261,13 +261,48 @@ files:
 | `delete_entries` | `rels` | nothing |
 | `delete_preview` | `rels` | every file a delete would remove |
 | `copy_to_own` | `rels`, `targetDir` | the copies' paths, in order |
-| `import_uploads` | `subjectCode`, `paths`, optional `targetDir` | one outcome per path |
+| `import_uploads` | `subjectCode`, `paths`, optional `targetDir` | one outcome per file |
 | `create_document`, `create_canvas` | as before, optional `targetDir` | the new file |
 
+- **Names.** A name may not be empty, start with a dot, hold `/`, `\`, `:`,
+  NUL or a control character, or start or end with a space; `Course` and
+  `.oculus` are refused at a subject's root. A taken name is `exists` for
+  `create_folder`, `rename_entry` and `move_entries` (nothing is
+  overwritten); imports and copies step aside to `name (2).ext`, and an
+  import of identical bytes reuses its name. A picked file or folder keeps
+  its name, with what the rules refuse replaced (`names::entry_name`).
+- **Rows follow by id.** A move or rename updates the `files` row in place:
+  path, name, `file_type` on a rename, `category` (`layout::category_of`, so
+  `.md` to `.txt` stops being a note) and, across subjects, `subject_id`; a
+  folder's rows all follow. A parsed file takes its artifacts with it and
+  stays parsed and embedded ([architecture.md](./architecture.md#one-module-owns-every-path-shape-in-the-library)),
+  a note its pictures ([editor.md](./editor.md#pictures-mentions-and-citations-resolve-to-library-files)).
+  A delete removes rows with their pages, versions and task links, then the
+  files and artifacts; there is no trash. `delete_preview` lists what Drive
+  would show of it. A copy is a new file with its own row, written before the
+  command returns, with no parse artifacts (an Office file's converted PDF
+  is copied); `copyInto` kicks each copied file's parse, a folder's files
+  included.
+- **Imports.** `import_uploads` copies files and, recursively, folders (no
+  dot-names or symlinks), one outcome per file with `source` its path from the
+  picked folder; each outcome's `file.category` is the row's (a dropped `.md`
+  is a document). A browser download's `Dest` takes the same optional
+  `target_dir`.
+- **Busy files.** A move, rename or delete is refused (`io`, "being parsed
+  right now") while a parse or embed runs on any file it touches, and holds
+  those files (`parse::InFlight`, `InFlight::embedding`) until its rows are
+  written, so no parse starts on a file mid-move; a canvas shared to a device
+  is refused the same way.
+- **`drive-changed`.** Each command but `delete_preview` emits
+  `{ subjectIds, moved: [{ from, to }], removed, added }`;
+  `useDriveEvents` turns it into `DRIVE_CHANGED_EVENT` for each subject.
+  Open tabs on a moved path, chat chips and other path-keyed state do not
+  follow it yet.
+
 A refusal arrives as a JSON-serialised `{ kind, message }`, `kind` one of
-`read_only`, `exists`, `not_found`, `invalid_name`, `io`; `driveErrorText`
-words `read_only` as "Course files are read-only" and shows any other
-message, or the raw text when it isn't one.
+`read_only` (anything synced or hidden), `exists`, `not_found`,
+`invalid_name`, `io`; `driveErrorText` words `read_only` as "Course files are
+read-only" and shows any other message, or the raw text when it isn't one.
 
 ## Backend events are the write path
 
@@ -425,9 +460,10 @@ message, or the raw text when it isn't one.
   (`app/src/lib/files/uploads.ts`), because the `parse-status` handler finds the row
   by path. `recordUploads` handles picked files and
   [browser saves](./viewers.md#downloads-wait-for-a-destination-while-their-bytes-arrive).
-  Paths cross IPC, never bytes, and a taken name steps aside (`notes-2.pdf`)
-  unless the bytes are identical. A new upload lands at the subject's root,
-  beside `Course/` (`layout::own_dir`).
+  Paths cross IPC, never bytes, and a taken name steps aside
+  (`notes (2).pdf`) unless the bytes are identical. A new upload lands in the
+  folder it was dropped on (`targetDir`), else at the subject's root beside
+  `Course/`; its row's category is the one Rust read off its path.
 - **The drop target is the Files tab's root**, so the import state lives in the
   tab (`app/src/hooks/data/useUploadImport.ts`) to survive switching to Uploads.
   `useFileDrop` ignores a `visibility: hidden` element — how background panes

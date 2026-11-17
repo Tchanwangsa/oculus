@@ -38,6 +38,29 @@ impl InFlight {
         &SHARED
     }
 
+    /// PDFs with an embed running: `embed_file` holds its PDF here, so a
+    /// Drive move or delete can see it and wait for none.
+    pub fn embedding() -> &'static InFlight {
+        static EMBEDDING: InFlight = InFlight::new();
+        &EMBEDDING
+    }
+
+    /// Hold every one of `pdfs` now, or none of them: the first already held
+    /// is returned instead, and nothing waits. Drive takes these around a
+    /// move or delete, so no parse starts on a file while it moves.
+    pub fn try_claim_all(&self, pdfs: &[PathBuf]) -> Result<Vec<InFlightClaim<'_>>, PathBuf> {
+        let mut running = self.running.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(busy) = pdfs.iter().find(|pdf| running.contains(*pdf)) {
+            return Err(busy.clone());
+        }
+        let wanted: BTreeSet<PathBuf> = pdfs.iter().cloned().collect();
+        running.extend(wanted.iter().cloned());
+        Ok(wanted
+            .into_iter()
+            .map(|pdf| InFlightClaim { owner: self, pdf })
+            .collect())
+    }
+
     /// Block until no other parse holds `pdf`, then hold it.
     pub fn claim(&self, pdf: &Path) -> InFlightClaim<'_> {
         let mut running = self.running.lock().unwrap_or_else(|p| p.into_inner());

@@ -1,9 +1,27 @@
 //! Writing artifacts to the library and announcing them.
 
+use crate::library::layout::{self, Zone};
 use crate::library::paths;
 use crate::parse;
 use crate::sync::parse::parse_pdf;
 use crate::sync::{Engine, FileEvent, Subject};
+
+/// `paths::write_course_bytes` for the sync: refuses any path that would
+/// land outside the subject's synced folder, so the sync never writes the
+/// student's own files, whatever a phase computes.
+pub(in crate::sync) fn write_synced(
+    data_dir: &std::path::Path,
+    code: &str,
+    rel_path: &str,
+    data: &[u8],
+) -> Result<(String, u64, paths::WriteAction), String> {
+    let rel = paths::course_rel_path(code, rel_path)
+        .ok_or_else(|| format!("invalid path: {rel_path}"))?;
+    if layout::zone_of(&rel) != Zone::Synced || layout::split_course(&rel).is_none() {
+        return Err(format!("the sync writes only into Course, not {rel}"));
+    }
+    paths::write_course_bytes(data_dir, code, rel_path, data)
+}
 
 impl Engine {
     /// Write one artifact and announce it. Returns `courses/CODE/...`.
@@ -38,8 +56,7 @@ impl Engine {
         canvas_id: Option<i64>,
         source_url: Option<String>,
     ) -> Result<(String, paths::WriteAction), String> {
-        let (rel, size, action) =
-            paths::write_course_bytes(&self.data_dir, &c.code, rel_path, data)?;
+        let (rel, size, action) = write_synced(&self.data_dir, &c.code, rel_path, data)?;
         // Purge the stale parse before the trigger below, or its skip check
         // would keep serving the old markdown and vectors.
         if action == paths::WriteAction::Updated {
