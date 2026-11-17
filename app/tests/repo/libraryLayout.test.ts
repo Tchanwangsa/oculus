@@ -71,6 +71,8 @@ const ALLOWED: [file: string, text: string, why: string][] = [
   ["src/components/markdown/openui/components/PageRef.tsx", "PageRef(\\\"courses/", "an example for agents"],
   // Canvas's course URL in a downloaded page's address.
   ["src/lib/browser/downloads/subjectGuess.ts", "/\\/courses\\/(\\d+)", "a Canvas URL"],
+  // An assignment's Canvas link, matched to a deadline row.
+  ["src/hooks/data/overview/comingUp.ts", "/\\/assignments\\/(\\d+)(?:[?#]|$)/", "a Canvas URL"],
   // MinerU's result archive keeps its pictures in `images/`, before the parse moves them.
   ["src-tauri/src/parse/mineru/client/extract.rs", ".join(\"images\")", "MinerU's archive"],
   ["src-tauri/src/parse/mineru/local/mod.rs", ".join(\"images\")", "MinerU's archive"],

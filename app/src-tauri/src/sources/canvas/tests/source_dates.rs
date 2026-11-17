@@ -81,7 +81,10 @@ async fn every_canvas_phase_backfills_unchanged_rows_without_changing_local_rece
         )
     });
     // Downloaded by the student, with no manifest entry for these remote bytes.
-    let video = r.dir.join("courses/SUBJ/files/video.mp4");
+    let video = r.dir.join(crate::library::layout::in_course(
+        "SUBJ",
+        &crate::library::layout::synced(crate::library::layout::SyncedKind::Media, "video.mp4"),
+    ));
     std::fs::create_dir_all(video.parent().unwrap()).unwrap();
     std::fs::write(&video, b"video").unwrap();
     let events = Arc::new(Mutex::new(Vec::new()));
@@ -139,12 +142,14 @@ async fn every_canvas_phase_backfills_unchanged_rows_without_changing_local_rece
             .fetch_one(&pool)
             .await
             .unwrap();
-        let (created, updated) = match event.relative_path.split('/').nth(2).unwrap() {
+        // `courses/SUBJ/Course/<folder or file>/…`
+        let synced = event.relative_path.split('/').nth(3).unwrap();
+        let (created, updated) = match synced.to_ascii_lowercase().as_str() {
             "home.md" => (Some(utc(1)), Some(utc(2))),
             "announcements" => (Some(utc(3)), Some(utc(3))),
             "quizzes" => (Some(utc(4)), Some(utc(5))),
             "assignments" => (Some(utc(2)), Some(utc(6))),
-            "pages" | "files" => (Some(utc(2)), Some(utc(3))),
+            "pages" | "files" | "media" => (Some(utc(2)), Some(utc(3))),
             "modules" | "syllabus.md" => (None, None),
             other => panic!("unexpected artifact: {other}"),
         };
