@@ -8,12 +8,14 @@ import { getRecents, type RecentEntry } from "@/lib/activity/recents";
 import { dateFromSlug, fmtShortDate, humanizeSlug } from "@/lib/format/format";
 import { lecturePagePath } from "@/lib/lectures";
 import { getLectures, type Lecture } from "@/lib/db";
+import { OverviewAskBar } from "./overview/AskBar";
 import { EmptyState } from "./overview/EmptyState";
 import { FileLink, MoreLink, Section } from "./overview/parts";
 import { RecentsCarousel } from "./overview/RecentsCarousel";
 
 /**
- * Subject home: where you left off, then what's new. Counts and per-tab stats
+ * Subject home: where you left off, then what's new, with the ask bar
+ * (`OverviewAskBar`) docked at the bottom. Counts and per-tab stats
  * deliberately don't live here — the tabs themselves are one click away.
  */
 export default function SubjectOverviewPage() {
@@ -53,68 +55,76 @@ export default function SubjectOverviewPage() {
   const nothingSynced = files.length === 0 && (lectures?.length ?? 0) === 0;
 
   return (
-    <SubjectPage className="py-6 space-y-8">
-      {nothingSynced && <EmptyState />}
+    <SubjectPage className="flex min-h-full flex-col pt-6 pb-0">
+      <div className="space-y-8">
+        {nothingSynced && <EmptyState />}
 
-      {recents.length > 0 && (
-        <Section title="Recently visited">
-          <RecentsCarousel recents={recents} files={files} subjectId={subject.id} />
-        </Section>
-      )}
+        {recents.length > 0 && (
+          <Section title="Recently visited">
+            <RecentsCarousel recents={recents} files={files} subjectId={subject.id} />
+          </Section>
+        )}
 
-      {nextLecture && (
-        <Section title="Up next">
-          <Link
-            to={lecturePagePath(nextLecture)}
-            className="flex items-center gap-3 rounded-lg border border-border px-3.5 py-3 hover:bg-surface transition-colors"
-          >
-            <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-medium text-foreground truncate">
-                {nextLecture.title}
-              </p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
-                {fmtShortDate(new Date(nextLecture.date))}
-                {nextLecture.progress_seconds > 5 ? " · in progress" : ""}
-              </p>
+        {nextLecture && (
+          <Section title="Up next">
+            <Link
+              to={lecturePagePath(nextLecture)}
+              className="flex items-center gap-3 rounded-lg border border-border px-3.5 py-3 hover:bg-surface transition-colors"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-medium text-foreground truncate">
+                  {nextLecture.title}
+                </p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {fmtShortDate(new Date(nextLecture.date))}
+                  {nextLecture.progress_seconds > 5 ? " · in progress" : ""}
+                </p>
+              </div>
+              <ArrowRight size={13} className="text-muted-foreground shrink-0" />
+            </Link>
+          </Section>
+        )}
+
+        {(byCategory.home.length > 0 || byCategory.syllabus.length > 0) && (
+          <Section title="Start here">
+            <div className="space-y-0.5">
+              {byCategory.home.map((f) => (
+                <FileLink key={f.id} file={f} label="Course overview" />
+              ))}
+              {byCategory.syllabus.map((f) => (
+                <FileLink key={f.id} file={f} label="Syllabus" />
+              ))}
             </div>
-            <ArrowRight size={13} className="text-muted-foreground shrink-0" />
-          </Link>
-        </Section>
-      )}
+          </Section>
+        )}
 
-      {(byCategory.home.length > 0 || byCategory.syllabus.length > 0) && (
-        <Section title="Start here">
-          <div className="space-y-0.5">
-            {byCategory.home.map((f) => (
-              <FileLink key={f.id} file={f} label="Course overview" />
-            ))}
-            {byCategory.syllabus.map((f) => (
-              <FileLink key={f.id} file={f} label="Syllabus" />
-            ))}
-          </div>
-        </Section>
-      )}
+        {recentAnnouncements.length > 0 && (
+          <Section title="Announcements">
+            <div className="space-y-0.5">
+              {recentAnnouncements.map((f) => {
+                const posted = dateFromSlug(f.filename);
+                return (
+                  <FileLink
+                    key={f.id}
+                    file={f}
+                    label={humanizeSlug(f.filename)}
+                    meta={posted ? fmtShortDate(posted) : undefined}
+                  />
+                );
+              })}
+            </div>
+            {byCategory.announcement.length > recentAnnouncements.length && (
+              <MoreLink to="announcements" label="All announcements" />
+            )}
+          </Section>
+        )}
+      </div>
 
-      {recentAnnouncements.length > 0 && (
-        <Section title="Announcements">
-          <div className="space-y-0.5">
-            {recentAnnouncements.map((f) => {
-              const posted = dateFromSlug(f.filename);
-              return (
-                <FileLink
-                  key={f.id}
-                  file={f}
-                  label={humanizeSlug(f.filename)}
-                  meta={posted ? fmtShortDate(posted) : undefined}
-                />
-              );
-            })}
-          </div>
-          {byCategory.announcement.length > recentAnnouncements.length && (
-            <MoreLink to="announcements" label="All announcements" />
-          )}
-        </Section>
-      )}
+      {/* Docked at the bottom of the pane, in the page's own column, so the
+          bar and the content above share one width. */}
+      <div className="sticky bottom-0 mt-auto bg-card pt-4 pb-4">
+        <OverviewAskBar subject={subject} />
+      </div>
     </SubjectPage>
   );
 }

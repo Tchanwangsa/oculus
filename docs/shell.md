@@ -94,6 +94,12 @@ before leaving a playing lecture.
   or its links, PDFs and challenge files open and title like downloads
   (`isLessonAsset` in `app/src/lib/files/fileTypes.ts`), and none counts toward
   the tab's never-opened count.
+- **A subject's Overview** (`app/src/pages/subject/content/OverviewPage.tsx`)
+  is where the student left off, the next lecture, the subject's home and
+  syllabus and its latest announcements, with an ask bar docked at the
+  bottom of the page's own column, so the bar and the content share one
+  width. The bar starts a Chat thread filed under the subject and warps this
+  pane into it ([harness.md](./harness.md#the-subject-overviews-ask-bar-starts-a-thread)).
 - **`/subjects` is a redirect, not a page** (`SubjectsRedirect`): it replaces
   itself with the Overview of the last subject `SubjectLayout` resolved
   (`localStorage`, `oculus-last-subject`), else the first current subject,

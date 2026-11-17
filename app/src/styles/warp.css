@@ -1,0 +1,12 @@
+/* The warp (`app/src/lib/ui/warp.ts`): the composer the student sent from
+   morphs into the opened page's composer while the window cross-fades. Short,
+   so it reads as one motion; reduced motion never starts it. */
+::view-transition-group(composer-warp) {
+  animation-duration: 280ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 280ms;
+}

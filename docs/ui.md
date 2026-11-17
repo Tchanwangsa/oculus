@@ -324,6 +324,11 @@ themes are opt-in and keep the same structure.
   bubble. The ⌘S stash is a "Stash"
   pill above the box opening a popover; its eviction notice is a line inside
   that popover, not a toast ([harness.md](./harness.md#the-empty-box-earlier-messages-and-the-stash)).
+- **A compact composer rests as one pill** (the subject Overview's ask bar):
+  the hint on one line, the agent's mark with its caret, the mic and send.
+  Used, it opens into the full box in place, with no animation; sent, it
+  morphs into the thread's composer
+  ([harness.md](./harness.md#the-subject-overviews-ask-bar-starts-a-thread)).
 - **The composer says a turn's state in words, not only colour**
   (`SendControls`): Stop is an icon until pressed, then a disabled "Stopping"
   pill with a brand spinner; a held queue with an empty box turns the send

@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef } from "react";
 import type { PendingActions, QuestionActions } from "@/components/harness/timeline/Timeline";
 import {
+  commandError,
   harnessEditQueued,
   harnessEditResend,
   harnessForceStop,
@@ -43,9 +44,11 @@ export function useThreadActions(opts: ThreadActionsOptions) {
   ref.current = opts;
 
   /** `extra` runs after the thread id is read, for options that take a while.
-   *  `mode`: how the message enters a running turn (`useSendMode`). */
+   *  `mode`: how the message enters a running turn (`useSendMode`). Resolves
+   *  to Rust's reason when the send was refused, else null, so a caller can
+   *  give the words back (the Overview's ask bar). */
   const send = useCallback(
-    async (text: string, extra: () => SendOptions | Promise<SendOptions> = () => ({}), mode?: DeliveryMode) => {
+    async (text: string, extra: () => SendOptions | Promise<SendOptions> = () => ({}), mode?: DeliveryMode): Promise<string | null> => {
       const s = store.getState();
       const o = ref.current;
       const id = o.threadId();
@@ -60,10 +63,12 @@ export function useThreadActions(opts: ThreadActionsOptions) {
           await s.loadThreads();
           await ref.current.onCreated(newId);
         }
+        return null;
       } catch (e) {
         // The failure also arrives as an error row through the event path.
         console.error("harness send failed", e);
         if (id == null) await s.loadThreads();
+        return commandError(e);
       }
     },
     [store],
