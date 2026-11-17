@@ -79,7 +79,7 @@ path or page in `source`, never in tags, and topic names in `topics`.
 For example:
 
 ```openui
-root = Stack([NewCheatNotes([CheatEntry("Product rule", "For $y=uv$, $y'=u'v+uv'$. Example: $(x^2 e^x)'=2xe^x+x^2e^x$.", "MAST10006", ["Formula"], "courses/MAST10006_2026_SM1/files/Lecture_5.pdf#page=3", ["Differentiation"])])])
+root = Stack([NewCheatNotes([CheatEntry("Product rule", "For $y=uv$, $y'=u'v+uv'$. Example: $(x^2 e^x)'=2xe^x+x^2e^x$.", "MAST10006", ["Formula"], "courses/MAST10006_2026_SM1/Course/Files/Lecture_5.pdf#page=3", ["Differentiation"])])])
 ```
 
 Quiz and Flashcards in an `openui` fence have Save to Revision, which saves

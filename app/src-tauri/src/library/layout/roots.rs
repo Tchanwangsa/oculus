@@ -21,6 +21,21 @@ pub fn courses_dir(data_dir: &Path) -> PathBuf {
     data_dir.join(COURSES_DIR)
 }
 
+/// The subject folders on disk, by name, sorted; dot-names are left out.
+pub fn subjects_on_disk(data_dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(courses_dir(data_dir))
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| !n.starts_with('.'))
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
 /// `courses/<code>`, data-dir-relative. The code is sanitised as the folder
 /// was named (`safe_dir`).
 pub fn course_rel(code: &str) -> String {

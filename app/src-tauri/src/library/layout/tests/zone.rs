@@ -1,4 +1,4 @@
-use crate::library::layout::{reserved_name, zone_of, Zone};
+use crate::library::layout::{reserved_name, reserved_names, zone_of, Zone};
 
 #[test]
 fn every_path_shape_has_its_zone() {
@@ -51,6 +51,14 @@ fn course_and_oculus_are_reserved_at_a_subjects_root() {
     }
     for name in ["Courses", "My Course", "oculus", "Exam prep"] {
         assert!(!reserved_name(name), "{name}");
+    }
+    assert_eq!(reserved_names(), ["Course", ".oculus"]);
+    for name in reserved_names() {
+        assert_ne!(
+            zone_of(&format!("courses/X/{name}/a")),
+            Zone::Own,
+            "{name} is not the student's"
+        );
     }
 }
 

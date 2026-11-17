@@ -106,7 +106,7 @@ ReviewDue(subject?: string | number) — Due review count for a subject code or 
 - subject is an id or code; omit for all. A single-subject read requires an unambiguous code; calendar also accepts a code prefix spanning terms. Revision also accepts "general". Local data refreshes after edits; @Run(rows) reads again. Query args may depend on $variables.
 
 ### Links
-PageRef(path: string, page?: number, label?: string) — A link to a page of a library file, e.g. PageRef("courses/MAST10006/Lecture 4.pdf", 12, "Chain rule"); same paths you cite in prose.
+PageRef(path: string, page?: number, label?: string) — A link to a page of a library file, e.g. PageRef("courses/MAST10006_2026_SM1/Course/Files/Lecture 4.pdf", 12, "Chain rule"); same paths you cite in prose.
 Ask(label: string, action?: ActionExpression) — A button that sends a follow-up message as the student, e.g. Ask("Harder questions", @ToAssistant("Give me five harder Big-O questions")). Without an action it sends its label.
 
 ### Create
@@ -223,7 +223,7 @@ c3 = Card("End product under aerobic conditions?", "Two pyruvate, which enter th
 A quiz with a source page:
 
 ```openui
-root = Stack([quiz, PageRef("courses/COMP20003/Week 3 Sorting.pdf", 14)])
+root = Stack([quiz, PageRef("courses/COMP20003_2026_SM2/Course/Files/Week 3 Sorting.pdf", 14)])
 quiz = Quiz("Sorting complexity", [q1, q2])
 q1 = Question("Worst case of quicksort with a first-element pivot?", [Option("$O(n \\log n)$"), Option("$O(n^2)$", true), Option("$O(n)$")], "An already-sorted input splits $n-1$ / $0$ every time.")
 q2 = Question("Which sort is stable?", [Option("Heapsort"), Option("Merge sort", true), Option("Quicksort")])

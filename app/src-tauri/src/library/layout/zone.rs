@@ -31,14 +31,20 @@ pub fn zone_of(rel: &str) -> Zone {
     CURRENT.zone_of(rel)
 }
 
-/// True for a name the layout keeps for itself at a subject's root (`Course`,
-/// `.oculus`), ignoring case: no folder of the student's may take it.
-pub fn reserved_name(name: &str) -> bool {
+/// The names the layout keeps for itself at a subject's root (`Course`,
+/// `.oculus`): what an agent's containment protects in every subject.
+pub fn reserved_names() -> Vec<&'static str> {
     CURRENT
         .synced_root
         .into_iter()
         .chain(CURRENT.hidden.iter().copied())
-        .any(|r| same_name(name, r))
+        .collect()
+}
+
+/// True for a name the layout keeps for itself at a subject's root, ignoring
+/// case: no folder of the student's may take it.
+pub fn reserved_name(name: &str) -> bool {
+    reserved_names().into_iter().any(|r| same_name(name, r))
 }
 
 /// `/`-separated segments, or `None` for any spelling that could leave the

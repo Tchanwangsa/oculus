@@ -2,7 +2,8 @@
 
 Chat is a coding agent the student already has — Claude Code, Codex, opencode
 or Antigravity (`agy`) — run as a subprocess from the library's `agents/`
-folder, its output folded into one timeline. Claude Code, Codex and `agy` carry
+folder, writing there and in the student's own files, its output folded into
+one timeline. Claude Code, Codex and `agy` carry
 the student's subscription; opencode carries whatever `opencode auth` holds and
 is the app's only API path. The shape is bb's (get-bb/bb) without plugins: one
 bridge per provider, one event stream, a timeline that only sees the stream.
@@ -16,7 +17,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Tauri commands (setup, models, turns, suggestions) | `app/src-tauri/src/harness/app/` |
 | The event enum, tool classification (`classify`) and answer selection | `app/src-tauri/src/harness/event/mod.rs`, `app/src-tauri/src/harness/event/classify.rs`, `app/src-tauri/src/harness/event/answer.rs` |
 | Bridges: Claude (`claude -p`), Codex (`app-server`), opencode (`serve`), Antigravity (`agy acp`) | `app/src-tauri/src/harness/providers/claude/`, `app/src-tauri/src/harness/providers/codex/`, `app/src-tauri/src/harness/providers/opencode/`, `app/src-tauri/src/harness/providers/antigravity/` (`acp/`) |
-| Paths no agent may write; opencode's ruleset; what Rust answers agy; taking back the agy rules earlier versions wrote | `app/src-tauri/src/harness/protected.rs`, `app/src-tauri/templates/OPENCODE.template.json`, `app/src-tauri/src/harness/providers/antigravity/acp/policy.rs`, `app/src-tauri/src/harness/providers/antigravity/cleanup.rs` |
+| Paths no agent may write and the own zone it may; each CLI's rendering (Claude's settings, Codex's writable roots, opencode's ruleset, what Rust answers agy); taking back the agy rules earlier versions wrote | `app/src-tauri/src/harness/protected.rs`, `app/src-tauri/src/harness/providers/claude/settings.rs`, `writable_roots` in `app/src-tauri/src/harness/providers/codex/mod.rs`, `app/src-tauri/templates/OPENCODE.template.json`, `app/src-tauri/src/harness/providers/antigravity/acp/policy.rs`, `app/src-tauri/src/harness/providers/antigravity/cleanup.rs` |
 | Finding, installing, updating and signing in the CLIs | `app/src-tauri/src/harness/cli/discover/`, `app/src-tauri/src/harness/cli/install/`, `app/src-tauri/src/harness/cli/update/`, `app/src-tauri/src/harness/cli/signin/` |
 | …their frontend | `app/src/hooks/agents/useBridgeHealth.ts`, `app/src/hooks/agents/useSignInStatus.ts`, `app/src/components/settings/agents/InstallAgentDialog.tsx`, `app/src/components/settings/agents/UpdateAgents.tsx`, `app/src/components/harness/SignInDialog.tsx`, `app/src/pages/settings/integrations/AgentsPage.tsx` |
 | Hidden native processes, Windows job ownership and npm shim resolution | `app/src-tauri/src/runtime/platform/` |
@@ -147,24 +148,49 @@ display policy: no thinking flags or summary setting, with
   do their own database write in Rust.
 - Chat's old tables (`llm_usage`, `chats`, `chat_messages`) have no readers.
 
-## Every thread runs from `agents/`, and that is the containment
+## Every thread runs from `agents/`; it writes there and in the student's own files
 
-A thread rooted at the library writes straight into `courses/` under
-`acceptEdits`. From `agents/`, each CLI refuses other writes its own way; the
-protected paths are one list in `protected.rs`: the library folders, the root files by pattern (the vault and its lock and temp files among them, so an agent cannot delete or truncate the sealed sessions) and the workspace folders. agy names the files instead.
+A thread rooted at the library would write straight into every subject's
+`Course/` under `acceptEdits`. So every thread runs from `agents/`, and each
+CLI is given, its own way, what else it may write: the database's three files
+and `studio/` (below), and the **own zone** — every subject's files and
+folders beside its `Course/` and `.oculus/` (`layout::Zone::Own`), written
+without a request. What stays protected is one list in `protected.rs`: each
+subject's `Course/` and `.oculus/` (`subject_dirs`, the layout's
+`reserved_names`), the subjects' folder itself and anything in it outside a
+subject, an earlier version's session folder (`library_dirs`), the root files
+by pattern (the vault and its lock and temp files among them, so an agent
+cannot delete or truncate the sealed sessions) and the workspace folders. agy
+names the files instead.
 
-- **Claude**: its sandbox with the cwd as the write root (plus the two holes
-  below), `--add-dir` for
-  reads (without it `ls ../courses` is refused), and `Edit` denies on
-  protected paths so `--add-dir` doesn't pull them into `acceptEdits`. What
-  that leaves undecided comes to the host as a permission prompt and is
-  asked of the student by the chat's mode
+| CLI | The own zone | `Course/` and `.oculus/` |
+| --- | --- | --- |
+| Claude | `<data>/courses` in `sandbox.filesystem.allowWrite`; `--add-dir` and `acceptEdits` take its edits unasked | `Edit(//<data>/courses/*/Course)` and `…/Course/**`, the same for `.oculus` (`*` is one segment, so a subject synced mid-thread is covered), plus `Edit(//<data>/courses/<code>/Course)` and `…/.oculus` named for each subject on disk at spawn, which makes the sandbox refuse moving that subject's folder; the CLI merges `Edit` denies into `denyWrite` |
+| Codex | Each subject's top-level own entries on disk at the thread's start (`layout::own_top_level`), one writable root each: `workspace-write`'s roots cannot leave out a folder beneath them, so a subject's folder is never a root. A new file or folder at a subject's top level is a request | Never a writable root |
+| opencode | `"{{LIBRARY}}/courses/*/*": "allow"` after the root-file denies (opencode's `*` crosses `/`, and `{{LIBRARY}}/*.json` would refuse a student's `.json`) | `"{{LIBRARY}}/courses/*/Course"` and `…/Course/*`, the same for `.oculus`, all `deny`, after it; `{{LIBRARY}}/courses/**` denies the rest of `courses/` first. A crossing `*` also refuses a folder named `Course` deeper in the student's own files |
+| Antigravity | Rust allows a write unseen when every path is in it (`requests::policy::in_own_zone`) | Refused unseen (`requests::policy::protected`) |
+
+Codex 0.169's permission profiles (`[permissions.<name>.filesystem]`, with a
+`deny` mode) might express the subtree less two folders, but the app-server
+refuses a profile its legacy `sandboxPolicy` cannot represent, and the
+schema is unmeasured; the bridge keeps the measured legacy policy.
+
+Folder names compare without case on the student's disk. Rust's checks
+(`zone_of`, `policy.rs`) ignore case; Claude's sandbox matches its patterns
+without case where the volume does; opencode's rule match is by spelling, so
+`courses/x/course/…` gets past it.
+
+- **Claude**: its sandbox with the cwd, the own zone and the two holes below
+  as write roots, `--add-dir` for reads (without it `ls ../courses` is
+  refused), and `Edit` denies on protected paths so `--add-dir` doesn't pull
+  them into `acceptEdits`. What that leaves undecided comes to the host as a
+  permission prompt and is asked of the student by the chat's mode
   ([Claude asks over its control channel](#claude-asks-over-its-control-channel));
   a one-off turn runs `--permission-prompts none`, since nobody is there to
   answer and an unanswered prompt under `-p` hangs.
-- **Codex**: `workspace-write` rooted at the cwd (plus the two holes below),
-  its approval policy is the chat's permission mode
-  ([Requests](#requests)): `never` in "Don't ask" and every one-off turn.
+- **Codex**: `workspace-write` rooted at the cwd (plus the own zone's roots
+  and the two holes below), its approval policy is the chat's permission
+  mode ([Requests](#requests)): `never` in "Don't ask" and every one-off turn.
 - **opencode has no sandbox** — a rule list its runner checks. File tools are
   real (`edit` covers `write`/`edit`/`apply_patch`); `bash` is a glob over the
   command string, allow-listing `oculus …` and `ls …` — it stops `rm -rf`, not
@@ -174,6 +200,18 @@ protected paths are one list in `protected.rs`: the library folders, the root fi
 - **Antigravity**: `agy acp` asks before every write and command, and Rust
   answers each request first ([Antigravity asks over ACP](#antigravity-asks-over-acp)).
   Nothing is written to the student's own agy settings.
+
+Each bridge's tests pin its rules: an own file in two subjects (a `.json`
+among them) writable, `Course/` and `.oculus/` refused in every subject,
+including one that did not exist at spawn where the rule is a glob.
+
+**A file an agent writes in the own zone is on disk, not yet in the index.**
+Drive lists the disk, so it shows at once. A note, canvas or notebook gets
+its `files` row when the subject's Files page next reconciles its own files
+(`reconcileDocuments`, `reconcileDrawings`); any other file (a PDF, a
+picture, a script) gets none, so it is not parsed or embedded and `oculus
+files|grep|read|search` and mentions do not find it. The agent docs say to
+read such a file by path.
 
 **The database is the first hole, three files wide.** The CLI reads the board
 and permits Studio metadata writes ([cli.md](./cli.md)), and a sandbox that opens
@@ -1910,9 +1948,12 @@ CLI is told no, and the request is never shown, when:
 - no turn is open (a background agent asking after its turn closed);
 - an approval arrives while the chat is saved as "Don't ask", whatever its
   turn started under; questions are independent of permission mode;
-- it names a protected path, or a folder that holds the library, since a
-  grant there reaches every protected folder inside (`requests/policy.rs`
-  against `protected.rs`; relative paths are read against `agents/`). A
+- it names a protected path, or a folder that holds the library or a
+  subject's `Course/`, since a grant there reaches every protected folder
+  inside (`requests/policy.rs` against `protected.rs`; relative paths are
+  read against `agents/`). A path in a subject's own files is not protected:
+  where a CLI's sandbox could not grant it (a new top-level file under
+  Codex), the student is asked. A
   shell command cannot be
   checked this way, so its payload says it runs outside the sandbox; the
   name denies and `OCULUS_AGENT` keep refusing inside an approved command;

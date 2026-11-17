@@ -541,3 +541,91 @@ fn windows_course_docs_are_managed_copies_and_memories_are_junctions() {
         "mine"
     );
 }
+
+/// Every path the agent docs spell is the layout's: the folder tree names
+/// each synced folder, the examples are what the layout module builds, and
+/// no earlier layout's folder is left in them.
+#[test]
+fn the_agent_docs_spell_the_layout_they_describe() {
+    use crate::library::layout::{
+        self, derived_rel, in_course, recording_name, recording_rel, synced, synced_dir,
+        synced_file, DerivedKind, SyncedFile, SyncedKind, CATEGORIES, LEGACY,
+    };
+    let harness = include_str!("../../templates/HARNESS.template.md");
+    let skill = |name: &str| SKILLS.iter().find(|s| s.name == name).unwrap().files[0].1;
+    let (library, lectures) = (skill("oculus-library"), skill("oculus-lectures"));
+
+    for kind in [
+        SyncedKind::Files,
+        SyncedKind::Media,
+        SyncedKind::Lessons,
+        SyncedKind::Discussion,
+        SyncedKind::Pages,
+        SyncedKind::Assignments,
+        SyncedKind::Quizzes,
+        SyncedKind::Announcements,
+        SyncedKind::Modules,
+        SyncedKind::Images,
+    ] {
+        let dir = synced_dir(kind);
+        let name = dir.rsplit('/').next().unwrap();
+        assert!(
+            AGENTS_DOC.contains(&format!("{name}/")),
+            "AGENTS.md lacks {dir}"
+        );
+    }
+    for file in [SyncedFile::Home, SyncedFile::Syllabus] {
+        let rel = synced_file(file);
+        assert!(AGENTS_DOC.contains(&rel), "AGENTS.md lacks {rel}");
+    }
+    for name in layout::reserved_names() {
+        assert!(
+            AGENTS_DOC.contains(&format!("{name}/")),
+            "AGENTS.md lacks {name}/"
+        );
+    }
+    let instructions = format!(
+        "{}/INSTRUCTIONS.md",
+        layout::agents_rel("X").strip_prefix("courses/X/").unwrap()
+    );
+    assert!(AGENTS_DOC.contains(&instructions), "{instructions}");
+
+    // A PDF's text, where the library skill says it is.
+    let pdf = synced(SyncedKind::Files, "13.pdf");
+    let md = derived_rel(&pdf, DerivedKind::Markdown);
+    assert!(library.contains(&format!("`{md}`")), "{md}");
+    // A citation as the brief spells it.
+    let cited = in_course("X", &synced(SyncedKind::Files, "week-3.pdf")).replace("/X/", "/<CODE>/");
+    assert!(harness.contains(&cited), "{cited}");
+    // A recording folder as the lectures skill spells it.
+    let code = "MULT20015_2026_SM2";
+    let folder = recording_rel(
+        code,
+        &recording_name("2026-09-08", "MULT20015_2026_SM2 MO L105", code),
+    );
+    assert!(
+        lectures.contains(&format!("../{folder}/outline.md")),
+        "{folder}"
+    );
+    for category in CATEGORIES {
+        assert!(
+            library.contains(&format!("`{category}`")),
+            "the library skill lacks {category}"
+        );
+    }
+
+    let docs = [
+        ("AGENTS.md", AGENTS_DOC),
+        ("the brief", harness),
+        ("oculus-library", library),
+        ("oculus-lectures", lectures),
+    ];
+    let legacy_own = LEGACY.own_dirs.iter().map(|(_, dir)| format!("{dir}/"));
+    let legacy_synced = LEGACY.synced_dirs.iter().map(|(_, dir)| format!("/{dir}/"));
+    let legacy_recordings = LEGACY.recordings_root().map(|r| format!("../{r}/"));
+    for old in legacy_own.chain(legacy_synced).chain(legacy_recordings) {
+        for (name, text) in docs {
+            assert!(!text.contains(&old), "{name} still spells {old}");
+        }
+    }
+}

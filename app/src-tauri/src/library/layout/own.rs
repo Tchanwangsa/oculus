@@ -92,6 +92,31 @@ pub fn own_files(data_dir: &Path, code: &str) -> Vec<(String, std::fs::Metadata)
     out
 }
 
+/// Each subject's top-level own entries on disk, files and folders: what
+/// sits beside `Course/` and `.oculus/`, less symlinks (a subject's
+/// `AGENTS.md`). A sandbox that cannot carve those two out of a subject's
+/// folder grants these one by one (`harness::providers::codex`).
+pub fn own_top_level(data_dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for code in super::subjects_on_disk(data_dir) {
+        let Ok(entries) = std::fs::read_dir(own_root(data_dir, &code)) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            let rel = format!("{}/{name}", course_rel(&code));
+            if zone_of(&rel) != Zone::Own || entry.file_type().is_ok_and(|t| t.is_symlink()) {
+                continue;
+            }
+            out.push(entry.path());
+        }
+    }
+    out.sort();
+    out
+}
+
 /// The same folder, data-dir-relative.
 pub fn own_dir_rel(code: &str, kind: OwnKind) -> String {
     match CURRENT.own_dir(kind) {

@@ -5,51 +5,61 @@ student's university, synced from Canvas, and from Ed Discussion and Echo360
 where the university uses them. The folder is named for the subject's Canvas
 course code: at the University of Melbourne `COMP30026_2026_SM2` is COMP30026,
 semester 2, 2026; elsewhere it is whatever code Canvas gives, such as
-`CS_101_Fall_2026` for "CS 101 Fall 2026".
-`syllabus.md` and `home.md` name it in full. If you are reading this from the
-library's own `agents/` folder instead — where the in-app chat runs you —
-the course folders are at `../courses/<CODE>/`, and everything below is about
-them.
+`CS_101_Fall_2026` for "CS 101 Fall 2026". `Course/syllabus.md` and
+`Course/home.md` name it in full. If you are reading this from the library's
+own `agents/` folder instead — where the in-app chat runs you — the course
+folders are at `../courses/<CODE>/`, and everything below is about them.
 
-Oculus fills this folder by syncing Canvas, Ed (Discussion and Lessons) and
-Echo360 from the desktop app. Only `uploads/`, `documents/`, `canvases/` and
-`notebooks/` are the student's own.
+Oculus fills this folder's `Course/` by syncing Canvas, Ed (Discussion and
+Lessons) and Echo360 from the desktop app. Everything beside `Course/` is the
+student's own: files and folders they made or brought in, at any depth, each
+file's kind given by its extension.
 
 ```
 ./
-  syllabus.md      home.md
-  announcements/   Canvas announcements, one .md each
-  assignments/     briefs and due dates, one .md each
-  ed/              Ed Discussion threads, NNNN-slug.md
-  lessons/         Ed Lessons: <id>-slug.md is an index linking each slide
+  Course/          synced by Oculus — read it, never write it
+    home.md  syllabus.md
+    Announcements/ Canvas announcements, one .md each
+    Assignments/   briefs and due dates, one .md each
+    Discussion/    Ed Discussion threads, NNNN-slug.md
+    Lessons/       Ed Lessons: <id>-slug.md is an index linking each slide
                    in order; <id>-slug/ holds NN-slide.md per slide, a PDF
                    slide as NN-slide.pdf (its text in NN-slide.md), and a
                    challenge's files under NN-slide/
-  files/           downloads plus parsed siblings:
-                     13.pdf  13.md  13.pages.json  13_images/
-                   a spreadsheet's text is beside it: marks.xlsx.md
-  modules/         module pages, in course order; an item marked
+    Files/         downloads, each parsed PDF with its text beside it:
+                     13.pdf  13.md  13_images/
+                   a spreadsheet's text is beside it too: marks.xlsx.md
+    Media/         module videos; a video's transcript, when there is one,
+                   is <video>.vtt beside it
+    Modules/       module pages, in course order; an item marked
                    _(video <id>)_ links where the video lands once the
                    student downloads it in the app — until then it is absent
-  pages/           Canvas pages
-  quizzes/         worksheets and quizzes
-  images/          images referenced by the markdown above
-  uploads/         the student's own files, added by hand
-  documents/       the student's own notes, written in the app — markdown
-                   you may read; they are the student's to write
-  canvases/        the student's drawings: `.canvas` files, whiteboards,
-                   not text
-  notebooks/       the student's notebooks: `.notebook` files, not text —
-                   pages where they write their working by hand. Read a
-                   notebook with `oculus read` (see the library skill),
-                   never by opening the file
-  agents/          yours: INSTRUCTIONS.md, and memories/ linked to the
-                   library's store (see Memory)
+    Pages/         Canvas pages
+    Quizzes/       worksheets and quizzes
+    Images/        images referenced by the markdown above
+    Recordings/    Echo360 lectures, one folder each, named
+                   <YYYY-MM-DD>-<slug> from the date and title:
+                   transcript.vtt, outline.md, source1.mp4 (see the
+                   lectures skill)
+  <the student's own files and folders>
+                   uploads, notes (`.md`, written in the app), drawings
+                   (`.canvas`, whiteboards, not text) and notebooks
+                   (`.notebook`, pages where they write their working by
+                   hand — read one with `oculus read`, see the library
+                   skill, never by opening the file)
+  .oculus/         app state, hidden: agents/INSTRUCTIONS.md (this
+                   subject's guidance), agents/memories/ linked to the
+                   library's store (see Memory), and machine records
+  AGENTS.md        this file
 ```
 
-Per-page PDF text is **not** on disk — it lives in the Oculus database. Plain
-`grep`/`rg` over this folder silently misses every slide deck; `oculus grep`
-reads both halves.
+A parsed PDF's text is on disk as `<stem>.md` beside it, wherever the PDF
+sits — in `Course/Files/` or among the student's own files — one file for
+the whole document, so `rg` over the folder finds it and your file tools read
+it. Page numbers are not in that file: they live in the Oculus database,
+which `oculus grep` (`:p12` addresses) and `oculus read --pages` use. A PDF
+with no `.md` beside it has not been parsed yet. Ripgrep skips hidden folders
+by default; nothing you need to read is in `.oculus/`.
 
 A spreadsheet (`.xlsx`, `.xlsm`, `.xls`, `.ods`, `.csv`) is text, not a PDF:
 `marks.xlsx.md` holds one `##` section per sheet as a table of the values
@@ -62,9 +72,14 @@ rank it.
 
 ## Rules
 
-- Keep ordinary file writes inside the library's `agents/` folder. Synced
-  material is regenerated and the student's own files are theirs to edit.
-  Studio work uses its workspace through the skill below.
+- `Course/` is read-only: Oculus regenerates it on every sync, and no
+  agent may write there. `.oculus/` is the app's.
+- The student's own files are theirs. Write there only what they ask you to
+  make — a worked solution, a table, a script — beside `Course/` in the
+  subject it belongs to, and never change or delete a file of theirs they did
+  not ask you to. In the Oculus chat a note goes through its confirmation
+  rules instead. Scratch work goes in the library's `agents/` folder. Studio
+  work uses its workspace through the skill below.
 - Videos (an explainer, an animation, a narrated summary) are made with the
   `oculus-studio` skill and live in `../studio/videos/` from `agents/`.
 - Keep memories as markdown in the library's memory store, not `.claude/` and
@@ -143,7 +158,7 @@ Do not narrate memory upkeep.
 
 `TASTE.md` owns standing preferences: read it for what belongs there and when
 to promote a feedback memory. Subject-specific guidance belongs in that
-course's `agents/INSTRUCTIONS.md`.
+course's `.oculus/agents/INSTRUCTIONS.md`.
 
 **How to write one — `oculus memory`, never by hand.** It fills in the front
 matter and the dates and rewrites that folder's `MEMORY.md`, so the index
@@ -237,8 +252,8 @@ needs that key to be set; when it can't run it fails loudly and points at
 Open these when you need them, not before every task. Paths are relative to
 this course folder.
 
-- `agents/INSTRUCTIONS.md` — instructions for this subject alone. Read it
-  first if it exists.
+- `.oculus/agents/INSTRUCTIONS.md` — instructions for this subject alone.
+  Read it first if it exists.
 - `../../agents/OCULUS-CLI.md` — every command and flag, generated from the
   binary itself. Trust it over anything else, including this file.
 - `../../agents/OCULUS.md` — what Oculus is and how it works.

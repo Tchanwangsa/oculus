@@ -1,31 +1,40 @@
 ---
 name: oculus-lectures
-description: Reads what was said in a recorded lecture in an Oculus course library, through its merged transcript and slide outline, and quotes it with timestamps. Use for "what did the lecture say about X", "find where they covered Y", "quote the recording", or any question that has to be answered from a lecture rather than from a slide deck or a Canvas page.
+description: Reads what was said in a recorded lecture in an Oculus course library, through its merged transcript and slide outline in the recording's folder under Course/Recordings, and quotes it with timestamps. Use for "what did the lecture say about X", "find where they covered Y", "quote the recording", or any question that has to be answered from a lecture rather than from a slide deck or a Canvas page.
 ---
 
 # Lectures
 
 A lecture is a **folder of files**, not a row to query. `oculus grep` does not
 reach it: that command scans Canvas markdown and PDF page text, and a
-recording is neither. So the shape of this work is always the same — resolve
-the id, open the merged document, read the span.
+recording is neither. So the shape of this work is always the same — find
+the recording's folder, open the merged document, read the span.
 
-## 1. Resolve the id
+## 1. Find the folder
 
 ```bash
 oculus list -l MULT20015
 ```
 
-One row per recording: a UUID, the title and the date. An `oculus` command
-takes a **unique prefix** of that UUID (`2d2a4a23` is enough), but a path does
-not: the folder is named by the **full 36-character UUID**, so copy it whole
-from the list.
+One row per recording: its id, date, length and title, and under it the
+recording's folder from the library root:
+
+```
+  2d2a4a23 2026-09-08    52m  video transcript       MULT20015_2026_SM2 MO L105
+           courses/MULT20015_2026_SM2/Course/Recordings/2026-09-08-mo-l105/
+```
+
+The folder is `<YYYY-MM-DD>-<slug>`, the date the lecture was given and its
+title, so the date is what tells two recordings of the same timetable slot
+apart. A recording with no folder line has nothing on disk yet. `--json`
+gives the same as `folder`. An `oculus lecture` command takes a **unique
+prefix** of the id (`2d2a4a23` is enough); a path takes the folder.
 
 If the subject is not known yet, `oculus list -l` with no code lists them all.
 
 ## 2. Read `outline.md`, not the `.vtt`
 
-The lecture folder is `../lectures/<full uuid>/` from this working directory:
+From the chat's working directory the folder is `../` and that path:
 
 ```
 outline.md      the transcript and the slide changes merged, in play order
@@ -57,7 +66,7 @@ loading the whole recording into context.
 Find the span, then read it:
 
 ```bash
-grep -n "superposition" ../lectures/2d2a4a23-5b1e-4c55-9d0a-6f1c2e7b8a90/outline.md
+grep -n "superposition" ../courses/MULT20015_2026_SM2/Course/Recordings/2026-09-08-mo-l105/outline.md
 ```
 
 ```
@@ -69,7 +78,7 @@ own first column, which is **seconds** into the recording (`725`). `sed -n`
 takes line numbers, so read around `412`, not `725`:
 
 ```bash
-sed -n '390,450p' ../lectures/2d2a4a23-5b1e-4c55-9d0a-6f1c2e7b8a90/outline.md
+sed -n '390,450p' ../courses/MULT20015_2026_SM2/Course/Recordings/2026-09-08-mo-l105/outline.md
 ```
 
 Two calls, each a single command. Widen with a second `sed -n` rather than

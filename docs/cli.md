@@ -89,6 +89,10 @@ migrations, so on a fresh machine the app must open once first; until then
   with space, `-` and `_` alike (`paths::fold_code`), so `cs-101` finds
   `CS 101 Fall 2026` and its `CS_101_Fall_2026` folder; lecture ids match on a
   unique prefix as `oculus list -l` prints them.
+- `list -l` and `lecture list` name each lecture's recording folder
+  (`lectures.folder_rel`, `courses/<code>/Course/Recordings/<date>-<slug>`,
+  `folder` in `--json`) once anything of it is on disk; it is how an agent
+  finds a transcript by path ([architecture.md](./architecture.md#a-recordings-folder-is-chosen-once-and-kept-on-its-row)).
 
 ## keyd lifetime follows the platform
 
@@ -286,8 +290,9 @@ Each file has one of four lifetimes:
 Skills are one directory reached three ways: Claude Code scans
 `.claude/skills` and Codex `.agents/skills`, both walking up from the working
 directory, and opencode reads a `skills.paths` config key. Nothing is written
-to a home directory. Both memory buckets sit under `agents/` because it is the
-only folder a chat thread may write.
+to a home directory. Both memory buckets sit under `agents/` because a chat
+thread may write it, and a subject's `.oculus/` is protected
+([harness.md](./harness.md)).
 
 Generated docs and skills are rewritten by every sync, `oculus docs` and each
 chat thread's start (`manager/session.rs`), so a thread reads this build's

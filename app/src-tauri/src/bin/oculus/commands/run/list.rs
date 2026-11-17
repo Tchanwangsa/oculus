@@ -105,6 +105,7 @@ impl Ctx {
                 duration_seconds: i64,
                 has_video: bool,
                 has_transcript: bool,
+                folder: Option<&'a str>,
             }
             let mut out: Vec<Lecture> = Vec::new();
             let rows: Vec<(String, Vec<store::LectureRow>)> = wanted
@@ -125,6 +126,7 @@ impl Ctx {
                     duration_seconds: l.duration_seconds,
                     has_video: l.has_video,
                     has_transcript: l.has_transcript,
+                    folder: l.folder.as_deref(),
                 }));
             }
             return self.emit(&out);
@@ -153,6 +155,10 @@ impl Ctx {
                     paint(&format!("{marks:<22}"), DIM),
                     l.title
                 );
+                // Where its transcript and streams are, data-dir-relative.
+                if let Some(folder) = &l.folder {
+                    println!("  {}", paint(&format!("{:9}{folder}/", ""), DIM));
+                }
             }
         }
         Ok(())

@@ -101,6 +101,43 @@ fn a_thread_may_write_the_database_and_studio_and_nothing_else_outside_its_cwd()
     );
 }
 
+/// A writable root cannot leave out a folder beneath it, so a subject's own
+/// files and folders are each a root, and its `Course/`, `.oculus/` and the
+/// subject's folder itself never are.
+#[test]
+fn a_thread_may_write_every_subjects_own_files_and_not_course_or_oculus() {
+    let library = crate::test_support::Scratch::new("codex-own-zone");
+    for rel in [
+        "courses/A/notes.md",
+        "courses/A/Exam prep/summary.md",
+        "courses/A/Course/Files/a.pdf",
+        "courses/A/.oculus/agents/INSTRUCTIONS.md",
+        "courses/B/board.canvas",
+    ] {
+        let path = library.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "x").unwrap();
+    }
+    let roots = super::writable_roots(&library);
+    for rel in [
+        "courses/A/notes.md",
+        "courses/A/Exam prep",
+        "courses/B/board.canvas",
+    ] {
+        assert!(roots.contains(&library.join(rel)), "{rel} in {roots:?}");
+    }
+    for root in &roots {
+        let rel = crate::library::paths::slash_path(root.strip_prefix(&*library).unwrap());
+        for held in ["courses", "courses/A", "courses/B"] {
+            assert_ne!(rel, held, "a subject's folder holds its Course/");
+        }
+        assert!(
+            !rel.contains("/Course") && !rel.contains("/.oculus"),
+            "{rel} is protected"
+        );
+    }
+}
+
 /// `oculus` reaches keyd's Unix socket from inside Codex's sandbox only
 /// while the workspace-write policy has network access (measured: the
 /// connect gets EPERM without it); Codex has no per-socket grant.

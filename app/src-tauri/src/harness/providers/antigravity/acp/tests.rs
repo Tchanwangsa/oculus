@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 
 use crate::harness::event::{HarnessEvent, Turns};
-use crate::harness::protected::{library_dirs, ROOT_FILE_GLOBS, WORKSPACE_DIRS};
+use crate::harness::protected::{library_dirs, subject_dirs, ROOT_FILE_GLOBS, WORKSPACE_DIRS};
 use crate::harness::requests::Action;
 
 use super::policy::{allowed_command, judge, Verdict};
@@ -74,7 +74,8 @@ macro_rules! protected_rule {
 }
 
 protected_rule! {
-    courses_is_refused_unseen: "courses" => "courses/maths/notes.md";
+    course_is_refused_unseen: "Course" => "courses/maths/Course/Files/a.pdf";
+    oculus_is_refused_unseen: ".oculus" => "courses/maths/.oculus/agents/INSTRUCTIONS.md";
     canvas_session_is_refused_unseen: "canvas-session" => "canvas-session/cookies";
     agents_skills_is_refused_unseen: "skills" => "agents/skills/oculus/SKILL.md";
     agents_claude_is_refused_unseen: ".claude" => "agents/.claude/settings.json";
@@ -94,6 +95,7 @@ protected_rule! {
 fn every_protected_rule_has_a_test() {
     for rule in library_dirs()
         .iter()
+        .chain(subject_dirs().iter())
         .chain(WORKSPACE_DIRS.iter())
         .chain(ROOT_FILE_GLOBS.iter())
     {
@@ -110,9 +112,31 @@ fn the_library_its_folders_above_and_agents_itself_are_refused_unseen() {
         assert!(refused(path), "{path}");
     }
     // Spelt with other case, or through `..`, it is the same folder.
-    assert!(refused("/lib/oculus/Courses/x.md"));
-    assert!(refused("/lib/oculus/agents/../courses/x"));
+    assert!(refused("/lib/oculus/Courses/x/COURSE/home.md"));
+    assert!(refused("/lib/oculus/agents/../courses/x/Course/y"));
     assert!(refused("../courses/x.md"), "relative to the chat's folder");
+    // The subjects' folder and a subject's folder hold `Course/`.
+    assert!(refused("/lib/oculus/courses"));
+    assert!(refused("/lib/oculus/courses/maths"));
+}
+
+#[test]
+fn writes_to_any_subjects_own_files_are_allowed_unseen() {
+    for path in [
+        "/lib/oculus/courses/maths/notes.md",
+        "/lib/oculus/courses/maths/Exam prep/deep/summary.md",
+        "/lib/oculus/courses/physics/table.json",
+        "/lib/oculus/Courses/maths/Notes/a.md",
+    ] {
+        assert_eq!(verdict(&write(path)), Verdict::Allow, "{path}");
+    }
+    let mut both = write("/lib/oculus/courses/maths/notes.md");
+    both["toolCall"]["locations"] = json!([{ "path": "/lib/oculus/agents/draft.md" }]);
+    assert_eq!(
+        verdict(&both),
+        Verdict::Allow,
+        "own files and the chat's folder"
+    );
 }
 
 #[test]

@@ -7,7 +7,7 @@
 > stops the merge and is left alone.
 
 Standing preferences that hold across every subject. Subject-specific ones
-belong in that course's `agents/INSTRUCTIONS.md`.
+belong in that course's `.oculus/agents/INSTRUCTIONS.md`.
 
 One bullet per preference, under its heading, written as an instruction —
 "lead with the verdict, then the evidence". Anything true of me that is not an

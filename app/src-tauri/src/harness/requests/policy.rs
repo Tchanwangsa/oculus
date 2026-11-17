@@ -1,14 +1,16 @@
 //! What Rust checks before a request reaches the student. A request that
 //! names paths (a file change, extra file access) is refused when one of
 //! them is protected (`protected.rs`): the student never sees it, and the
-//! CLI is told no. A shell command cannot be checked this way, since
-//! nothing can tell from a command line what it will touch; its row says
-//! so instead, and the name denies and `OCULUS_AGENT` keep refusing inside
-//! an approved command.
+//! CLI is told no. A subject's own files are not protected; a CLI whose
+//! sandbox could not grant them asks, and the student decides. A shell
+//! command cannot be checked this way, since nothing can tell from a
+//! command line what it will touch; its row says so instead, and the name
+//! denies and `OCULUS_AGENT` keep refusing inside an approved command.
 
 use std::path::{Component, Path, PathBuf};
 
-use crate::harness::protected::{library_dirs, ROOT_FILE_GLOBS, WORKSPACE_DIRS};
+use crate::harness::protected::{library_dirs, own_zone, ROOT_FILE_GLOBS, WORKSPACE_DIRS};
+use crate::library::layout::COURSES_DIR;
 
 /// The first of `paths` that no agent may write in the library at
 /// `library`. Relative paths are read against `cwd`, the agent's folder.
@@ -16,41 +18,66 @@ pub fn protected(library: &Path, cwd: &Path, paths: &[String]) -> Option<String>
     let library = resolve(library);
     paths
         .iter()
-        .find(|p| {
-            let path = Path::new(p.as_str());
-            let full = match path.is_absolute() {
-                true => path.to_path_buf(),
-                false => cwd.join(path),
-            };
-            covers(&library, &resolve(&full))
-        })
+        .find(|p| covers(&library, &resolve(&absolute(cwd, p))))
         .cloned()
 }
 
+/// Whether `path` (absolute, or relative to `cwd`) is in the library's own
+/// zone, which an agent writes without asking.
+pub fn in_own_zone(library: &Path, cwd: &Path, path: &str) -> bool {
+    let library = resolve(library);
+    library_rel(&library, &resolve(&absolute(cwd, path))).is_some_and(|rel| own_zone(&rel))
+}
+
+fn absolute(cwd: &Path, path: &str) -> PathBuf {
+    let path = Path::new(path);
+    match path.is_absolute() {
+        true => path.to_path_buf(),
+        false => cwd.join(path),
+    }
+}
+
+/// `path` relative to `library`, `/`-separated in its own spelling, when it
+/// is inside it. The prefix is compared without case: the student's disk
+/// ignores it by default, so `Courses/` is `courses/`, existing or not.
+fn library_rel(library: &Path, path: &Path) -> Option<String> {
+    let lib: Vec<String> = parts(library);
+    let all: Vec<String> = parts(path);
+    let inside = all.len() >= lib.len()
+        && lib
+            .iter()
+            .zip(&all)
+            .all(|(a, b)| a.to_lowercase() == b.to_lowercase());
+    inside.then(|| all[lib.len()..].join("/"))
+}
+
+fn parts(path: &Path) -> Vec<String> {
+    path.components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect()
+}
+
 fn covers(library: &Path, path: &Path) -> bool {
-    // Without case: the student's disk ignores it by default, so
-    // `Courses/` is `courses/`, existing or not.
-    let lower = |p: &Path| PathBuf::from(p.to_string_lossy().to_lowercase());
-    let (library, path) = (&lower(library), &lower(path));
     // A folder that holds the library: a grant on it reaches every
     // protected folder inside.
-    if library.starts_with(path) {
+    if library_rel(path, library).is_some() {
         return true;
     }
-    let Ok(rest) = path.strip_prefix(library) else {
+    let Some(rel) = library_rel(library, path) else {
         return false;
     };
-    let parts: Vec<String> = rest
-        .components()
-        .map(|c| c.as_os_str().to_string_lossy().into_owned())
-        .collect();
+    let lower = rel.to_lowercase();
+    let parts: Vec<&str> = lower.split('/').filter(|p| !p.is_empty()).collect();
     match parts.as_slice() {
         // The library itself: a grant on it reaches every protected folder.
         [] => true,
-        [first, ..] if library_dirs().contains(&first.as_str()) => true,
-        [agents, dir, ..] if agents == "agents" && WORKSPACE_DIRS.contains(&dir.as_str()) => true,
+        [first, ..] if library_dirs().contains(first) => true,
+        // A subject's own files are writable; `Course/`, `.oculus/`, the
+        // subjects' folder itself and a subject's folder are not.
+        [first, ..] if *first == COURSES_DIR => !own_zone(&rel),
+        [agents, dir, ..] if *agents == "agents" && WORKSPACE_DIRS.contains(dir) => true,
         // An `agents/` grant reaches the workspace folders inside it.
-        [agents] if agents == "agents" => true,
+        [agents] if *agents == "agents" => true,
         [file] => ROOT_FILE_GLOBS.iter().any(|glob| glob_matches(glob, file)),
         _ => false,
     }
@@ -120,8 +147,14 @@ mod tests {
     #[test]
     fn protected_folders_and_root_files_are_refused_and_the_rest_is_not() {
         for path in [
-            "/lib/oculus/courses/maths/notes.md",
+            "/lib/oculus/courses",
+            "/lib/oculus/courses/maths",
+            "/lib/oculus/courses/loose.pdf",
+            "/lib/oculus/courses/maths/Course/Files/a.pdf",
+            "/lib/oculus/courses/maths/Course",
             "/lib/oculus/courses/maths/Course/Recordings/x/transcript.vtt",
+            "/lib/oculus/courses/maths/.oculus/agents/INSTRUCTIONS.md",
+            "/lib/oculus/courses/maths/.oculus",
             "/lib/oculus/canvas-session/x",
             "/lib/oculus/vault.bin",
             "/lib/oculus/.vault.bin.tmp",
@@ -130,12 +163,13 @@ mod tests {
             "/lib/oculus/agents",
             "/lib/oculus/agents/skills/a/SKILL.md",
             "/lib/oculus/agents/.claude/settings.json",
-            "../courses/x.md",
+            "../courses/maths/Course/home.md",
             "skills/x",
-            "/lib/oculus/agents/../courses/y",
+            "/lib/oculus/agents/../courses/y/Course/z",
             "/lib",
             "/",
             "/lib/oculus/Courses/x/COURSE/home.md",
+            "/lib/oculus/courses/x/.OCULUS/derived/a.pages.json",
             "/LIB/Oculus/COURSES",
             "/lib/oculus/Settings.JSON",
             "/lib/oculus/agents/Skills/x",
@@ -143,6 +177,13 @@ mod tests {
             assert!(check(path), "{path} is protected");
         }
         for path in [
+            "/lib/oculus/courses/maths/notes.md",
+            "/lib/oculus/courses/maths/Exam prep/deep/scan.pdf",
+            "/lib/oculus/courses/other/summary.md",
+            "/lib/oculus/Courses/maths/Notes/a.md",
+            "/lib/oculus/courses/maths/settings.json",
+            "../courses/maths/notes.md",
+            "/lib/oculus/agents/../courses/maths/a.md",
             "/lib/oculus/agents/notes.md",
             "/lib/oculus/agents/attachments/a.png",
             "/lib/oculus/studio/video/video.json",
@@ -151,6 +192,28 @@ mod tests {
             "scratch/out.txt",
         ] {
             assert!(!check(path), "{path} is not protected");
+        }
+    }
+
+    #[test]
+    fn the_own_zone_is_read_against_the_chats_folder() {
+        let library = Path::new("/lib/oculus");
+        let cwd = library.join("agents");
+        for path in [
+            "../courses/maths/notes.md",
+            "/lib/oculus/courses/maths/Exam prep/a.md",
+            "/LIB/oculus/Courses/maths/a.md",
+        ] {
+            assert!(in_own_zone(library, &cwd, path), "{path}");
+        }
+        for path in [
+            "notes.md",
+            "../courses/maths/Course/home.md",
+            "../courses/maths/.oculus/x",
+            "../courses/maths",
+            "/elsewhere/courses/maths/a.md",
+        ] {
+            assert!(!in_own_zone(library, &cwd, path), "{path}");
         }
     }
 

@@ -12,7 +12,7 @@ import { parseCitation } from "@/lib/citations";
 export const PageRef = defineComponent({
   name: "PageRef",
   description:
-    "A link to a page of a library file, e.g. PageRef(\"courses/MAST10006/Lecture 4.pdf\", 12, \"Chain rule\"); same paths you cite in prose.",
+    "A link to a page of a library file, e.g. PageRef(\"courses/MAST10006_2026_SM1/Course/Files/Lecture 4.pdf\", 12, \"Chain rule\"); same paths you cite in prose.",
   props: z.object({
     path: z.string(),
     page: z.number().optional(),
