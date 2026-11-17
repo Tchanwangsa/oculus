@@ -1,4 +1,5 @@
 import { fmtAgo } from "@/lib/format/format";
+import { courseRelOf } from "@/lib/files/libraryLayout";
 
 /** "90 min", or null when there is no estimate. */
 export function estimateLabel(minutes: number | null): string | null {
@@ -48,7 +49,7 @@ export function checklistProgress(items: { done_at: string | null }[]): {
  * the subject's top.
  */
 export function fileFolder(relativePath: string): string {
-  const inSubject = relativePath.replace(/^courses\/[^/]+\//, "");
+  const inSubject = courseRelOf(relativePath);
   const cut = inSubject.lastIndexOf("/");
   return cut < 0 ? "" : inSubject.slice(0, cut);
 }

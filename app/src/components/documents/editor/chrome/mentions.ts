@@ -13,6 +13,7 @@ import { noteHost } from "../core/host";
 import { mathAt } from "../math/mathContext";
 import { mentionText } from "../syntax/mentionSyntax";
 import { ancestorAt } from "../syntax/syntax";
+import { courseRelOf } from "@/lib/files/libraryLayout";
 
 /**
  * `@` in a note mentions a library file: the query after it searches the
@@ -37,7 +38,7 @@ const optionFiles = new WeakMap<Completion, NoteLinkFile>();
 
 /** The folder under the subject (`files/Week 1`), else the category. */
 function folderLabel(file: NoteLinkFile): string {
-  const rel = file.relative_path.replace(/^courses\/[^/]+\//, "");
+  const rel = courseRelOf(file.relative_path);
   const dir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
   return dir || file.category || "";
 }

@@ -9,6 +9,7 @@ import { CARD_WIDTH } from "./layout";
 import { ThreadRows } from "./ThreadRows";
 import { useLectureTitles } from "./useLectureTitles";
 import { WorkRows } from "./WorkRows";
+import { RECORDINGS_PREFIX } from "@/lib/files/libraryLayout";
 
 export interface ThreadInfoProps {
   thread: HarnessThread;
@@ -50,7 +51,7 @@ export function ThreadInfoCard({
   const lectureIds = useMemo(
     () =>
       read.flatMap((e) => {
-        const id = /^lectures\/([^/]+)$/.exec(e.key)?.[1];
+        const id = new RegExp(`${RECORDINGS_PREFIX}([^/]+)$`).exec(e.key)?.[1];
         return id ? [id] : [];
       }),
     [read],

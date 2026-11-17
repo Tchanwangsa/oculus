@@ -330,8 +330,8 @@ its last-opened time.
   tab (`app/src/hooks/data/useUploadImport.ts`) to survive switching to Uploads.
   `useFileDrop` ignores a `visibility: hidden` element — how background panes
   hide.
-- **Delete is guarded by `is_upload_rel`** (`app/src-tauri/src/library/paths/own_files.rs`), not a
-  dialog. `deleteFileRow` deletes `pages` and `document_versions` by hand,
+- **Delete is guarded by `own_file_ok`** (`app/src-tauri/src/library/layout/own.rs`), not a
+  dialog. An upload's name never starts with a dot, which the guard refuses. `deleteFileRow` deletes `pages` and `document_versions` by hand,
   since the cascade fires only with `foreign_keys` on. A parse in flight can land after a delete, so
   `store_upload` purges artifacts on a reused name whenever the bytes differ.
 - **The PDF/markdown toggle probes file metadata**, through

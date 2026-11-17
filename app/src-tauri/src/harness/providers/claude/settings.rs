@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::harness::protected::{LIBRARY_DIRS, ROOT_FILE_GLOBS, WORKSPACE_DIRS};
+use crate::harness::protected::{library_dirs, ROOT_FILE_GLOBS, WORKSPACE_DIRS};
 
 /// The inline `--settings` document; docs/harness.md explains each part.
 /// `//` prefixes an absolute path in the CLI's rule syntax. Root files are
@@ -22,7 +22,7 @@ pub(super) fn settings_json(
     let abs = root.trim_start_matches('/');
     // Never `oculus.db*`: the CLI merges `Edit(...)` denies into the
     // sandbox's `denyWrite`, which would cancel `allowWrite` below.
-    let mut deny: Vec<String> = LIBRARY_DIRS
+    let mut deny: Vec<String> = library_dirs()
         .iter()
         .map(|d| format!("{d}/**"))
         .chain(ROOT_FILE_GLOBS.iter().map(|g| g.to_string()))

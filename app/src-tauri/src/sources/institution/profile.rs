@@ -42,7 +42,7 @@ pub fn load(data_dir: &Path) -> Option<Institution> {
 fn predates_profile(data_dir: &Path) -> bool {
     use keyd_core::paths;
 
-    let courses = data_dir.join("courses");
+    let courses = crate::library::layout::courses_dir(data_dir);
     paths::cookie(data_dir).exists()
         || paths::authenticated(data_dir).exists()
         || paths::signed_out(data_dir).exists()

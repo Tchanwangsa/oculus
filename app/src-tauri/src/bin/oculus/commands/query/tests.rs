@@ -185,7 +185,7 @@ fn a_typo_is_refused_but_an_honest_miss_is_empty() {
 #[test]
 fn the_category_help_lists_what_the_flag_accepts() {
     let help = category_help();
-    for c in paths::CATEGORIES {
+    for c in app_lib::library::layout::CATEGORIES {
         assert!(help.contains(c), "{c:?} missing from {help:?}");
     }
 }

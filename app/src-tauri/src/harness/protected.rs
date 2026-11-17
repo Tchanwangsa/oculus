@@ -4,8 +4,14 @@
 //! Antigravity's only gate; opencode's copy is static in
 //! `templates/OPENCODE.template.json`, held to these by the test below.
 
-/// Library folders an agent reads but never writes.
-pub const LIBRARY_DIRS: [&str; 3] = ["courses", "lectures", "canvas-session"];
+/// Library folders an agent reads but never writes: the library's own
+/// (`layout::library_roots`) and an earlier version's session folder.
+pub fn library_dirs() -> Vec<&'static str> {
+    crate::library::layout::library_roots()
+        .into_iter()
+        .chain(["canvas-session"])
+        .collect()
+}
 
 /// App-owned folders inside the writable `agents/` folder: generated skills
 /// and the links scanning CLIs find them through (`crate::agents`).
@@ -96,7 +102,7 @@ mod tests {
             .map(|(k, _)| k.as_str())
             .collect();
 
-        let mut want: Vec<String> = LIBRARY_DIRS
+        let mut want: Vec<String> = library_dirs()
             .iter()
             .map(|d| format!("{{{{LIBRARY}}}}/{d}/**"))
             .collect();

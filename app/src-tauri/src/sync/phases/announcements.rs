@@ -1,5 +1,6 @@
 //! Phase: announcements.
 
+use crate::library::layout::{self, SyncedKind};
 use crate::pages::md;
 use crate::sync::render::slug;
 use crate::sync::{Engine, LinkCrawl, Progress, Subject};
@@ -51,11 +52,12 @@ impl Engine {
             }
             header.push_str("\n---\n\n");
 
-            let name = if date.is_empty() {
-                format!("announcements/{}.md", slug(title))
+            let file = if date.is_empty() {
+                format!("{}.md", slug(title))
             } else {
-                format!("announcements/{date}-{}.md", slug(title))
+                format!("{date}-{}.md", slug(title))
             };
+            let name = layout::synced(SyncedKind::Announcements, &file);
             let md = format!("{header}{}", self.convert(message, c, &name));
             self.write(c, &name, md.as_bytes(), None)?;
         }

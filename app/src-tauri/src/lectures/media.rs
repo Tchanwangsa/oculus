@@ -99,10 +99,13 @@ fn handle(request: tiny_http::Request, data_dir: &Path, token: &str, kit: &Kit) 
     let Ok(path) = crate::runtime::platform::canonicalize(path) else {
         return respond_status(request, 404);
     };
-    let in_scope = ["lectures", "courses", "studio/videos"].iter().any(|dir| {
-        crate::runtime::platform::canonicalize(data_dir.join(dir))
-            .is_ok_and(|scope| path.starts_with(scope))
-    });
+    let in_scope = crate::library::layout::library_roots()
+        .into_iter()
+        .map(|root| data_dir.join(root))
+        .chain([crate::library::paths::studio_dir(data_dir).join("videos")])
+        .any(|dir| {
+            crate::runtime::platform::canonicalize(dir).is_ok_and(|scope| path.starts_with(scope))
+        });
     if !in_scope {
         return respond_status(request, 403);
     }

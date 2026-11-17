@@ -1,5 +1,6 @@
 //! Where a downloaded embed lands in the library.
 
+use crate::library::layout::{synced, SyncedKind};
 use crate::library::paths::course_rel_path;
 
 /// Extensions a media name may carry that the muxed MP4 replaces.
@@ -27,11 +28,14 @@ pub(super) fn video_rel(
     } else {
         stem.to_string()
     };
-    let plain = course_rel_path(code, &format!("files/{stem}.mp4"))
+    let plain = course_rel_path(code, &synced(SyncedKind::Media, &format!("{stem}.mp4")))
         .ok_or_else(|| format!("invalid file name: {media_name}"))?;
     if !exists(&plain) {
         return Ok(plain);
     }
-    course_rel_path(code, &format!("files/{stem}-{short}.mp4"))
-        .ok_or_else(|| format!("invalid file name: {media_name}"))
+    course_rel_path(
+        code,
+        &synced(SyncedKind::Media, &format!("{stem}-{short}.mp4")),
+    )
+    .ok_or_else(|| format!("invalid file name: {media_name}"))
 }

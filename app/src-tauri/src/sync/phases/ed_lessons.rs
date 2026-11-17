@@ -4,6 +4,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::library::layout::{self, SyncedKind};
 use crate::library::paths;
 use crate::sources::ed::workspace_session::paths as workspace_paths;
 use crate::sources::ed::workspace_session::reconcile::{self, Synced};
@@ -64,7 +65,7 @@ impl Engine {
         let lesson = self.ed.lesson(lesson_id)?;
         let title = lesson["title"].as_str().unwrap_or("Lesson");
         // The id leads, so a renamed lesson keeps its prefix.
-        let stem = format!("lessons/{lesson_id}-{}", slug(title));
+        let stem = layout::synced(SyncedKind::Lessons, &format!("{lesson_id}-{}", slug(title)));
         let region = self.ed.region();
         let place = LessonPlace {
             stem: &stem,
@@ -151,7 +152,7 @@ impl Engine {
                 code: c.code.clone(),
                 relative_path: rel.clone(),
                 size_bytes: meta.len(),
-                category: paths::category_from_path(&rel_path).to_string(),
+                category: layout::category_of(&rel_path).to_string(),
                 canvas_id: None,
                 source_url: None,
                 action: "unchanged",
@@ -276,7 +277,7 @@ impl Engine {
                     code: c.code.clone(),
                     relative_path: k.rel.clone(),
                     size_bytes: k.size,
-                    category: paths::category_from_path(&k.rel).to_string(),
+                    category: layout::category_of(&k.rel).to_string(),
                     canvas_id: None,
                     source_url: None,
                     action: if updated { "updated" } else { "unchanged" },
@@ -412,7 +413,7 @@ impl Engine {
             code: c.code.clone(),
             relative_path: rel.clone(),
             size_bytes: bytes.len() as u64,
-            category: paths::category_from_path(&rel).to_string(),
+            category: layout::category_of(&rel).to_string(),
             canvas_id: None,
             source_url: None,
             action: action.as_str(),

@@ -65,7 +65,12 @@ fn canvas_files_and_folders_cannot_be_symlinks() {
     assert!(write_at(&root, "courses/TEST/canvases/alias.canvas", DOCUMENT).is_err());
     assert!(rename_at(&root, "courses/TEST/canvases/alias.canvas", "Escape").is_err());
     assert!(write_at(&root, &own.relative_path, DOCUMENT).is_ok());
-    assert_eq!(std::fs::read_dir(&*outside).unwrap().count(), 1);
+    // A folder deeper down is checked the same way.
+    std::fs::create_dir_all(outside.join("deep")).unwrap();
+    std::fs::write(outside.join("deep/inner.canvas"), DOCUMENT).unwrap();
+    symlink(outside.join("deep"), root.join("courses/TEST/canvases/sub")).unwrap();
+    assert!(write_at(&root, "courses/TEST/canvases/sub/inner.canvas", DOCUMENT).is_err());
+    assert_eq!(std::fs::read_dir(&*outside).unwrap().count(), 2);
 }
 
 #[test]
@@ -156,6 +161,11 @@ fn each_kind_only_takes_its_own_folder_and_extension() {
         DrawingKind::of("courses/X/canvases/a.canvas"),
         Some(DrawingKind::Canvas)
     );
+    // Any depth inside its own folder.
+    assert_eq!(
+        DrawingKind::of("courses/X/notebooks/sub/a.notebook"),
+        Some(DrawingKind::Notebook)
+    );
     for rel in [
         "courses/X/canvases/a.notebook",
         "courses/X/notebooks/a.canvas",
@@ -165,7 +175,7 @@ fn each_kind_only_takes_its_own_folder_and_extension() {
         "courses/../notebooks/a.notebook",
         "courses/X/documents/a.notebook",
         r"courses/X/notebooks/..\a.notebook",
-        "courses/X/notebooks/sub/a.notebook",
+        "courses/X/notebooks/.sub/a.notebook",
     ] {
         assert_eq!(DrawingKind::of(rel), None, "{rel}");
         assert!(write_at(&root, rel, NOTEBOOK).is_err(), "{rel}");

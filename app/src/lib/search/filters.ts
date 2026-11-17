@@ -5,7 +5,7 @@ import type { Subject } from "../db";
 import type { IconSpec } from "./";
 
 /** What `type:` narrows to. A kind with a `category` is files of that
- *  `files.category` (`category_from_path` in `app/src-tauri/src/library/paths/categories.rs`). */
+ *  `files.category` (`category_of` in `app/src-tauri/src/library/layout/category.rs`). */
 export type KindId =
   | "subject"
   | "file"

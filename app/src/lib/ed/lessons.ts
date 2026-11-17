@@ -15,10 +15,11 @@ import {
 import type { DbFile } from "@/lib/db";
 import { humanizeSlug } from "@/lib/format/format";
 import { frontNumber, frontString, splitFrontmatter, type FrontValue } from "@/lib/markdown/frontmatter";
+import { COURSES_DIR, LESSONS_DIR } from "@/lib/files/libraryLayout";
 
-/** A lesson's own markdown, `courses/<CODE>/lessons/<id>-<slug>.md`. Its
- *  slides, PDFs and challenge files sit one folder down. */
-const LESSON_DOC = /^courses\/[^/]+\/lessons\/[^/]+\.md$/;
+/** A lesson's own markdown, `<id>-<slug>.md` in a subject's lessons folder.
+ *  Its slides, PDFs and challenge files sit one folder down. */
+const LESSON_DOC = new RegExp(`^${COURSES_DIR}/[^/]+/${LESSONS_DIR}/[^/]+\\.md$`);
 
 export const isLessonDoc = (file: Pick<DbFile, "relative_path">): boolean =>
   LESSON_DOC.test(file.relative_path);

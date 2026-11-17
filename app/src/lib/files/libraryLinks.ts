@@ -1,6 +1,7 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import type { DbFile } from "@/lib/db";
+import { PAGES_DIR } from "@/lib/files/libraryLayout";
 
 /**
  * Links and pictures inside a library file, resolved against the subject's
@@ -26,7 +27,7 @@ export function libraryLinkTarget(href: string, files: DbFile[], fromPath?: stri
     const slug = /\/pages\/([^/?#]+)/.exec(href)?.[1];
     if (slug) {
       return (
-        files.find((f) => f.relative_path.endsWith(`pages/${slug}.md`)) ??
+        files.find((f) => f.relative_path.endsWith(`${PAGES_DIR}/${slug}.md`)) ??
         // A renamed page keeps its Canvas URL slug while the saved file
         // tracks the title — source_url holds the canonical URL.
         files.find((f) => f.source_url?.endsWith(`/pages/${slug}`))

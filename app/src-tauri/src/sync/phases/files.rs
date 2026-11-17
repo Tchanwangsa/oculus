@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use crate::library::layout::{self, SyncedKind};
 use crate::library::paths;
 use crate::sync::office::{
     is_csv_type, is_generic_binary, is_sheet_type, is_video, office_ext, office_ext_of,
@@ -57,7 +58,16 @@ impl Engine {
                 .log("info", &c.code, &format!("{name}: locked{until}, skipped"));
             return Ok(Fetched::Skipped);
         }
-        let Some(rel) = paths::course_rel_path(&c.code, &format!("files/{name}")) else {
+        // A module video lands where the app's download will put it.
+        let inner = layout::synced(
+            if video {
+                SyncedKind::Media
+            } else {
+                SyncedKind::Files
+            },
+            &name,
+        );
+        let Some(rel) = paths::course_rel_path(&c.code, &inner) else {
             return Ok(Fetched::Skipped);
         };
 
@@ -78,7 +88,7 @@ impl Engine {
                 code: c.code.clone(),
                 relative_path: rel.clone(),
                 size_bytes: meta_size,
-                category: paths::category_from_path(&format!("files/{name}")).to_string(),
+                category: layout::category_of(&inner).to_string(),
                 canvas_id: Some(file_id),
                 source_url: None,
                 action: "unchanged",
@@ -137,7 +147,7 @@ impl Engine {
         // "deck.pptx.pdf" beside them — never announced, never a database row
         // — and spreadsheets their text, "marks.xlsx.md".
         let (rel, action) = self
-            .store(c, &format!("files/{name}"), &bytes, Some(file_id), None)
+            .store(c, &inner, &bytes, Some(file_id), None)
             .map_err(|e| failed(format!("Could not save the file: {e}.")))?;
 
         // A failed Office conversion stays out of the manifest so it retries.
@@ -148,7 +158,7 @@ impl Engine {
                     paths::write_course_bytes(
                         &self.data_dir,
                         &c.code,
-                        &format!("files/{name}.pdf"),
+                        &format!("{inner}.pdf"),
                         &pdf,
                     )?;
                     if self.parse_pdfs {

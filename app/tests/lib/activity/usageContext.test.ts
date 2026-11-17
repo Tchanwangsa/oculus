@@ -13,8 +13,9 @@ describe("usage context", () => {
     ["/subjects/12", "course", 12],
     ["/subjects/12/discussion", "course", 12],
     ["/subjects/12/lecture?id=abc", "lecture", 12],
-    ["/subjects/12/file?path=x/downloads/a.pdf", "file", 12],
-    ["/subjects/12/file?path=x/documents/n.md", "document", 12],
+    ["/subjects/12/file?path=courses/X/files/a.pdf", "file", 12],
+    ["/subjects/12/file?path=courses/X/documents/n.md", "document", 12],
+    ["/subjects/12/file?path=courses/X/uploads/documents/n.md", "file", 12],
     ["/subjects/12/projects", "planning", 12],
   ] as const)("%s is %s", (path, kind, subjectId) => {
     expect(usageContext(path)).toEqual({ kind, subjectId });

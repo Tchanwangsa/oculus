@@ -8,7 +8,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use crate::harness::protected::{LIBRARY_DIRS, ROOT_FILE_GLOBS, WORKSPACE_DIRS};
+use crate::harness::protected::{library_dirs, ROOT_FILE_GLOBS, WORKSPACE_DIRS};
 
 /// The first of `paths` that no agent may write in the library at
 /// `library`. Relative paths are read against `cwd`, the agent's folder.
@@ -47,7 +47,7 @@ fn covers(library: &Path, path: &Path) -> bool {
     match parts.as_slice() {
         // The library itself: a grant on it reaches every protected folder.
         [] => true,
-        [first, ..] if LIBRARY_DIRS.contains(&first.as_str()) => true,
+        [first, ..] if library_dirs().contains(&first.as_str()) => true,
         [agents, dir, ..] if agents == "agents" && WORKSPACE_DIRS.contains(&dir.as_str()) => true,
         // An `agents/` grant reaches the workspace folders inside it.
         [agents] if agents == "agents" => true,

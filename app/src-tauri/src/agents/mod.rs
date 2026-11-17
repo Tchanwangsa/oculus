@@ -42,8 +42,11 @@ const MEMORIES_DIR: &str = "memories";
 /// From a course folder to the one central copy; relative so the library can move.
 const AGENTS_DOC_REL: &str = "../../agents/AGENTS.md";
 
+/// The agents' workspace, at the data dir's top: every thread's cwd.
+pub const AGENTS_DIR: &str = "agents";
+
 pub fn agents_dir(data_dir: &Path) -> PathBuf {
-    data_dir.join("agents")
+    data_dir.join(AGENTS_DIR)
 }
 
 /// The one copy of the skills. Everything else about them is a route to here.

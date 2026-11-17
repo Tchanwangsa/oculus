@@ -29,38 +29,6 @@ fn path_components_are_sanitised() {
     assert!(safe_rel_path("///").is_none());
 }
 
-/// Every category the scraper can write is listed.
-#[test]
-fn every_category_the_scraper_writes_is_listed() {
-    let paths = [
-        "home.md",
-        "syllabus.md",
-        "uploads/notes.pdf",
-        "documents/week-3-notes.md",
-        "canvases/ideas.canvas",
-        "notebooks/working.notebook",
-        "pages/week-01.md",
-        "assignments/a2.md",
-        "quizzes/mid.md",
-        "announcements/2026-07-14-welcome.md",
-        "ed/0001-teams.md",
-        "lessons/120619-assignment-2.md",
-        "files/week-01.pdf",
-        "modules/01-intro.md",
-        "images/fig-3.png",
-        "something-nobody-planned-for",
-    ];
-    for p in paths {
-        let c = category_from_path(p);
-        assert!(CATEGORIES.contains(&c), "{p} -> {c:?} is not in CATEGORIES");
-    }
-    // And nothing in the list is unreachable: every entry was just hit.
-    let hit: Vec<&str> = paths.iter().map(|p| category_from_path(p)).collect();
-    for c in CATEGORIES {
-        assert!(hit.contains(c), "{c:?} is listed but no path produces it");
-    }
-}
-
 #[test]
 fn doc_pdf_resolution() {
     assert_eq!(doc_pdf_rel("files/a.pdf").as_deref(), Some("files/a.pdf"));
@@ -133,55 +101,6 @@ fn purging_a_sheet_takes_its_text_and_any_pdf_route_files() {
 }
 
 #[test]
-fn categories_follow_the_directory() {
-    assert_eq!(category_from_path("home.md"), "home");
-    assert_eq!(category_from_path("pages/x.md"), "page");
-    assert_eq!(category_from_path("files/x.pdf"), "file");
-    assert_eq!(category_from_path("assignments/a1.md"), "assignment");
-    assert_eq!(category_from_path("quizzes/week-3.md"), "quiz");
-    assert_eq!(category_from_path("ed/0031-welcome.md"), "ed");
-    assert_eq!(category_from_path("uploads/tutor-notes.pdf"), "upload");
-    assert_eq!(category_from_path("documents/revision.md"), "document");
-    assert_eq!(category_from_path("canvases/ideas.canvas"), "canvas");
-    assert_eq!(category_from_path("notebooks/week-3.notebook"), "notebook");
-    assert_eq!(category_from_path("nope.txt"), "other");
-}
-
-#[test]
-fn only_a_subjects_uploads_folder_is_deletable() {
-    assert!(is_upload_rel("courses/COMP30026/uploads/notes.pdf"));
-    // Everything else under courses/ belongs to a sync.
-    assert!(!is_upload_rel("courses/COMP30026/files/lecture.pdf"));
-    assert!(!is_upload_rel("courses/COMP30026/uploads"));
-    assert!(!is_upload_rel("lectures/abc/source1.mp4"));
-    assert!(!is_upload_rel("courses/../oculus.db"));
-    assert!(!is_upload_rel("courses/X/uploads/../../../oculus.db"));
-}
-
-#[test]
-fn only_a_markdown_note_in_a_subjects_documents_folder_is_writable() {
-    assert!(is_document_rel("courses/COMP30026/documents/week-3.md"));
-    assert!(is_document_rel(
-        "courses/COMP30026_2026_SM2/documents/Untitled-2.md"
-    ));
-    // Traversal, however it is spelled, never resolves to a document.
-    assert!(!is_document_rel(
-        "courses/COMP30026/documents/../../oculus.db"
-    ));
-    assert!(!is_document_rel("courses/../documents/x.md"));
-    // Exactly one level deep: a nested folder is not a place the app writes.
-    assert!(!is_document_rel("courses/COMP30026/documents/drafts/x.md"));
-    assert!(!is_document_rel("courses/COMP30026/documents"));
-    // Only markdown, and only with a name in front of the extension.
-    assert!(!is_document_rel("courses/COMP30026/documents/x.pdf"));
-    assert!(!is_document_rel("courses/COMP30026/documents/.md"));
-    // An upload is not a document, however it ends.
-    assert!(!is_document_rel("courses/COMP30026/uploads/x.md"));
-    assert!(!is_document_rel("courses//documents/x.md"));
-    assert!(!is_document_rel("lectures/abc/documents/x.md"));
-}
-
-#[test]
 fn filenames_are_portable_to_windows_volumes() {
     for name in ["CON", "con.pdf", "NUL.txt", "COM1.md", "LPT9", "COM¹"] {
         assert_eq!(safe_filename(name), format!("_{name}"));
@@ -195,8 +114,40 @@ fn filenames_are_portable_to_windows_volumes() {
 }
 
 #[test]
-fn writable_file_guards_reject_windows_path_spellings() {
-    assert!(!is_document_rel(r"courses/X/documents/C:\secret.md"));
-    assert!(!is_document_rel(r"courses/X/documents/..\secret.md"));
-    assert!(!is_upload_rel(r"courses/X/uploads/file.txt:stream"));
+fn purging_an_own_pdf_keeps_a_note_the_parser_did_not_write() {
+    let scratch = crate::test_support::Scratch::new("purge-own");
+    let dir = scratch.join("courses/X/uploads");
+    std::fs::create_dir_all(dir.join("notes_images")).unwrap();
+    for name in ["notes.pdf", "notes.md", "notes.emb.json"] {
+        std::fs::write(dir.join(name), b"x").unwrap();
+    }
+    purge_parse_artifacts(&scratch, "courses/X/uploads/notes.pdf");
+    assert!(dir.join("notes.md").is_file(), "the student's note stays");
+    assert!(!dir.join("notes.emb.json").exists());
+    assert!(!dir.join("notes_images").exists());
+
+    // With a parse record beside it, the markdown is the parser's.
+    std::fs::write(dir.join("notes.pages.json"), b"{}").unwrap();
+    purge_parse_artifacts(&scratch, "courses/X/uploads/notes.pdf");
+    assert!(!dir.join("notes.md").exists());
+    assert!(!dir.join("notes.pages.json").exists());
+    assert!(dir.join("notes.pdf").is_file());
+}
+
+#[test]
+fn purging_a_synced_pdf_takes_every_artifact() {
+    let scratch = crate::test_support::Scratch::new("purge-synced");
+    let dir = scratch.join("courses/X/files");
+    std::fs::create_dir_all(dir.join("w1_images")).unwrap();
+    for name in ["w1.pdf", "w1.md", "w1.pages.json", "w1.emb.json"] {
+        std::fs::write(dir.join(name), b"x").unwrap();
+    }
+    purge_parse_artifacts(&scratch, "courses/X/files/w1.pdf");
+    let left: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(left, vec!["w1.pdf".to_string()]);
+    // A path that could leave the data dir purges nothing.
+    purge_parse_artifacts(&scratch, "courses/X/files/../../../w1.pdf");
 }

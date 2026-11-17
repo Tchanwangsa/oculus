@@ -11,7 +11,7 @@ const LECTURE_HAYSTACK = `l.title || ' ' || s.code`;
 /** Narrows a palette search (`in:` / `type:` in `app/src/lib/search/index.ts`). */
 export interface SearchScope {
   subjectId?: number;
-  /** A `files.category` (`category_from_path` in `app/src-tauri/src/library/paths/categories.rs`). */
+  /** A `files.category` (`category_of` in `app/src-tauri/src/library/layout/category.rs`). */
   category?: string;
 }
 

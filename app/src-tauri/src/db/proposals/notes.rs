@@ -86,7 +86,7 @@ pub(super) async fn snapshot(
     root: &Path,
     path: &str,
 ) -> Result<Value, String> {
-    if !crate::library::paths::is_document_rel(path) {
+    if !crate::library::layout::own_file_ok(path, crate::library::layout::OwnKind::Document) {
         return Err("invalid note path".into());
     }
     let rows = sqlx::query("SELECT * FROM files WHERE relative_path=?1")

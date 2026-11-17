@@ -1,6 +1,7 @@
 import { readCourseFile } from "@/lib/files/courseFiles";
 import type { LineRange } from "./parse";
 import { normalizeText } from "./text";
+import { pagesRecordOf } from "@/lib/files/libraryLayout";
 
 /** A parsed `.md` with its pages: `lines` 0-based, `start` 1-based. */
 interface PagedMd {
@@ -39,7 +40,7 @@ const paged = new Map<string, { at: number; doc: Promise<PagedMd | null> }>();
 function loadPaged(mdPath: string, fresh = false): Promise<PagedMd | null> {
   const cached = paged.get(mdPath);
   if (cached && !(fresh && Date.now() - cached.at > FRESH_MS)) return cached.doc;
-  const json = mdPath.replace(/\.md$/i, ".pages.json");
+  const json = pagesRecordOf(mdPath);
   const doc = Promise.all([readCourseFile(mdPath), readCourseFile(json)])
     .then(([md, raw]) => {
       const record = JSON.parse(raw) as PagesJson;

@@ -43,11 +43,7 @@ impl Ctx {
                 "-".to_string()
             };
             // The course prefix is already the section header.
-            let short = f
-                .relative_path
-                .splitn(3, '/')
-                .nth(2)
-                .unwrap_or(&f.relative_path);
+            let short = app_lib::library::layout::within_course(&f.relative_path);
             println!(
                 "  {} {} {} {}",
                 paint(&format!("{:<5}", truncate(&f.file_type, 5)), DIM),

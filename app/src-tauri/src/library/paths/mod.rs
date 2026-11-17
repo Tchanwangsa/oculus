@@ -4,22 +4,18 @@
 //! identifier as Tauri does, so the CLI and the app agree on where the vault,
 //! the database and `courses/` live.
 
-mod categories;
 mod course;
 mod db;
 mod file_types;
 mod notebook;
-mod own_files;
 mod studio;
 #[cfg(test)]
 mod tests;
 
-pub use categories::*;
 pub use course::*;
 pub use db::*;
 pub use file_types::*;
 pub use notebook::*;
-pub use own_files::*;
 pub use studio::*;
 
 use std::path::PathBuf;

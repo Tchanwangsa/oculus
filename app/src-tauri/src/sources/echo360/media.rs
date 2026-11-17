@@ -114,12 +114,8 @@ pub fn stream_to_file(
 
 /// Remove untrimmed `raw*.mp4` downloads left by an interrupted run.
 pub fn cleanup_partial_downloads(data_dir: &Path) {
-    let dir = data_dir.join("lectures");
-    let Ok(lectures) = std::fs::read_dir(&dir) else {
-        return;
-    };
-    for lecture in lectures.flatten() {
-        let Ok(files) = std::fs::read_dir(lecture.path()) else {
+    for lecture in crate::library::layout::recording_dirs(data_dir) {
+        let Ok(files) = std::fs::read_dir(&lecture) else {
             continue;
         };
         for file in files.flatten() {
@@ -136,8 +132,10 @@ pub fn cleanup_partial_downloads(data_dir: &Path) {
     }
 }
 
-pub fn lecture_dir(data_dir: &Path, media_id: &str) -> PathBuf {
-    data_dir.join("lectures").join(media_id)
+/// A lecture's folder (`layout::recording_dir`); refuses an id that is not
+/// one folder name.
+pub fn lecture_dir(data_dir: &Path, media_id: &str) -> Result<PathBuf, String> {
+    crate::library::layout::recording_dir(data_dir, media_id)
 }
 
 /// Where a trimmed stream lives.

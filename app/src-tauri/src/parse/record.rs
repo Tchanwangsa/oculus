@@ -1,28 +1,26 @@
 //! The artifacts beside a PDF, and the parsed document they record.
 //!
-//! The image directory's name is also the link prefix written into the markdown
-//! (`![](<stem>_images/x.jpg)`), so both are computed here, never by a backend.
+//! Where each artifact lives is `library::layout::derived`'s. The image
+//! directory's name is also the link prefix written into the markdown
+//! (`![](<stem>_images/x.jpg)`), so a backend never computes either.
 
 use super::{ImageStaging, ParseError, MODE, PARSER_VERSION};
+use crate::library::layout::{derived, DerivedKind};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub fn md_path(pdf: &Path) -> PathBuf {
-    pdf.with_extension("md")
+    derived(pdf, DerivedKind::Markdown)
 }
 
 pub fn pages_path(pdf: &Path) -> PathBuf {
-    pdf.with_extension("pages.json")
+    derived(pdf, DerivedKind::Pages)
 }
 
 pub fn images_dir_for(pdf: &Path) -> PathBuf {
-    let stem = pdf
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    pdf.with_file_name(format!("{stem}_images"))
+    derived(pdf, DerivedKind::Images)
 }
 
 /// The record beside this PDF, read back as the type that wrote it.

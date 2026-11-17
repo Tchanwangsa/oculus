@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use crate::library::layout::{self, SyncedKind};
 use crate::sync::Fetched;
 
 pub(super) fn items_of(module: &serde_json::Value) -> &[serde_json::Value] {
@@ -54,18 +55,24 @@ pub(super) fn modified_of(info: &serde_json::Value) -> String {
         .to_string()
 }
 
-/// One module-TOC line for a file item; TOCs live in `modules/`, so links
-/// step up a level. A video carries its Canvas id — `_(video <id>)_` — for
+/// One line of the TOC at `toc_path` for a file item; links climb to the
+/// course root first. A video carries its Canvas id — `_(video <id>)_` — for
 /// the app's on-demand download, and links where that download lands.
-pub(super) fn file_toc_line(indent: &str, title: &str, fetched: &Fetched) -> String {
+pub(super) fn file_toc_line(
+    toc_path: &str,
+    indent: &str,
+    title: &str,
+    fetched: &Fetched,
+) -> String {
+    let up = up_to_course_root(toc_path);
     match fetched {
         Fetched::Saved(rel) => format!(
-            "{indent}- [{}](../{})",
+            "{indent}- [{}]({up}{})",
             escape_md(title),
             rel_within_course(rel)
         ),
         Fetched::Video { rel, canvas_id } => format!(
-            "{indent}- [{}](../{}) _(video {canvas_id})_",
+            "{indent}- [{}]({up}{}) _(video {canvas_id})_",
             escape_md(title),
             rel_within_course(rel)
         ),
@@ -75,7 +82,7 @@ pub(super) fn file_toc_line(indent: &str, title: &str, fetched: &Fetched) -> Str
 
 /// `courses/CODE/files/x.pdf` → `files/x.pdf`.
 pub(super) fn rel_within_course(rel: &str) -> String {
-    rel.splitn(3, '/').nth(2).unwrap_or(rel).to_string()
+    layout::within_course(rel).to_string()
 }
 
 /// The `../` prefix a document at `out_path` needs to reach the course root.
@@ -83,13 +90,19 @@ pub(super) fn up_to_course_root(out_path: &str) -> String {
     "../".repeat(out_path.matches('/').count())
 }
 
-/// `<dir>/<slug>.md`, or `<slug>-<id>.md` when two titles slug identically.
-pub(super) fn task_path(dir: &str, title: &str, id: i64, used: &mut HashSet<String>) -> String {
-    let base = format!("{dir}/{}", slug(title));
+/// `<kind's folder>/<slug>.md`, or `<slug>-<id>.md` when two titles slug
+/// identically.
+pub(super) fn task_path(
+    kind: SyncedKind,
+    title: &str,
+    id: i64,
+    used: &mut HashSet<String>,
+) -> String {
+    let base = slug(title);
     if used.insert(base.clone()) {
-        format!("{base}.md")
+        layout::synced(kind, &format!("{base}.md"))
     } else {
-        format!("{base}-{id}.md")
+        layout::synced(kind, &format!("{base}-{id}.md"))
     }
 }
 

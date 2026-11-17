@@ -1,5 +1,6 @@
 //! Module videos: listed by a sync, downloaded on request.
 
+use crate::library::layout::{self, SyncedKind};
 use crate::library::paths;
 use crate::sync::office::is_video;
 use crate::sync::render::{content_type_of, file_name, locked_until, modified_of};
@@ -34,7 +35,7 @@ impl Engine {
         self.save_video(c, file_id, &info, &name, on_progress, cancelled)
     }
 
-    /// Stream a video into `files/` through a `.part` sibling, renamed on
+    /// Stream a video into the course's media folder through a `.part` sibling, renamed on
     /// success and removed on any failure, so a cut-off download never looks
     /// finished. Never buffered: lecture recordings run to hundreds of MB.
     fn save_video(
@@ -46,7 +47,8 @@ impl Engine {
         on_progress: &dyn Fn(u8),
         cancelled: &dyn Fn() -> bool,
     ) -> Result<String, String> {
-        let rel = paths::course_rel_path(&c.code, &format!("files/{name}"))
+        let inner = layout::synced(SyncedKind::Media, name);
+        let rel = paths::course_rel_path(&c.code, &inner)
             .ok_or_else(|| format!("invalid file name: {name}"))?;
         let dest = self.data_dir.join(&rel);
         let part = dest.with_file_name(format!(
@@ -78,7 +80,7 @@ impl Engine {
             code: c.code.clone(),
             relative_path: rel.clone(),
             size_bytes: size,
-            category: paths::category_from_path(&format!("files/{name}")).to_string(),
+            category: layout::category_of(&inner).to_string(),
             canvas_id: Some(file_id),
             source_url: None,
             action: if existed { "updated" } else { "new" },

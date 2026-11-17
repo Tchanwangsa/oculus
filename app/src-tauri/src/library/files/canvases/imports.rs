@@ -120,7 +120,10 @@ fn library_path(root: &Path, relative: &str) -> Result<std::path::PathBuf, Strin
     let path = Path::new(relative);
     let mut components = path.components();
     let inside = matches!(components.next(), Some(Component::Normal(first))
-        if ["courses", "lectures", "agents"].iter().any(|s| first == *s));
+    if first.to_str().is_some_and(|first| {
+        crate::library::layout::library_roots().contains(&first)
+            || first == crate::agents::AGENTS_DIR
+    }));
     if !inside || !components.all(|part| matches!(part, Component::Normal(_))) {
         return Err("Choose a PDF inside the library".into());
     }

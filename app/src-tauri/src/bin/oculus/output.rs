@@ -179,11 +179,7 @@ impl Reporter for TermReporter {
             String::new()
         };
         // The course is already the section header, so drop `courses/CODE/`.
-        let short = f
-            .relative_path
-            .splitn(3, '/')
-            .nth(2)
-            .unwrap_or(&f.relative_path);
+        let short = app_lib::library::layout::within_course(&f.relative_path);
         // Pad before painting: escape codes count toward a width specifier.
         println!(
             "  {} {}  {short:<52} {}",
@@ -196,11 +192,7 @@ impl Reporter for TermReporter {
     }
 
     fn file_failed(&self, f: &sync::FileFailed) {
-        let short = f
-            .relative_path
-            .splitn(3, '/')
-            .nth(2)
-            .unwrap_or(&f.relative_path);
+        let short = app_lib::library::layout::within_course(&f.relative_path);
         eprintln!("  {} {short}: {}", paint("error", RED), f.error);
     }
 

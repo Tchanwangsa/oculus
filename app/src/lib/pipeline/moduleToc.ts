@@ -109,7 +109,7 @@ export function resolveTocHref(
 ): { kind: "internal"; path: string } | { kind: "external"; url: string } {
   if (/^https?:/i.test(href)) return { kind: "external", url: href };
 
-  const dir = moduleRelPath.replace(/[^/]+$/, ""); // "modules/"
+  const dir = moduleRelPath.replace(/[^/]+$/, ""); // the module file's folder
   const parts = (dir + href).split("/");
   const out: string[] = [];
   for (const part of parts) {

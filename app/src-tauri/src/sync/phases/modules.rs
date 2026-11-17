@@ -1,7 +1,8 @@
 //! Phase: modules, which drives pages and files, then the link crawl.
 
+use crate::library::layout::{self, SyncedKind};
 use crate::pages::md;
-use crate::sync::render::{escape_md, file_toc_line, items_of, slug};
+use crate::sync::render::{escape_md, file_toc_line, items_of, slug, up_to_course_root};
 use crate::sync::{Engine, Fetched, LinkCrawl, Progress, Subject, TaskDocs};
 
 impl Engine {
@@ -33,6 +34,13 @@ impl Engine {
                 break;
             }
             let mod_name = m["name"].as_str().unwrap_or("Module");
+            let pos = m["position"].as_u64().unwrap_or(0);
+            let path = layout::synced(
+                SyncedKind::Modules,
+                &format!("{pos:02}-{}.md", slug(mod_name)),
+            );
+            // Every link climbs from the TOC to the course root first.
+            let up = up_to_course_root(&path);
             let mut toc = vec![format!("# {mod_name}\n")];
 
             for item in items_of(m) {
@@ -74,9 +82,9 @@ impl Engine {
                             }
                         }
                         toc.push(format!(
-                            "{indent}- [{}](../pages/{}.md)",
+                            "{indent}- [{}]({up}{})",
                             escape_md(title),
-                            slug(title)
+                            layout::synced(SyncedKind::Pages, &format!("{}.md", slug(title)))
                         ));
                     }
                     "File" => {
@@ -94,7 +102,7 @@ impl Engine {
                                 ),
                             }
                         }
-                        toc.push(file_toc_line(&indent, title, &fetched));
+                        toc.push(file_toc_line(&path, &indent, title, &fetched));
                     }
                     "Assignment" | "Quiz" => {
                         let kind = if ty == "Quiz" { "quiz" } else { "assignment" };
@@ -106,7 +114,7 @@ impl Engine {
                         let local = item["content_id"].as_i64().and_then(|id| map.get(&id));
                         toc.push(match local {
                             Some(path) => {
-                                format!("{indent}- [{}](../{path}) _({kind})_", escape_md(title))
+                                format!("{indent}- [{}]({up}{path}) _({kind})_", escape_md(title))
                             }
                             None => format!(
                                 "{indent}- [{}]({}) _({kind})_",
@@ -134,8 +142,6 @@ impl Engine {
                 }
             }
 
-            let pos = m["position"].as_u64().unwrap_or(0);
-            let path = format!("modules/{pos:02}-{}.md", slug(mod_name));
             self.write(c, &path, format!("{}\n", toc.join("\n")).as_bytes(), None)?;
         }
         Ok(())
@@ -201,7 +207,7 @@ impl Engine {
         let page_title = full["title"].as_str().unwrap_or(title);
         let updated = full["updated_at"].as_str().unwrap_or("");
 
-        let out = format!("pages/{}.md", slug(page_title));
+        let out = layout::synced(SyncedKind::Pages, &format!("{}.md", slug(page_title)));
         let md_body = format!(
             "# {page_title}\n\n{}---\n\n{}",
             if updated.is_empty() {

@@ -1,23 +1,25 @@
 import type { DbFile } from "@/lib/db";
 import type { ImportedFile } from "@/lib/files/uploads";
+import { COURSES_DIR, OWN_DIRS } from "@/lib/files/libraryLayout";
 
 /**
- * The two drawing documents: a canvas (an infinite board, `canvases/<title>.canvas`) and a notebook
- * (pages, `notebooks/<title>.notebook`). The same JSON and the same editor; the kind is the file's
- * folder and extension, matching `DrawingKind` in `app/src-tauri/src/library/files/canvases.rs`, and
+ * The two drawing documents: a canvas (an infinite board, `<title>.canvas`) and a notebook
+ * (pages, `<title>.notebook`), each in its kind's folder (`OWN_DIRS`). The same JSON and the same
+ * editor; the kind is the file's folder and extension, matching `DrawingKind` in
+ * `app/src-tauri/src/library/files/canvases.rs`, and
  * never what the document holds: `paper` in a `.canvas` is kept and ignored (`notebookPaper`).
  */
 export type DrawingKind = "canvas" | "notebook";
 
 export const DRAWING_KINDS: Record<DrawingKind, { folder: string; extension: string; category: string }> = {
-  canvas: { folder: "canvases", extension: ".canvas", category: "canvas" },
-  notebook: { folder: "notebooks", extension: ".notebook", category: "notebook" },
+  canvas: { folder: OWN_DIRS.canvas, extension: ".canvas", category: "canvas" },
+  notebook: { folder: OWN_DIRS.notebook, extension: ".notebook", category: "notebook" },
 };
 
 /** The kind a `courses/<code>/<folder>/<title><extension>` path names, or null. */
 export function drawingKindOfPath(path: string): DrawingKind | null {
   const parts = path.split("/");
-  if (parts.length !== 4 || parts[0] !== "courses") return null;
+  if (parts.length !== 4 || parts[0] !== COURSES_DIR) return null;
   for (const kind of Object.keys(DRAWING_KINDS) as DrawingKind[]) {
     const { folder, extension } = DRAWING_KINDS[kind];
     if (parts[2] === folder && parts[3].endsWith(extension) && parts[3].length > extension.length) return kind;

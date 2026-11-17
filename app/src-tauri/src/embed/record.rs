@@ -1,7 +1,7 @@
 //! The on-disk record beside a PDF and the encoding of its vectors.
 //!
-//! One file beside the PDF, named off its stem — the same rule the parse
-//! artifacts follow, so a library folder can be copied whole. Voyage has no f16
+//! One file beside the PDF, named off its stem (`library::layout::derived`,
+//! as the parse artifacts are), so a library folder can be copied whole. Voyage has no f16
 //! `output_dtype` (its base64 `output_encoding` is f32), so every backend hands
 //! over `&[f32]` and the narrowing to f16 happens here, once.
 
@@ -14,7 +14,7 @@ use half::f16;
 use super::{EmbedError, EmbedOutput, EMBED_DIM, EMBED_MODEL};
 
 pub fn emb_path(pdf: &Path) -> PathBuf {
-    pdf.with_extension("emb.json")
+    crate::library::layout::derived(pdf, crate::library::layout::DerivedKind::Embeddings)
 }
 
 /// The record beside this PDF. Records from another model still deserialise

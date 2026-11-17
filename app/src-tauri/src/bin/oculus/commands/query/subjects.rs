@@ -11,7 +11,7 @@ pub(crate) fn matches_code(code: &str, wanted: &str) -> bool {
 
 /// Narrow a file list to the categories asked for, and refuse a word that is
 /// not a category: a silent empty result from a typo reads as "the library does
-/// not cover that". Validity is `paths::CATEGORIES`, not the rows' own
+/// not cover that". Validity is `layout::CATEGORIES`, not the rows' own
 /// categories, so a subject with no quizzes answers `--category quiz` with
 /// nothing rather than an error. Shared by `grep` and `files`.
 pub(crate) fn filter_categories(
@@ -22,10 +22,13 @@ pub(crate) fn filter_categories(
         return Ok(files);
     }
     for c in wanted {
-        if !paths::CATEGORIES.iter().any(|k| k.eq_ignore_ascii_case(c)) {
+        if !app_lib::library::layout::CATEGORIES
+            .iter()
+            .any(|k| k.eq_ignore_ascii_case(c))
+        {
             return Err(format!(
                 "no category {c:?} — the categories are: {}",
-                paths::CATEGORIES.join(", ")
+                app_lib::library::layout::CATEGORIES.join(", ")
             ));
         }
     }
@@ -43,7 +46,7 @@ pub(crate) fn filter_categories(
 pub(crate) fn category_help() -> String {
     format!(
         "Only these categories ({}). Repeatable",
-        paths::CATEGORIES.join(", ")
+        app_lib::library::layout::CATEGORIES.join(", ")
     )
 }
 

@@ -21,7 +21,10 @@ pub fn resolve_subject(data_dir: &Path, code: &str) -> Result<String, String> {
         return Err("a subject code cannot be empty".into());
     }
     let mut names: Vec<String> = Vec::new();
-    for dir in [data_dir.join("courses"), bucket_dir(data_dir, None)] {
+    for dir in [
+        crate::library::layout::courses_dir(data_dir),
+        bucket_dir(data_dir, None),
+    ] {
         let Ok(rd) = std::fs::read_dir(&dir) else {
             continue;
         };

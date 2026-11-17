@@ -14,7 +14,7 @@ use crate::db::store::{
     echo_embed, echo_embed_file_of_media, open_pool, set_echo_embed_file, upsert_echo_embed,
     EchoEmbed,
 };
-use crate::library::paths;
+use crate::library::{layout, paths};
 use crate::sources::echo360::{self, embed};
 use crate::sources::institution;
 use crate::sync::FileEvent;
@@ -241,7 +241,6 @@ impl Download {
             &|| emit(app, link_id, 100, "muxing"),
             cancelled,
         )?;
-        let name = rel.rsplit('/').next().unwrap_or(&rel);
         app.emit(
             "scrape-file",
             &FileEvent {
@@ -249,7 +248,7 @@ impl Download {
                 code: self.code.clone(),
                 relative_path: rel.clone(),
                 size_bytes: size,
-                category: paths::category_from_path(&format!("files/{name}")).to_string(),
+                category: layout::category_of(layout::within_course(&rel)).to_string(),
                 canvas_id: None,
                 source_url: Some(self.retrieve.clone()),
                 action: if existed { "updated" } else { "new" },

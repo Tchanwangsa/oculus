@@ -27,6 +27,7 @@ import {
   Stack,
   type Icon,
 } from "@phosphor-icons/react";
+import { parsedMdOf } from "@/lib/files/libraryLayout";
 
 /** Office formats stored with a derived sibling PDF ("deck.pptx" →
  *  "deck.pptx.pdf"). Mirrors OFFICE_EXTS in library/paths/file_types.rs. */
@@ -115,7 +116,7 @@ export function isCodeFile(filename: string): boolean {
  *  "a.md", "deck.pptx" → "deck.pptx.md", "marks.xlsx" → "marks.xlsx.md". */
 export function parsedMdRelPath(file: { filename: string; relative_path: string }): string | null {
   const e = ext(file.filename);
-  if (e === "pdf") return file.relative_path.replace(/\.pdf$/i, ".md");
+  if (e === "pdf") return parsedMdOf(file.relative_path);
   if (OFFICE_EXTS.includes(e) || SHEET_EXTS.includes(e)) return `${file.relative_path}.md`;
   return null;
 }

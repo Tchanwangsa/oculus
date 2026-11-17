@@ -4,9 +4,10 @@ import { parsedSourceOf } from "@/lib/citations";
 import { fmtBytes } from "@/lib/format/format";
 import { fmtDurationSecs } from "@/lib/lectures/format";
 import type { ReferenceDetails } from "./ReferencePreview";
+import { RECORDINGS_PREFIX } from "@/lib/files/libraryLayout";
 
 export async function fileReferenceDetails(path: string): Promise<ReferenceDetails | null> {
-  const lectureId = /^lectures\/([^/]+)\//.exec(path)?.[1];
+  const lectureId = new RegExp(`${RECORDINGS_PREFIX}([^/]+)/`).exec(path)?.[1];
   if (lectureId) {
     const lecture = await getLecture(lectureId);
     return lecture ? { title: lecture.title, meta: fmtDurationSecs(lecture.duration_seconds) } : null;

@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use crate::library::paths;
+use crate::library::layout;
 
 use super::docs::{Skill, SKILLS};
 use super::{
-    agents_dir, AGENTS_DOC, AGENTS_DOC_NAME, AGENTS_DOC_REL, MEMORIES_DIR, MEMORY_INDEX_NAME,
-    SKILLS_DIR,
+    agents_dir, AGENTS_DIR, AGENTS_DOC, AGENTS_DOC_NAME, AGENTS_DOC_REL, MEMORIES_DIR,
+    MEMORY_INDEX_NAME, SKILLS_DIR,
 };
 
 /// Claude Code walks up from its cwd for `.claude/skills` and Codex for
@@ -68,7 +68,7 @@ pub enum Link {
 ///
 /// The sync-side entry point, so a new subject is linked by its first scrape.
 pub fn link_course(data_dir: &Path, code: &str) -> Result<Link, String> {
-    let dir = data_dir.join("courses").join(paths::safe_dir(code));
+    let dir = layout::course_root(data_dir, code);
     if !dir.is_dir() {
         return Ok(Link::Absent);
     }
@@ -79,7 +79,7 @@ pub fn link_course(data_dir: &Path, code: &str) -> Result<Link, String> {
 ///
 /// The sweep behind `oculus docs`.
 pub fn link_all(data_dir: &Path) -> Result<LinkReport, String> {
-    let courses = data_dir.join("courses");
+    let courses = layout::courses_dir(data_dir);
     let mut report = LinkReport::default();
     let entries = match std::fs::read_dir(&courses) {
         Ok(e) => e,
@@ -109,8 +109,15 @@ pub fn subject_memories(data_dir: &Path, course_dir: &str) -> PathBuf {
     agents_dir(data_dir).join(MEMORIES_DIR).join(course_dir)
 }
 
-/// From `courses/<CODE>/agents/memories` back to that bucket (relative).
-const SUBJECT_MEMORIES_REL: &str = "../../../agents/memories";
+/// From a subject's `<agents>/memories` back to the library's buckets
+/// (relative): up out of the subject's agents folder, then into the
+/// library's own.
+fn subject_memories_rel(name: &str) -> PathBuf {
+    let depth = layout::agents_rel(name).matches('/').count() + 1;
+    PathBuf::from("../".repeat(depth))
+        .join(AGENTS_DIR)
+        .join(MEMORIES_DIR)
+}
 
 /// Move a course folder's old `agents/memories/` into the library bucket and
 ///
@@ -136,7 +143,7 @@ fn adopt_course_memories(course_agents: &Path, bucket: &Path, name: &str) -> Res
     match std::fs::symlink_metadata(&old) {
         // Already a link; repoint it if it aims elsewhere (links are ours).
         Ok(meta) if meta.file_type().is_symlink() => {
-            let want = PathBuf::from(SUBJECT_MEMORIES_REL).join(name);
+            let want = subject_memories_rel(name).join(name);
             if std::fs::read_link(&old).is_ok_and(|t| t == want) {
                 return Ok(());
             }
@@ -173,7 +180,7 @@ fn adopt_course_memories(course_agents: &Path, bucket: &Path, name: &str) -> Res
         Ok(_) => return Ok(()),
         Err(_) => {}
     }
-    let target = format!("{SUBJECT_MEMORIES_REL}/{name}");
+    let target = subject_memories_rel(name).join(name);
     #[cfg(unix)]
     std::os::unix::fs::symlink(&target, &old)
         .map_err(|e| format!("cannot link {name}/agents/memories: {e}"))?;
@@ -195,7 +202,7 @@ fn link_dir(data_dir: &Path, dir: &Path) -> Result<Link, String> {
     let bucket = subject_memories(data_dir, &name);
     std::fs::create_dir_all(&bucket)
         .map_err(|e| format!("cannot create agents/memories/{name}: {e}"))?;
-    let course_agents = dir.join("agents");
+    let course_agents = layout::agents_under(dir);
     std::fs::create_dir_all(&course_agents)
         .map_err(|e| format!("cannot create {name}/agents: {e}"))?;
     adopt_course_memories(&course_agents, &bucket, &name)?;

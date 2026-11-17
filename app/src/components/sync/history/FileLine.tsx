@@ -5,13 +5,14 @@ import { pathFile } from "@/lib/files/openFile";
 import { fileReferenceAppearance } from "@/lib/files/referenceAppearance";
 import { cn } from "@/lib/utils";
 import { ACTION_LABEL, ACTION_VARIANT } from "@/components/sync/history/constants";
+import { courseRelOf } from "@/lib/files/libraryLayout";
 
 export function FileLine({ file }: { file: SyncRunFile }) {
   const name = file.relative_path.split("/").pop() ?? file.relative_path;
   // The file's reference colour: PDFs red, lessons, threads and pages their own.
   const { Icon, tone } = fileReferenceAppearance(
     pathFile(file.relative_path),
-    file.relative_path.replace(/^courses\/[^/]+\//, ""),
+    courseRelOf(file.relative_path),
   );
   return (
     <div className="flex items-center gap-2.5 py-1.5 min-w-0">

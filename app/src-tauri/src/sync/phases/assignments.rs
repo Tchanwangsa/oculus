@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use crate::library::layout::SyncedKind;
 use crate::pages::md;
 use crate::sync::render::{fmt_points, push_ts, submission_status, task_path};
 use crate::sync::{Engine, LinkCrawl, Progress, Subject, TaskDocs};
@@ -76,7 +77,7 @@ impl Engine {
                 meta.push("**Status:** submitted".to_string());
             }
 
-            let path = task_path("quizzes", title, id, &mut used_paths);
+            let path = task_path(SyncedKind::Quizzes, title, id, &mut used_paths);
             self.write_task_doc(c, &path, title, &meta, q, crawl)?;
             docs.quizzes.insert(id, path.clone());
             // A graded quiz also exists as an assignment; either id reaches it.
@@ -128,7 +129,7 @@ impl Engine {
                 meta.push(format!("**Status:** {status}"));
             }
 
-            let path = task_path("assignments", title, id, &mut used_paths);
+            let path = task_path(SyncedKind::Assignments, title, id, &mut used_paths);
             self.write_task_doc(c, &path, title, &meta, a, crawl)?;
             docs.assignments.insert(id, path);
         }

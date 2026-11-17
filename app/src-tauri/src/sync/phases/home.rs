@@ -1,5 +1,6 @@
 //! Phase: the course home page and syllabus.
 
+use crate::library::layout::{self, SyncedFile};
 use crate::pages::md;
 use crate::sync::{Engine, LinkCrawl, Subject};
 
@@ -44,12 +45,13 @@ impl Engine {
         // Separate from the front page — a course can have both.
         if let Some(syllabus) = course["syllabus_body"].as_str().filter(|s| !s.is_empty()) {
             crawl.absorb(md::canvas_links(syllabus, c.id));
-            let body = self.convert(syllabus, c, "syllabus.md");
+            let syllabus_path = layout::synced_file(SyncedFile::Syllabus);
+            let body = self.convert(syllabus, c, &syllabus_path);
             let md = format!(
                 "{}\n---\n\n{body}",
                 header(&format!("{name} — Syllabus"), "")
             );
-            self.write(c, "syllabus.md", md.as_bytes(), None)?;
+            self.write(c, &syllabus_path, md.as_bytes(), None)?;
         }
 
         let (body, source) = match self
@@ -82,12 +84,13 @@ impl Engine {
         }
 
         crawl.absorb(md::canvas_links(&body, c.id));
-        let converted = self.convert(&body, c, "home.md");
+        let home_path = layout::synced_file(SyncedFile::Home);
+        let converted = self.convert(&body, c, &home_path);
         let md = format!(
             "{}\n---\n\n{converted}",
             header(&name, &format!("\n> Source: {source}\n"))
         );
-        self.write(c, "home.md", md.as_bytes(), None)?;
+        self.write(c, &home_path, md.as_bytes(), None)?;
         Ok(())
     }
 }

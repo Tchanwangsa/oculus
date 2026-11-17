@@ -45,8 +45,9 @@ fn a_note_s_pictures_sit_beside_it() {
         document_asset_ref("20260922-101112-0a1b2c3d.png"),
         "assets/20260922-101112-0a1b2c3d.png"
     );
-    assert!(!crate::library::paths::is_document_rel(
-        "courses/MULT20015/documents/assets/20260922-101112-0a1b2c3d.png"
+    assert!(!crate::library::layout::own_file_ok(
+        "courses/MULT20015/documents/assets/20260922-101112-0a1b2c3d.png",
+        crate::library::layout::OwnKind::Document
     ));
 }
 
@@ -67,9 +68,10 @@ fn a_note_is_replaced_whole() {
         name.starts_with(".Week 3.md.") && name.ends_with(".tmp"),
         "{name}"
     );
-    assert!(!crate::library::paths::is_document_rel(&format!(
-        "courses/X/documents/{name}"
-    )));
+    assert!(!crate::library::layout::own_file_ok(
+        &format!("courses/X/documents/{name}"),
+        crate::library::layout::OwnKind::Document
+    ));
 }
 
 #[test]
@@ -93,6 +95,8 @@ fn a_title_becomes_a_markdown_filename() {
     assert_eq!(document_name("..."), "Untitled.md");
     assert_eq!(document_name("???"), "Untitled.md");
     assert_eq!(document_name("Draft."), "Draft.md");
+    // Never a dot-name, which the own-file guard refuses.
+    assert_eq!(document_name(".plan"), "plan.md");
     assert_eq!(document_name("../../etc/passwd"), "____etc_passwd.md");
     assert_eq!(document_name("a/b"), "a_b.md");
 }

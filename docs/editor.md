@@ -236,8 +236,9 @@ selected.
 - **A pasted, dropped or picked picture is written beside its note** in
   `documents/assets/`, on arrival, and linked relatively; `FileViewer` and the
   editor both resolve it with `libraryImageSrc` (`app/src/lib/files/libraryLinks.ts`).
-  `is_document_rel` demands a `.md` one level down, so nothing can edit
-  `assets/`.
+  The note guard (`own_file_ok`,
+  [architecture.md](./architecture.md#one-module-owns-every-path-shape-in-the-library))
+  refuses a `.md` inside `assets/`, so nothing can edit it as a note.
 - **`@` mentions a library file**
   (`app/src/components/documents/editor/chrome/mentions.ts`): at a word start,
   outside maths, code and frontmatter, the query after it (the chat's caps)

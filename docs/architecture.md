@@ -12,7 +12,8 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | --- | --- |
 | App entry, startup, command registry | `app/src-tauri/src/lib.rs` |
 | Schema migrations | `app/src-tauri/src/db/migrations.rs` |
-| Data-dir and library path rules | `app/src-tauri/src/library/paths/` |
+| Data-dir location, file names and types | `app/src-tauri/src/library/paths/` |
+| Every path shape inside the library: folders, zones, guards, categories, parse artifacts ([below](#one-module-owns-every-path-shape-in-the-library)) | `app/src-tauri/src/library/layout/`, `app/src/lib/files/libraryLayout.ts` |
 | Parse seam and its two MinerU clients | `app/src-tauri/src/parse/mod.rs`, `app/src-tauri/src/parse/mineru/` |
 | Embed seam, Voyage client, page rasterizer | `app/src-tauri/src/embed/mod.rs`, `app/src-tauri/src/embed/voyage/`, `app/src-tauri/src/embed/raster/` |
 | hayro rendering shared by the viewer and the embedder, and its memory budget | `app/src-tauri/src/library/pdf_render/` |
@@ -306,8 +307,9 @@ links and Host allow-list on `Changed`. Nothing polls an OS command.
 WebKit refuses `<video>` sources on custom URL schemes: an `asset://` URL
 fetches but the media element fails with error code 4 (macOS 26). So
 `app/src-tauri/src/lectures/media.rs` serves lecture video on an ephemeral localhost
-port with a per-launch token and Range support, scoped to `lectures/`,
-`courses/` and `studio/videos/` (rendered videos), and serving PNG, JPEG and
+port with a per-launch token and Range support, scoped to the library's
+folders (`library_roots` in `app/src-tauri/src/library/layout/roots.rs`) and
+`studio/videos/` (rendered videos), and serving PNG, JPEG and
 WebP as images. The frontend gets URLs from `mediaSrc()` in `app/src/lib/lectures/media/src.ts`.
 
 The same server answers `GET|HEAD /widget-kit/<path>` with no token: the
@@ -327,16 +329,11 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Windows
 uses the shared profile folder described in [windows.md](./windows.md). Inside:
 
 - `oculus.db` — SQLite, everything structured.
-- `courses/<code>/…` — scraped files in Canvas's layout, with the parser's
-  `.md`, `.pages.json` and `<stem>_images/` siblings and the embedder's
-  `.emb.json`. Four subfolders are the student's own, never written by a sync:
-  `uploads/` (copied in by `import_files`), `documents/` (notes written in
-  the app by `create_document`, with pasted images in `documents/assets/`),
-  `canvases/` and `notebooks/` (versioned drawing documents; [drawing-canvas.md](./drawing-canvas.md)),
-  all in `app/src-tauri/src/library/files/`. Rename and delete commands are scoped
-  to those shapes (`is_document_rel` in `app/src-tauri/src/library/paths/own_files.rs`
-  and the canvas guard in `app/src-tauri/src/library/files/canvases.rs`), which is
-  what makes deleting there safe.
+- `courses/<code>/…` — one folder per subject: what the sync writes, the
+  student's own files and the subject's agent folder. Its shape is the
+  layout module's ([below](#one-module-owns-every-path-shape-in-the-library)).
+  The parser's `.md`, `.pages.json` and `<stem>_images/` and the embedder's
+  `.emb.json` sit beside each PDF.
 - `lectures/<uuid>/` — Echo360 media (`source1.mp4`, optionally
   `source2.mp4`) and `transcript.vtt`, plus regenerable `frames/` and
   `outline.md` from the chapter jobs. Which source is the slides is measured,
@@ -372,6 +369,50 @@ uses the shared profile folder described in [windows.md](./windows.md). Inside:
 - `start-over` — present only between Start over and the next launch, which
   empties the directory but for the two usage files, `models/` and keyd's
   own ([auth.md](./auth.md#one-institution-profile-says-which-university)).
+
+## One module owns every path shape in the library
+
+`app/src-tauri/src/library/layout/` names every folder in the library; no
+other Rust file spells one, and `app/tests/repo/libraryLayout.test.ts` fails
+the build if one does. Its folder names are a table (`shape.rs`), so a new
+layout changes the table, not the callers.
+
+```
+courses/<code>/
+  files/ lessons/ ed/ pages/ assignments/ quizzes/ announcements/ modules/ images/
+  home.md  syllabus.md          synced: SyncedKind, SyncedFile (module videos land in files/)
+  uploads/ documents/ canvases/ notebooks/   own: OwnKind, each kind's folder
+  agents/                       hidden: the subject's agent folder
+lectures/<media id>/            synced: one recording (recording_dir)
+```
+
+- **`zone_of(rel)` is the question every guard asks** of a data-dir-relative
+  path: `Synced`, `Own`, `Hidden` (inside the data dir, not a library file)
+  or `Outside` (absolute, `..`, a backslash, a drive, an empty segment). Folder
+  names compare ignoring ASCII case, as macOS and Windows volumes do.
+- **`own_file_ok(rel, kind)` is the guard of every command that writes,
+  renames or deletes the student's files** (notes, uploads, canvases,
+  notebooks): in the own zone, below the kind's folder at any depth, the
+  kind's extension, no dot-name (staging files are dot-names), no `:`. A note's
+  pictures folder (`documents/assets/`) holds no notes. Canvases add a refusal
+  of any symlink on the way (`checked` in
+  `app/src-tauri/src/library/files/canvases.rs`).
+- **IPC commands that read or open what the frontend names go through
+  `resolve`** (`read_course_file`, `open_course_file`) or `resolve_absolute`
+  (`echo360_read_transcript`, which gets a stored absolute path): `Outside`
+  is refused, and so is a path whose symlinks lead out of the data dir. A
+  lecture id that is not one folder name is refused by `recording_dir`.
+- **`category_of` sets `files.category`** from the path inside the subject:
+  synced folders by their kind, own files by their folder.
+  `app/src/lib/files/libraryLayout.ts` is the frontend's copy for paths with
+  no row (citations, chips); both are held to
+  `app/tests/fixtures/library/categories.json`.
+- **`derived(pdf, kind)` names a PDF's parse and embed artifacts**; parse,
+  embed, the sheet converter and the purge all ask it.
+- **The purge spares the student's notes.** `purge_parse_artifacts` deletes
+  every artifact of a synced PDF, but outside the synced folders a
+  `<stem>.md` goes only when the parser wrote it: a parse record beside it,
+  or a spreadsheet's text.
 
 ## The database has one schema owner and two writers
 

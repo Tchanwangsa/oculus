@@ -3,6 +3,7 @@ import { shallow } from "zustand/shallow";
 import { listen } from "@tauri-apps/api/event";
 import { getDb } from "@/lib/db";
 import { FILE_ACCESSED_EVENT } from "@/lib/files/openFile";
+import { COURSES_DIR, LESSONS_DIR } from "@/lib/files/libraryLayout";
 
 /**
  * Counts of never-opened files per subject and category, for the sidebar's
@@ -40,7 +41,7 @@ export const useNewFilesStore = create<NewFilesState>((set) => ({
          FROM files
          WHERE first_seen_at IS NOT NULL AND last_accessed_at IS NULL
            AND category IN (${COUNTED_CATEGORIES.map((c) => `'${c}'`).join(", ")})
-           AND NOT (category = 'lessons' AND relative_path GLOB 'courses/*/lessons/*/*')
+           AND NOT (category = 'lessons' AND relative_path GLOB '${COURSES_DIR}/*/${LESSONS_DIR}/*/*')
          GROUP BY subject_id, category`,
       );
       const bySubject: CountsBySubject = {};

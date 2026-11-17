@@ -80,7 +80,7 @@ impl Ctx {
         }
         for h in &hits {
             // Subject plus in-course path: a filename is not unique across courses.
-            let short = h.path.splitn(3, '/').nth(2).unwrap_or(&h.path);
+            let short = app_lib::library::layout::within_course(&h.path);
             println!(
                 "{} {} {} {}",
                 paint(&format!("{:.3}", h.score), BOLD),

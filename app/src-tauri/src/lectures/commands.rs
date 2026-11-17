@@ -44,6 +44,7 @@ pub async fn echo360_download_video(
     crate::runtime::blocking::run(move || {
         let source = source.unwrap_or(1);
         let session = get_or_auth(&cache, canvas_course_id)?;
+        let dir = echo360::lecture_dir(&crate::library::paths::data_dir(), &media_id)?;
         let url = echo360::download_url(&session, &media_id, &lesson_id, source)?;
 
         // Removed on every exit path, so a late cancel cannot poison a retry.
@@ -55,7 +56,6 @@ pub async fn echo360_download_video(
             .unwrap()
             .insert(key.clone(), Arc::clone(&flag));
 
-        let dir = echo360::lecture_dir(&crate::library::paths::data_dir(), &media_id);
         let raw = echo360::partial_path(&dir, source);
         let final_ = echo360::source_path(&dir, source);
 
@@ -149,7 +149,7 @@ pub async fn echo360_delete_video(
 ) -> Result<u64, String> {
     let cancels = cancels.inner().clone();
     crate::runtime::blocking::run(move || {
-        let dir = echo360::lecture_dir(&crate::library::paths::data_dir(), &media_id);
+        let dir = echo360::lecture_dir(&crate::library::paths::data_dir(), &media_id)?;
 
         let sources: Vec<u8> = match source {
             Some(s) => vec![s],
@@ -195,7 +195,7 @@ pub async fn echo360_download_transcript(
         let session = get_or_auth(&cache, canvas_course_id)?;
         let vtt = echo360::transcript(&session, &lesson_id, &media_id)?;
 
-        let dir = echo360::lecture_dir(&crate::library::paths::data_dir(), &media_id);
+        let dir = echo360::lecture_dir(&crate::library::paths::data_dir(), &media_id)?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let path = dir.join("transcript.vtt");
         std::fs::write(&path, vtt.as_bytes()).map_err(|e| e.to_string())?;
@@ -205,27 +205,29 @@ pub async fn echo360_download_transcript(
     .await
 }
 
+/// A transcript by the absolute path its lecture row stores; only one inside
+/// the data dir (`layout::resolve_absolute`).
 #[tauri::command]
 pub async fn echo360_read_transcript(path: String) -> Result<String, String> {
-    crate::runtime::blocking::run(move || std::fs::read_to_string(&path).map_err(|e| e.to_string()))
-        .await
+    crate::runtime::blocking::run(move || {
+        let path = crate::library::layout::resolve_absolute(
+            &crate::library::paths::data_dir(),
+            std::path::Path::new(&path),
+        )?;
+        std::fs::read_to_string(path).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn echo360_clear_transcripts() -> Result<u32, String> {
     crate::runtime::blocking::run(move || {
-        let dir = crate::library::paths::data_dir().join("lectures");
-        if !dir.exists() {
-            return Ok(0);
-        }
         let mut deleted = 0u32;
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let transcript = entry.path().join("transcript.vtt");
-                if transcript.exists() {
-                    std::fs::remove_file(&transcript).ok();
-                    deleted += 1;
-                }
+        for dir in crate::library::layout::recording_dirs(&crate::library::paths::data_dir()) {
+            let transcript = dir.join("transcript.vtt");
+            if transcript.exists() {
+                std::fs::remove_file(&transcript).ok();
+                deleted += 1;
             }
         }
         elog!("[oculus] cleared {deleted} transcript files");

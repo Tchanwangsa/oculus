@@ -9,6 +9,7 @@ import { libraryLinkTarget } from "@/lib/files/libraryLinks";
 import { readCourseFile } from "@/lib/files/courseFiles";
 import { lecturePagePath } from "@/lib/lectures";
 import { citedPage, fullCitation, quoteFromLines, type Citation } from "@/lib/citations";
+import { RECORDINGS_PREFIX, isCoursePath } from "@/lib/files/libraryLayout";
 
 /** Categories whose rows carry real filenames, not Canvas slugs. */
 const REAL_FILENAME = new Set(["file", "image", "upload"]);
@@ -167,7 +168,7 @@ export function openCitation(cite: Citation, newTab = false): void {
 
 async function openCitationAsync(cite: Citation, newTab: boolean): Promise<void> {
   const system = () => invoke<void>("open_course_file", { relativePath: cite.path });
-  const lectureId = /^lectures\/([^/]+)(?:\/|$)/.exec(cite.path)?.[1];
+  const lectureId = new RegExp(`${RECORDINGS_PREFIX}([^/]+)(?:/|$)`).exec(cite.path)?.[1];
   if (lectureId) {
     const lecture = await getLecture(lectureId);
     if (!lecture) return system();
@@ -175,7 +176,7 @@ async function openCitationAsync(cite: Citation, newTab: boolean): Promise<void>
     else openBeside(lecturePagePath(lecture, cite.at));
     return;
   }
-  if (!cite.path.startsWith("courses/")) return system();
+  if (!isCoursePath(cite.path)) return system();
   const file = await resolveLibraryFile(cite.path);
   if (!file) return system();
   const locate = await citationLocate(cite, file);

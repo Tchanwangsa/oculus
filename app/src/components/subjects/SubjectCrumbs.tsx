@@ -16,7 +16,7 @@ export const LECTURES_TAB: CrumbTab = { to: "lectures", label: "Lectures" };
 
 /**
  * The tab that lists a file of each category — the seam between Rust's
- * categories (`category_from_path` in `app/src-tauri/src/library/paths/categories.rs`) and
+ * categories (`category_of` in `app/src-tauri/src/library/layout/category.rs`) and
  * `SubjectLayout`'s tabs. `home`/`syllabus` are absent: they live on Overview,
  * where the subject crumb already points. Unmapped falls back to the subject.
  */

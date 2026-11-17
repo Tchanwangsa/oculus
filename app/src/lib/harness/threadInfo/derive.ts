@@ -11,6 +11,7 @@ import {
   toLibraryPath,
   type InfoTarget,
 } from "./targets";
+import { recordingRel } from "@/lib/files/libraryLayout";
 
 /**
  * Thread info's Read and Made groups, projected from a thread's rows with no
@@ -186,7 +187,7 @@ export function deriveThreadInfo(
 ): ThreadInfoLists {
   const lists = new Lists();
   // The lecture a lecture thread is about leads Read before any message.
-  if (lectureId) lists.addRead(`lectures/${lectureId}`, -1, { pinned: true });
+  if (lectureId) lists.addRead(recordingRel(lectureId), -1, { pinned: true });
   items.forEach((item, at) => {
     if (item.thread_id !== threadId) return;
     if (item.kind === "user" || item.kind === "steer") {
@@ -201,7 +202,7 @@ export function deriveThreadInfo(
         }
       }
       const moment = lectureId ? messageAt(item) : null;
-      if (moment != null) lists.addRead(`lectures/${lectureId}`, at, { time: moment });
+      if (moment != null && lectureId) lists.addRead(recordingRel(lectureId), at, { time: moment });
       return;
     }
     if (item.kind !== "tool") return;

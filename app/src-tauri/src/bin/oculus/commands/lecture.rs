@@ -56,7 +56,7 @@ impl Ctx {
             .and_then(|p| std::fs::read_to_string(p).ok())
             .map(|vtt| app_lib::lectures::chapters::cue_gaps(&vtt))
             .unwrap_or_default();
-        let dir = app_lib::sources::echo360::lecture_dir(&self.data_dir, &id);
+        let dir = app_lib::sources::echo360::lecture_dir(&self.data_dir, &id)?;
         // `--source` overrules the detected slide stream.
         let detected = app_lib::lectures::chapters::detect(
             &ffmpeg,

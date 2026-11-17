@@ -20,6 +20,7 @@ inside the app (on a plain thread, reporting through Tauri events) and in the
 | Echo360 core | `app/src-tauri/src/sources/echo360/` |
 | Echo360 Tauri commands, session cache, downloads | `app/src-tauri/src/lectures/commands.rs`, `app/src-tauri/src/lectures/mod.rs`, `app/src-tauri/src/lectures/downloads.rs` |
 | Canvas HTML → Markdown | `app/src-tauri/src/pages/md/` |
+| Where every phase writes (`synced`, `SyncedKind`), lecture folders, and the category each file gets | `app/src-tauri/src/library/layout/` ([architecture.md](./architecture.md#one-module-owns-every-path-shape-in-the-library)) |
 | App-side entry: thread + `AppReporter`; on-demand module videos and page embeds | `app/src-tauri/src/sync/scrape/` |
 | Headless DB writes, subject list state | `app/src-tauri/src/db/store/`, `app/src-tauri/src/sync/subjects.rs` |
 | Chronological term ordering (`term_sort`) | `app/src-tauri/src/sync/terms.rs` |

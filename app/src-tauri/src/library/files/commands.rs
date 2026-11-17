@@ -1,9 +1,12 @@
 use std::path::Path;
 
+use crate::library::layout;
+
+/// A text file in the data dir; never one `layout::resolve` places outside it.
 #[tauri::command]
 pub async fn read_course_file(relative_path: String) -> Result<String, String> {
     crate::runtime::blocking::run(move || {
-        let path = crate::library::paths::data_dir().join(&relative_path);
+        let path = layout::resolve(&crate::library::paths::data_dir(), &relative_path)?;
         std::fs::read_to_string(path).map_err(|e| e.to_string())
     })
     .await
@@ -39,9 +42,10 @@ pub async fn course_file_has_content(relative_path: String) -> Result<bool, Stri
     .await
 }
 
+/// Hand a data-dir file to the system viewer, under the same guard as reads.
 #[tauri::command]
 pub fn open_course_file(relative_path: String) -> Result<(), String> {
-    let path = crate::library::paths::data_dir().join(&relative_path);
+    let path = layout::resolve(&crate::library::paths::data_dir(), &relative_path)?;
     tauri_plugin_opener::open_path(path.to_str().unwrap_or(""), None::<&str>)
         .map_err(|e| e.to_string())
 }

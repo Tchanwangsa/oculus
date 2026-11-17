@@ -107,21 +107,22 @@ fn videos_are_known_by_type_or_an_untyped_upload_s_extension() {
 
 #[test]
 fn a_module_video_lists_its_canvas_id_and_where_it_will_land() {
+    const TOC: &str = "modules/01-intro.md";
     let video = Fetched::Video {
         rel: "courses/MAST_2026/files/Matrices_Part_1.mp4".into(),
         canvas_id: 12345,
     };
     assert_eq!(
-        file_toc_line("  ", "Matrices [Part 1]", &video),
+        file_toc_line(TOC, "  ", "Matrices [Part 1]", &video),
         "  - [Matrices \\[Part 1\\]](../files/Matrices_Part_1.mp4) _(video 12345)_"
     );
     let saved = Fetched::Saved("courses/MAST_2026/files/w1.pdf".into());
     assert_eq!(
-        file_toc_line("", "Week 1", &saved),
+        file_toc_line(TOC, "", "Week 1", &saved),
         "- [Week 1](../files/w1.pdf)"
     );
     assert_eq!(
-        file_toc_line("", "Gone", &Fetched::Skipped),
+        file_toc_line(TOC, "", "Gone", &Fetched::Skipped),
         "- Gone _(file)_"
     );
 }

@@ -1,4 +1,5 @@
 import { parsedMdSource } from "@/lib/files/fileTypes";
+import { FILES_DIR, OWN_DIRS, inFolder, isCoursePath } from "@/lib/files/libraryLayout";
 
 /** 1-based, inclusive. */
 export interface LineRange {
@@ -134,6 +135,6 @@ export function citationText(c: Citation): string {
 /** A parse artifact the student knows by its source: a `.md` under a course's
  *  `files/` or `uploads/` → the PDF or Office file it came from. */
 export function parsedSourceOf(path: string): string | null {
-  if (!/^courses\/[^/]+\/(?:files|uploads)\//.test(path)) return null;
+  if (!isCoursePath(path) || !(inFolder(path, FILES_DIR) || inFolder(path, OWN_DIRS.upload))) return null;
   return parsedMdSource(path);
 }

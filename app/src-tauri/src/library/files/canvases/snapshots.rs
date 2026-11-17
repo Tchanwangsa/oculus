@@ -69,7 +69,7 @@ fn write_at(
     now: u64,
 ) -> Result<(), String> {
     if super::DrawingKind::of(relative_path) != Some(super::DrawingKind::Notebook) {
-        return Err("Expected courses/<subject>/notebooks/<title>.notebook".into());
+        return Err("Expected one of your notebooks (<title>.notebook)".into());
     }
     if page_count == 0 || page_count > MAX_PAGES {
         return Err(format!("A notebook has between 1 and {MAX_PAGES} pages"));

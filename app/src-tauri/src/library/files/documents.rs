@@ -1,19 +1,21 @@
-//! Markdown notes in `courses/<code>/documents/`: Rust moves the bytes, the
-//! frontend writes the `files` row. A note is rewritten on save and moves on
-//! rename, so every mutating command checks the path's shape (`is_document_rel`)
-//! before resolving it.
+//! Markdown notes, in the folder `layout::own_dir` gives documents: Rust moves
+//! the bytes, the frontend writes the `files` row. A note is rewritten on save
+//! and moves on rename, so every mutating command checks the path's shape
+//! (`layout::own_file_ok`) before resolving it.
 
 use std::path::Path;
 
 use super::uploads::step_aside;
 use super::ImportedFile;
+use crate::library::layout::{self, OwnKind};
 
 /// A title's filename: sanitised, `Untitled` when only underscores survive,
 /// `.md` always. A trailing dot is dropped, or `notes..md` would be sanitised
 /// again on write and land under a different name.
 pub(super) fn document_name(title: &str) -> String {
     let stem = crate::library::paths::safe_filename(title.trim());
-    let stem = stem.trim_end_matches('.');
+    // A leading dot would make it a dot-name, which the guard refuses.
+    let stem = stem.trim_matches('.');
     let stem = if stem.trim_matches('_').is_empty() {
         "Untitled"
     } else {
@@ -23,15 +25,12 @@ pub(super) fn document_name(title: &str) -> String {
 }
 
 fn documents_dir(data_dir: &Path, code: &str) -> std::path::PathBuf {
-    data_dir
-        .join("courses")
-        .join(crate::library::paths::safe_dir(code))
-        .join(crate::library::paths::DOCUMENTS_DIR)
+    layout::own_dir(data_dir, code, OwnKind::Document)
 }
 
 /// A document's absolute path, or an error — the one place the guard runs.
 fn document_path(relative_path: &str) -> Result<std::path::PathBuf, String> {
-    if !crate::library::paths::is_document_rel(relative_path) {
+    if !layout::own_file_ok(relative_path, OwnKind::Document) {
         return Err(format!("{relative_path} is not one of your documents"));
     }
     Ok(crate::library::paths::data_dir().join(relative_path))
@@ -44,12 +43,12 @@ pub(super) fn document_assets_dir(note: &Path) -> Result<std::path::PathBuf, Str
     let dir = note
         .parent()
         .ok_or_else(|| format!("{} has no folder", note.display()))?;
-    Ok(dir.join(crate::library::paths::DOCUMENT_ASSETS_DIR))
+    Ok(dir.join(layout::note_assets_dir()))
 }
 
 /// The link the editor writes, relative to the note (survives a rename).
 pub(super) fn document_asset_ref(name: &str) -> String {
-    format!("{}/{name}", crate::library::paths::DOCUMENT_ASSETS_DIR)
+    format!("{}/{name}", layout::note_assets_dir())
 }
 
 fn document_file(relative_path: String, size_bytes: u64) -> ImportedFile {
@@ -145,18 +144,15 @@ pub(crate) fn create_document_body_in(
             return Err(e.to_string());
         }
         return Ok(document_file(
-            format!(
-                "courses/{}/{}/{name}",
-                crate::library::paths::safe_dir(code),
-                crate::library::paths::DOCUMENTS_DIR
-            ),
+            format!("{}/{name}", layout::own_dir_rel(code, OwnKind::Document)),
             body.len() as u64,
         ));
     }
 }
 
 /// The hidden sibling a note's text is staged in. It ends in `.tmp`, never
-/// `.md`, so `is_document_rel` rejects a leftover and it never becomes a row.
+/// `.md` and is a dot-name, so `layout::own_file_ok` rejects a leftover and
+/// it never becomes a row.
 pub(crate) fn note_temp_path(note: &Path) -> Result<std::path::PathBuf, String> {
     let dir = note
         .parent()
@@ -236,18 +232,14 @@ pub fn list_documents(subject_code: String) -> Result<Vec<ImportedFile>, String>
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e.to_string()),
     };
-    let dir_rel = format!(
-        "courses/{}/{}",
-        crate::library::paths::safe_dir(&subject_code),
-        crate::library::paths::DOCUMENTS_DIR
-    );
+    let dir_rel = layout::own_dir_rel(&subject_code, OwnKind::Document);
     let mut out = Vec::new();
     for entry in entries.flatten() {
         let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
         let rel = format!("{dir_rel}/{name}");
-        if !crate::library::paths::is_document_rel(&rel) {
+        if !layout::own_file_ok(&rel, OwnKind::Document) {
             continue;
         }
         let Ok(meta) = entry.metadata() else { continue };

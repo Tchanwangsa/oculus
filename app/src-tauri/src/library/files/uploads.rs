@@ -1,7 +1,9 @@
-//! Copied into `courses/<code>/uploads/`; the rest of the pipeline keys off the
-//! path alone.
+//! Copied into a subject's uploads folder (`layout::own_dir`); the rest of the
+//! pipeline keys off the path alone.
 
 use std::path::Path;
+
+use crate::library::layout::{self, OwnKind};
 
 /// One file that landed, in the shape the frontend writes its row from.
 #[derive(Clone, Debug, serde::Serialize)]
@@ -38,7 +40,7 @@ pub async fn import_uploads(
 }
 
 /// Stores each of `paths` as an upload of `code`, the one way files enter
-/// `uploads/` (picked files, and browser downloads). Imports share name
+/// the uploads folder (picked files, and browser downloads). Imports share name
 /// allocation, so one lock keeps simultaneous batches from choosing the same
 /// unused name while conversion runs.
 pub(crate) fn import_files(data_dir: &Path, code: &str, paths: &[&Path]) -> Vec<ImportOutcome> {
@@ -80,13 +82,11 @@ fn store_upload(
         .ok_or_else(|| "that file has no name".to_string())?;
     let bytes = std::fs::read(src).map_err(|e| format!("could not read it — {e}"))?;
 
-    let dir = data_dir
-        .join("courses")
-        .join(crate::library::paths::safe_dir(code))
-        .join(crate::library::paths::UPLOADS_DIR);
-    let name = free_name(&dir, &crate::library::paths::safe_filename(picked), &bytes);
+    let dir = layout::own_dir(data_dir, code, OwnKind::Upload);
+    let name = free_name(&dir, &upload_name(picked), &bytes);
 
-    let course_rel = format!("{}/{name}", crate::library::paths::UPLOADS_DIR);
+    let rel = format!("{}/{name}", layout::own_dir_rel(code, OwnKind::Upload));
+    let course_rel = layout::within_course(&rel).to_string();
     let (rel, size, action) =
         crate::library::paths::write_course_bytes(data_dir, code, &course_rel, &bytes)?;
 
@@ -131,6 +131,16 @@ fn store_upload(
     ))
 }
 
+/// A picked file's name in the library: sanitised, and never a dot-name,
+/// which the own-file guard refuses (so it could never be deleted).
+fn upload_name(picked: &str) -> String {
+    let safe = crate::library::paths::safe_filename(picked);
+    match safe.trim_start_matches('.') {
+        "" => "file".to_string(),
+        name => name.to_string(),
+    }
+}
+
 /// A name in `dir` for these bytes: never overwrites a different file
 /// (`notes-2.pdf`), but identical bytes reuse the name and keep their parse.
 pub(super) fn free_name(dir: &Path, name: &str, bytes: &[u8]) -> String {
@@ -164,7 +174,7 @@ pub(super) fn step_aside(dir: &Path, name: &str, ours: impl Fn(&[u8]) -> bool) -
 /// parse of whatever lands on that name next.
 #[tauri::command]
 pub fn delete_upload(relative_path: String) -> Result<(), String> {
-    if !crate::library::paths::is_upload_rel(&relative_path) {
+    if !layout::own_file_ok(&relative_path, OwnKind::Upload) {
         return Err(format!("{relative_path} is not one of your uploads"));
     }
     let base = crate::library::paths::data_dir();

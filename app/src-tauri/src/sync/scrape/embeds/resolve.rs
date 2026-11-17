@@ -5,7 +5,7 @@ use std::path::Path;
 
 use super::state::EmbedBearer;
 use crate::db::store::EchoEmbed;
-use crate::library::paths;
+use crate::library::{layout, paths};
 use crate::sources::canvas::Canvas;
 use crate::sources::echo360::embed::{self, EmbedInfo, PropertiesError};
 
@@ -89,8 +89,11 @@ pub(super) fn save_poster(
         &embed::sign(url, &resolved.info.query_strings)?,
         "the poster",
     )?;
-    let rel = paths::course_rel_path(code, &format!("images/echo-{}.jpg", resolved.media_id))
-        .ok_or("invalid poster path")?;
+    let poster = layout::synced(
+        layout::SyncedKind::Images,
+        &format!("echo-{}.jpg", resolved.media_id),
+    );
+    let rel = paths::course_rel_path(code, &poster).ok_or("invalid poster path")?;
     let dest = data_dir.join(&rel);
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;

@@ -1,5 +1,6 @@
-//! Versioned drawing documents under each subject's own folders: canvases
-//! (`canvases/<title>.canvas`) and notebooks (`notebooks/<title>.notebook`).
+//! Versioned drawing documents among each subject's own files: canvases
+//! (`<title>.canvas`) and notebooks (`<title>.notebook`), each created in its
+//! kind's folder (`layout::own_dir`).
 pub(crate) mod authority;
 pub(crate) mod drafts;
 pub(crate) mod export;
@@ -9,11 +10,12 @@ pub(crate) mod imports;
 pub(crate) mod snapshots;
 
 use super::ImportedFile;
+use crate::library::layout::{self, OwnKind};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 /// The two drawing documents. Both are the same `oculus-canvas` JSON; a
-/// notebook lives in its own folder with its own extension and always has
+/// notebook has its own extension (and, today, folder) and always has
 /// `paper`. Only a notebook has pages: `paper` in a canvas is kept as written
 /// and means nothing, and the kind always comes from the path.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -25,19 +27,15 @@ pub enum DrawingKind {
 }
 
 impl DrawingKind {
-    /// Its folder under `courses/<code>/`.
-    fn folder(self) -> &'static str {
+    fn own(self) -> OwnKind {
         match self {
-            Self::Canvas => "canvases",
-            Self::Notebook => "notebooks",
+            Self::Canvas => OwnKind::Canvas,
+            Self::Notebook => OwnKind::Notebook,
         }
     }
 
     fn extension(self) -> &'static str {
-        match self {
-            Self::Canvas => ".canvas",
-            Self::Notebook => ".notebook",
-        }
+        self.own().extension().unwrap_or_default()
     }
 
     /// The `files` row's `file_type`, the same word as its category.
@@ -48,30 +46,17 @@ impl DrawingKind {
         }
     }
 
-    /// The kind a library path names: `courses/<code>/canvases/<x>.canvas` or
-    /// `courses/<code>/notebooks/<x>.notebook`, and nothing else.
+    /// The kind a library path names: an own file of either kind
+    /// (`layout::own_file_ok`), and nothing else.
     pub fn of(rel: &str) -> Option<Self> {
-        let parts: Vec<_> = rel.split('/').collect();
-        if rel.contains(['\\', ':'])
-            || parts.len() != 4
-            || parts[0] != "courses"
-            || parts
-                .iter()
-                .any(|p| p.is_empty() || *p == "." || *p == "..")
-            || parts[3].starts_with('.')
-        {
-            return None;
-        }
-        [Self::Canvas, Self::Notebook].into_iter().find(|kind| {
-            parts[2] == kind.folder()
-                && parts[3].len() > kind.extension().len()
-                && parts[3].ends_with(kind.extension())
-        })
+        [Self::Canvas, Self::Notebook]
+            .into_iter()
+            .find(|kind| layout::own_file_ok(rel, kind.own()))
     }
 }
 
-const EXPECTED: &str = "Expected courses/<subject>/canvases/<title>.canvas \
-     or courses/<subject>/notebooks/<title>.notebook";
+const EXPECTED: &str =
+    "Expected one of your canvases (<title>.canvas) or notebooks (<title>.notebook)";
 
 pub(super) fn is_canvas_rel(rel: &str) -> bool {
     DrawingKind::of(rel).is_some()
@@ -100,28 +85,29 @@ fn checked(root: &Path, rel: &str, create_parents: bool) -> Result<PathBuf, Stri
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let mut path = root.clone();
     let parts: Vec<_> = rel.split('/').collect();
+    let last = parts.len() - 1;
     for (i, part) in parts.iter().enumerate() {
         path.push(part);
         match std::fs::symlink_metadata(&path) {
             Ok(meta) if meta.file_type().is_symlink() => {
                 return Err("Canvas paths cannot contain symlinks".into())
             }
-            Ok(meta) if i < 3 && !meta.is_dir() => {
+            Ok(meta) if i < last && !meta.is_dir() => {
                 return Err("Canvas parent is not a folder".into())
             }
-            Ok(meta) if i == 3 && !meta.is_file() => return Err("Canvas is not a file".into()),
+            Ok(meta) if i == last && !meta.is_file() => return Err("Canvas is not a file".into()),
             Ok(_) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound && i < 3 && create_parents => {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && i < last && create_parents => {
                 std::fs::create_dir(&path).map_err(|e| e.to_string())?;
                 let meta = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
                 if meta.file_type().is_symlink() || !meta.is_dir() {
                     return Err("Unsafe canvas folder".into());
                 }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound && i == 3 => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && i == last => {}
             Err(e) => return Err(e.to_string()),
         }
-        if i < 3
+        if i < last
             && !path
                 .canonicalize()
                 .map_err(|e| e.to_string())?
@@ -171,11 +157,7 @@ pub(super) fn write_at(root: &Path, rel: &str, content: &str) -> Result<u64, Str
 }
 
 fn folder_of(kind: DrawingKind, code: &str) -> String {
-    format!(
-        "courses/{}/{}",
-        crate::library::paths::safe_dir(code),
-        kind.folder()
-    )
+    layout::own_dir_rel(code, kind.own())
 }
 
 pub(super) fn create_at(

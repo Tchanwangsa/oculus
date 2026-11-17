@@ -4,6 +4,7 @@ import { create } from "zustand";
 
 import { presentLibraryPaths } from "@/lib/db/files";
 import { splitLibraryPaths } from "@/lib/files/libraryPaths";
+import { isCoursePath } from "@/lib/files/libraryLayout";
 
 /** The two lookups a check makes, passed in so tests need no backend. */
 export interface ReferenceLookups {
@@ -25,7 +26,7 @@ export function checkablePaths(text: string): string[] {
   const out = new Set<string>();
   for (const p of splitLibraryPaths(text)) {
     if (p.kind === "image" || p.kind === "attachment") out.add(p.path);
-    else if (p.kind === "path" && p.path.startsWith("courses/")) out.add(p.path);
+    else if (p.kind === "path" && isCoursePath(p.path)) out.add(p.path);
   }
   return [...out];
 }
@@ -35,7 +36,7 @@ export function checkablePaths(text: string): string[] {
 export async function missingReferences(paths: readonly string[], lookups: ReferenceLookups = BACKEND): Promise<Map<string, boolean>> {
   const result = new Map<string, boolean>();
   const attachments = paths.filter((p) => p.startsWith("agents/attachments/"));
-  const library = paths.filter((p) => p.startsWith("courses/"));
+  const library = paths.filter(isCoursePath);
   const [exist, present] = await Promise.all([
     attachments.length ? lookups.attachmentsExist(attachments).catch(() => null) : [],
     library.length ? lookups.libraryPresent(library).catch(() => null) : new Set<string>(),

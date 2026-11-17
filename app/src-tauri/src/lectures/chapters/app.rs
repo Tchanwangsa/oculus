@@ -206,7 +206,7 @@ async fn downloaded_streams(lecture_id: &str) -> Result<Streams, String> {
     .map_err(|e| e.to_string())?;
     let (title, duration, first, second) = row.ok_or_else(|| format!("no lecture {lecture_id}"))?;
 
-    let dir = crate::sources::echo360::lecture_dir(&crate::library::paths::data_dir(), lecture_id);
+    let dir = crate::sources::echo360::lecture_dir(&crate::library::paths::data_dir(), lecture_id)?;
     // The column, else the stream's own path on disk (as `detect` does).
     let sources = [(1, first), (2, second)]
         .into_iter()
@@ -319,7 +319,10 @@ pub async fn lecture_grab_frames(
         .into_iter()
         .map(|source| MomentFrame {
             source,
-            path: format!("../lectures/{lecture_id}/frames/live/{seconds}-source{source}.jpg"),
+            path: format!(
+                "../{}/frames/live/{seconds}-source{source}.jpg",
+                crate::library::layout::recording_rel(&lecture_id)
+            ),
         })
         .collect())
 }

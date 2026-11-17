@@ -11,6 +11,7 @@ import { kindIcon, kindNoun } from "./kinds";
 import { CHIP, SubjectLabel } from "./SubjectLabel";
 import { type Row } from "./model";
 import { continueLabel, followUp, followUpNote } from "./followUp";
+import { RECORDINGS_PREFIX } from "@/lib/files/libraryLayout";
 
 const LABELS: Record<string, string> = { Sync: "Sync", Reparse: "Re-parse", Transcribe: "Transcribe", LectureChapters: "Find chapters", LectureEnd: "Find the end", Download: "Download" };
 
@@ -35,7 +36,7 @@ function targets(kind: string, input: Row): ReactNode {
   if (kind === "Sync") return <>{strings(input.subjects).map((code) => <SubjectLabel key={code} code={code} />)}{input.lectures === true && chip("lectures", null, "With lectures")}</>;
   if (kind === "Reparse") return strings(input.files).map((file) => chip(file, <FilePdf size={11} className="shrink-0" />, base(file), file));
   if (kind === "Transcribe" && typeof input.file === "string") return chip("file", <FileVideo size={11} className="shrink-0" />, base(input.file), input.file);
-  if ((kind === "LectureChapters" || kind === "LectureEnd") && input.lecture != null) return chip("lecture", kind === "LectureChapters" ? <ListNumbers size={11} className="shrink-0" /> : <Waveform size={11} className="shrink-0" />, `Lecture ${String(input.lecture).replace(/^lectures\//, "")}`);
+  if ((kind === "LectureChapters" || kind === "LectureEnd") && input.lecture != null) return chip("lecture", kind === "LectureChapters" ? <ListNumbers size={11} className="shrink-0" /> : <Waveform size={11} className="shrink-0" />, `Lecture ${String(input.lecture).replace(new RegExp(RECORDINGS_PREFIX), "")}`);
   return null;
 }
 

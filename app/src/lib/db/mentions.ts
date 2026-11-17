@@ -2,6 +2,7 @@ import { getDb } from "./connection";
 import { terms } from "./match";
 import type { DbFile } from "./types";
 import { PDF_BACKED_SQL_LIST } from "@/lib/files/fileTypes";
+import { COURSES_DIR } from "@/lib/files/libraryLayout";
 
 /** A file the chat composer's `@` can point the agent at. */
 export interface MentionFile {
@@ -106,10 +107,10 @@ export function mentionFoldersQuery(
   return {
     sql: `WITH d AS (
        SELECT f.subject_id, s.code AS subject_code, f.last_accessed_at AS seen,
-              substr(f.relative_path, 9) AS rest
+              substr(f.relative_path, ${COURSES_DIR.length + 2}) AS rest
        FROM files f
        JOIN subjects s ON s.id = f.subject_id
-       WHERE f.relative_path LIKE 'courses/%/%'
+       WHERE f.relative_path LIKE '${COURSES_DIR}/%/%'
          AND ($1 IS NULL OR f.subject_id = $1)
      ), t AS (
        SELECT subject_id, subject_code, seen,
@@ -118,8 +119,8 @@ export function mentionFoldersQuery(
        FROM d
      ), n AS (
        SELECT subject_id, subject_code, seen,
-              CASE WHEN $1 IS NULL THEN 'courses/' || top
-                   ELSE 'courses/' || top || substr(inner, 1, instr(inner, '/')) END AS path,
+              CASE WHEN $1 IS NULL THEN '${COURSES_DIR}/' || top
+                   ELSE '${COURSES_DIR}/' || top || substr(inner, 1, instr(inner, '/')) END AS path,
               CASE WHEN $1 IS NULL THEN substr(top, 1, length(top) - 1)
                    ELSE substr(inner, 1, instr(inner, '/') - 1) END AS name
        FROM t

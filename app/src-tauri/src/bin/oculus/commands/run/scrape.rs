@@ -48,7 +48,7 @@ impl Ctx {
             println!("  {} lecture(s)", lectures.len());
 
             for l in &lectures {
-                let dir = app_lib::sources::echo360::lecture_dir(&self.data_dir, &l.id);
+                let dir = app_lib::sources::echo360::lecture_dir(&self.data_dir, &l.id)?;
                 let date = l.date.chars().take(10).collect::<String>();
 
                 if args.transcripts {

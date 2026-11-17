@@ -23,7 +23,7 @@ either. MinerU is ~100× faster than docling with formula enrichment, with 1% vs
 | Call site; one thread per PDF; LibreOffice conversion | `app/src-tauri/src/sync/parse.rs`, `app/src-tauri/src/sync/phases/output.rs`, `app/src-tauri/src/sync/office.rs` |
 | Spreadsheets to text: conversion, page rows, startup reconcile | `app/src-tauri/src/pages/sheets/` |
 | Skipping a file: the `parse_skip` command and its marks | `app/src-tauri/src/sync/scrape/mod.rs`, `app/src-tauri/src/parse/skips.rs` (`Skips`) |
-| Artifact purging | `app/src-tauri/src/library/paths/course.rs` |
+| Artifact names and purging | `app/src-tauri/src/library/layout/derived.rs`, `app/src-tauri/src/library/paths/course.rs` |
 | MinerU token commands (through `oculus-keyd`, else the keychain) + the pre-store token probe | `app/src-tauri/src/providers/mineru.rs`, `app/src-tauri/src/providers/credentials/` (`CloudKey`) |
 | Engine selection, endpoint override, local probe | `app/src-tauri/src/parse/commands.rs` |
 | Failure vocabulary, rendered | `app/src/lib/pipeline/parseState.ts` |

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use super::options::LectureBrief;
 use super::studio::{self, StudioBrief};
+use crate::library::layout;
 
 const INSTRUCTIONS_TEMPLATE: &str = include_str!("../../../templates/HARNESS.template.md");
 
@@ -25,7 +26,7 @@ pub fn instructions(
     lecture: Option<&LectureBrief>,
     studio: Option<&StudioBrief>,
 ) -> String {
-    let mut courses: Vec<String> = std::fs::read_dir(data_dir.join("courses"))
+    let mut courses: Vec<String> = std::fs::read_dir(layout::courses_dir(data_dir))
         .map(|rd| {
             rd.flatten()
                 .filter(|e| e.path().is_dir())
@@ -61,12 +62,14 @@ pub fn thread_sections(
 ) -> String {
     let mut out = String::new();
     if let Some(code) = scope {
+        let folder = layout::course_rel(code);
+        let agents = layout::agents_rel(code);
         out.push_str(&format!(
             "\n\n## This conversation\n\n\
-             It is scoped to **{code}** — the folder `../courses/{code}/`. Unless the \
+             It is scoped to **{code}** — the folder `../{folder}/`. Unless the \
              student names another subject, answer from that folder, and pass `{code}` \
              as the subject to the CLI. Subject-specific guidance, if present, is at \
-             `../courses/{code}/agents/INSTRUCTIONS.md`.\n"
+             `../{agents}/INSTRUCTIONS.md`.\n"
         ));
     }
     if let Some(lec) = lecture {
@@ -85,7 +88,7 @@ pub fn thread_sections(
 /// real flags are spelled out because an agent otherwise spends its turn
 /// rediscovering them.
 fn lecture_section(lec: &LectureBrief, scope: Option<&str>) -> String {
-    let dir = format!("../lectures/{}", lec.id);
+    let dir = format!("../{}", layout::recording_rel(&lec.id));
     let mut s = format!(
         "\n## The lecture being watched\n\n\
          The student is watching **{}**, recorded **{}**. Its recording folder is \
@@ -105,8 +108,9 @@ fn lecture_section(lec: &LectureBrief, scope: Option<&str>) -> String {
     }
     if let Some(code) = scope {
         s.push_str(&format!(
-            "- `../courses/{code}/` — the course folder: the slide deck for this lecture, \
-             and everything else the subject has.\n"
+            "- `../{}/` — the course folder: the slide deck for this lecture, \
+             and everything else the subject has.\n",
+            layout::course_rel(code)
         ));
         s.push_str(&format!(
             "\nThe deck is not linked to the recording, so finding it is a step: \

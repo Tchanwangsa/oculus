@@ -30,16 +30,10 @@ pub(super) fn prompt(path: &str, before: &str, after: &str) -> Option<String> {
     ))
 }
 
-/// The note's title (its file stem) and subject code, from a path like
-/// `courses/<code>/documents/<name>.md`.
+/// The note's title (its file stem) and subject code, from its library path
+/// (`layout::split_course`).
 fn note_names(path: &str) -> (String, Option<String>) {
-    let mut parts = path.split('/');
-    let subject = match (parts.next(), parts.next()) {
-        (Some("courses"), Some(code)) if !code.is_empty() && path.matches('/').count() >= 2 => {
-            Some(code.to_string())
-        }
-        _ => None,
-    };
+    let subject = crate::library::layout::split_course(path).map(|(code, _)| code.to_string());
     let name = path.rsplit('/').next().unwrap_or(path);
     let stem = name.strip_suffix(".md").unwrap_or(name);
     (stem.replace('_', " "), subject)

@@ -50,7 +50,7 @@ impl Engine {
             code: c.code.clone(),
             relative_path: rel.clone(),
             size_bytes: size,
-            category: paths::category_from_path(rel_path).to_string(),
+            category: crate::library::layout::category_of(rel_path).to_string(),
             canvas_id,
             source_url,
             action: action.as_str(),

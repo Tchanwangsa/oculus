@@ -8,6 +8,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use super::events::Features;
+use crate::library::layout::{self, SyncedKind};
 use crate::library::paths::slash_path;
 use crate::sources::ed::{front::read_front_matter, slide_workspace_dir, workspace_state};
 
@@ -26,7 +27,7 @@ pub struct Slide {
 }
 
 /// The challenge's slide: the one its sync record names when that still
-/// holds it, else the first under `courses/*/lessons/*/` that does.
+/// holds it, else the first in any subject's lessons folder that does.
 pub fn find(data_dir: &Path, challenge_id: i64) -> Result<Slide, String> {
     let recorded = workspace_state::load(data_dir, challenge_id)
         .map(|s| s.slide_dir)
@@ -48,8 +49,9 @@ pub fn find(data_dir: &Path, challenge_id: i64) -> Result<Slide, String> {
 /// Every lesson slide file, data-dir-relative, sorted.
 fn slide_files(data_dir: &Path) -> Vec<String> {
     let mut found = Vec::new();
-    for course in dirs(&data_dir.join("courses")) {
-        for lesson in dirs(&course.join("lessons")) {
+    let lessons = layout::synced_dir(SyncedKind::Lessons);
+    for course in dirs(&layout::courses_dir(data_dir)) {
+        for lesson in dirs(&course.join(&lessons)) {
             let Ok(entries) = std::fs::read_dir(&lesson) else {
                 continue;
             };

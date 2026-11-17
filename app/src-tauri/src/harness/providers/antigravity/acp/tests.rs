@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 
 use crate::harness::event::{HarnessEvent, Turns};
-use crate::harness::protected::{LIBRARY_DIRS, ROOT_FILE_GLOBS, WORKSPACE_DIRS};
+use crate::harness::protected::{library_dirs, ROOT_FILE_GLOBS, WORKSPACE_DIRS};
 use crate::harness::requests::Action;
 
 use super::policy::{allowed_command, judge, Verdict};
@@ -93,7 +93,7 @@ protected_rule! {
 
 #[test]
 fn every_protected_rule_has_a_test() {
-    for rule in LIBRARY_DIRS
+    for rule in library_dirs()
         .iter()
         .chain(WORKSPACE_DIRS.iter())
         .chain(ROOT_FILE_GLOBS.iter())

@@ -1,5 +1,6 @@
 //! Inline images: a body to Markdown, its images downloaded beside it.
 
+use crate::library::layout::{self, SyncedKind};
 use crate::library::paths;
 use crate::pages::md::{self, ImageMap};
 use crate::sync::render::{content_type_of, up_to_course_root};
@@ -50,7 +51,7 @@ impl Engine {
                 .find_map(|seg| seg.parse::<i64>().ok())
                 .unwrap_or(0)
         });
-        let path = format!("images/{fid}.{ext}");
+        let path = layout::synced(SyncedKind::Images, &format!("{fid}.{ext}"));
 
         // Same unchanged-skip as fetch_file: metadata match + on disk.
         let modified = info["modified_at"]

@@ -12,7 +12,7 @@ page.
 | Drive list, type filters and creation menu | `app/src/pages/subject/files/DrivePage.tsx` |
 | File route and editor choice (passes the file's kind to `CanvasEditor`) | `app/src/pages/subject/files/FilePage.tsx` |
 | The two kinds: folder, extension, category, path and row helpers, reconcile plan | `app/src/lib/canvas/drawingKinds.ts`, `DrawingKind` in `app/src-tauri/src/library/files/canvases.rs` |
-| Folder → category for a path (`notebooks/` is `notebook`) | `app/src/lib/files/pathCategory.ts`, `app/src-tauri/src/library/paths/categories.rs` |
+| Folder → category for a path (`notebooks/` is `notebook`) | `app/src/lib/files/libraryLayout.ts`, `app/src-tauri/src/library/layout/category.rs` |
 | Drawing file rows, reconciles and native command wrappers | `app/src/lib/canvas/files.ts` |
 | Shared ordered saves and the shared-canvas adapter | `app/src/lib/canvas/sessions.ts`, `app/src/lib/canvas/sessionRuntime.ts`, `app/src/lib/canvas/authority.ts` |
 | Desktop recovery drafts | `app/src/lib/canvas/drafts.ts`, `app/src-tauri/src/library/files/canvases/drafts.rs` |
@@ -79,8 +79,8 @@ page.
 | Canvas | `courses/<code>/canvases/<title>.canvas` | `category = canvas`, `file_type = canvas` |
 | Notebook | `courses/<code>/notebooks/<title>.notebook` | `category = notebook`, `file_type = notebook` |
 
-Both are the same JSON. The kind comes from the path (`DrawingKind::of`,
-`drawingKindOfPath`) or the row's category (`drawingKindOf`), never from what
+Both are the same JSON. The kind comes from the path (`DrawingKind::of`, the
+own-file guard, and `drawingKindOfPath`) or the row's category (`drawingKindOf`), never from what
 the document holds. `FilePage` passes it to `CanvasEditor`, the companion page
 reads it from the snapshot's `x-oculus-kind` header
 ([device-sharing.md](./device-sharing.md)), and below the editor it is one

@@ -1,5 +1,6 @@
 //! Phase: the subject's Ed course — its Discussion board and its Lessons.
 
+use crate::library::layout::{self, SyncedKind};
 use crate::sources::ed::{self, Board};
 use crate::sync::render::slug;
 use crate::sync::{Engine, Progress, Subject};
@@ -60,7 +61,10 @@ impl Engine {
 
             // Ed's per-course thread number is stable across syncs.
             let number = t["number"].as_i64().unwrap_or(0);
-            let path = format!("ed/{number:04}-{}.md", slug(title));
+            let path = layout::synced(
+                SyncedKind::Discussion,
+                &format!("{number:04}-{}.md", slug(title)),
+            );
             let url = board
                 .region
                 .zip(t["id"].as_i64())
