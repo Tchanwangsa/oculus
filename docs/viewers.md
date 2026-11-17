@@ -642,11 +642,9 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
   resize handle and T does nothing; `captions={false}` leaves out the captions
   button. `useLibraryPlayback` is what `VideoFileViewer` and Studio's element
   share: pause with the tab, and one sound across lectures and library videos.
-- **Files ▸ Media lists the videos Oculus fetched** — module videos and
-  Canvas-page embeds, the `file` rows that are videos
-  (`app/src/pages/subject/files/MediaPage.tsx`) — with a captions mark when the
-  sibling `.vtt` has content. A video not yet downloaded shows only on its
-  module.
+- **Course ▸ Media holds the videos Oculus fetched** — module videos and
+  Canvas-page embeds, beside their `.vtt` captions — and Drive lists them as
+  any file. A video not yet downloaded shows only on its module.
 - **One sound at a time**: a library video playing pauses the lecture
   (`pauseLecturePlayback`) and other library videos; a lecture's leader
   playing pauses every registered library video (`registerLibraryVideo` in
@@ -1068,7 +1066,10 @@ last byte and a choice, whichever comes second (`Downloads`):
   `app/src-tauri/src/library/files/uploads.rs`, the same path as picked
   uploads: into `Dest`'s optional `target_dir` (a folder of the student's in
   that subject, checked by `own_target`), else the subject's root. The Save
-  dialog sends no folder yet. `useBrowserDownloads` calls `recordUploads` in
+  dialog picks it under the subject select: the subject's folder tree
+  (`DriveTree` with `onPick`), where synced folders can't be picked, on the
+  subject's root until the student picks another; its hint names where the
+  file lands. `useBrowserDownloads` calls `recordUploads` in
   `app/src/lib/files/uploads.ts` through `createSavedRecorder` in
   `app/src/lib/browser/downloads/recordSaved.ts`: it claims each
   download once, skips an existing `files` row (including after a frontend

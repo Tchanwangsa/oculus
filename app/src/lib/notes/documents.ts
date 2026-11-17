@@ -151,13 +151,6 @@ export async function pickDocumentImages(title = "Add pictures to this note"): P
   return Array.isArray(picked) ? picked : [picked];
 }
 
-/** Delete the file, then its row. No trash, so the page confirms first. */
-export async function deleteDocument(file: DbFile): Promise<void> {
-  await invoke("delete_document", { relativePath: file.relative_path });
-  await deleteFileRow(file.id);
-  announce(file.subject_id);
-}
-
 /**
  * Sync the subject's `document` rows with its `documents/` folder, which other
  * editors can change: new files get rows, missing files lose them, and a size

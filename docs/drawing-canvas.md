@@ -1,6 +1,6 @@
 # Canvases and notebooks live in Drive
 
-Files → Drive holds the student's own notes and drawings. A drawing is one of
+Drive holds the student's own notes and drawings among their other files. A drawing is one of
 two kinds on the same engine: a **canvas**, an infinite whiteboard, or a
 **notebook**, paper pages to write on. Either opens in a tab or beside another
 page.
@@ -9,7 +9,7 @@ page.
 
 | Piece | Location |
 | --- | --- |
-| Drive list, type filters and creation menu | `app/src/pages/subject/files/DrivePage.tsx` |
+| Drive's folder browser, its Type filter and New menu | `app/src/components/drive/` ([frontend.md](./frontend.md#drive-is-one-folder-browser-over-the-disk)) |
 | File route and editor choice (passes the file's kind to `CanvasEditor`) | `app/src/pages/subject/files/FilePage.tsx` |
 | The two kinds: extension, category, path and row helpers, reconcile plan | `app/src/lib/canvas/drawingKinds.ts`, `DrawingKind` in `app/src-tauri/src/library/files/canvases.rs` |
 | Extension → category for a path (`.notebook` is `notebook`) | `app/src/lib/files/libraryLayout.ts`, `app/src-tauri/src/library/layout/category.rs` |
@@ -101,11 +101,12 @@ boolean, `notebook`.
   `planDrawingRows`: it adds rows for its files on disk and removes rows of
   its own category whose file is gone, and never touches the other kind's
   rows or folder. A removed row's page pictures, if any, go with it.
-- **Drive** combines `document` rows (Notes), `canvas` rows and `notebook`
-  rows, with All, Notes, Canvases and Notebooks filters. New file offers Note,
-  Canvas and Notebook… (a dialog, below). Notes are ordinary Markdown
-  documents ([editor.md](./editor.md)). A title is its filename; a rename keeps
-  the database ID and updates routes that hold that file.
+- **Drive** lists notes, canvases and notebooks in the student's folders
+  beside their other files; its Type filter narrows to one kind. New offers
+  Note, Canvas and Notebook… (a dialog, below), made in the folder on screen.
+  Notes are ordinary Markdown documents ([editor.md](./editor.md)). A title
+  is its filename; a rename keeps the database ID, and open tabs on the file
+  follow it ([frontend.md](./frontend.md#path-keyed-state-follows-drive)).
 
 ## The format is one open envelope
 

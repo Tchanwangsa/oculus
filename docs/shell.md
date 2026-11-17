@@ -19,6 +19,7 @@ beside each tab's page, every window shortcut, ⌘F, and search.
 | ⌘F: routing, find in rendered DOM, the find bar | `app/src/lib/menu/find.ts`, `app/src/hooks/find/useDomFind.ts`, `app/src/lib/menu/findText.ts`, `app/src/components/ui/search/FindBar.tsx`, `app/src/components/ui/search/PageFind.tsx`, `app/src/components/documents/editor/chrome/useEditorFind.ts` |
 | Shared page navigation: responsive drawer and desktop panel | `app/src/components/ui/layout/SideNavShell.tsx`, `app/src/hooks/ui/useSideNavPanel.ts` |
 | Subject page: the nav column, subject switcher and `/subjects` redirect | `app/src/layouts/SubjectLayout.tsx`, `app/src/components/subjects/SubjectNav.tsx`, `app/src/pages/start/SubjectsRedirect.tsx` |
+| Drive: the section's nav column, its folder and Recent pages, the folder routes, the Files tab and the older paths it redirects | `app/src/layouts/DriveLayout.tsx`, `app/src/components/drive/nav/`, `app/src/pages/drive/`, `app/src/lib/drive/routes.ts`, `app/src/pages/subject/files/FilesPage.tsx`, `app/src/lib/drive/legacyTabs.ts` |
 | Home: sections, the Recent row's query, the Activity chart and its pings | `app/src/pages/start/HomePage.tsx`, `app/src/components/home/`, `app/src/lib/activity/home.ts`, `app/src/lib/activity/usage/`, `app/src/lib/activity/usageContext.ts`, `app/src/hooks/backend/useActivityPing.ts` |
 | Settings: the nav column, its search and section jumps | `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx`, `app/src/lib/search/settings.ts` |
 
@@ -73,15 +74,26 @@ before leaving a playing lecture.
   code as a switcher to another subject, a search over the subject, and a row
   per tab; above the tab a header row, shaped like Chat's, holds the column's
   toggle, the subject crumb and the tab's name (`subjectTabLabel`). Tab rows and switcher rows carry the never-opened count
-  (`newFilesStore`); a switcher row's is the sum of its subject's tabs. A switch
+  (`newFilesStore`, synced files inside `Course/` only): a tab that lists one
+  kind counts that kind, Files counts all of them, and a switcher row's is the
+  subject's total. A switch
   navigates the pane's router to the same top-level tab of the other subject;
-  anything deeper lands on that tab's default. Files is one tab whose sub-tabs are
-  routes (`files/downloads`, `files/media`, `files/uploads`, `files/drive`),
-  and its `useFilesTab()` context *extends* the subject, because
-  `useOutletContext` reads the nearest Outlet and a different shape would make
-  `useSubject()` lie. Downloads and Media split the `file` rows: Media lists the
-  videos (`isVideoFile`), Downloads everything else, so no file shows twice; the
-  student's own videos stay in Uploads. Lessons
+  anything deeper lands on that tab's default.
+- **Files is Drive's folder browser rooted at the subject**
+  (`FilesPage`, [frontend.md](./frontend.md#drive-is-one-folder-browser-over-the-disk)):
+  `files/*`, whose splat is the folder inside the subject, each segment
+  URL-encoded (`filesFolderHref` in `app/src/lib/drive/routes.ts`); the
+  subject's folder is `subjectRel(code)`, the mirror of Rust's `course_rel`.
+  The browser draws the tab's header row (the column's toggle, then the trail
+  from Files), so `SubjectLayout` leaves its own out on that tab and hands the
+  panel down through `useSubjectPanel`, a context, since the outlet carries
+  the subject. Older paths that saved tabs and Recent may carry are replaced
+  once the page loads (`resolveLegacyTab`): `files/downloads` by Course ▸ Files,
+  `files/media` by Course ▸ Media (Course when there is none), `files/uploads`,
+  `files/drive`, `files/documents`, `files/canvases` and `files/notebooks` by
+  the subject's root, and `/subjects/<id>/downloads` and `/uploads` go
+  through those. A student's folder by one of those names, in that exact case,
+  is theirs and stays. Lessons
   (`app/src/pages/subject/content/LessonsPage.tsx`) lists only the lesson
   indexes, `Course/Lessons/<id>-<slug>.md` (`isLessonDoc` in `app/src/lib/ed/lessons.ts`),
   under their Ed modules in Ed's order; a row is the lesson type's glyph, the
@@ -91,7 +103,7 @@ before leaving a playing lecture.
   Files without front matter sit in a last Other group, newest first. A
   lesson's slides, PDFs and challenge files share the category but sit in its
   folder: they open from the lesson view ([viewers.md](./viewers.md#an-ed-lesson-opens-as-its-slides))
-  or its links, PDFs and challenge files open and title like downloads
+  or its links, PDFs and challenge files open and title like any synced file
   (`isLessonAsset` in `app/src/lib/files/fileTypes.ts`), and none counts toward
   the tab's never-opened count.
 - **A subject's Overview** (`app/src/pages/subject/content/OverviewPage.tsx`,
@@ -131,17 +143,35 @@ before leaving a playing lecture.
 - **`/subjects/:id/file` and `/subjects/:id/lecture` sit outside
   `SubjectLayout`** so a document takes the whole card; `SubjectCrumbs` gives
   them a trail back, as buttons with `data-tab-href` rather than `Link`s so a
-  click goes through `navigateActive`.
+  click goes through `navigateActive`. A file's trail is its folders: the
+  subject, Files, then each folder it sits in, each opening that folder in
+  the Files tab.
+- **`/drive` is every subject's folders** (`DriveLayout`): a nav column with
+  My Drive (`/drive`), Recent (`/drive/recent`) and the folder tree
+  (`DriveTree`: current subjects under Subjects, the rest folded under Past
+  subjects) beside the browser rooted at the library (`DriveFolderPage`).
+  The splat is the folder under `courses/`, each segment URL-encoded
+  (`driveFolderHref`), so `/drive/<code>/Course/Files` is a subject's synced
+  files. **Recent** (`DriveRecentPage`) is a `GridTable` of the files opened
+  in the last 30 days and the student's own files made or changed then,
+  across subjects and newest first (`getRecentDriveFiles` in
+  `app/src/lib/db/recency.ts`): name with its new dot, subject and folder,
+  "Opened" or "Changed" and when, size; a row opens as Drive opens a file.
+  Synced changes are left out, since a sync rewrites too many rows. A Drive
+  tab is titled by its folder (a subject's by its code and icon).
 
-Saved tabs and Recent entries with an unknown route return to Home.
+Saved tabs and Recent entries with an unknown route return to Home; the Files
+tab's older paths are redirected (above), and ones on a file
+or folder that moved follow it
+([frontend.md](./frontend.md#path-keyed-state-follows-drive)).
 
 ## The sidebar is an icon rail
 
 `app/src/components/sidebar/Sidebar.tsx` is a 52px column of icon buttons,
 each named by a tooltip on its right: Search (opens ⌘K), then Home, Chat,
-Calendar, Tasks, Subjects and Studio, and Sync and Settings pinned to the foot under a
-short hairline. Spotify's tile, while music is on, sits under a rule after the
-sections; it opens a popover player rather than navigating ([music.md](./music.md#the-player-is-a-rail-tile-and-a-side-panel-item)). The six sections drag into any order on `useStripReorder`'s
+Calendar, Tasks, Subjects, Drive (a folder), Studio and Revision, and Sync and
+Settings pinned to the foot under a short hairline. Spotify's tile, while music is on, sits under a rule after the
+sections; it opens a popover player rather than navigating ([music.md](./music.md#the-player-is-a-rail-tile-and-a-side-panel-item)). The eight sections drag into any order on `useStripReorder`'s
 vertical axis, and the order is kept in `localStorage` (`railOrderStore`); a
 section the stored order lacks is appended. A `RailItem` is a button with `data-tab-href` that goes
 through `navigateActive`, since the sidebar sits outside every pane's router,
@@ -154,7 +184,7 @@ indexing, a brand dot on Subjects while any subject has never-opened files
 
 ## Page navigation overlays narrow panes
 
-Chat, Subjects, Tasks, Studio and Settings use `SideNavShell` with
+Chat, Subjects, Drive, Tasks, Studio and Settings use `SideNavShell` with
 `useSideNavPanel`. Below 768 CSS pixels of the shell's own width, navigation
 starts closed and opens over the page with a dismissing backdrop. Split panes
 and page zoom follow the same rule. Links, New thread, route changes, Escape,
@@ -300,7 +330,8 @@ while Ctrl+Shift+Z is Redo.
 - **A new tab lands on `/new`**, not Home: a search field, a browser door, a
   chat door and the Recent trail.
 - **Recent is a still list** (`recentTabsStore`): a visit lands only after the
-  pane settles, a row is a *thing* (`recentKey` — a subject's tabs are one row),
+  pane settles, a row is a *thing* (`recentKey` — a subject's tabs are one
+  row, and Drive's pages another),
   and a listed page refreshes in place. Browser tabs, Home, `/new` and the
   `/subjects` redirect stay out.
 - **Home is a dashboard with no state of its own.** Each section owns its read
@@ -470,7 +501,9 @@ navigates the pane. Its field is `SideNavSearch`
 (`app/src/components/ui/layout/SideNav.tsx`), shared with Settings.
 
 `app/src/lib/search/filters.ts` owns the filter catalogue, tokens and resolution
-without database or navigation effects. ⌘K takes filters: `in:<subject>` and `type:<kind>`. Typing
+without database or navigation effects. ⌘K takes filters: `in:<subject>` and `type:<kind>`
+(a file kind is a `files.category`: notes, uploads, canvases and notebooks
+among them). Its Go to rows include Drive and Drive's Recent. Typing
 the colon turns the key into a chip with the caret inside it, and the list shows
 only its values; picking one (or a space after an unambiguous value) fixes the
 chip, one per key. Backspace at a field's start drops the chip being typed, or

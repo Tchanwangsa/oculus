@@ -16,7 +16,7 @@ import {
 } from "@/components/documents/DocumentControls";
 import { FileViewer, PdfMdToggle, usePdfMd } from "@/components/files/FileViewer";
 import { MarkdownUnavailable } from "@/components/files/ParseState";
-import { SubjectCrumbs, fileCrumbTab } from "@/components/subjects/SubjectCrumbs";
+import { SubjectCrumbs, fileCrumbFolder } from "@/components/subjects/SubjectCrumbs";
 import { LessonView } from "@/components/lessons/LessonView";
 import { useLessonIndex } from "@/hooks/data/useLessonIndex";
 import { useSubjectFiles } from "@/hooks/data/useSubjectFiles";
@@ -156,7 +156,7 @@ export default function SubjectFilePage() {
             aria-label="Breadcrumb"
             className="flex shrink-0 items-center gap-2.5 text-[11px] text-muted-foreground"
           >
-            <SubjectCrumbs subjectId={id} tab={fileCrumbTab(file)} />
+            <SubjectCrumbs subjectId={id} folder={fileCrumbFolder(file)} />
           </nav>
           <PaneTitle>{fileTitle(file)}</PaneTitle>
         </PaneTrail>

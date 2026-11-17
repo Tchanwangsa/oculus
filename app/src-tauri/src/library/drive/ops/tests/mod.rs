@@ -9,6 +9,7 @@ mod imports;
 mod moves;
 mod names;
 mod pictures;
+mod reconcile;
 mod rename;
 
 use sqlx::sqlite::SqlitePoolOptions;

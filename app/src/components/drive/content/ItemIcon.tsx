@@ -20,7 +20,12 @@ const KIND_TONE: Partial<Record<DriveKind, string>> = {
 export function kindTone(item: DriveItem): string {
   if (item.type === "recording") return "text-reference-lecture";
   if (item.type === "folder") return "text-muted-foreground";
-  return KIND_TONE[kindOf(item.entry.name, item.row?.category)] ?? "text-muted-foreground";
+  return fileKindTone(item.entry.name, item.row?.category);
+}
+
+/** A file's glyph colour, from its name and its row's category. */
+export function fileKindTone(name: string, category?: string | null): string {
+  return KIND_TONE[kindOf(name, category)] ?? "text-muted-foreground";
 }
 
 /** True for a folder at the edge of the synced files: one the student can't

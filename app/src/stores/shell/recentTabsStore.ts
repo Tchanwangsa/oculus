@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { browseId } from "@/lib/browser";
+import type { FollowedRoute } from "@/lib/shell/pathFollow";
 
 /**
  * The new-tab page's Recent trail. A page joins only after `DWELL_MS` on it (so
@@ -53,6 +54,8 @@ export function recentKey(path: string): string | null {
   }
 
   if (pathname.startsWith("/settings")) return "settings";
+  // Drive's folders and Recent are one place, as a subject's tabs are.
+  if (pathname === "/drive" || pathname.startsWith("/drive/")) return "drive";
   // One player, so one side panel item however it was opened.
   if (pathname === "/music") return "music";
   return pathname;
@@ -88,6 +91,10 @@ function write(list: RecentTab[]): void {
 interface RecentTabsState {
   recents: RecentTab[];
   record: (path: string) => void;
+  /** Library paths moved or went: a row on a moved path takes the new one
+   *  in place (merging into a row already listing it), a row on a deleted
+   *  thing goes. */
+  follow: (follow: (route: string) => FollowedRoute) => void;
 }
 
 export const useRecentTabsStore = create<RecentTabsState>((set, get) => ({
@@ -118,7 +125,38 @@ export const useRecentTabsStore = create<RecentTabsState>((set, get) => ({
     write(next);
     set({ recents: next });
   },
+
+  follow: (follow) => {
+    const list = get().recents;
+    const next = followRecents(list, follow);
+    if (next === list) return;
+    write(next);
+    set({ recents: next });
+  },
 }));
+
+/** `follow` over the trail, pure. The same array when nothing changed. */
+export function followRecents(list: RecentTab[], follow: (route: string) => FollowedRoute): RecentTab[] {
+  let changed = false;
+  const followed = list.flatMap((e) => {
+    const next = follow(e.path);
+    if (next.kind === "same") return [e];
+    changed = true;
+    if (next.kind === "removed") return [];
+    const key = recentKey(next.path);
+    return key ? [{ key, path: next.path, visitedAt: e.visitedAt }] : [];
+  });
+  if (!changed) return list;
+  // A moved row can land on a thing already listed: the later visit stays,
+  // in the earlier row's place.
+  const out: RecentTab[] = [];
+  for (const e of followed) {
+    const at = out.findIndex((o) => o.key === e.key);
+    if (at === -1) out.push(e);
+    else if (e.visitedAt > out[at].visitedAt) out[at] = e;
+  }
+  return out;
+}
 
 /** Pending dwell per pane, so one pane navigating cannot cancel another's. */
 const dwelling = new Map<number, number>();

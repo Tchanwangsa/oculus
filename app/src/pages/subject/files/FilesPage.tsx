@@ -1,96 +1,54 @@
-import { useMemo, useRef } from "react";
-import {
-  Outlet,
-  useLocation,
-  useNavigate,
-  useOutletContext,
-} from "react-router-dom";
+import { useEffect, useMemo } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 
-import { DropOverlay } from "@/components/ui/layout/DropOverlay";
-import { PillTabs } from "@/components/ui/table/PillTabs";
-import { useSubject } from "@/layouts/SubjectLayout";
-import { useFileDrop } from "@/hooks/gestures/useFileDrop";
-import { useUploadImport, type UploadImport } from "@/hooks/data/useUploadImport";
-import type { Subject } from "@/lib/db";
-
-/** The Files tab's sub-tabs, in strip order; each is a child route in
- *  `app/src/routes.tsx`. */
-const SUB_TABS = [
-  { value: "downloads", label: "Downloads" },
-  { value: "media", label: "Media" },
-  { value: "uploads", label: "Uploads" },
-  { value: "drive", label: "Drive" },
-] as const satisfies ReadonlyArray<{ value: string; label: string }>;
-
-type SubTab = (typeof SUB_TABS)[number]["value"];
+import { DriveBrowser } from "@/components/drive";
+import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
+import { useSubject, useSubjectPanel } from "@/layouts/SubjectLayout";
+import { resolveLegacyTab } from "@/lib/drive/legacyTabs";
+import { listFolder } from "@/lib/drive/listing";
+import { filesFolderHref, parseFilesRoute } from "@/lib/drive/routes";
+import { subjectRel } from "@/lib/files/libraryLayout";
 
 /**
- * What the Files tab hands its sub-pages through the outlet. A superset of the
- * subject, not a `{ subject }` record, because `useOutletContext` reads the
- * nearest Outlet: any other shape would make `useSubject()` silently return it
- * on every page under this tab.
- */
-export interface FilesTab extends Subject {
-  upload: UploadImport;
-}
-
-/** Only valid under `SubjectFilesPage`. */
-export function useFilesTab(): FilesTab {
-  return useOutletContext<FilesTab>();
-}
-
-/**
- * One subject tab for every file: Downloads, Media, Uploads and Drive as routed
- * sub-tabs (so restore, crumbs and ⌘-click key off the path), drawn as
- * `PillTabs` under the subject's underline strip.
- *
- * The whole tab is the drop target: a Finder drop goes to Uploads whichever
- * sub-tab is showing, so the import state lives here and survives the switch.
- * `useFileDrop` hit-tests against visibility, so a background tab never
- * claims a drop.
+ * A subject's Files tab: Drive's folder browser rooted at the subject's
+ * folder, the route's path below `files/` the folder on screen
+ * (`app/src/lib/drive/routes.ts`). An old sub-tab's path (`files/downloads`
+ * and kin, from a saved tab or Recent) is replaced by the folder its files
+ * are in now, unless the student has a folder by that name.
  */
 export default function SubjectFilesPage() {
   const subject = useSubject();
+  const panel = useSubjectPanel();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const rootRef = useRef<HTMLDivElement>(null);
+  const root = subjectRel(subject.code);
+  const inner = parseFilesRoute(pathname)?.inner ?? "";
+  const folder = inner ? `${root}/${inner}` : root;
 
-  // Anything else is the index route's one-frame redirect to Downloads.
-  const segment = pathname.split("/").pop();
-  const active: SubTab = SUB_TABS.some((t) => t.value === segment)
-    ? (segment as SubTab)
-    : "downloads";
-
-  const upload = useUploadImport(subject);
-
-  const dropping = useFileDrop(rootRef, (paths) => {
-    void upload.add(paths);
-    if (active !== "uploads") navigate("uploads");
-  });
-
-  const context = useMemo<FilesTab>(
-    () => ({ ...subject, upload }),
-    [subject, upload],
+  const folderHref = useMemo(
+    () => (rel: string) => filesFolderHref(subject.id, rel === root ? "" : rel.slice(root.length + 1)),
+    [subject.id, root],
   );
 
+  useEffect(() => {
+    let live = true;
+    const exists = (rel: string) =>
+      listFolder(rel ? `${root}/${rel}` : root).then(() => true, () => false);
+    void resolveLegacyTab(inner, exists).then((target) => {
+      if (live && target != null) navigate(filesFolderHref(subject.id, target), { replace: true });
+    });
+    return () => {
+      live = false;
+    };
+  }, [inner, root, subject.id, navigate]);
+
   return (
-    <div ref={rootRef} className="relative flex h-full flex-col">
-      {/* `-ml-2` puts the first label's text on the column's edge. */}
-      <div className="mx-auto w-full max-w-5xl shrink-0 px-6 pt-4">
-        <PillTabs
-          className="-ml-2"
-          tabs={SUB_TABS}
-          value={active}
-          onChange={(to) => navigate(to)}
-        />
-      </div>
-
-      <div className="min-h-0 flex-1">
-        <Outlet context={context} />
-      </div>
-
-      {/* An overlay, because the whole tab accepts the drop. */}
-      <DropOverlay show={dropping} label={`Drop to add to ${subject.code}`} />
-    </div>
+    <DriveBrowser
+      root={root}
+      folder={folder}
+      folderHref={folderHref}
+      rootLabel="Files"
+      leading={<SideNavCollapseToggle panel={panel} />}
+    />
   );
 }

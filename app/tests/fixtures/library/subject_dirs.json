@@ -1,0 +1,15 @@
+{
+  "about": "Subject codes and the folder each is written to. Checked by app/src-tauri/src/library/layout/tests/subject_dirs.rs (course_rel) and app/tests/lib/files/subjectRel.test.ts (subjectRel), so the TypeScript mirror cannot drift.",
+  "cases": [
+    ["COMP30022_2026_SM2", "courses/COMP30022_2026_SM2"],
+    ["MAST20009-2026", "courses/MAST20009-2026"],
+    ["CS 101", "courses/CS_101"],
+    ["a.b/c:d", "courses/a_b_c_d"],
+    ["Ünï 1", "courses/Ünï_1"],
+    ["com1", "courses/_com1"],
+    ["Nul", "courses/_Nul"],
+    ["LPT²", "courses/_LPT²"],
+    ["COM10", "courses/COM10"],
+    ["console", "courses/console"]
+  ]
+}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { CircleNotch, Warning } from "@phosphor-icons/react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { DriveTree } from "@/components/drive";
 import {
   Dialog,
   DialogContent,
@@ -17,6 +18,9 @@ import { sizeWords } from "@/lib/browser/downloads/describe";
 import { guessSubject, preselectSubject } from "@/lib/browser/downloads/subjectGuess";
 import type { Download, LastDestination } from "@/lib/browser/downloads/types";
 import { isPipelineFile } from "@/lib/files/fileTypes";
+import { subjectRel } from "@/lib/files/libraryLayout";
+import { baseName } from "@/lib/drive/paths";
+import { displayCode } from "@/lib/format/format";
 import { isWindows } from "@/lib/platform";
 import { useAskedDownload, useBrowserDownloadsStore } from "@/stores/shell/browserDownloadsStore";
 import { useBrowserPrefsStore } from "@/stores/shell/browserPrefsStore";
@@ -88,11 +92,16 @@ function SaveForm({
   // and the profile load after the dialog opens.
   const [pickedDest, setPickedDest] = useState<LastDestination | null>(null);
   const [pickedSubject, setPickedSubject] = useState<string | null>(null);
+  // A folder in the chosen subject, data-dir-relative; the subject's own
+  // root until the student picks another.
+  const [pickedFolder, setPickedFolder] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dest = pickedDest ?? lastDestination;
   const subject =
     pickedSubject ??
     preselectSubject(guessSubject(tabUrl, subjects, institution?.canvas ?? null), lastSubject, subjects);
+  const root = subject ? subjectRel(subject) : null;
+  const folder = root && pickedFolder?.startsWith(`${root}/`) ? pickedFolder : root;
 
   const run = async (action: () => Promise<boolean>) => {
     setBusy(true);
@@ -110,7 +119,11 @@ function SaveForm({
     run(async () => {
       if (dest === "oculus") {
         if (!subject) return false;
-        await downloads.choose(download.id, { kind: "oculus", subject_code: subject });
+        await downloads.choose(download.id, {
+          kind: "oculus",
+          subject_code: subject,
+          ...(folder && folder !== root ? { target_dir: folder } : {}),
+        });
         void remember("oculus", subject).catch(() => {});
         return true;
       }
@@ -129,9 +142,10 @@ function SaveForm({
     });
 
   const shown = error ?? (download.error ? `Not saved: ${download.error}` : null);
+  const place = folder && folder !== root ? baseName(folder) : subject ? displayCode(subject) : "the subject";
   const kept = isPipelineFile(download.name)
-    ? "Lands in Files › Uploads, read and made searchable"
-    : "Lands in Files › Uploads, kept but not searchable";
+    ? `Lands in ${place}, read and made searchable`
+    : `Lands in ${place}, kept but not searchable`;
 
   return (
     <DialogContent className="sm:max-w-md" showCloseButton={false}>
@@ -161,6 +175,7 @@ function SaveForm({
               disabled={busy}
               onChange={(code) => {
                 setPickedSubject(code);
+                setPickedFolder(null);
                 setPickedDest("oculus");
               }}
               className="max-w-40 shrink-0"
@@ -175,6 +190,22 @@ function SaveForm({
           disabled={busy}
         />
       </div>
+
+      {dest === "oculus" && root ? (
+        // The subject's folders; a synced folder can't be picked.
+        <div className="max-h-48 overflow-y-auto rounded-lg border border-border-subtle p-1" aria-label="Folder">
+          <DriveTree
+            key={root}
+            root={root}
+            current={folder}
+            onPick={(rel) => {
+              setPickedFolder(rel);
+              setPickedDest("oculus");
+            }}
+            storageKey="oculus-download-folder-open"
+          />
+        </div>
+      ) : null}
 
       {shown ? (
         <Alert variant="warning" className="w-auto px-2.5 py-2">

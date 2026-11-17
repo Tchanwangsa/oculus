@@ -6,7 +6,7 @@ use std::path::Path;
 
 use crate::library::drive::ops::guard::{own_target, Target};
 use crate::library::drive::ops::names::{entry_name, free_name};
-use crate::library::layout::{self, OwnKind};
+use crate::library::layout;
 
 /// A picked folder is read this many folders down.
 const MAX_DEPTH: usize = 32;
@@ -251,24 +251,4 @@ pub(super) fn step_aside(dir: &Path, name: &str, ours: impl Fn(&[u8]) -> bool) -
         }
     }
     name.to_string()
-}
-
-/// Remove an upload and everything derived from it: the parse's skip checks
-/// are existence checks, so a leftover `{stem}.md` would be served as the
-/// parse of whatever lands on that name next.
-#[tauri::command]
-pub fn delete_upload(relative_path: String) -> Result<(), String> {
-    if !layout::own_file_ok(&relative_path, OwnKind::Upload) {
-        return Err(format!("{relative_path} is not one of your uploads"));
-    }
-    let base = crate::library::paths::data_dir();
-
-    crate::library::paths::purge_parse_artifacts(&base, &relative_path);
-    // The converted sibling of an Office document (a real PDF is itself).
-    if let Some(pdf_rel) = crate::library::paths::doc_pdf_rel(&relative_path) {
-        if pdf_rel != relative_path {
-            let _ = std::fs::remove_file(base.join(&pdf_rel));
-        }
-    }
-    std::fs::remove_file(base.join(&relative_path)).map_err(|e| e.to_string())
 }

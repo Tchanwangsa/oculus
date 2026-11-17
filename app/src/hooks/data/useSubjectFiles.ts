@@ -9,6 +9,14 @@ import { createPendingReader } from "@/lib/platform/pendingRead";
 
 const readFiles = createPendingReader(getFilesForSubject);
 
+/** The `files.category` values (`category_of` in
+ *  `app/src-tauri/src/library/layout/category.rs`), each always listed. */
+const KNOWN_CATEGORIES = [
+  "home", "syllabus", "module", "page", "file", "upload", "document", "canvas", "notebook",
+  "announcement", "assignment", "quiz", "ed", "lessons", "image", "other",
+] as const;
+type KnownCategory = (typeof KNOWN_CATEGORIES)[number];
+
 export function useSubjectFiles(subjectId: number | null) {
   const [files, setFiles] = useState<DbFile[]>([]);
   const [loadedSubjectId, setLoadedSubjectId] = useState<number | null>(null);
@@ -53,19 +61,13 @@ export function useSubjectFiles(subjectId: number | null) {
     if (changedId == null || changedId === subjectId) reload();
   });
 
+  // Every category gets a list, the ones pages read always present; one
+  // Rust adds later still lands, so no file drops out of a view.
   const byCategory = useMemo(() => {
-    const groups = {
-      home: [] as DbFile[], module: [] as DbFile[], page: [] as DbFile[],
-      file: [] as DbFile[], upload: [] as DbFile[], document: [] as DbFile[], canvas: [] as DbFile[], notebook: [] as DbFile[],
-      announcement: [] as DbFile[], assignment: [] as DbFile[], quiz: [] as DbFile[],
-      ed: [] as DbFile[], lessons: [] as DbFile[], image: [] as DbFile[], syllabus: [] as DbFile[],
-    };
-    for (const file of files) {
-      const category = file.category;
-      if (category && Object.prototype.hasOwnProperty.call(groups, category)) {
-        groups[category as keyof typeof groups].push(file);
-      }
-    }
+    const groups: Record<string, DbFile[]> & Record<KnownCategory, DbFile[]> = Object.fromEntries(
+      KNOWN_CATEGORIES.map((c) => [c, [] as DbFile[]]),
+    ) as Record<KnownCategory, DbFile[]>;
+    for (const file of files) (groups[file.category ?? "other"] ??= []).push(file);
     return groups;
   }, [files]);
 

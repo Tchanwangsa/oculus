@@ -3,6 +3,7 @@ import { newItem, settleError, inFlight, FRESH_MS } from "./pipeline/item";
 import type { PipelineItem, StagePatch } from "./pipeline/item";
 import { mergeSeed, seededItem, type SeedRow } from "./pipeline/seed";
 import { hasFailed, isComplete } from "./pipeline/status";
+import { rekeyByPath, type FollowedPath } from "@/lib/shell/pathFollow";
 
 /**
  * Per-file view of the ingest pipeline: download → parse → embed. The embed
@@ -55,6 +56,10 @@ interface PipelineState {
   failStalledDownloads: () => void;
   /** Drop completed rows. Failed ones stay, since they need attention. */
   clearFinished: () => void;
+  /** Library paths moved or went (`drive-changed`): a row takes its new
+   *  path, name, code and (with `subjectOf`) subject, or goes. A row with a
+   *  stage running stays: Drive refuses to move a file mid-parse or embed. */
+  follow: (follow: (path: string) => FollowedPath, subjectOf: (path: string) => number | undefined) => void;
 }
 
 export const usePipelineStore = create<PipelineState>((set, get) => ({
@@ -142,6 +147,22 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
         }
       }
       return { items };
+    }),
+
+  follow: (follow, subjectOf) =>
+    set((s) => {
+      const items = rekeyByPath(
+        s.items,
+        follow,
+        (item, path) => {
+          const moved = newItem(path, subjectOf(path) ?? item.subjectId);
+          return { ...item, relativePath: path, subjectId: moved.subjectId, code: moved.code, filename: moved.filename };
+        },
+        (item) => item.parse === "active" || item.embed === "active",
+      );
+      const cleared = rekeyByPath(s.cleared, follow);
+      if (items === s.items && cleared === s.cleared) return {};
+      return { items, cleared };
     }),
 
   clearFinished: () =>

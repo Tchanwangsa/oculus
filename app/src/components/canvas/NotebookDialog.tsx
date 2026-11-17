@@ -58,7 +58,7 @@ function PdfChoices({ subjectId, selected, disabled, onSelect }: { subjectId: nu
       })}
       {error ? <p role="alert" className="px-3 py-4 text-[12px] text-destructive">{error}</p>
         : pending ? <p role="status" className="flex items-center gap-2 px-3 py-4 text-[12px] text-muted-foreground"><CircleNotch className="animate-spin" aria-hidden />Looking through this subject…</p>
-          : files.length === 0 ? <p role="status" className="px-3 py-4 text-[12px] text-muted-foreground">{query.trim() ? 'No PDFs match.' : 'This subject has no PDFs yet. Sync it, or add one under Files → Uploads.'}</p> : null}
+          : files.length === 0 ? <p role="status" className="px-3 py-4 text-[12px] text-muted-foreground">{query.trim() ? 'No PDFs match.' : 'This subject has no PDFs yet. Sync it, or add one in its Files tab.'}</p> : null}
     </div>
   </div>;
 }

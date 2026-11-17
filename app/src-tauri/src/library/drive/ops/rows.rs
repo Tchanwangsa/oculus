@@ -117,13 +117,13 @@ async fn clear_stale(conn: &mut SqliteConnection, rel: &str, keep: i64) -> Drive
     delete_ids(conn, &stale).await
 }
 
-fn file_type(name: &str) -> String {
+pub(super) fn file_type(name: &str) -> String {
     name.rsplit_once('.')
         .map(|(_, e)| e.to_ascii_lowercase())
         .unwrap_or_default()
 }
 
-fn name_of(rel: &str) -> &str {
+pub(super) fn name_of(rel: &str) -> &str {
     rel.rsplit('/').next().unwrap_or(rel)
 }
 

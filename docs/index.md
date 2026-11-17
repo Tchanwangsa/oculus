@@ -27,8 +27,8 @@ the root `CLAUDE.md` holds only the rules.
 | [chapters.md](./chapters.md) | Lecture chapters and where a lecture ends: the detector and the two model jobs |
 | [onboarding.md](./onboarding.md) | First-run setup: the launch gate, the `onboarding` settings row, the steps, *Run setup again* |
 | [library-move.md](./library-move.md) | The one-shot move of an old library into the Drive tree at launch: plan, journal, renames, the database rewrite, `path_moves` |
-| [frontend.md](./frontend.md) | The frontend's data side: backend events, settings, parse state, library files |
-| [shell.md](./shell.md) | Per-pane routers, tabs, the side panel, window shortcuts, ⌘F, search |
+| [frontend.md](./frontend.md) | The frontend's data side: backend events, settings, parse state, library files, Drive's folder browser and commands, rows for files written outside the app, open tabs and queues following a move |
+| [shell.md](./shell.md) | Per-pane routers, tabs, the side panel, the rail, the Drive section and the subject's Files tab, window shortcuts, ⌘F, search |
 | [ui.md](./ui.md) | The UI system: design rules, and the WebKit and CSS traps |
 | [music.md](./music.md) | Spotify played natively through librespot: the session task, credentials in keyd, the `music-state` snapshot, Settings → Music, the rail tile and `/music` player, commands that control the device playing (here or another one), the output on this Mac, and why music and lecture audio never play together |
 | [music-library.md](./music-library.md) | Playlists (the rootlist, in Spotify's library order from pathfinder `libraryV3`), their tracks and made covers (playlist contents, batched track metadata), Recently played (pathfinder `recents`' tracks merged by day with the tracks Oculus played, the `music_recent_tracks` row), search (pathfinder `searchDesktop`) and the 429 gate over the session's spclient, the queue and up next, and the Connect device list and transfer |

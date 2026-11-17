@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { rekeyByPath, type FollowedPath } from "@/lib/shell/pathFollow";
 
 /** The `parse-status` event. `status`: queued | running | quality | error |
  *  skipped, where `"quality"` is success (frozen: every parsed row's
@@ -58,6 +59,10 @@ interface ParseState {
    *  sweep's first gate lets those files through again. Every other failure
    *  stays: a new token can't fix a file MinerU couldn't read. */
   tokenSaved: () => void;
+  /** Library paths moved or went (`drive-changed`): statuses, queued jobs and
+   *  failures take the new path or go. A running job stays: Drive refuses to
+   *  move a file mid-parse. */
+  follow: (follow: (path: string) => FollowedPath) => void;
 }
 
 /** The frozen `kind()`s of `ParseError::MissingCredentials` and
@@ -108,6 +113,20 @@ export const useParseStore = create<ParseState>((set) => ({
 
   merge: (incoming) =>
     set((state) => ({ statuses: { ...incoming, ...state.statuses } })),
+
+  follow: (follow) =>
+    set((state) => {
+      const statuses = rekeyByPath(state.statuses, follow, undefined, (s) => s === "running");
+      const jobs = rekeyByPath(
+        state.jobs,
+        follow,
+        (job, path) => ({ ...job, relative_path: path }),
+        (job) => job.status === "running",
+      );
+      const failures = rekeyByPath(state.failures, follow);
+      if (statuses === state.statuses && jobs === state.jobs && failures === state.failures) return state;
+      return { statuses, jobs, failures };
+    }),
 
   tokenSaved: () =>
     set((state) => ({

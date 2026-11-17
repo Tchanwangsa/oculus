@@ -23,8 +23,9 @@ library files; the rest of the frontend has its own pages:
 | The companion's transport: share-link credentials, HTTP and socket client, stored drafts | `app/src/lib/companion/` |
 | The first-run gate: onboarding or the shell ([onboarding.md](./onboarding.md)) | `app/src/App.tsx`, `app/src/hooks/shell/useOnboardingGate.ts` |
 | Backend events → SQLite and stores | `app/src/hooks/backend/useBackendEvents.ts`, `app/src/hooks/backend/useEvents.ts`, `app/src/lib/pipeline/parseStatusWriter.ts`, `app/src/lib/db/connection.ts` |
-| Files tab: uploads and Drive (notes and drawing canvases) | `app/src/pages/subject/files/FilesPage.tsx`, `app/src/pages/subject/files/DrivePage.tsx`, `app/src/lib/files/uploads.ts`, `app/src/lib/notes/documents.ts`, `app/src/lib/canvas/files.ts`, `app/src-tauri/src/library/files/commands.rs` |
-| Subject file rows and category icons | `app/src/components/files/DownloadRow.tsx`, `app/src/pages/subject/files/DrivePage.tsx` |
+| Own files: uploads, notes and drawings, their rows and reconcilers | `app/src/lib/files/uploads.ts`, `app/src/lib/notes/documents.ts`, `app/src/lib/canvas/files.ts`, `app/src/lib/drive/reconcile.ts`, `app/src-tauri/src/library/files/commands.rs`, `app/src-tauri/src/library/drive/ops/reconcile.rs` |
+| File category icons and recency marks | `app/src/lib/files/fileTypes.ts`, `app/src/components/files/FileRecency.tsx` |
+| Path-keyed state following Drive's moves ([below](#path-keyed-state-follows-drive)) | `app/src/lib/shell/pathFollow.ts`, `app/src/lib/shell/followLibrary.ts`, `app/src/stores/shell/tabs/follow.ts` |
 | Drive's folder browser and folder tree ([below](#drive-is-one-folder-browser-over-the-disk)); `list_folder` | `app/src/components/drive/`, `app/src/hooks/drive/`, `app/src/lib/drive/`, `app/src-tauri/src/library/drive/` |
 | Ed board, keyword search and filters | `app/src/pages/subject/content/DiscussionPage.tsx`, `app/src/pages/subject/content/discussion/`, `app/src/lib/ed/threads.ts` |
 | Ed lessons under their modules; the lesson index reader | `app/src/pages/subject/content/LessonsPage.tsx`, `app/src/pages/subject/content/lessons/`, `app/src/lib/ed/lessons.ts` |
@@ -123,7 +124,7 @@ files in `dist/companion/assets/` (`assetsInlineLimit: 0`, so nothing becomes a
 ## Subject lists keep content flat and distinguish file types by colour
 
 Subject file and content rows use flat divided lists without a surrounding
-card. Downloaded files and Canvas module items use a single list level. Module
+card. Canvas module items use a single list level. Module
 rows stay individually collapsible; the newest TOC for each Canvas position
 wins when an old position path remains, and exact repeated TOCs appear once.
 Lecture recordings use the shared
@@ -164,7 +165,8 @@ status filters apply only to questions; older scrapes without a status remain
 unknown. Search runs over the metadata loader's cached reads, so typing makes
 no network calls or file reads.
 
-A file row's recency slot (`FileRecency`) shows an indigo dot and *NEW* while
+A file's recency (`FileRecency`, in Drive's details panel; `RecencyDot`, the
+dot alone, on Drive's rows and Recent) shows an indigo dot and *NEW* while
 the file has never been opened (new, or rewritten by a sync before then), the
 same *NEW* in amber once it changed since it was last opened, and otherwise
 its last-opened time.
@@ -180,7 +182,10 @@ state. `DriveTree({ current, folderHref })` is the nav column's tree beside
 it: subjects under Subjects, the rest folded under Past subjects, each opening
 in place to its folders, read when first opened; which rows are open is a
 `useStoredSet`. With `onPick` and a subject `root` the same tree is the folder
-picker of Copy to my files… and Move to…. Neither is routed yet.
+picker of Copy to my files…, Move to… and the browser's Save dialog. Both
+are routed: Drive's rail section at `/drive/*` and the Files tab at
+`/subjects/<id>/files/*`, whose splats are the folder
+([shell.md](./shell.md#each-pane-has-its-own-router-and-the-path-is-its-only-state)).
 
 - **`list_folder({ rel, recursive? })` reads the disk**
   (`app/src-tauri/src/library/drive/`), so empty folders show and a file
@@ -206,7 +211,10 @@ picker of Copy to my files… and Move to…. Neither is routed yet.
   its row's (`fileTitle`), its parse state `ParseStateBadge` and
   `useFileParseState` (the parse store over `files.parse_status`), its new dot
   `RecencyDot`. Listings and rows re-read on `DRIVE_CHANGED_EVENT` and the
-  upload, note, canvas and scrape events, once they stop for 300 ms.
+  upload, note, canvas and scrape events, once they stop for 300 ms. The PDFs
+  on screen have their parse state read back from disk
+  (`useReconcileParseStatus`), for a parse an earlier session finished, and a
+  folder in a subject asks for its own files' rows (below).
 - **The view.** The header holds the trail, a search scoped to the folder
   and everything below it, and New (folder, note, canvas, notebook, upload
   files or a folder), drawn only where the folder is `writable`. The Type,
@@ -294,15 +302,70 @@ target folder is a subject's root or an existing folder of the student's:
   written, so no parse starts on a file mid-move; a canvas shared to a device
   is refused the same way.
 - **`drive-changed`.** Each command but `delete_preview` emits
-  `{ subjectIds, moved: [{ from, to }], removed, added }`;
-  `useDriveEvents` turns it into `DRIVE_CHANGED_EVENT` for each subject.
-  Open tabs on a moved path, chat chips and other path-keyed state do not
-  follow it yet.
+  `{ subjectIds, moved: [{ from, to }], removed, added }`, and so does
+  `reconcile_own_files` when it adds rows; `useDriveEvents` turns it into
+  `DRIVE_CHANGED_EVENT` for each subject and hands the moves and deletes to
+  the path followers (below).
 
 A refusal arrives as a JSON-serialised `{ kind, message }`, `kind` one of
 `read_only` (anything synced or hidden), `exists`, `not_found`,
 `invalid_name`, `io`; `driveErrorText` words `read_only` as "Course files are
 read-only" and shows any other message, or the raw text when it isn't one.
+
+### Own files written outside the app get rows
+
+A chat agent, Finder or another app can write straight into a subject's own
+files. Such a file lists in Drive (the listing reads the disk) but has no
+`files` row until `reconcile_own_files`
+(`app/src-tauri/src/library/drive/ops/reconcile.rs`) gives it one. It walks
+the subject's own zone (`layout::own_files`) and inserts a row for each file
+with none, with `category_of`'s category, leaving out what Drive hides:
+parse artifacts, converted PDFs, and the markdown of a parse still running
+(checked by claiming the PDF for a moment). It never updates or deletes a
+row, and announces what it added on `drive-changed`. `reconcileOwnFiles`
+(`app/src/lib/drive/reconcile.ts`) kicks each new file's parse as an
+upload's is kicked, then brings notes and drawings in line
+(`reconcileDocuments`, `reconcileDrawings`, which also drop rows whose file
+is gone). `scheduleOwnReconcile` runs it when the browser opens a folder in
+a subject (the Files tab, or Drive below a subject): calls are debounced per
+subject, never overlap, and are skipped for 10 s after a pass, so the
+listing reloading on the pass's own event does not start another.
+`reconcileAfterTurn` forces it when a chat turn ends (`turn_finished` in
+`useHarnessEvents`), for the thread's subject, or every current subject for
+a thread filed under none.
+
+### Path-keyed state follows Drive
+
+On each `drive-changed`, `useDriveEvents` hands `{ moved, removed }` to
+`followLibraryChange` (`app/src/lib/shell/followLibrary.ts`), whose rules
+are `followRoute` and `followPath` (`app/src/lib/shell/pathFollow.ts`). A
+folder's entries match by prefix at a `/` boundary, and the longest moved
+prefix wins.
+
+- **Routes.** A file page (`?path=`) takes its file's new path, and its
+  subject's id when the file changed subject; other query parameters stay.
+  A Drive or Files folder page follows its folder, and when the folder is
+  deleted it moves up to the folder that held it. A deleted file's main pane
+  goes to the Files tab on that file's folder, and a side item on it is
+  removed.
+- **Where.** Open tabs and side items (a pane with a router is navigated
+  with `replace`, so its older history entries keep the old path; one never
+  built only has its stored path changed), the closed-tab stack and Recent
+  (`followRecents`; a row on a deleted file is dropped) in `oculus-tabs` and
+  `oculus-recent-tabs`.
+- **Job queues.** The parse, pipeline and embed queues re-key the files they
+  are waiting on, or drop deleted ones, and never touch a running file,
+  since Drive refuses to move one.
+- **Paths from before the library move.** Once a session, after the first
+  render, `followSavedPaths` checks each saved tab, side item, closed tab
+  and Recent row on a file with no row and no file on disk against
+  `path_moves` (`resolveMoved`) and applies what it finds as one move.
+- **Left as written.** Chat drafts, pastes, scopes, shelves, attachment
+  names and question drafts (`app/src/stores/chat/draftStore.ts`,
+  `app/src/stores/chat/stashStore.ts`, `app/src/stores/chat/attachmentNames.ts`,
+  `app/src/stores/chat/questionDrafts.ts`), the stash, and
+  sent messages (`harness_items`, `agents/threads/`) keep their text; a
+  mention whose file is gone shows as unavailable.
 
 ## The subject Overview derives activity from source dates
 
@@ -513,13 +576,14 @@ and read errors are exposed; metadata read failures retain filename fallbacks.
   (`notes (2).pdf`) unless the bytes are identical. A new upload lands in the
   folder it was dropped on (`targetDir`), else at the subject's root beside
   `Course/`; its row's category is the one Rust read off its path.
-- **The drop target is the Files tab's root**, so the import state lives in the
-  tab (`app/src/hooks/data/useUploadImport.ts`) to survive switching to Uploads.
-  `useFileDrop` ignores a `visibility: hidden` element — how background panes
-  hide.
-- **Delete is guarded by `own_file_ok`** (`app/src-tauri/src/library/layout/own.rs`), not a
-  dialog. An upload's name never starts with a dot, which the guard refuses. `deleteFileRow` deletes `pages` and `document_versions` by hand,
-  since the cascade fires only with `foreign_keys` on. A parse in flight can land after a delete, so
+- **Finder drops land on Drive's folders** (`useDriveDrop`): a folder card,
+  list row or tree row, else the folder on screen. `useFileDrop` ignores a
+  `visibility: hidden` element — how background panes hide.
+- **Delete is Drive's `delete_entries`** (above), guarded by
+  `layout::own_path_ok`; an upload's name never starts with a dot, which the
+  guard refuses. `deleteFileRow`, which the reconcilers use, deletes `pages`
+  and `document_versions` by hand, since the cascade fires only with
+  `foreign_keys` on. A parse in flight can land after a delete, so
   `store_upload` purges artifacts on a reused name whenever the bytes differ.
 - **The PDF/markdown toggle probes file metadata**, through
   `course_file_has_content` in `app/src-tauri/src/library/files/commands.rs`, without reading or
@@ -561,10 +625,11 @@ and read errors are exposed; metadata read failures retain filename fallbacks.
   row. The title is the filename (`fileTitle`); a rename moves the file and
   keeps the row id. `reconcileDocuments` brings rows in line with
   `list_documents` (every own `.md` at any depth, less a parsed PDF's or a
-  sheet's text) on mount, so a note written elsewhere just appears.
+  sheet's text) when `reconcileOwnFiles` runs, so a note written elsewhere
+  just appears.
 
-The editor a document opens in is [editor.md](./editor.md). Drawing canvases have
-the Drive list, a `canvas` category and versioned `.canvas` files; see
+The editor a document opens in is [editor.md](./editor.md). Drawing canvases are
+listed by Drive, with a `canvas` category and versioned `.canvas` files; see
 [drawing-canvas.md](./drawing-canvas.md).
 
 ## Gotchas

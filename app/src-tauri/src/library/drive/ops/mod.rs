@@ -8,7 +8,8 @@
 //! is running on or a device shares (`busy`); then the `files` rows follow
 //! by id in one transaction, so pages, versions and task links stay; if they
 //! cannot, the disk goes back (`journal`). A parsed file carries its
-//! artifacts (`companions`), a note its pictures (`pictures`).
+//! artifacts (`companions`), a note its pictures (`pictures`). Own files
+//! that arrived without a row (an agent's, Finder's) get one (`reconcile`).
 //! docs/frontend.md has the commands' contract.
 
 mod busy;
@@ -24,6 +25,7 @@ mod journal;
 mod moves;
 pub(crate) mod names;
 mod pictures;
+pub(crate) mod reconcile;
 mod relink;
 mod rows;
 

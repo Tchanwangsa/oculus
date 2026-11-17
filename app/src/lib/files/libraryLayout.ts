@@ -22,6 +22,7 @@ const DERIVED_DIR = `${HIDDEN_DIR}/derived`;
 
 /** Subject-relative synced folders. */
 export const FILES_DIR = `${COURSE_DIR}/Files`;
+export const MEDIA_DIR = `${COURSE_DIR}/Media`;
 export const LESSONS_DIR = `${COURSE_DIR}/Lessons`;
 export const PAGES_DIR = `${COURSE_DIR}/Pages`;
 export const MODULES_DIR = `${COURSE_DIR}/Modules`;
@@ -56,6 +57,19 @@ const OWN_EXTENSIONS: [extension: string, category: string][] = [
   [".canvas", "canvas"],
   [".notebook", "notebook"],
 ];
+
+/** Windows device names, which a file or folder name may not be. */
+const DEVICE = /^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(COM|LPT)[1-9¹²³])$/;
+
+/** A subject's folder, data-dir-relative (`courses/COMP30022_2026_SM2`):
+ *  `course_rel` in Rust, `safe_dir` over the code. Anything but a letter, a
+ *  digit, `-` or `_` becomes `_`, and a Windows device name takes a leading
+ *  `_`. `app/tests/fixtures/library/subject_dirs.json` holds both to the
+ *  same answers. */
+export function subjectRel(code: string): string {
+  const safe = [...code].map((c) => (/[\p{Alphabetic}\p{N}_-]/u.test(c) ? c : "_")).join("");
+  return `${COURSES_DIR}/${DEVICE.test(safe.toUpperCase()) ? `_${safe}` : safe}`;
+}
 
 const COURSE_PREFIX = new RegExp(`^${COURSES_DIR}/[^/]+/`);
 

@@ -6,6 +6,7 @@ import {
   BookOpen,
   CircleNotch,
   FilmSlate,
+  Folder,
   Lightbulb,
   ListChecks,
   MagnifyingGlass,
@@ -130,6 +131,7 @@ function Sections() {
         indicator={anyNew ? <span className="size-1.5 rounded-full bg-brand" /> : null}
       />
     ),
+    drive: <RailItem to="/drive" icon={Folder} label="Drive" />,
     revision: <RailItem to="/revision" icon={Lightbulb} label="Revision" />,
     studio: (
       <RailItem

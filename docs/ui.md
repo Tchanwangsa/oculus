@@ -383,13 +383,13 @@ themes are opt-in and keep the same structure.
   reserved) with `FilterFold` for a collapsed group such as Archived. Rows
   and fold triggers draw keyboard focus inside their bounds, so the list
   cannot clip the highlight when the popover focuses its first option.
-- **Settings, subjects, Chat, Tasks and Studio share one nav column**, `SideNav`: a 208px column
+- **Settings, subjects, Chat, Drive, Tasks and Studio share one nav column**, `SideNav`: a 208px column
   on the window's `background` beside the page, a pinned header, rows with a
   16px icon and the active row filled, never an underline strip, and
   `SideNavSearch`, the pill search field under the header. Rows that are not
   links take its exported row classes. `SideNavShell` and `useSideNavPanel`
   own the responsive behavior ([shell.md](./shell.md#page-navigation-overlays-narrow-panes)).
-  The subject, Chat, Tasks, Studio and Revision columns are drag-resizable and
+  The subject, Chat, Drive, Tasks, Studio and Revision columns are drag-resizable and
   fold away to nothing (`useResizablePanel`, width and fold remembered) from
   ⌘⌥B, from `SideNavCollapseToggle` at the start of the
   page's 48px header row, beside its title, or by dragging it narrow. The
@@ -414,7 +414,9 @@ themes are opt-in and keep the same structure.
   `SubjectLayout`'s header row (the toggle, the subject crumb, the tab's
   name) and beside the subject's nav column, `SubjectLoading` for skeleton
   rows and `SubjectEmpty` for the empty view. Per-tab content and actions
-  stay with the page.
+  stay with the page. Files is the one tab that draws its own header row:
+  Drive's browser, whose 48px header holds the toggle, the trail from Files,
+  the folder search and New.
 - **View preferences use `useStoredState`**, with readers that own defaults and validation; `useStoredSet` keeps collapsed group keys. Storage failures leave the live view usable.
 - **No toasts, no bottom progress bars** — background jobs surface in the
   sidebar, as a spinner or dot on their rail item

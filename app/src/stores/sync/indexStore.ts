@@ -14,6 +14,7 @@ import {
   getUnembeddedPdfs,
 } from "@/lib/pipeline/retrieval";
 import { usePipelineStore } from "@/stores/sync/pipelineStore";
+import type { FollowedPath } from "@/lib/shell/pathFollow";
 
 /**
  * The index run: a queue of files to embed, fed by the Index button in
@@ -283,6 +284,32 @@ async function drain(): Promise<void> {
       result: { files: done - errors.length, pages, errors, stopped: stopped || done < total },
     });
   }
+}
+
+/**
+ * Library paths moved or went (`drive-changed`): a waiting job takes its
+ * file's new path (and, across subjects, its subject), or leaves the queue
+ * with its file. The file in flight is never one: Drive refuses to move a
+ * file mid-embed. The DB mark is on the row, which moved or went with it.
+ */
+export function followIndexQueue(
+  follow: (path: string) => FollowedPath,
+  subjectOf: (path: string) => number | undefined,
+): void {
+  const before = queue.length;
+  let changed = false;
+  queue = queue.flatMap((job) => {
+    const next = follow(job.relativePath);
+    if (next.kind === "same") return [job];
+    changed = true;
+    if (next.kind === "removed") return [];
+    const filename = next.path.slice(next.path.lastIndexOf("/") + 1);
+    return [{ ...job, relativePath: next.path, filename, subjectId: subjectOf(next.path) ?? job.subjectId }];
+  });
+  if (!changed) return;
+  const progress = useIndexStore.getState().progress;
+  const gone = before - queue.length;
+  if (progress && gone > 0) useIndexStore.setState({ progress: { ...progress, total: Math.max(progress.done, progress.total - gone) } });
 }
 
 let restored = false;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { createContext, useContext, useEffect, useMemo } from "react";
 import { Navigate, Outlet, useLocation, useOutletContext, useParams } from "react-router-dom";
 import { useSideNavPanel } from "@/hooks/ui/useSideNavPanel";
 import { SideNavShell } from "@/components/ui/layout/SideNavShell";
@@ -15,6 +15,16 @@ import { SideNavCollapseToggle } from "@/components/ui/layout/SideNav";
 import type { Subject } from "@/lib/db";
 
 const LAST_SUBJECT_KEY = "oculus-last-subject";
+
+type Panel = ReturnType<typeof useSideNavPanel>;
+
+/** The nav column's panel, for a tab that draws its own header row. A
+ *  context, not the outlet's: that carries the subject (`useSubject`). */
+const SubjectPanelContext = createContext<Panel | null>(null);
+
+/** Tabs whose page draws the header row itself (Files: Drive's browser,
+ *  whose trail goes on from the subject). */
+const OWN_HEADER_TABS = new Set(["files"]);
 
 /** The subject a page last resolved, for `/subjects` to reopen
  *  (`app/src/pages/start/SubjectsRedirect.tsx`). The caller checks it still exists. */
@@ -77,11 +87,12 @@ export default function SubjectLayout() {
   // redirect skips a remembered id that is gone, so it never bounces back.
   if (!subject) return <Navigate to="/subjects" replace />;
 
+  const ownHeader = OWN_HEADER_TABS.has(pathname.split("/")[3] ?? "");
   return (
     <SideNavShell panel={panel} nav={<SubjectNav subject={subject} current={current} past={past} panel={panel} />}>
 
       <div className="flex h-full min-w-0 flex-1 flex-col">
-        <PaneHeaderRow className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border-subtle px-6">
+        {!ownHeader && <PaneHeaderRow className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border-subtle px-6">
           <SideNavCollapseToggle panel={panel} />
           <PaneTrail>
             <nav
@@ -92,11 +103,13 @@ export default function SubjectLayout() {
             </nav>
             <PaneTitle>{subjectTabLabel(pathname)}</PaneTitle>
           </PaneTrail>
-        </PaneHeaderRow>
+        </PaneHeaderRow>}
 
         {/* Keyed so switching subjects remounts the tab. */}
         <div key={subject.id} data-dom-find-content className="min-h-0 flex-1 overflow-hidden">
-          <Outlet context={subject satisfies Subject} />
+          <SubjectPanelContext.Provider value={panel}>
+            <Outlet context={subject satisfies Subject} />
+          </SubjectPanelContext.Provider>
         </div>
       </div>
     </SideNavShell>
@@ -106,4 +119,11 @@ export default function SubjectLayout() {
 /** The subject for the current /subjects/:subjectId route. */
 export function useSubject(): Subject {
   return useOutletContext<Subject>();
+}
+
+/** The subject's nav column, for a tab drawing its own header's toggle. */
+export function useSubjectPanel(): Panel {
+  const panel = useContext(SubjectPanelContext);
+  if (!panel) throw new Error("useSubjectPanel outside SubjectLayout");
+  return panel;
 }

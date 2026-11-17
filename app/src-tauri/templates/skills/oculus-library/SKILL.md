@@ -46,8 +46,9 @@ From the chat's working directory a subject is `../courses/<CODE>/`:
   there.
 
 `oculus files`, `grep` and `read` see only files the app has a record of. A
-file written straight into a subject's folder is on disk at once but may have
-no record yet, so read such a file by path.
+file written straight into a subject's folder is on disk at once but gets its
+record when your turn ends (a PDF is parsed then), so in the same turn read
+such a file by path.
 
 ## The two passes
 

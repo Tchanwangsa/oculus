@@ -207,12 +207,12 @@ among them) writable, `Course/` and `.oculus/` refused in every subject,
 including one that did not exist at spawn where the rule is a glob.
 
 **A file an agent writes in the own zone is on disk, not yet in the index.**
-Drive lists the disk, so it shows at once. A note, canvas or notebook gets
-its `files` row when the subject's Files page next reconciles its own files
-(`reconcileDocuments`, `reconcileDrawings`); any other file (a PDF, a
-picture, a script) gets none, so it is not parsed or embedded and `oculus
-files|grep|read|search` and mentions do not find it. The agent docs say to
-read such a file by path.
+Drive lists the disk, so it shows at once. Its `files` row comes when the
+turn ends, or sooner when the student opens one of the subject's folders
+(`reconcile_own_files`, [frontend.md](./frontend.md#own-files-written-outside-the-app-get-rows));
+a PDF or an Office file is parsed then. Until that, `oculus
+files|grep|read|search` and mentions do not find it, so the agent docs say
+to read such a file by path within the turn.
 
 **The database is the first hole, three files wide.** The CLI reads the board
 and permits Studio metadata writes ([cli.md](./cli.md)), and a sandbox that opens

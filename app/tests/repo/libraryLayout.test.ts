@@ -78,10 +78,6 @@ const ALLOWED: [file: string, text: string, why: string][] = [
   ["src-tauri/src/parse/mineru/local/mod.rs", ".join(\"images\")", "MinerU's archive"],
   ["src-tauri/src/parse/mineru/client/run_batch.rs", ".join(\"images\")", "MinerU's archive"],
   ["src-tauri/src/parse/mineru/client/run_batch.rs", "format!(\"images/{target}\")", "MinerU's archive"],
-  // App routes (`/subjects/:id/files/uploads`), not library paths. Stage 6 of the Drive plan rewrites these screens.
-  ["src/components/tabs/tabInfo.tsx", "/^\\/subjects\\/\\d+\\/files\\/(drive|documents", "stage 6: an app route"],
-  ["src/routes.tsx", "\"../files/", "stage 6: an app route"],
-  ["src/components/subjects/SubjectCrumbs.tsx", "to: \"files/", "stage 6: an app route"],
 ];
 
 /** A literal that is a library path, or the start of one. */

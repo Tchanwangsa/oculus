@@ -3,11 +3,12 @@ import { useHarnessStore } from "@/stores/chat/harnessStore";
 import type { HarnessEnvelope } from "@/lib/harness";
 import { useTauriEvent } from "@/hooks/backend/useEvents";
 import { notifyProjectsUpdated } from "@/lib/planning/projects";
+import { reconcileAfterTurn } from "@/lib/drive/reconcile";
 
 const WRITES_PLANNING = /\boculus\s+(project|task|tag)\b/;
 
-/** Feeds the chat store and tells the planning board to re-read when an agent
- *  writes to it. */
+/** Feeds the chat store, tells the planning board to re-read when an agent
+ *  writes to it, and gives files an agent wrote their rows once its turn ends. */
 export function useHarnessEvents() {
   // An agent's `oculus project`/`task`/`tag` writes from another process,
   // so the board is told to re-read when such a call finishes (ids are
@@ -31,6 +32,8 @@ export function useHarnessEvents() {
       if (planningCalls.delete(`${e.payload.threadId}:${ev.id}`)) {
         notifyProjectsUpdated();
       }
+    } else if (ev.type === "turn_finished") {
+      void reconcileAfterTurn(e.payload.threadId);
     }
   });
 }

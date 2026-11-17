@@ -7,10 +7,12 @@ import SettingsLayout from "@/layouts/SettingsLayout";
 import RevisionLayout from "@/layouts/RevisionLayout";
 import StudioLayout from "@/layouts/StudioLayout";
 import TasksLayout from "@/layouts/TasksLayout";
+import DriveLayout from "@/layouts/DriveLayout";
 import HomePage from "@/pages/start/HomePage";
 import NewTabPage from "@/pages/start/NewTabPage";
 import SubjectTasksRedirect from "@/pages/work/SubjectTasksRedirect";
 import SubjectsRedirect from "@/pages/start/SubjectsRedirect";
+import { LegacyFilesRedirect } from "@/pages/subject/files/LegacyFilesRedirect";
 
 /** Paths stay synchronous for matching and ⌘-click; page modules load only
  *  when a pane visits them, except Home and the new-tab page, which a fresh
@@ -71,30 +73,29 @@ export const routes: RouteObject[] = [
         children: [
           { index: true, lazy: page(() => import("@/pages/subject/content/OverviewPage")) },
           { path: "modules", lazy: page(() => import("@/pages/subject/content/ModulesPage")) },
-          {
-            // Sub-tabs are child routes so restore, crumbs and ⌘-click key
-            // off the path (see FilesPage).
-            path: "files",
-            lazy: page(() => import("@/pages/subject/files/FilesPage")),
-            children: [
-              { index: true, element: <Navigate to="downloads" replace /> },
-              { path: "downloads", lazy: page(() => import("@/pages/subject/files/DownloadsPage")) },
-              { path: "media", lazy: page(() => import("@/pages/subject/files/MediaPage")) },
-              { path: "uploads", lazy: page(() => import("@/pages/subject/files/UploadsPage")) },
-              { path: "drive", lazy: page(() => import("@/pages/subject/files/DrivePage")) },
-              { path: "documents", element: <Navigate to="../drive" replace /> },
-              { path: "canvases", element: <Navigate to="../drive" replace /> },
-              { path: "notebooks", element: <Navigate to="../drive" replace /> },
-            ],
-          },
+          // Drive's browser rooted at the subject; the splat is the folder
+          // (`app/src/lib/drive/routes.ts`). Old sub-tab paths
+          // (`files/downloads`…) are redirected by the page.
+          { path: "files/*", lazy: page(() => import("@/pages/subject/files/FilesPage")) },
           { path: "lectures", lazy: page(() => import("@/pages/subject/content/LecturesPage")) },
           { path: "announcements", lazy: page(() => import("@/pages/subject/content/AnnouncementsPage")) },
           { path: "assignments", lazy: page(() => import("@/pages/subject/content/AssignmentsPage")) },
           { path: "discussion", lazy: page(() => import("@/pages/subject/content/DiscussionPage")) },
           { path: "lessons", lazy: page(() => import("@/pages/subject/content/LessonsPage")) },
           // Legacy paths that restored tabs and Recent entries may carry.
-          { path: "downloads", element: <Navigate to="../files/downloads" replace /> },
-          { path: "uploads", element: <Navigate to="../files/uploads" replace /> },
+          { path: "downloads", element: <LegacyFilesRedirect tab="downloads" /> },
+          { path: "uploads", element: <LegacyFilesRedirect tab="uploads" /> },
+        ],
+      },
+      {
+        // Every subject's folders: the nav column (My Drive, Recent, the
+        // tree) beside the browser; the splat is the folder under `courses/`.
+        path: "drive",
+        element: <DriveLayout />,
+        children: [
+          { index: true, lazy: page(() => import("@/pages/drive/DriveFolderPage")) },
+          { path: "recent", caseSensitive: true, lazy: page(() => import("@/pages/drive/DriveRecentPage")) },
+          { path: "*", lazy: page(() => import("@/pages/drive/DriveFolderPage")) },
         ],
       },
       {

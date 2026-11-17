@@ -14,7 +14,7 @@ import { TAB_PATHS } from "@/components/subjects/nav/tabs";
 
 /**
  * `id`'s page for the tab open at `pathname`. Only the top-level tab carries
- * over; anything deeper (a Files sub-tab) lands on that tab's default.
+ * over; anything deeper (a folder in Files) lands on that tab's default.
  */
 function switchPath(pathname: string, id: number): string {
   const tab = pathname.split("/")[3]; // ["", "subjects", ":id", tab, …]

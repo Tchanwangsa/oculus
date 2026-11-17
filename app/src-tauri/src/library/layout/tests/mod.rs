@@ -5,4 +5,5 @@ mod links;
 mod own;
 mod recordings;
 mod resolve;
+mod subject_dirs;
 mod zone;

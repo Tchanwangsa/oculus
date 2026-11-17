@@ -10,6 +10,7 @@ import { useDriveDrop } from "@/hooks/drive/useDriveDrop";
 import { useDriveRows } from "@/hooks/drive/useDriveRows";
 import { useElementWidth } from "@/hooks/drive/useElementWidth";
 import { useFolderListing } from "@/hooks/drive/useFolderListing";
+import { useReconcileParseStatus } from "@/hooks/sync/useReconcileParseStatus";
 import { useStoredSet, useStoredState } from "@/hooks/ui/useStoredState";
 import { copyToFolder, deleteAll, dropInto, DRIVE_PROBLEM_EVENT, importInto, moveToFolder, renameTo, subjectOf } from "@/lib/drive/actions";
 import { READ_ONLY_TEXT } from "@/lib/drive/commands";
@@ -20,6 +21,7 @@ import { itemHref, openInNewTab, openItem, revealItem } from "@/lib/drive/open";
 import { baseName, subjectRelOf } from "@/lib/drive/paths";
 import { clickSelect, EMPTY_SELECTION, pruneSelection, selectAll, type Selection } from "@/lib/drive/selection";
 import { filePagePath } from "@/lib/files/openFile";
+import { scheduleOwnReconcile } from "@/lib/drive/reconcile";
 import { isMac } from "@/lib/platform";
 import { navigateActive } from "@/lib/shell/tabRouters";
 import { DriveViewProvider, type DriveView } from "./DriveContext";
@@ -81,6 +83,18 @@ export function DriveBrowser({ root, folder, folderHref, rootLabel, leading }: D
     return listing.folders.flatMap((f) => subjectOf(f.relativePath, subjects)?.id ?? []);
   }, [subject, flat, listing, subjects]);
   const rows = useDriveRows(rowSubjects);
+  // Files an agent or Finder wrote get their rows (debounced per subject),
+  // and a parse an earlier session finished shows as parsed.
+  const subjectId = subject?.id;
+  const subjectCode = subject?.code;
+  useEffect(() => {
+    if (subjectId != null && subjectCode) scheduleOwnReconcile({ id: subjectId, code: subjectCode });
+  }, [subjectId, subjectCode, folder]);
+  const listedRows = useMemo(
+    () => listing?.files.flatMap((f) => rows.get(f.relativePath) ?? []) ?? [],
+    [listing, rows],
+  );
+  useReconcileParseStatus(listedRows);
 
   const [layout, setLayout] = useStoredState<DriveLayout>(
     `oculus-drive-layout:${root || "drive"}`,

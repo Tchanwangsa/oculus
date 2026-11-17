@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { deleteFileRow, upsertFile, type DbFile } from "@/lib/db";
+import { upsertFile } from "@/lib/db";
 import { isPipelineFile } from "@/lib/files/fileTypes";
 import { parseFile } from "@/lib/files/courseFiles";
 
@@ -27,7 +27,7 @@ export interface ImportOutcome {
   error: string | null;
 }
 
-/** Fired after uploads land or one is removed, so open lists refresh. */
+/** Fired after uploads land, so open lists refresh. */
 export const UPLOADS_CHANGED_EVENT = "oculus:uploads-changed";
 
 const announce = () =>
@@ -90,13 +90,5 @@ export async function recordUploads(
     }
   }
 
-  announce();
-}
-
-/** Remove an upload: the file, its derived PDF and parse artifacts on disk,
- *  then its row — which cascades the `pages` table's embeddings with it. */
-export async function removeUpload(file: DbFile): Promise<void> {
-  await invoke("delete_upload", { relativePath: file.relative_path });
-  await deleteFileRow(file.id);
   announce();
 }

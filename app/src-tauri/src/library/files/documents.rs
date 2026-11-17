@@ -206,15 +206,8 @@ pub fn rename_document(relative_path: String, title: String) -> Result<ImportedF
     Ok(document_file(format!("{dir_rel}/{name}"), size))
 }
 
-/// Remove a note (nothing is derived from it).
-#[tauri::command]
-pub fn delete_document(relative_path: String) -> Result<(), String> {
-    let path = document_path(&relative_path)?;
-    std::fs::remove_file(path).map_err(|e| e.to_string())
-}
-
-/// Every note among a subject's own files at any depth, for the Documents
-/// tab to reconcile against — including ones written outside the app. Only
+/// Every note among a subject's own files at any depth, for
+/// `reconcileDocuments` to reconcile against — including ones written outside the app. Only
 /// guard-accepted names, and never a `.md` the parser or the sheet converter
 /// wrote beside its source (`layout::is_derived_text`).
 #[tauri::command]

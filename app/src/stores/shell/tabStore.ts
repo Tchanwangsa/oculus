@@ -15,6 +15,7 @@ import { leaveFront, releaseItem } from "./tabs/lifecycle";
 import { panesOf, pane, withTab } from "./tabs/panes";
 import type { AppTab, PaneSide, PaneState } from "./tabs/panes";
 import { CLOSED_LIMIT, restore, saveStrip, type ClosedTab } from "./tabs/persist";
+import { followClosed, type RouteFollower } from "./tabs/follow";
 
 export type { AppTab, PaneSide, PaneState } from "./tabs/panes";
 export { focusedPane, panesOf, sideFront } from "./tabs/panes";
@@ -94,6 +95,11 @@ interface TabState {
   removeSide: (tabId: number, itemId: number, opts?: { handover?: boolean }) => void;
   setSideRatio: (tabId: number, ratio: number) => void;
   focusPane: (tabId: number, side: PaneSide) => void;
+  /** Library paths moved or went (`drive-changed`, `lib/shell/followLibrary.ts`):
+   *  a pane on a moved path goes to the new one, replacing its entry; a side
+   *  item on a deleted thing is removed, and a main pane goes to the
+   *  `fallback` its follower names. The reopen stack follows the same way. */
+  followRoutes: (follow: RouteFollower) => void;
 }
 
 export const useTabStore = create<TabState>((set, get) => ({
@@ -236,6 +242,27 @@ export const useTabStore = create<TabState>((set, get) => ({
       if (!tab || tab.focus === side || (side === "side" && (!tab.side || tab.side.hidden))) return s;
       return { tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, focus: side } : t)) };
     }),
+
+  followRoutes: (follow) => {
+    const retarget = (paneId: number, path: string) => {
+      // A live router reports where it lands through `setPath`; one never
+      // built opens on the stored path when it is.
+      if (hasTabRouter(paneId)) navigateInTab(paneId, path, { replace: true });
+      else get().setPath(paneId, path, { canBack: false, canForward: false });
+    };
+    for (const tab of get().tabs) {
+      const main = follow(tab.path);
+      if (main.kind === "moved") retarget(tab.id, main.path);
+      else if (main.kind === "removed") retarget(tab.id, main.fallback);
+      for (const item of tab.side?.items ?? []) {
+        const next = follow(item.path);
+        if (next.kind === "moved") retarget(item.id, next.path);
+        else if (next.kind === "removed") get().removeSide(tab.id, item.id);
+      }
+    }
+    const closed = followClosed(get().closed, follow);
+    if (closed !== get().closed) set({ closed });
+  },
 
   remember: (entry) =>
     set((s) => ({ closed: [...s.closed, entry].slice(-CLOSED_LIMIT) })),

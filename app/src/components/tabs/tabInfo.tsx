@@ -8,9 +8,12 @@ import {
   CalendarBlank,
   Chat,
   CheckSquare,
+  ClockCounterClockwise,
   Cube,
   FileDashed,
   FilmSlate,
+  Folder,
+  FolderSimple,
   GearSix,
   Globe,
   House,
@@ -31,6 +34,9 @@ import { displayCode, humanizeSlug } from "@/lib/format/format";
 import { SETTINGS_PAGES } from "@/lib/search/settings";
 import type { Subject } from "@/lib/db";
 import { isOwnPath } from "@/lib/files/libraryLayout";
+import { parseDriveRoute, parseFilesRoute } from "@/lib/drive/routes";
+import { legacyTabTargets } from "@/lib/drive/legacyTabs";
+import { subjectForFolder } from "@/lib/drive/paths";
 import { pathFile } from "@/lib/files/pathCategory";
 
 const SECTION_LABELS: Record<string, string> = {
@@ -145,6 +151,19 @@ export function tabInfo(
       icon: <FilmSlate size={size} />,
     };
   }
+  if (pathname === "/drive/recent") return { title: "Recent", icon: <ClockCounterClockwise size={size} /> };
+  const driveFolder = parseDriveRoute(pathname);
+  if (driveFolder != null) {
+    // `courses/<subject>/…`: a subject's own folder by its code and icon,
+    // anything deeper by its name.
+    const parts = driveFolder.split("/").slice(1);
+    if (parts.length === 0) return { title: "Drive", icon: <Folder size={size} /> };
+    const subject = subjectForFolder(parts[0], subjects);
+    if (parts.length === 1 && subject) {
+      return { title: displayCode(subject.code), icon: <SubjectIcon code={subject.code} size={size} /> };
+    }
+    return { title: parts[parts.length - 1], icon: <FolderSimple size={size} /> };
+  }
   if (pathname === "/music")
     return { title: "Music", icon: <MusicNotes size={size} /> };
   if (pathname.startsWith("/sync"))
@@ -182,10 +201,13 @@ export function tabInfo(
       return { title: new URLSearchParams(search).get("t") ?? "Lecture", icon };
     }
     const code = subject ? displayCode(subject.code) : "Subject";
-    if (m[2] === "files" && /^\/subjects\/\d+\/files\/(drive|documents|canvases|notebooks)\/?$/.test(pathname)) {
-      return { title: `${code} · Drive`, icon };
+    // A Files folder is titled by its name; the tab's root, and an old
+    // sub-tab's path waiting for its redirect, are the Files tab.
+    const files = m[2] === "files" ? parseFilesRoute(pathname) : null;
+    if (files?.inner && !legacyTabTargets(files.inner)) {
+      return { title: `${code} · ${files.inner.split("/").pop()}`, icon };
     }
-    // The first segment only: other Files sub-tabs share the Files title.
+    // The first segment only.
     const section = m[2] ? SECTION_LABELS[m[2]] : null;
     return { title: section ? `${code} · ${section}` : code, icon };
   }
