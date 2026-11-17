@@ -46,7 +46,7 @@ pub(crate) struct CheatWriteArgs {
     /// Topic ids, comma-separated; omitted or empty assigns Unsorted
     #[arg(long)]
     pub(crate) topics: Option<String>,
-    /// Provenance, e.g. courses/CODE/files/notes.pdf#page=3
+    /// Provenance, e.g. courses/CODE/Course/Files/notes.pdf#page=3
     #[arg(long)]
     pub(crate) source: Option<String>,
     #[arg(long, default_value = "manual", value_parser = ["manual", "chat", "file", "lecture", "agent"])]

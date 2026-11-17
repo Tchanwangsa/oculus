@@ -75,7 +75,7 @@ pub(super) fn properties_for(
     with(&fresh, &launch.media_id, &launch.secure_link_id).map_err(String::from)
 }
 
-/// Save the poster as `courses/<code>/images/echo-<mediaId>.jpg`, since its
+/// Save the poster as `courses/<code>/Course/Images/echo-<mediaId>.jpg`, since its
 /// signed URL expires; the data-dir-relative path, or `None` without one.
 pub(super) fn save_poster(
     data_dir: &Path,

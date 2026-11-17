@@ -29,8 +29,10 @@ fn the_scratch_directory_is_removed_on_drop() {
 #[test]
 fn the_vtt_sits_beside_the_video_with_its_full_name() {
     assert_eq!(
-        vtt_path(Path::new("/lib/courses/MAST/files/Matrices Part 1.mp4")),
-        Path::new("/lib/courses/MAST/files/Matrices Part 1.mp4.vtt")
+        vtt_path(Path::new(
+            "/lib/courses/MAST/Course/Media/Matrices Part 1.mp4"
+        )),
+        Path::new("/lib/courses/MAST/Course/Media/Matrices Part 1.mp4.vtt")
     );
 }
 
@@ -38,14 +40,14 @@ fn the_vtt_sits_beside_the_video_with_its_full_name() {
 fn only_files_inside_the_library_resolve() {
     let library = Dir::new("transcribe-library");
     let outside = Dir::new("transcribe-outside");
-    let files = library.join("courses").join("MAST").join("files");
+    let files = library.join("courses/MAST/Course/Media");
     std::fs::create_dir_all(&files).unwrap();
     std::fs::write(files.join("Week 1.mp4"), b"x").unwrap();
     std::fs::write(outside.join("elsewhere.mp4"), b"x").unwrap();
     let inside = files.join("Week 1.mp4").canonicalize().unwrap();
 
     assert_eq!(
-        resolve(&library, "courses/MAST/files/Week 1.mp4").unwrap(),
+        resolve(&library, "courses/MAST/Course/Media/Week 1.mp4").unwrap(),
         inside
     );
     assert_eq!(resolve(&library, inside.to_str().unwrap()).unwrap(), inside);
@@ -65,15 +67,15 @@ fn only_files_inside_the_library_resolve() {
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(outside.join("elsewhere.mp4"), files.join("link.mp4")).unwrap();
-        assert!(resolve(&library, "courses/MAST/files/link.mp4")
+        assert!(resolve(&library, "courses/MAST/Course/Media/link.mp4")
             .unwrap_err()
             .contains("outside"));
     }
 
-    assert!(resolve(&library, "courses/MAST/files/missing.mp4")
+    assert!(resolve(&library, "courses/MAST/Course/Media/missing.mp4")
         .unwrap_err()
         .contains("not on disk"));
-    assert!(resolve(&library, "courses/MAST/files")
+    assert!(resolve(&library, "courses/MAST/Course/Media")
         .unwrap_err()
         .contains("not a file"));
 }

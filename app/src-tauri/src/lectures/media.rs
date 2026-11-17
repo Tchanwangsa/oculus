@@ -2,8 +2,9 @@
 //! custom-scheme sources (`asset://` fails with MEDIA_ERR_SRC_NOT_SUPPORTED on
 //! macOS 26; cf. tauri-apps/tauri#3725), so lecture video is served over HTTP.
 //!
-//! Scope: files under the data dir's `lectures/`, `courses/` and
-//! `studio/videos/` (rendered videos and their stills), and only with the
+//! Scope: files under the library's roots (`layout::library_roots`, which
+//! hold the lecture recordings) and `studio/videos/` (rendered videos and
+//! their stills), and only with the
 //! per-launch token in the path — any local process can reach the port.
 //!
 //! One route needs no token: `/widget-kit/**`, the code and fonts chat

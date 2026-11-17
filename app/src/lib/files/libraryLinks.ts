@@ -13,8 +13,11 @@ import { PAGES_DIR } from "@/lib/files/libraryLayout";
  *  Canvas `/files/<id>` or `/pages/<slug>` URL. Undefined for anything else. */
 export function libraryLinkTarget(href: string, files: DbFile[], fromPath?: string): DbFile | undefined {
   if (/^\.\.\//.test(href)) {
-    const rel = decodeLinkPath(href.replace(/^\.\.\//, ""));
-    return files.find((f) => f.relative_path.endsWith(rel));
+    const exact = fromPath && resolveFrom(fromPath, decodeLinkPath(href));
+    const hit = exact ? files.find((f) => f.relative_path === exact) : undefined;
+    if (hit) return hit;
+    const rel = decodeLinkPath(href.replace(/^(\.\.\/)+/, ""));
+    return files.find((f) => f.relative_path.endsWith(`/${rel}`));
   }
   if (fromPath && /^[^/#?:]+\//.test(href)) {
     const rel = fromPath.replace(/[^/]+$/, "") + decodeLinkPath(href.replace(/^\.\//, ""));
@@ -35,6 +38,19 @@ export function libraryLinkTarget(href: string, files: DbFile[], fromPath?: stri
     }
   }
   return undefined;
+}
+
+/** `href` (relative, `..` allowed) resolved against the folder of the file at
+ *  `fromPath`; null when it climbs out of the data dir. */
+function resolveFrom(fromPath: string, href: string): string | null {
+  const parts = fromPath.split("/").slice(0, -1);
+  for (const part of href.split("/")) {
+    if (part === "..") {
+      if (!parts.length) return null;
+      parts.pop();
+    } else if (part && part !== ".") parts.push(part);
+  }
+  return parts.join("/");
 }
 
 /** Link destinations are percent-encoded: markdown renderers encode them

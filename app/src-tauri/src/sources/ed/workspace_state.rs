@@ -16,7 +16,7 @@ pub struct WorkspaceState {
     /// Ed's workspace id, from `POST /challenges/<ch>/connect`.
     pub workspace_id: String,
     /// The slide's workspace folder, data-dir-relative:
-    /// `courses/<CODE>/lessons/<id>-<slug>/<NN>-<slide-slug>`.
+    /// `courses/<CODE>/Course/Lessons/<id>-<slug>/<NN>-<slide-slug>`.
     pub slide_dir: String,
     /// The commit the files were last in step with Ed at.
     pub base_commit: Option<String>,

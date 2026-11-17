@@ -178,8 +178,8 @@ selected.
 
 - **`document_versions` holds the whole text per row**
   (`app/src/lib/notes/documentVersions.ts`), keyed by the file's row id so a rename
-  keeps its history, and outside `documents/` so listing, search and agents
-  never see them. **Checkpoints** are the student's "Save version" (numbered
+  keeps its history, and off disk so listing, search and agents never see
+  them. **Checkpoints** are the student's "Save version" (numbered
   v1, v2… per note, optional label) and never pruned. **Snapshots** are the
   app's: the session asks for one through `SessionIO.snapshot` when its first
   read lands, after a save once 10 min have passed since the last, and with
@@ -234,11 +234,15 @@ selected.
 ## Pictures, mentions and citations resolve to library files
 
 - **A pasted, dropped or picked picture is written beside its note** in
-  `documents/assets/`, on arrival, and linked relatively; `FileViewer` and the
+  `.assets/` (`layout::note_assets_dir`), on arrival, and linked relatively
+  (`.assets/<file>`); `FileViewer` and the
   editor both resolve it with `libraryImageSrc` (`app/src/lib/files/libraryLinks.ts`).
   The note guard (`own_file_ok`,
   [architecture.md](./architecture.md#one-module-owns-every-path-shape-in-the-library))
-  refuses a `.md` inside `assets/`, so nothing can edit it as a note.
+  refuses anything inside `.assets/` (a dot-name), so nothing can edit it as
+  a note. The asset protocol's scope in `tauri.conf.json` sets
+  `requireLiteralLeadingDot: false`, or a `**` glob would never match the
+  dot-folder and the pictures would draw broken.
 - **`@` mentions a library file**
   (`app/src/components/documents/editor/chrome/mentions.ts`): at a word start,
   outside maths, code and frontmatter, the query after it (the chat's caps)
@@ -249,7 +253,7 @@ selected.
   (`PDF`, `Discussion`, `File`…), are `fileReferenceAppearance`'s, the same as
   a task's related-file chip. It is a source in the one `autocompletion()`. Accepting writes
   the backticked library path the chat composer sends,
-  `` `courses/<code>/files/week-3.pdf` `` (`syntax/mentionSyntax.ts`). The subject
+  `` `courses/<code>/Course/Files/week-3.pdf` `` (`syntax/mentionSyntax.ts`). The subject
   and note path reach the editor through `NoteHost`; an editor with no file
   passes a null path. `@` lists files only. A `[words](path)` link is the
   writer's own and stays a link; an older `[title](../<path>)` still opens

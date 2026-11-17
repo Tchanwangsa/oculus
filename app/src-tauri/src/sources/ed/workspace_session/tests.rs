@@ -258,10 +258,10 @@ fn write_slide(dir: &std::path::Path, md: &str, id: i64, challenge: Value) {
 #[test]
 fn a_challenge_is_found_by_its_slide_front_matter() {
     let dir = Scratch::new("ed-ws-slide");
-    let md = "courses/COMP30026/lessons/1-week-1/03-tally.md";
+    let md = "courses/COMP30026/Course/Lessons/1-week-1/03-tally.md";
     write_slide(
         &dir,
-        "courses/COMP30026/lessons/1-week-1/02-other.md",
+        "courses/COMP30026/Course/Lessons/1-week-1/02-other.md",
         2678800,
         Value::Null,
     );
@@ -277,7 +277,7 @@ fn a_challenge_is_found_by_its_slide_front_matter() {
     let found = slide::find(&dir, 267880).unwrap();
     assert_eq!(
         found.slide_dir,
-        "courses/COMP30026/lessons/1-week-1/03-tally"
+        "courses/COMP30026/Course/Lessons/1-week-1/03-tally"
     );
     assert_eq!(found.run_command.as_deref(), Some("python3 tally.py"));
     assert_eq!(
@@ -301,10 +301,10 @@ fn a_challenge_is_found_by_its_slide_front_matter() {
     assert!(slide::find(&dir, 1).is_err());
 
     // The record's folder is taken when its slide still names the challenge.
-    let moved = "courses/COMP30026/lessons/9-moved/01-tally.md";
+    let moved = "courses/COMP30026/Course/Lessons/9-moved/01-tally.md";
     write_slide(&dir, moved, 267880, Value::Null);
     let state = WorkspaceState {
-        slide_dir: "courses/COMP30026/lessons/9-moved/01-tally".into(),
+        slide_dir: "courses/COMP30026/Course/Lessons/9-moved/01-tally".into(),
         ..WorkspaceState::default()
     };
     workspace_state::save(&dir, 267880, &state).unwrap();
@@ -353,7 +353,7 @@ fn events_and_results_have_the_panes_shapes() {
     );
     let info = WorkspaceInfo {
         challenge_id: 5,
-        slide_dir: "courses/C/lessons/1-l/01-s".into(),
+        slide_dir: "courses/C/Course/Lessons/1-l/01-s".into(),
         files: vec!["a.py".into()],
         run_command: None,
         features: Features {
@@ -365,7 +365,7 @@ fn events_and_results_have_the_panes_shapes() {
     };
     assert_eq!(
         serde_json::to_value(info).unwrap(),
-        json!({"challengeId": 5, "slideDir": "courses/C/lessons/1-l/01-s", "files": ["a.py"],
+        json!({"challengeId": 5, "slideDir": "courses/C/Course/Lessons/1-l/01-s", "files": ["a.py"],
                "runCommand": null,
                "features": {"run": false, "mark": false, "terminal": false, "feedback": false,
                             "confirmSubmit": true},

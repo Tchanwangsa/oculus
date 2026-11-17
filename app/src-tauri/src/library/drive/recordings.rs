@@ -5,7 +5,6 @@ use std::path::Path;
 
 use sqlx::{Row, SqlitePool};
 
-use super::listing::data_rel;
 use crate::library::layout;
 use crate::library::paths::fold_code;
 
@@ -16,20 +15,22 @@ pub struct Recording {
     pub subject_id: i64,
     pub title: String,
     pub date: String,
-    /// Data-dir-relative, as the layout names it (`layout::recording_dir`).
+    /// Data-dir-relative, as the row keeps it (`lectures.folder_rel`).
     pub folder_rel: String,
 }
 
 /// The lectures of the subject whose folder is `folder` (`courses/<folder>`),
-/// each with its recording's folder.
+/// each with its recording's folder; a lecture with no folder yet (nothing of
+/// it downloaded) has nothing on disk to stand in for.
 pub async fn subject_recordings(
     pool: &SqlitePool,
     data_dir: &Path,
     folder: &str,
 ) -> Result<Vec<Recording>, String> {
     let rows = sqlx::query(
-        "SELECT l.id, l.subject_id, l.title, l.date, s.code
-         FROM lectures l JOIN subjects s ON s.id = l.subject_id",
+        "SELECT l.id, l.subject_id, l.title, l.date, l.folder_rel, s.code
+         FROM lectures l JOIN subjects s ON s.id = l.subject_id
+         WHERE l.folder_rel IS NOT NULL",
     )
     .fetch_all(pool)
     .await
@@ -42,14 +43,14 @@ pub async fn subject_recordings(
             fold_code(&crate::library::paths::safe_dir(&code)) == wanted
         })
         .filter_map(|r| {
-            let lecture_id: String = r.get("id");
-            let dir = layout::recording_dir(data_dir, &lecture_id).ok()?;
+            let folder_rel: String = r.get("folder_rel");
+            layout::recording_dir(data_dir, &folder_rel).ok()?;
             Some(Recording {
-                folder_rel: data_rel(data_dir, &dir)?,
+                folder_rel,
                 subject_id: r.get("subject_id"),
                 title: r.get("title"),
                 date: r.get("date"),
-                lecture_id,
+                lecture_id: r.get("id"),
             })
         })
         .collect())

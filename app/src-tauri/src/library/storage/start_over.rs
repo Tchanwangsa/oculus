@@ -111,8 +111,8 @@ mod tests {
     #[test]
     fn start_over_empties_the_library_but_keeps_cloud_usage_models_and_keyd() {
         let dir = Scratch::new("start-over");
-        std::fs::create_dir_all(dir.join("courses/COMP30026/files")).unwrap();
-        std::fs::write(dir.join("courses/COMP30026/files/a.pdf"), b"%PDF").unwrap();
+        std::fs::create_dir_all(dir.join("courses/COMP30026/Course/Files")).unwrap();
+        std::fs::write(dir.join("courses/COMP30026/Course/Files/a.pdf"), b"%PDF").unwrap();
         std::fs::write(dir.join("oculus.db"), b"").unwrap();
         std::fs::write(dir.join("institution.json"), b"{}").unwrap();
         std::fs::write(dir.join("voyage-usage.json"), b"{}").unwrap();

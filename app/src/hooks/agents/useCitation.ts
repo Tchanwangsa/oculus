@@ -7,6 +7,7 @@ import {
   type Citation,
   type CitationShape,
 } from "@/lib/citations";
+import { isOwnPath } from "@/lib/files/libraryLayout";
 
 /** The file a citation names: at once for a full path, after a cached lookup
  *  for a tail (null until then, and for a tail with no unique hit). Keyed on
@@ -30,9 +31,11 @@ export function useCitation(shape: CitationShape | null): Citation | null {
 }
 
 /** The PDF page a line of a parsed `.md` falls on, once `.pages.json` is
- *  read (cached); null for any other citation. */
+ *  read (cached); null for any other citation. An own `.md` may be a note,
+ *  which simply has no record to read. */
 export function useCitedPage(cite: Citation | null | undefined): number | null {
-  const path = cite?.line && parsedSourceOf(cite.path) ? cite.path : null;
+  const parsed = cite?.line && (parsedSourceOf(cite.path) || (isOwnPath(cite.path) && /\.md$/i.test(cite.path)));
+  const path = parsed && cite ? cite.path : null;
   const from = cite?.line?.from ?? 0;
   const to = cite?.line?.to ?? 0;
   const [page, setPage] = useState<number | null>(null);

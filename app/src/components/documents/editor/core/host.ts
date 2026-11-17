@@ -11,8 +11,9 @@ export interface NoteHost {
   openLink(href: string): void;
   /** `@` searches this subject's files; null searches the whole library. */
   subjectId: number | null;
-  /** Library path of the note, `courses/<code>/documents/<title>.md`, which
-   *  `@` leaves out; null for an editor with no file behind it. */
+  /** Library path of the note (`courses/<code>/<title>.md`, or deeper among
+   *  the student's own files), which `@` leaves out; null for an editor with
+   *  no file behind it. */
   notePath: string | null;
 }
 

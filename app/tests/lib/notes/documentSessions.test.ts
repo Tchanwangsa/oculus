@@ -195,7 +195,7 @@ describe("document sessions", () => {
     const moved = deferred<void>();
     const renaming = lease.rename(async (file) => {
       await moved.promise;
-      return { ...file, relative_path: "courses/X/documents/b.md", filename: "b.md" };
+      return { ...file, relative_path: "courses/X/b.md", filename: "b.md" };
     });
     await tick();
     view.type(0, "during");
@@ -204,7 +204,7 @@ describe("document sessions", () => {
     moved.resolve();
     expect(await renaming).toBe(true);
     await tick();
-    expect(disk.writes.map((w) => w.path)).toEqual(["courses/X/documents/b.md"]);
+    expect(disk.writes.map((w) => w.path)).toEqual(["courses/X/b.md"]);
   });
 
   test("a rename refuses to move a note whose save failed", async () => {

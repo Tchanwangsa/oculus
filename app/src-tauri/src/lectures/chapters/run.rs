@@ -96,7 +96,8 @@ pub fn run(
         let gaps = vtt.as_deref().map(cue_gaps).unwrap_or_default();
         let cues = vtt.as_deref().map(parse_transcript).unwrap_or_default();
 
-        let dir = crate::sources::echo360::lecture_dir(job.data_dir, id)?;
+        let folder = rt.block_on(crate::db::store::recording_folder(pool, job.data_dir, id))?;
+        let dir = crate::library::layout::recording_dir(job.data_dir, &folder)?;
         let mut last = std::time::Instant::now();
         let detected = detect(
             &ffmpeg,
@@ -153,7 +154,7 @@ pub fn run(
         let text = prompt(&Job {
             title,
             duration_secs: duration,
-            lecture_dir: &format!("../{}", crate::library::layout::recording_rel(id)),
+            lecture_dir: &format!("../{folder}"),
             course_dir: course_dir.as_deref(),
             detected: found.len(),
             has_transcript: !cues.is_empty(),

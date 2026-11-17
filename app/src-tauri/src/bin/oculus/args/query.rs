@@ -74,11 +74,11 @@ pub(crate) struct GrepArgs {
 /// in workbook order. For markdown and other text it is the file on disk. A PDF that has never been parsed says so rather than printing
 /// nothing — run `oculus index <SUBJECT_CODE>` for it.
 ///
-/// A notebook — pages the student writes on, `notebooks/<title>.notebook` —
+/// A notebook — pages the student writes on, `<title>.notebook` among their own files —
 /// has no text. It prints one line per page with the path of that page's
 /// picture, which the app redraws a few seconds after each stroke, and how
 /// long ago; open the pictures with your image tool. `--pages` picks pages by
-/// number. A canvas (`canvases/<title>.canvas`) is a drawing with no pages
+/// number. A canvas (`<title>.canvas`) is a drawing with no pages
 /// and no text, and says so.
 ///
 /// FILE may be a full library path, a bare filename, or any distinctive

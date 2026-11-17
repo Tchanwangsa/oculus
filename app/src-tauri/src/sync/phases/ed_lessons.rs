@@ -1,6 +1,6 @@
-//! Phase: the subject's Ed Lessons, an index `lessons/<id>-<slug>.md` per
+//! Phase: the subject's Ed Lessons, an index `Course/Lessons/<id>-<slug>.md` per
 //! lesson with a file per slide (a PDF slide is its PDF), its PDFs and its
-//! challenge workspaces in `lessons/<id>-<slug>/`.
+//! challenge workspaces in `Course/Lessons/<id>-<slug>/`.
 
 use std::collections::BTreeSet;
 
@@ -477,8 +477,8 @@ mod tests {
     #[test]
     fn a_workspace_with_local_state_is_listed_from_disk() {
         let dir = Scratch::new("ed-kept-files");
-        let stem = "lessons/1-l/03-q1a";
-        let course = dir.join("courses/COMP30026/lessons/1-l/03-q1a");
+        let stem = "Course/Lessons/1-l/03-q1a";
+        let course = dir.join("courses/COMP30026/Course/Lessons/1-l/03-q1a");
         std::fs::create_dir_all(course.join("src")).unwrap();
         std::fs::write(course.join("q1a.py"), "dfa = 1\n").unwrap();
         std::fs::write(course.join("src/data.bin"), [0u8, 1, 2]).unwrap();
@@ -506,11 +506,24 @@ mod tests {
         assert_eq!(
             listed,
             [
-                ("q1a.py", "lessons/1-l/03-q1a/q1a.py", 8, Some("dfa = 1\n")),
-                ("src/data.bin", "lessons/1-l/03-q1a/src/data.bin", 3, None),
+                (
+                    "q1a.py",
+                    "Course/Lessons/1-l/03-q1a/q1a.py",
+                    8,
+                    Some("dfa = 1\n")
+                ),
+                (
+                    "src/data.bin",
+                    "Course/Lessons/1-l/03-q1a/src/data.bin",
+                    3,
+                    None
+                ),
             ]
         );
-        assert_eq!(kept[0].rel, "courses/COMP30026/lessons/1-l/03-q1a/q1a.py");
+        assert_eq!(
+            kept[0].rel,
+            "courses/COMP30026/Course/Lessons/1-l/03-q1a/q1a.py"
+        );
         // Nothing written: the folder holds only what was there.
         assert!(!course.join("gone.py").exists());
     }

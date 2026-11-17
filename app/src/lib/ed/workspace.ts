@@ -24,7 +24,7 @@ export interface WorkspaceFeatures {
 
 export interface WorkspaceInfo {
   challengeId: number;
-  /** Data-dir-relative: `courses/<CODE>/lessons/<id>-<slug>/<NN>-<slide-slug>`. */
+  /** Data-dir-relative: `courses/<CODE>/Course/Lessons/<id>-<slug>/<NN>-<slide-slug>`. */
   slideDir: string;
   /** Sorted, read from disk. */
   files: string[];

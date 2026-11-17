@@ -1,13 +1,13 @@
 import { CheckSquare, File, Folder, Kanban, Notebook, Scribble, VideoCamera } from "@phosphor-icons/react";
 import { categoryIconFor, fileIconFor, isLessonAsset, isSheetFile } from "./fileTypes";
 import { lecturePageId } from "@/lib/lectures/pagePath";
-import { RECORDINGS_DIR } from "@/lib/files/libraryLayout";
+import { recordingOf } from "@/lib/files/libraryLayout";
 
 /** Reference colours identify content, independently of the shell accent. */
 export function fileReferenceAppearance(file: { category: string | null; filename: string }, path = "") {
   // A folder the composer's `@` named; the agent lists it itself.
   if (path.endsWith("/")) return { Icon: Folder, tone: "text-muted-foreground", kind: "Folder" };
-  if (path.startsWith(`${RECORDINGS_DIR}/`)) return { Icon: VideoCamera, tone: "text-reference-lecture", kind: "Lecture" };
+  if (recordingOf(path)) return { Icon: VideoCamera, tone: "text-reference-lecture", kind: "Lecture" };
   const category = file.category;
   if (category === "canvas") return { Icon: Scribble, tone: "text-reference-page", kind: "Canvas" };
   if (category === "notebook") return { Icon: Notebook, tone: "text-reference-page", kind: "Notebook" };

@@ -1,5 +1,5 @@
 /**
- * Parses the module TOC markdown `sync/phases/modules.rs` writes to `modules/NN-slug.md`:
+ * Parses the module TOC markdown `sync/phases/modules.rs` writes to `Course/Modules/NN-slug.md`:
  * `## ` for Canvas SubHeaders, `- [label](href) _(kind)_` for items, indented
  * two spaces per Canvas `indent` level. A video is `_(video <canvas id>)_`,
  * its href where the on-demand download lands (`file_toc_line`).
@@ -7,7 +7,7 @@
 
 export interface ModuleItem {
   title: string;
-  /** `../files/x.pdf` (in-app), an http(s) URL, or null when not downloaded. */
+  /** `../Files/x.pdf` (in-app), an http(s) URL, or null when not downloaded. */
   href: string | null;
   /** From the trailing `_(kind)_`: quiz | assignment | external | file | video. */
   kind: string | null;

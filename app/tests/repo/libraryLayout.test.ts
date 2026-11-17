@@ -4,7 +4,8 @@ import { join, relative, sep } from "node:path";
 
 // Every path shape in the library is spelled in one Rust module,
 // `app/src-tauri/src/library/layout/`, and one TypeScript file,
-// `app/src/lib/files/libraryLayout.ts` (docs/architecture.md#the-library-layout).
+// `app/src/lib/files/libraryLayout.ts` (docs/architecture.md, "One module owns
+// every path shape in the library").
 // Anywhere else, a library folder name used as a path segment is a second
 // copy that a new layout would leave behind. Tests, fixtures and comments may
 // spell paths; app code asks the layout.
@@ -15,9 +16,28 @@ const ROOTS = ["src", "src-tauri/src"];
 /** The layout's own files. */
 const OWNERS = ["src-tauri/src/library/layout/", "src/lib/files/libraryLayout.ts"];
 
-/** Folder names the library uses: the data dir's, and a subject's. */
-const FOLDERS = [
+/** Folder names the library uses: the data dir's, a subject's, and its
+ *  synced kinds'. */
+const CURRENT = [
   "courses",
+  "Course",
+  ".oculus",
+  "Files",
+  "Media",
+  "Recordings",
+  "Lessons",
+  "Discussion",
+  "Pages",
+  "Assignments",
+  "Quizzes",
+  "Announcements",
+  "Modules",
+  "Images",
+];
+
+/** The layout before the Drive tree; only its `LEGACY` shape
+ *  (`src-tauri/src/library/layout/shape.rs`) may still spell these. */
+const LEGACY = [
   "lectures",
   "uploads",
   "documents",
@@ -32,7 +52,9 @@ const FOLDERS = [
   "announcements",
   "modules",
   "images",
-].join("|");
+];
+
+const FOLDERS = [...CURRENT, ...LEGACY].map((f) => f.replace(".", "\\.")).join("|");
 
 /** Lines that name a folder but not a library path, each with its reason. */
 const ALLOWED: [file: string, text: string, why: string][] = [
@@ -143,4 +165,20 @@ test("every allowance still matches a line", () => {
     ([file, text]) => !readFileSync(join(APP, file), "utf8").split("\n").some((l) => l.includes(text)),
   ).map(([file, text]) => `${file}: ${text}`);
   expect(stale).toEqual([]);
+});
+
+test("the old folder names are spelled only in the LEGACY shape", () => {
+  // Category names (`"lessons"`, `"ed"`) share some of these spellings, so
+  // only the shape tables, which hold folder names alone, are checked.
+  const legacy = new RegExp(`"(${LEGACY.join("|")})"`);
+  const path = join(APP, OWNERS[0], "shape.rs");
+  const lines = readFileSync(path, "utf8").split("\n");
+  const start = lines.findIndex((l) => l.includes("const LEGACY: Shape"));
+  const end = lines.findIndex((l, i) => i > start && l === "};");
+  expect(start).toBeGreaterThan(-1);
+  const hits = lines
+    .map((line, i): [number, string] => [i + 1, line])
+    .filter(([n, line]) => (n - 1 < start || n - 1 > end) && legacy.test(line))
+    .map(([n, line]) => `shape.rs:${n} ${line.trim()}`);
+  expect(hits).toEqual([]);
 });

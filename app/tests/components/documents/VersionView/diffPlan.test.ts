@@ -94,8 +94,8 @@ describe("constructs drawn as widgets", () => {
   test("a task's checkbox and a citation chip are constructs", () => {
     const task = stateOf("- [x] done");
     expect(constructsIn(task, 3, 4)).toEqual([{ from: 2, to: 5, block: false }]);
-    const cite = stateOf("see `courses/A/files/w.pdf` now");
-    expect(constructsIn(cite, 10, 11)).toEqual([{ from: 4, to: 27, block: false }]);
+    const cite = stateOf("see `courses/A/Course/Files/w.pdf` now");
+    expect(constructsIn(cite, 10, 11)).toEqual([{ from: 4, to: 34, block: false }]);
   });
 });
 

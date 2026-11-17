@@ -19,7 +19,7 @@ use crate::sources::ed::workspace_state;
 use crate::sources::ed::Ed;
 use crate::test_support::{FakeKeyd, FakeServer, Reply, Scratch};
 
-pub(super) const SLIDE_DIR: &str = "courses/COMP30026/lessons/1-week-1/03-tally";
+pub(super) const SLIDE_DIR: &str = "courses/COMP30026/Course/Lessons/1-week-1/03-tally";
 
 pub(super) fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));

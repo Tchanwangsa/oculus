@@ -221,7 +221,6 @@ mod tests {
         );
         for sib in [
             "courses/**",
-            "lectures/**",
             "canvas-session/**",
             "oculus.db*",
             "vault.bin*",

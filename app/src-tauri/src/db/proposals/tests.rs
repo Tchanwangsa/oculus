@@ -622,7 +622,7 @@ async fn cheat_tags_take_the_registry_spelling() {
         .await
         .unwrap();
     assert_eq!(tags, r#"["Formula","Grover"]"#);
-    let path = json!({"notes":[{"title":"Bad","body":"x","subject":"COMP10001","tags":["courses/A/files/x.pdf"]}]});
+    let path = json!({"notes":[{"title":"Bad","body":"x","subject":"COMP10001","tags":["courses/A/Course/Files/x.pdf"]}]});
     let q = card(&pool, t, reply(&pool, t).await, "NewCheatNotes", &path).await;
     assert!(apply(&pool, &q.id, &path).await.is_err());
 }

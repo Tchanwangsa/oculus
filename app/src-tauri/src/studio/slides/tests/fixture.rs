@@ -147,18 +147,17 @@ pub fn write(path: &Path) {
             { "page_no": 2, "markdown": "" },
         ],
     });
-    std::fs::write(
+    crate::test_support::write_creating(
         crate::parse::pages_path(path),
         serde_json::to_string_pretty(&record).unwrap(),
-    )
-    .unwrap();
+    );
 }
 
 /// One block of a page's record: kind, box, markdown.
 pub type Block = (&'static str, [f64; 4], &'static str);
 
 /// A PDF of 600x400 pt pages, each a content stream (Helvetica is `/F1`)
-/// with its record's blocks, and the `.pages.json` beside it.
+/// with its record's blocks, and its `.pages.json`.
 pub fn write_pages(path: &Path, pages: &[(String, Vec<Block>)]) {
     let mut doc = Document::with_version("1.5");
     let pages_id = doc.new_object_id();
@@ -206,9 +205,8 @@ pub fn write_pages(path: &Path, pages: &[(String, Vec<Block>)]) {
         "page_count": count,
         "pages": records,
     });
-    std::fs::write(
+    crate::test_support::write_creating(
         crate::parse::pages_path(path),
         serde_json::to_string_pretty(&record).unwrap(),
-    )
-    .unwrap();
+    );
 }

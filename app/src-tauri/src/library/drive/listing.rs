@@ -315,8 +315,3 @@ fn digits(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> String {
     }
     run
 }
-
-/// `path` relative to the data dir, `/`-separated; `None` outside it.
-pub fn data_rel(data_dir: &Path, path: &Path) -> Option<String> {
-    path.strip_prefix(data_dir).ok().map(slash_path)
-}

@@ -32,13 +32,13 @@ fn linking_replaces_stale_links_but_never_real_files() {
     // The bucket is under `agents/`; the course folder gets a link to it.
     assert!(root.join("agents/memories/fresh").is_dir());
     assert!(
-        std::fs::symlink_metadata(courses.join("fresh/agents/memories"))
+        std::fs::symlink_metadata(courses.join("fresh/.oculus/agents/memories"))
             .unwrap()
             .file_type()
             .is_symlink()
     );
     assert!(
-        courses.join("fresh/agents/memories").is_dir(),
+        courses.join("fresh/.oculus/agents/memories").is_dir(),
         "the link resolves"
     );
     // Named for the subject, so the bucket a memory lands in is unambiguous.
@@ -55,7 +55,7 @@ fn linking_replaces_stale_links_but_never_real_files() {
 #[test]
 fn memories_filed_in_a_course_folder_are_adopted() {
     let root = Scratch::new("agents-adopt");
-    let old = root.join("courses/INFO30006_2026_SM2/agents/memories");
+    let old = root.join("courses/INFO30006_2026_SM2/.oculus/agents/memories");
     std::fs::create_dir_all(&old).unwrap();
     std::fs::write(old.join("info30006-mst.md"), "the MST is week 7").unwrap();
     std::fs::write(

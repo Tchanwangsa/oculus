@@ -158,11 +158,11 @@ fn open_refuses_text_that_is_not_the_file_on_disk() {
             .code,
         Code::SessionEnded
     );
-    let other = f.root.join("courses/TEST/canvases/Other.canvas");
+    let other = f.root.join("courses/TEST/Other.canvas");
     std::fs::write(&other, "{}").unwrap();
     let error = f
         .authority
-        .open(FILE, &f.root, "courses/TEST/canvases/Other.canvas", "{}")
+        .open(FILE, &f.root, "courses/TEST/Other.canvas", "{}")
         .unwrap_err();
     assert_eq!(error.code, Code::Invalid);
 }
@@ -361,7 +361,7 @@ fn rename_keeps_the_session() {
     let f = Fixture::new("authority-rename");
     let epoch = f.open().epoch;
     let moved = f.authority.rename(FILE, "Renamed").unwrap();
-    assert_eq!(moved.relative_path, "courses/TEST/canvases/Renamed.canvas");
+    assert_eq!(moved.relative_path, "courses/TEST/Renamed.canvas");
     let ack = f.authority.commit(FILE, op("c", 1, add("b"))).unwrap();
     assert_eq!(ack.epoch, epoch);
     assert!(!f.root.join(&f.rel).exists());
@@ -386,16 +386,13 @@ fn a_notebook_shares_commits_and_renames_like_a_canvas() {
         "viewport": {"x": 0, "y": 0, "zoom": 1}, "background": "#e4e5ea",
         "paper": {"pages": [{"id": "p1", "width": 595, "height": 842, "template": "ruled"}]}}),
     );
-    assert_eq!(f.rel, "courses/TEST/notebooks/Shared.notebook");
+    assert_eq!(f.rel, "courses/TEST/Shared.notebook");
     f.open();
     let ack = f.authority.commit(FILE, op("ipad", 1, add("b"))).unwrap();
     assert_eq!(ack.revision, 1);
     assert_eq!(ids(&f.disk()), ["a", "b"]);
     let moved = f.authority.rename(FILE, "Week 4").unwrap();
-    assert_eq!(
-        moved.relative_path,
-        "courses/TEST/notebooks/Week_4.notebook"
-    );
+    assert_eq!(moved.relative_path, "courses/TEST/Week_4.notebook");
     assert_eq!(moved.file_type, "notebook");
     f.authority.commit(FILE, op("ipad", 2, add("c"))).unwrap();
     let text = std::fs::read_to_string(f.root.join(&moved.relative_path)).unwrap();
@@ -414,7 +411,7 @@ fn a_canvas_holding_paper_keeps_it_as_written_through_commits() {
         json!({"type": "oculus-canvas", "version": 1, "elements": [shape("a", 0.0)],
         "viewport": {"x": 0, "y": 0, "zoom": 1}, "background": "#ffffff", "paper": paper.clone()}),
     );
-    assert_eq!(f.rel, "courses/TEST/canvases/Shared.canvas");
+    assert_eq!(f.rel, "courses/TEST/Shared.canvas");
     f.open();
     f.authority.commit(FILE, op("ipad", 1, add("b"))).unwrap();
     let value: Value = serde_json::from_str(&f.disk()).unwrap();

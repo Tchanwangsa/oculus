@@ -169,7 +169,7 @@ describe("telling the app's writes from others'", () => {
     };
   }
 
-  const note = { id: 7, relative_path: "courses/X/documents/a.md" } as DbFile;
+  const note = { id: 7, relative_path: "courses/X/a.md" } as DbFile;
   /** `saveDocument` with no Tauri to answer: the write is issued, never lands. */
   const issue = (text: string) => saveDocument(note, text).catch(() => {});
 

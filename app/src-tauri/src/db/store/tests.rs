@@ -90,12 +90,12 @@ async fn reconciling_parse_status_keeps_failures_and_skips_and_clears_stale_runs
         .await
         .unwrap();
     let rows = [
-        ("courses/SUBJ/files/failed.pdf", "error"),
-        ("courses/SUBJ/files/skipped.pdf", "skipped"),
-        ("courses/SUBJ/files/queued.pdf", "queued"),
-        ("courses/SUBJ/files/running.pdf", "running"),
-        ("courses/SUBJ/files/gone.pdf", "quality"),
-        ("courses/SUBJ/files/done.pdf", "error"),
+        ("courses/SUBJ/Course/Files/failed.pdf", "error"),
+        ("courses/SUBJ/Course/Files/skipped.pdf", "skipped"),
+        ("courses/SUBJ/Course/Files/queued.pdf", "queued"),
+        ("courses/SUBJ/Course/Files/running.pdf", "running"),
+        ("courses/SUBJ/Course/Files/gone.pdf", "quality"),
+        ("courses/SUBJ/Course/Files/done.pdf", "error"),
     ];
     for (rel, status) in rows {
         sqlx::query(
@@ -110,9 +110,9 @@ async fn reconciling_parse_status_keeps_failures_and_skips_and_clears_stale_runs
         .unwrap();
     }
     // Only `done.pdf` has a record on disk.
-    let done = dir.join("courses/SUBJ/files/done.pdf");
+    let done = dir.join("courses/SUBJ/Course/Files/done.pdf");
     std::fs::create_dir_all(done.parent().unwrap()).unwrap();
-    std::fs::write(crate::parse::pages_path(&done), r#"{"mode":"quality"}"#).unwrap();
+    crate::test_support::write_creating(crate::parse::pages_path(&done), r#"{"mode":"quality"}"#);
 
     reconcile_parse_status(&pool, &dir).await.unwrap();
 
@@ -129,18 +129,24 @@ async fn reconciling_parse_status_keeps_failures_and_skips_and_clears_stale_runs
         }
     };
     assert_eq!(
-        status("courses/SUBJ/files/failed.pdf").await.as_deref(),
+        status("courses/SUBJ/Course/Files/failed.pdf")
+            .await
+            .as_deref(),
         Some("error")
     );
     assert_eq!(
-        status("courses/SUBJ/files/skipped.pdf").await.as_deref(),
+        status("courses/SUBJ/Course/Files/skipped.pdf")
+            .await
+            .as_deref(),
         Some("skipped")
     );
-    assert_eq!(status("courses/SUBJ/files/queued.pdf").await, None);
-    assert_eq!(status("courses/SUBJ/files/running.pdf").await, None);
-    assert_eq!(status("courses/SUBJ/files/gone.pdf").await, None);
+    assert_eq!(status("courses/SUBJ/Course/Files/queued.pdf").await, None);
+    assert_eq!(status("courses/SUBJ/Course/Files/running.pdf").await, None);
+    assert_eq!(status("courses/SUBJ/Course/Files/gone.pdf").await, None);
     assert_eq!(
-        status("courses/SUBJ/files/done.pdf").await.as_deref(),
+        status("courses/SUBJ/Course/Files/done.pdf")
+            .await
+            .as_deref(),
         Some("quality")
     );
 }
@@ -154,7 +160,7 @@ async fn file_upserts_preserve_content_time_unless_bytes_changed() {
         .unwrap();
     let row = FileRow {
         subject_id: 1,
-        relative_path: "courses/SUBJ/files/a.pdf",
+        relative_path: "courses/SUBJ/Course/Files/a.pdf",
         size_bytes: 4,
         category: "files",
         canvas_id: Some(7),
@@ -162,7 +168,7 @@ async fn file_upserts_preserve_content_time_unless_bytes_changed() {
         changed: false,
     };
     upsert_file(&pool, &row).await.unwrap();
-    let id = file_id(&pool, 1, "courses/SUBJ/files/a.pdf")
+    let id = file_id(&pool, 1, "courses/SUBJ/Course/Files/a.pdf")
         .await
         .unwrap()
         .unwrap();
@@ -365,16 +371,15 @@ async fn a_reparse_never_blanks_markdown_it_already_had() {
 #[tokio::test]
 async fn reconcile_follows_the_disk_in_both_directions() {
     let data_dir = crate::test_support::Scratch::new("reconcile");
-    let course = data_dir.join("courses/SUBJ/files");
+    let course = data_dir.join("courses/SUBJ/Course/Files");
     std::fs::create_dir_all(&course).expect("scratch library");
 
     let parsed = course.join("done.pdf");
     std::fs::write(&parsed, b"%PDF").unwrap();
-    std::fs::write(
+    crate::test_support::write_creating(
         crate::parse::pages_path(&parsed),
         r#"{"mode":"quality","parser_version":2,"page_count":1,"pages":[]}"#,
-    )
-    .unwrap();
+    );
     std::fs::write(course.join("gone.pdf"), b"%PDF").unwrap();
 
     let pool = SqlitePoolOptions::new()
@@ -394,10 +399,10 @@ async fn reconcile_follows_the_disk_in_both_directions() {
     .expect("files schema");
     sqlx::query(
         "INSERT INTO files (relative_path, parse_status) VALUES
-               ('courses/SUBJ/files/done.pdf', NULL),
+               ('courses/SUBJ/Course/Files/done.pdf', NULL),
                -- Left behind by a run that was killed mid-parse: only a live
                -- process could ever have cleared this.
-               ('courses/SUBJ/files/gone.pdf', 'running')",
+               ('courses/SUBJ/Course/Files/gone.pdf', 'running')",
     )
     .execute(&pool)
     .await
@@ -421,10 +426,12 @@ async fn reconcile_follows_the_disk_in_both_directions() {
         }
     };
     assert_eq!(
-        status("courses/SUBJ/files/done.pdf").await.as_deref(),
+        status("courses/SUBJ/Course/Files/done.pdf")
+            .await
+            .as_deref(),
         Some("quality")
     );
-    assert_eq!(status("courses/SUBJ/files/gone.pdf").await, None);
+    assert_eq!(status("courses/SUBJ/Course/Files/gone.pdf").await, None);
 }
 
 #[tokio::test]
@@ -443,7 +450,7 @@ async fn an_echo_embed_refresh_keeps_its_file_and_poster_and_cascades_with_the_s
         duration_s: Some(1358.393),
         restrict_download: false,
         has_captions: true,
-        poster_rel: Some("courses/SUBJ/images/echo-media-1.jpg".into()),
+        poster_rel: Some("courses/SUBJ/Course/Images/echo-media-1.jpg".into()),
         file_rel: None,
         extra_sources: 0,
     };
@@ -453,9 +460,13 @@ async fn an_echo_embed_refresh_keeps_its_file_and_poster_and_cascades_with_the_s
         Some(embed.clone())
     );
 
-    set_echo_embed_file(&pool, "link-a", Some("courses/SUBJ/files/Week_1.mp4"))
-        .await
-        .unwrap();
+    set_echo_embed_file(
+        &pool,
+        "link-a",
+        Some("courses/SUBJ/Course/Files/Week_1.mp4"),
+    )
+    .await
+    .unwrap();
     embed.name = "Week 1 (renamed).mp4".into();
     embed.poster_rel = None;
     upsert_echo_embed(&pool, &embed).await.unwrap();
@@ -463,15 +474,15 @@ async fn an_echo_embed_refresh_keeps_its_file_and_poster_and_cascades_with_the_s
     assert_eq!(stored.name, "Week 1 (renamed).mp4");
     assert_eq!(
         stored.file_rel.as_deref(),
-        Some("courses/SUBJ/files/Week_1.mp4")
+        Some("courses/SUBJ/Course/Files/Week_1.mp4")
     );
     assert_eq!(
         stored.poster_rel.as_deref(),
-        Some("courses/SUBJ/images/echo-media-1.jpg")
+        Some("courses/SUBJ/Course/Images/echo-media-1.jpg")
     );
     assert_eq!(
         echo_embed_file_of_media(&pool, 1, "media-1").await.unwrap(),
-        vec!["courses/SUBJ/files/Week_1.mp4".to_string()]
+        vec!["courses/SUBJ/Course/Files/Week_1.mp4".to_string()]
     );
     assert!(echo_embed_file_of_media(&pool, 1, "media-2")
         .await
@@ -566,7 +577,7 @@ async fn file_rows_follow_touch_rename_and_delete() {
     sqlx::raw_sql(
         "INSERT INTO subjects (id, code, name) VALUES (1, 'A', 'Alpha');
          INSERT INTO files (id, subject_id, filename, relative_path, file_type, size_bytes)
-           VALUES (9, 1, 'Plan.canvas', 'courses/A/canvases/Plan.canvas', 'canvas', 10);
+           VALUES (9, 1, 'Plan.canvas', 'courses/A/Plan.canvas', 'canvas', 10);
          INSERT INTO pages (file_id, page_no) VALUES (9, 1);
          INSERT INTO document_versions (file_id, kind, text, hash) VALUES (9, 'auto', '', '');",
     )
@@ -602,13 +613,13 @@ async fn file_rows_follow_touch_rename_and_delete() {
     let (size, _, _, flags) = row(pool.clone()).await.unwrap();
     assert_eq!((size, flags), (43, (true, true, true)));
 
-    rename_file_row(&pool, 9, "Next.canvas", "courses/A/canvases/Next.canvas")
+    rename_file_row(&pool, 9, "Next.canvas", "courses/A/Next.canvas")
         .await
         .unwrap();
     let (_, filename, rel, _) = row(pool.clone()).await.unwrap();
     assert_eq!(
         (filename.as_str(), rel.as_str()),
-        ("Next.canvas", "courses/A/canvases/Next.canvas")
+        ("Next.canvas", "courses/A/Next.canvas")
     );
 
     delete_file_row(&pool, 9).await.unwrap();
@@ -621,4 +632,55 @@ async fn file_rows_follow_touch_rename_and_delete() {
                 .unwrap();
         assert_eq!(left, 0, "{table}");
     }
+}
+
+#[tokio::test]
+async fn a_recordings_folder_is_chosen_once_and_kept() {
+    let pool = migrated_pool().await;
+    let data_dir = crate::test_support::Scratch::new("recording-folder");
+    sqlx::query("INSERT INTO subjects (id, code, name) VALUES (1, 'MULT20015_2026_SM2', 'M')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for (id, lesson, date) in [
+        ("a", "la", "2026-07-27T11:05:00.000"),
+        ("b", "lb", "2026-07-27T14:05:00.000"),
+        ("c", "lc", "2026-07-28T11:05:00.000"),
+    ] {
+        sqlx::query(
+            "INSERT INTO lectures (id, lesson_id, subject_id, title, date)
+             VALUES (?1, ?2, 1, 'MULT20015_2026_SM2 MO L105', ?3)",
+        )
+        .bind(id)
+        .bind(lesson)
+        .bind(date)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let base = "courses/MULT20015_2026_SM2/Course/Recordings";
+
+    assert_eq!(recorded_folder(&pool, "a").await.unwrap(), None);
+    let a = recording_folder(&pool, &data_dir, "a").await.unwrap();
+    assert_eq!(a, format!("{base}/2026-07-27-mo-l105"));
+    // Same day, same title: the second steps aside.
+    let b = recording_folder(&pool, &data_dir, "b").await.unwrap();
+    assert_eq!(b, format!("{base}/2026-07-27-mo-l105-2"));
+    // A folder already on disk is someone's too.
+    std::fs::create_dir_all(data_dir.join(base).join("2026-07-28-mo-l105")).unwrap();
+    let c = recording_folder(&pool, &data_dir, "c").await.unwrap();
+    assert_eq!(c, format!("{base}/2026-07-28-mo-l105-2"));
+
+    // A later title change never moves it.
+    sqlx::query("UPDATE lectures SET title = 'Renamed' WHERE id = 'a'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(recording_folder(&pool, &data_dir, "a").await.unwrap(), a);
+    assert_eq!(recorded_folder(&pool, "a").await.unwrap(), Some(a.clone()));
+    assert_eq!(
+        recording_dir(&pool, &data_dir, "a").await.unwrap(),
+        data_dir.join(&a)
+    );
+    assert!(recording_folder(&pool, &data_dir, "missing").await.is_err());
 }

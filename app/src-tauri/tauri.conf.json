@@ -29,12 +29,14 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": [
-          "$APPDATA/courses/**",
-          "$APPDATA/lectures/**",
-          "$APPDATA/agents/**",
-          "$APPDATA/studio/videos/**"
-        ]
+        "scope": {
+          "allow": [
+            "$APPDATA/courses/**",
+            "$APPDATA/agents/**",
+            "$APPDATA/studio/videos/**"
+          ],
+          "requireLiteralLeadingDot": false
+        }
       }
     }
   },

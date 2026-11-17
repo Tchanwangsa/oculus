@@ -22,7 +22,7 @@ export function embedKind(path: string): "image" | "html" | null {
   return null;
 }
 
-/** `path` is data-dir-relative (`agents/…`, `courses/…`, `lectures/…`). */
+/** `path` is data-dir-relative (`agents/…`, `courses/…`). */
 export function OutputEmbed({ path, alt }: { path: string; alt?: string }) {
   const kind = embedKind(path);
   if (kind === "image") return <EmbedImage path={path} alt={alt} />;

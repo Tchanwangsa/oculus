@@ -978,6 +978,19 @@ INSERT OR IGNORE INTO task_tags (name, color, position) VALUES
             sql: include_str!("../harness/store/search.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 63,
+            description: "lectures: the recording's folder",
+            // Data-dir-relative, chosen once by `store::recording_folder` when
+            // the folder is first needed; NULL until then. Unique ignoring
+            // case, as the folders it names are on disk.
+            sql: r#"
+ALTER TABLE lectures ADD COLUMN folder_rel TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS lectures_folder_rel
+    ON lectures(folder_rel COLLATE NOCASE) WHERE folder_rel IS NOT NULL;
+                        "#,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

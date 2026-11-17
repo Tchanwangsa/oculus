@@ -77,11 +77,11 @@ describe("checklistProgress", () => {
 
 describe("fileFolder", () => {
   test("the folder under the subject", () => {
-    expect(fileFolder("courses/MULT20015_2026_SM2/files/week-1/notes.pdf")).toBe("files/week-1");
-    expect(fileFolder("courses/ABCD1_2026_SM1/documents/essay.md")).toBe("documents");
+    expect(fileFolder("courses/MULT20015_2026_SM2/Course/Files/week-1/notes.pdf")).toBe("Course/Files/week-1");
+    expect(fileFolder("courses/ABCD1_2026_SM1/Exam prep/essay.md")).toBe("Exam prep");
   });
 
   test("a file at the subject's top has no folder", () => {
-    expect(fileFolder("courses/ABCD1_2026_SM1/syllabus.md")).toBe("");
+    expect(fileFolder("courses/ABCD1_2026_SM1/essay.md")).toBe("");
   });
 });

@@ -260,8 +260,8 @@ no explanation of Oculus. Everything but the CLI reference is written by
   .agents/skills/<name> → ../../skills/<name>
 <data>/courses/<code>/
   AGENTS.md → ../../agents/AGENTS.md
-  agents/INSTRUCTIONS.md         hand-written; nothing writes it
-  agents/memories → ../../../agents/memories/<code>
+  .oculus/agents/INSTRUCTIONS.md hand-written; nothing writes it
+  .oculus/agents/memories → ../../../../agents/memories/<code>
 ```
 
 Each file has one of four lifetimes:

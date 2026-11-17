@@ -14,7 +14,7 @@ use crate::sources::ed::workspace_state::{self, WorkspaceState};
 use crate::sources::ed::Ed;
 use crate::test_support::{FakeKeyd, FakeServer, Reply, Scratch};
 
-const SLIDE_DIR: &str = "courses/COMP30026/lessons/1-week-1/03-tally";
+const SLIDE_DIR: &str = "courses/COMP30026/Course/Lessons/1-week-1/03-tally";
 
 fn fake_ed(dir: &Path) -> FakeKeyd {
     FakeKeyd::start(dir, |_, _| {

@@ -7,7 +7,7 @@ import { formatPages, formatTimes, type InfoEntry } from "@/lib/harness/threadIn
 import { parsedSourceOf } from "@/lib/citations/parse";
 import { InfoRow } from "./InfoRow";
 import { openTarget } from "./openTarget";
-import { RECORDINGS_PREFIX } from "@/lib/files/libraryLayout";
+import { recordingOf } from "@/lib/files/libraryLayout";
 
 const ICON = 15;
 const base = (p: string) => p.replace(/\/+$/, "").split("/").pop() ?? p;
@@ -38,7 +38,7 @@ function look(entry: InfoEntry, lectureTitle: (id: string) => string | undefined
   }
   const file = pathFile(parsedSourceOf(path) ?? path);
   const { Icon, tone } = fileReferenceAppearance(file, path);
-  const lecture = new RegExp(`${RECORDINGS_PREFIX}([^/]+)$`).exec(path)?.[1];
+  const lecture = recordingOf(path) === path ? path : null;
   const label = lecture
     ? (lectureTitle(lecture) ?? "Lecture")
     : path.endsWith("/")

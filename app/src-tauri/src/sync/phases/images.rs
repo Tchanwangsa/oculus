@@ -3,15 +3,14 @@
 use crate::library::layout::{self, SyncedKind};
 use crate::library::paths;
 use crate::pages::md::{self, ImageMap};
-use crate::sync::render::{content_type_of, up_to_course_root};
+use crate::sync::render::content_type_of;
 use crate::sync::{Engine, Subject, IMAGE_EXT};
 
 impl Engine {
     /// Convert a body to Markdown with its inline images downloaded to the
-    /// course's `images/`. Image `src` resolves against the document at
-    /// `out_path`, so nested documents climb back to the course root.
+    /// course's synced images folder. Image `src` is relative to the
+    /// document at `out_path` (subject-relative).
     pub(in crate::sync) fn convert(&self, html: &str, c: &Subject, out_path: &str) -> String {
-        let up = up_to_course_root(out_path);
         let mut images = ImageMap::new();
         for (endpoint, src) in md::image_refs(html) {
             if src.is_empty() || images.contains_key(&src) {
@@ -19,7 +18,7 @@ impl Engine {
             }
             match self.fetch_image(c, &endpoint) {
                 Ok(Some(path)) => {
-                    images.insert(src, format!("{up}{path}"));
+                    images.insert(src, layout::link_between(out_path, &path));
                 }
                 Ok(None) => {}
                 Err(e) => self
@@ -30,7 +29,7 @@ impl Engine {
         md::to_markdown(html, &images)
     }
 
-    /// Returns `images/…`, not yet adjusted for the document's depth.
+    /// Returns the image's subject-relative path.
     fn fetch_image(&self, c: &Subject, endpoint: &str) -> Result<Option<String>, String> {
         let r = self.canvas.get(endpoint)?;
         if !r.ok() {
@@ -44,7 +43,7 @@ impl Engine {
             .find(|(k, _)| *k == ct)
             .map(|(_, v)| *v)
             .unwrap_or("png");
-        // Without an id every image would be `images/0.png`.
+        // Without an id every image would be `Course/Images/0.png`.
         let fid = info["id"].as_i64().unwrap_or_else(|| {
             endpoint
                 .rsplit('/')

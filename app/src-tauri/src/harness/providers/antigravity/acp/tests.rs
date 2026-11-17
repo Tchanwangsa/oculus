@@ -75,7 +75,6 @@ macro_rules! protected_rule {
 
 protected_rule! {
     courses_is_refused_unseen: "courses" => "courses/maths/notes.md";
-    lectures_is_refused_unseen: "lectures" => "lectures/abc/transcript.vtt";
     canvas_session_is_refused_unseen: "canvas-session" => "canvas-session/cookies";
     agents_skills_is_refused_unseen: "skills" => "agents/skills/oculus/SKILL.md";
     agents_claude_is_refused_unseen: ".claude" => "agents/.claude/settings.json";
@@ -112,7 +111,7 @@ fn the_library_its_folders_above_and_agents_itself_are_refused_unseen() {
     }
     // Spelt with other case, or through `..`, it is the same folder.
     assert!(refused("/lib/oculus/Courses/x.md"));
-    assert!(refused("/lib/oculus/agents/../lectures/x"));
+    assert!(refused("/lib/oculus/agents/../courses/x"));
     assert!(refused("../courses/x.md"), "relative to the chat's folder");
 }
 

@@ -48,12 +48,26 @@ impl Ctx {
             println!("  {} lecture(s)", lectures.len());
 
             for l in &lectures {
-                let dir = app_lib::sources::echo360::lecture_dir(&self.data_dir, &l.id)?;
                 let date = l.date.chars().take(10).collect::<String>();
+                // The recording folder is chosen only when something is about
+                // to be written into it (`store::recording_folder`).
+                let recorded = self
+                    .rt
+                    .block_on(store::recorded_folder(&pool, &l.id))?
+                    .map(|f| app_lib::library::layout::recording_dir(&self.data_dir, &f))
+                    .transpose()?;
+                let folder = || {
+                    self.rt
+                        .block_on(store::recording_dir(&pool, &self.data_dir, &l.id))
+                };
 
                 if args.transcripts {
-                    let path = dir.join("transcript.vtt");
-                    if !path.exists() {
+                    let have = recorded
+                        .as_ref()
+                        .is_some_and(|dir| dir.join("transcript.vtt").exists());
+                    if !have {
+                        let dir = folder()?;
+                        let path = dir.join("transcript.vtt");
                         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
                         match app_lib::sources::echo360::transcript(&session, &l.lesson_id, &l.id) {
                             Ok(vtt) => {
@@ -73,10 +87,14 @@ impl Ctx {
 
                 if let Some(ffmpeg) = &ffmpeg {
                     // Source 1 only (the Presenter screen); the app fetches room cameras on demand.
-                    let final_ = app_lib::sources::echo360::source_path(&dir, 1);
-                    if final_.exists() {
+                    let have = recorded
+                        .as_ref()
+                        .is_some_and(|dir| app_lib::sources::echo360::source_path(dir, 1).exists());
+                    if have {
                         continue;
                     }
+                    let dir = folder()?;
+                    let final_ = app_lib::sources::echo360::source_path(&dir, 1);
                     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
                     let raw = app_lib::sources::echo360::partial_path(&dir, 1);
                     print!("  {}       {date}  {} ", paint("video", DIM), l.title);

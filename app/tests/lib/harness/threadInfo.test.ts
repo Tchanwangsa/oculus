@@ -27,7 +27,7 @@ function row(kind: HarnessItem["kind"], content: string | null, meta?: object, t
 const tool = (kind: string, input: object, ok: boolean | null = true, content: string | null = null) =>
   row("tool", content, { kind, name: kind, input, ok });
 
-const info = (items: HarnessItem[], lectureId?: string) => deriveThreadInfo(items, { threadId: 7, lectureId });
+const info = (items: HarnessItem[], lectureFolder?: string) => deriveThreadInfo(items, { threadId: 7, lectureFolder });
 
 describe("page ranges", () => {
   test("parses single pages, spans, lists and open ends", () => {
@@ -70,33 +70,33 @@ describe("page ranges", () => {
 describe("Read", () => {
   test("one row per file: a parsed .md is its PDF, and pages from every read merge", () => {
     const { read } = info([
-      row("tool", "oculus read", { kind: "oculus_cli", input: { command: "oculus read courses/COMP30024/files/week-7-search.pdf -p 12-15" }, ok: true }),
-      tool("read", { file_path: `${DATA}/courses/COMP30024/files/week-7-search.md` }),
-      row("tool", "oculus read", { kind: "oculus_cli", input: { command: "oculus read courses/COMP30024/files/week-7-search.pdf --pages 16-19" }, ok: true }),
+      row("tool", "oculus read", { kind: "oculus_cli", input: { command: "oculus read courses/COMP30024/Course/Files/week-7-search.pdf -p 12-15" }, ok: true }),
+      tool("read", { file_path: `${DATA}/courses/COMP30024/Course/Files/week-7-search.md` }),
+      row("tool", "oculus read", { kind: "oculus_cli", input: { command: "oculus read courses/COMP30024/Course/Files/week-7-search.pdf --pages 16-19" }, ok: true }),
     ]);
     expect(read).toHaveLength(1);
-    expect(read[0].key).toBe("courses/COMP30024/files/week-7-search.pdf");
+    expect(read[0].key).toBe("courses/COMP30024/Course/Files/week-7-search.pdf");
     expect(formatPages(read[0].pages)).toBe("pp. 12–19");
-    expect(read[0].target).toEqual({ kind: "library", path: "courses/COMP30024/files/week-7-search.pdf", page: 12 });
+    expect(read[0].target).toEqual({ kind: "library", path: "courses/COMP30024/Course/Files/week-7-search.pdf", page: 12 });
   });
 
   test("most recently touched first; touching again moves a file up", () => {
     const { read } = info([
-      tool("read", { file_path: "../courses/A/pages/one.md" }),
-      tool("read", { file_path: "../courses/A/pages/two.md" }),
-      tool("read", { file_path: "../courses/A/pages/one.md" }),
+      tool("read", { file_path: "../courses/A/Course/Pages/one.md" }),
+      tool("read", { file_path: "../courses/A/Course/Pages/two.md" }),
+      tool("read", { file_path: "../courses/A/Course/Pages/one.md" }),
     ]);
-    expect(read.map((e) => e.key)).toEqual(["courses/A/pages/one.md", "courses/A/pages/two.md"]);
+    expect(read.map((e) => e.key)).toEqual(["courses/A/Course/Pages/one.md", "courses/A/Course/Pages/two.md"]);
   });
 
   test("@ mentions and attachments in the student's messages and steers count", () => {
     const { read } = info([
-      row("user", "Explain `courses/A/files/slides.pdf#page=4` and `./attachments/notes.pdf`"),
-      row("steer", "also `courses/A/pages/`"),
+      row("user", "Explain `courses/A/Course/Files/slides.pdf#page=4` and `./attachments/notes.pdf`"),
+      row("steer", "also `courses/A/Course/Pages/`"),
     ]);
     expect(read.map((e) => e.key)).toEqual([
-      "courses/A/pages/",
-      "courses/A/files/slides.pdf",
+      "courses/A/Course/Pages/",
+      "courses/A/Course/Files/slides.pdf",
       "agents/attachments/notes.pdf",
     ]);
     expect(formatPages(read[1].pages)).toBe("p. 4");
@@ -104,42 +104,42 @@ describe("Read", () => {
 
   test("a shell reader's library paths count; the agent's own skills and memories do not", () => {
     const { read } = info([
-      tool("bash", { command: "sed -n 1,80p ../courses/A/pages/brief.md | head -5" }),
+      tool("bash", { command: "sed -n 1,80p ../courses/A/Course/Pages/brief.md | head -5" }),
       tool("read", { file_path: `${DATA}/agents/.claude/skills/oculus-library/SKILL.md` }),
       tool("read", { file_path: `${DATA}/agents/memories/MEMORY.md` }),
       tool("bash", { command: "cat AGENTS.md" }),
     ]);
-    expect(read.map((e) => e.key)).toEqual(["courses/A/pages/brief.md"]);
+    expect(read.map((e) => e.key)).toEqual(["courses/A/Course/Pages/brief.md"]);
   });
 
   test("failed and refused calls read nothing; a running read counts", () => {
     const { read } = info([
-      tool("read", { file_path: "../courses/A/pages/denied.md" }, false),
-      tool("read", { file_path: "../courses/A/pages/running.md" }, null),
+      tool("read", { file_path: "../courses/A/Course/Pages/denied.md" }, false),
+      tool("read", { file_path: "../courses/A/Course/Pages/running.md" }, null),
     ]);
-    expect(read.map((e) => e.key)).toEqual(["courses/A/pages/running.md"]);
+    expect(read.map((e) => e.key)).toEqual(["courses/A/Course/Pages/running.md"]);
   });
 
   test("a lecture thread's lecture leads, with the moments asked at", () => {
     const { read } = info(
       [
-        tool("read", { file_path: "../courses/A/files/deck.pdf" }),
+        tool("read", { file_path: "../courses/A/Course/Files/deck.pdf" }),
         row("user", "what is this?", { at: 740 }),
-        tool("read", { file_path: `${DATA}/lectures/lec-1/transcript.vtt` }),
+        tool("read", { file_path: `${DATA}/courses/A/Course/Recordings/2026-08-04-lec-1/transcript.vtt` }),
         row("user", "and this?", { at: 1865 }),
-        tool("read", { file_path: "../courses/A/pages/after.md" }),
+        tool("read", { file_path: "../courses/A/Course/Pages/after.md" }),
       ],
-      "lec-1",
+      "courses/A/Course/Recordings/2026-08-04-lec-1",
     );
-    expect(read.map((e) => e.key)).toEqual(["lectures/lec-1", "courses/A/pages/after.md", "courses/A/files/deck.pdf"]);
+    expect(read.map((e) => e.key)).toEqual(["courses/A/Course/Recordings/2026-08-04-lec-1", "courses/A/Course/Pages/after.md", "courses/A/Course/Files/deck.pdf"]);
     expect(read[0].pinned).toBe(true);
     expect(formatTimes(read[0].times)).toBe("12:20–31:05");
-    expect(read[0].target).toEqual({ kind: "library", path: "lectures/lec-1", at: 1865 });
+    expect(read[0].target).toEqual({ kind: "library", path: "courses/A/Course/Recordings/2026-08-04-lec-1", at: 1865 });
   });
 
   test("the lecture shows before any message, and other threads' rows are ignored", () => {
-    const { read } = info([row("user", "`courses/B/pages/x.md`", undefined, 8)], "lec-2");
-    expect(read.map((e) => e.key)).toEqual(["lectures/lec-2"]);
+    const { read } = info([row("user", "`courses/B/Course/Pages/x.md`", undefined, 8)], "courses/A/Course/Recordings/2026-08-05-lec-2");
+    expect(read.map((e) => e.key)).toEqual(["courses/A/Course/Recordings/2026-08-05-lec-2"]);
   });
 });
 

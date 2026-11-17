@@ -1,5 +1,5 @@
 import { parsedMdSource } from "@/lib/files/fileTypes";
-import { FILES_DIR, OWN_DIRS, inFolder, isCoursePath } from "@/lib/files/libraryLayout";
+import { COURSE_DIR, FILES_DIR, SYNCED_DIR_NAMES, inFolder, isCoursePath } from "@/lib/files/libraryLayout";
 
 /** 1-based, inclusive. */
 export interface LineRange {
@@ -15,7 +15,7 @@ export interface CiteLocation {
 }
 
 /** A citation whose file is known: `path` is data-dir-relative, under
- *  `courses/`, `agents/` or `lectures/`. */
+ *  `courses/` or `agents/`. */
 export interface Citation extends CiteLocation {
   path: string;
 }
@@ -30,11 +30,11 @@ export type CitationShape =
  *  `#page=12`, or a lecture moment `#t=723`. */
 const SUFFIX = /(?::L?(\d+)(?:-L?(\d+))?|#L(\d+)(?:-L?(\d+))?|#page=(\d+)|#t=(\d+(?:\.\d+)?))$/;
 
-export const ROOTS = "(?:courses|agents|lectures)";
+export const ROOTS = "(?:courses|agents)";
 
 /** From the filesystem root, cut at the data dir (`IDENTIFIER` in
  *  `app/src-tauri/src/library/paths/mod.rs`); any `/…/courses/…` also counts, but
- *  `agents/` and `lectures/` are common names elsewhere. May hold spaces
+ *  `agents/` is a common name elsewhere. May hold spaces
  *  ("Application Support"), so `COMMAND` keeps a command a command. */
 const ABSOLUTE = new RegExp(`^\\/.*?\\/com\\.tchan\\.oculus\\/(${ROOTS}\\/.+)$`);
 const ABSOLUTE_COURSES = /^\/.*?\/(courses\/.+)$/;
@@ -46,10 +46,11 @@ const RELATIVE = new RegExp(`^(?:\\.\\.\\/)?(${ROOTS}\\/\\S+)$`);
 /** Relative to the agent's cwd (`agents/`). */
 const AGENT_CWD = /^(?:\.\/(\S+)|((?:attachments|outputs)\/\S+))$/;
 
-/** A course-relative path: one of `CATEGORY_FOLDERS` (`openFile.ts`) or the
- *  student's `uploads/`, ending in an extension. */
-const COURSE_RELATIVE =
-  /^(?:pages|assignments|quizzes|announcements|ed|files|modules|images|documents|uploads)\/\S+\.[A-Za-z0-9]+$/;
+/** A course-relative path into one of the synced folders
+ *  (`Course/Files/…`), ending in an extension. */
+const COURSE_RELATIVE = new RegExp(
+  `^${COURSE_DIR}\\/(?:${SYNCED_DIR_NAMES.join("|")})\\/\\S+\\.[A-Za-z0-9]+$`,
+);
 
 /** A bare filename with a document or picture extension. */
 const BARE_NAME =
@@ -132,9 +133,10 @@ export function citationText(c: Citation): string {
   return c.page ? `${c.path}#page=${c.page}` : c.path;
 }
 
-/** A parse artifact the student knows by its source: a `.md` under a course's
- *  `files/` or `uploads/` → the PDF or Office file it came from. */
+/** A parse artifact the student knows by its source: a `.md` in a course's
+ *  synced `Files/` → the PDF or Office file it came from. Among the
+ *  student's own files a `.md` is as likely a note, so it is taken as itself. */
 export function parsedSourceOf(path: string): string | null {
-  if (!isCoursePath(path) || !(inFolder(path, FILES_DIR) || inFolder(path, OWN_DIRS.upload))) return null;
+  if (!isCoursePath(path) || !inFolder(path, FILES_DIR)) return null;
   return parsedMdSource(path);
 }

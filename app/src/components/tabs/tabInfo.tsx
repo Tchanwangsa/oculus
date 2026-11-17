@@ -30,7 +30,8 @@ import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { displayCode, humanizeSlug } from "@/lib/format/format";
 import { SETTINGS_PAGES } from "@/lib/search/settings";
 import type { Subject } from "@/lib/db";
-import { OWN_DIRS, inFolder } from "@/lib/files/libraryLayout";
+import { isOwnPath } from "@/lib/files/libraryLayout";
+import { pathFile } from "@/lib/files/pathCategory";
 
 const SECTION_LABELS: Record<string, string> = {
   modules: "Modules",
@@ -167,11 +168,12 @@ export function tabInfo(
     if (m[2] === "file") {
       const rel = new URLSearchParams(search).get("path");
       const base = rel?.split("/").pop();
-      if (base && rel && inFolder(rel, OWN_DIRS.canvas))
+      const own = rel && isOwnPath(rel) ? pathFile(rel).category : null;
+      if (base && own === "canvas")
         return { title: base.replace(/\.canvas$/i, ""), icon: <Scribble size={size} /> };
-      if (base && rel && inFolder(rel, OWN_DIRS.notebook))
+      if (base && own === "notebook")
         return { title: base.replace(/\.notebook$/i, ""), icon: <Notebook size={size} /> };
-      if (base && rel && inFolder(rel, OWN_DIRS.document))
+      if (base && own === "document")
         return { title: base.replace(/\.md$/i, ""), icon };
       if (base)
         return { title: humanizeSlug(base.replace(/\.pdf$/i, "")), icon };

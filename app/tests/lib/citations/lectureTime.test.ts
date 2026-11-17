@@ -7,15 +7,15 @@ import {
 import { resolvedNow } from "@/lib/citations/resolve";
 import { lecturePagePath } from "@/lib/lectures/pagePath";
 test("lecture time survives parsing, resolution and copying", () => {
-  const shape = parseCitation("lectures/recording-1#t=723.5")!;
+  const shape = parseCitation("courses/X/Course/Recordings/2026-08-04-intro#t=723.5")!;
   expect(shape).toMatchObject({
     kind: "path",
-    path: "lectures/recording-1",
+    path: "courses/X/Course/Recordings/2026-08-04-intro",
     at: 723.5,
   });
   expect(resolvedNow(shape)).toMatchObject({ at: 723.5 });
-  expect(citationText(fullCitation("lectures/recording-1#t=723.5")!)).toBe(
-    "lectures/recording-1#t=723.5",
+  expect(citationText(fullCitation("courses/X/Course/Recordings/2026-08-04-intro#t=723.5")!)).toBe(
+    "courses/X/Course/Recordings/2026-08-04-intro#t=723.5",
   );
 });
 test("lecture time routes preserve zero and omit invalid values", () => {

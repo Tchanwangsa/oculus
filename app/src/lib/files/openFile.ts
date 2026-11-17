@@ -3,13 +3,13 @@ import { useTabStore } from "@/stores/shell/tabStore";
 import { openBeside, openLink } from "@/lib/shell/tabRouters";
 import { displayCode, humanizeSlug } from "@/lib/format/format";
 import { isLessonAsset, isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath, parsedMdSource } from "@/lib/files/fileTypes";
-import { getFileByRelativePath, getLecture, markFileAccessed, type DbFile } from "@/lib/db";
+import { getFileByRelativePath, getLectureByFolder, markFileAccessed, type DbFile } from "@/lib/db";
 import { isWebUrl } from "@/lib/browser";
 import { libraryLinkTarget } from "@/lib/files/libraryLinks";
 import { readCourseFile } from "@/lib/files/courseFiles";
 import { lecturePagePath } from "@/lib/lectures";
 import { citedPage, fullCitation, quoteFromLines, type Citation } from "@/lib/citations";
-import { RECORDINGS_PREFIX, isCoursePath } from "@/lib/files/libraryLayout";
+import { isCoursePath, recordingOf } from "@/lib/files/libraryLayout";
 
 /** Categories whose rows carry real filenames, not Canvas slugs. */
 const REAL_FILENAME = new Set(["file", "image", "upload"]);
@@ -26,7 +26,7 @@ export function fileTitle(file: Pick<DbFile, "category" | "filename">): string {
     : humanizeSlug(file.filename);
 }
 
-/** A folder path's (`courses/<CODE>/pages/`) display name: a subject's own
+/** A folder path's (`courses/<CODE>/Course/Pages/`) display name: a subject's own
  *  folder by its code, any other humanised. */
 export function folderTitle(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");
@@ -157,7 +157,7 @@ let locateSeq = 0;
 /**
  * Opens a citation. A course file opens in the side panel at the cited spot
  * (`citationLocate`); a path with no row, an `agents/` file, or a binary goes
- * to the system viewer; `lectures/<id>/…` opens the lecture. `newTab` is the
+ * to the system viewer; a path in a lecture's recording folder opens the lecture. `newTab` is the
  * ⌘-click, answered here rather than through `data-tab-href` because the
  * route is a database lookup away. Pictures under `agents/` are the caller's
  * to show (the lightbox in `components/markdown/Citation.tsx`).
@@ -168,9 +168,9 @@ export function openCitation(cite: Citation, newTab = false): void {
 
 async function openCitationAsync(cite: Citation, newTab: boolean): Promise<void> {
   const system = () => invoke<void>("open_course_file", { relativePath: cite.path });
-  const lectureId = new RegExp(`${RECORDINGS_PREFIX}([^/]+)(?:/|$)`).exec(cite.path)?.[1];
-  if (lectureId) {
-    const lecture = await getLecture(lectureId);
+  const folder = recordingOf(cite.path);
+  if (folder) {
+    const lecture = await getLectureByFolder(folder);
     if (!lecture) return system();
     if (newTab) useTabStore.getState().addTab(lecturePagePath(lecture, cite.at));
     else openBeside(lecturePagePath(lecture, cite.at));

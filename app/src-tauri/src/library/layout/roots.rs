@@ -12,7 +12,7 @@ pub const COURSES_DIR: &str = "courses";
 /// media server may serve, and a picture may be imported from.
 pub fn library_roots() -> Vec<&'static str> {
     std::iter::once(COURSES_DIR)
-        .chain(CURRENT.recordings_root)
+        .chain(CURRENT.recordings_root())
         .collect()
 }
 
@@ -51,4 +51,20 @@ pub fn split_course(rel: &str) -> Option<(&str, &str)> {
 /// display and for module TOC links.
 pub fn within_course(rel: &str) -> &str {
     split_course(rel).map_or(rel, |(_, inner)| inner)
+}
+
+/// The relative link from the file at `from` to the one at `to`, both
+/// spelled from one root (both subject-relative, or both data-dir-relative):
+/// `Course/Modules/01-intro.md` → `Course/Files/a.pdf` is `../Files/a.pdf`.
+pub fn link_between(from: &str, to: &str) -> String {
+    let from_dir: Vec<&str> = from.split('/').collect();
+    let from_dir = &from_dir[..from_dir.len() - 1];
+    let to_parts: Vec<&str> = to.split('/').collect();
+    let shared = from_dir
+        .iter()
+        .zip(&to_parts)
+        .take_while(|(a, b)| a == b)
+        .count()
+        .min(to_parts.len() - 1);
+    "../".repeat(from_dir.len() - shared) + &to_parts[shared..].join("/")
 }

@@ -24,7 +24,7 @@ struct Page {
     data: std::path::PathBuf,
 }
 
-const SOURCE: &str = "courses/T/files/figs.pdf";
+const SOURCE: &str = "courses/T/Course/Files/figs.pdf";
 
 fn pages() -> Page {
     let scratch = Scratch::new("slide-snap");

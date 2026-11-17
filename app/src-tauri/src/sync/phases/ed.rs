@@ -34,7 +34,7 @@ impl Engine {
         }
     }
 
-    /// The board into `ed/*.md`, one thread per file, each with its page in
+    /// The board into `Course/Discussion/*.md`, one thread per file, each with its page in
     /// Ed as the file's source.
     fn scrape_ed_threads(&self, c: &Subject, course_id: i64) -> Result<(), String> {
         let threads = self.ed.threads(course_id)?;

@@ -9,7 +9,7 @@ const SUBJECT = { id: 42, code: "COMP10001_2026_SM2" };
 function outcome(filename: string, error: string | null = null): ImportOutcome {
   return {
     source: filename,
-    file: { filename, relative_path: `courses/${SUBJECT.code}/uploads/${filename}`, file_type: "x", size_bytes: 10 },
+    file: { filename, relative_path: `courses/${SUBJECT.code}/${filename}`, file_type: "x", size_bytes: 10 },
     error,
   };
 }
@@ -51,7 +51,7 @@ describe("recording downloads saved in Oculus", () => {
   });
 
   test("a list replayed after a reload records nothing already in the database", async () => {
-    const { record, written } = harness([`courses/${SUBJECT.code}/uploads/a.pdf`]);
+    const { record, written } = harness([`courses/${SUBJECT.code}/a.pdf`]);
     await record([saved(1, outcome("a.pdf")), saved(2, outcome("b.pdf"))]);
     expect(written).toEqual(["b.pdf"]);
   });

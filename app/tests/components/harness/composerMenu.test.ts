@@ -93,14 +93,14 @@ describe("skill chunks", () => {
   });
 
   test("a folder chip round-trips with its trailing slash", () => {
-    const text = "list `courses/MAST20004/pages/` please";
+    const text = "list `courses/MAST20004/Course/Pages/` please";
     const chunks = normalize(toChunks(text, known));
-    expect(chunks.filter((c) => c.kind === "chip")).toEqual([{ kind: "chip", path: "courses/MAST20004/pages/" }]);
+    expect(chunks.filter((c) => c.kind === "chip")).toEqual([{ kind: "chip", path: "courses/MAST20004/Course/Pages/" }]);
     expect(chunksText(chunks)).toBe(text);
   });
 
   test("mentions and skills share a sentence", () => {
-    const text = "/oculus-plan using `courses/MAST20004/pages/week-1.md`";
+    const text = "/oculus-plan using `courses/MAST20004/Course/Pages/week-1.md`";
     const chunks = normalize(toChunks(text, known));
     expect(chunks.map((c) => c.kind)).toEqual(["text", "skill", "text", "chip"]);
     expect(chunksText(chunks)).toBe(text);
@@ -116,7 +116,7 @@ describe("menuContent", () => {
     userInvocable: true,
   });
   const commands = composerCommands();
-  const file = { id: 1, subject_id: 1, subject_code: "M", filename: "a.md", relative_path: "courses/M/pages/a.md", category: "page" } as MentionFile;
+  const file = { id: 1, subject_id: 1, subject_code: "M", filename: "a.md", relative_path: "courses/M/Course/Pages/a.md", category: "page" } as MentionFile;
 
   test("groups commands then skills", () => {
     const { groups, note } = menuContent({ trigger: { kind: "slash", query: "", start: 0 }, library: null, slow: false, commands, skills: [skill("oculus-plan")] });
@@ -133,17 +133,17 @@ describe("menuContent", () => {
   });
 
   test("lists folders before files on @", () => {
-    const folder = { path: "courses/M/pages/", name: "pages", subject_id: 1, subject_code: "M" };
+    const folder = { path: "courses/M/Course/Pages/", name: "pages", subject_id: 1, subject_code: "M" };
     const { groups } = menuContent({ trigger: { kind: "mention", query: "", start: 0 }, library: { folders: [folder], files: [file], unparsed: 0 }, slow: false, commands, skills: [] });
     expect(groups[0].rows.map((i) => i.kind)).toEqual(["folder", "file"]);
   });
 
   test("an opened folder shows its subfolders, then its files, one level in", () => {
     const folder = (path: string, name: string) => ({ path, name, subject_id: 1, subject_code: "M" });
-    const files = folder("courses/M/files/", "files");
-    const week = folder("courses/M/files/Week_1/", "Week_1");
-    const inside = { ...file, id: 2, relative_path: "courses/M/files/syllabus.pdf" };
-    const deep = { ...file, id: 3, relative_path: "courses/M/files/Week_1/notes.pdf" };
+    const files = folder("courses/M/Course/Files/", "files");
+    const week = folder("courses/M/Course/Files/Week_1/", "Week_1");
+    const inside = { ...file, id: 2, relative_path: "courses/M/Course/Files/syllabus.pdf" };
+    const deep = { ...file, id: 3, relative_path: "courses/M/Course/Files/Week_1/notes.pdf" };
     const rows = (opened: Map<string, { folders: (typeof files)[]; files: MentionFile[]; more: number }>) =>
       menuContent({ trigger: { kind: "mention", query: "", start: 0 }, library: { folders: [files], files: [file], unparsed: 0 }, slow: false, commands, skills: [], opened })
         .groups[0].rows.map((r) => (r.kind === "line" ? `${r.depth} ${r.text}` : r.kind === "folder" ? `${r.depth} ${r.folder.name}${r.open ? " open" : ""}` : r.kind === "file" ? `${r.depth} #${r.file.id}` : ""));

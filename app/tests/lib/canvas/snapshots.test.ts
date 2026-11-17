@@ -8,7 +8,7 @@ const base = { stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'c
 const stroke = (id: string, x: number, y: number): CanvasElement => ({ id, type: 'rectangle', x, y, width: 20, height: 20, ...base });
 const notebook = (paper: Paper, elements: CanvasElement[] = [], viewport = { x: 0, y: 0, zoom: 1 }): CanvasDocument => ({ ...createCanvasDocument(), paper, elements, viewport });
 const two: Paper = { gap: 10, pages: [{ id: 'p1', width: 100, height: 200 }, { id: 'p2', width: 100, height: 200 }] };
-const PATH = 'courses/X/notebooks/Work.notebook';
+const PATH = 'courses/X/Work.notebook';
 
 function fakes() {
   const rendered: string[] = [], sent: SnapshotRequest[] = [];
@@ -53,7 +53,7 @@ describe('pageFingerprints', () => {
 describe('NotebookSnapshots', () => {
   test('a .canvas has no page pictures, even one holding paper', async () => {
     const f = fakes();
-    await f.write(notebook(two, [stroke('a', 10, 10)]), 'courses/X/canvases/Work.canvas');
+    await f.write(notebook(two, [stroke('a', 10, 10)]), 'courses/X/Work.canvas');
     expect(f.rendered).toEqual([]);
     expect(f.sent).toHaveLength(0);
   });
@@ -81,8 +81,8 @@ describe('NotebookSnapshots', () => {
   test('a rename sends the new path with no pictures', async () => {
     const f = fakes();
     await f.write(notebook(two));
-    await f.write(notebook(two), 'courses/X/notebooks/Renamed.notebook');
-    expect(f.sent[1]).toMatchObject({ relativePath: 'courses/X/notebooks/Renamed.notebook', pages: [] });
+    await f.write(notebook(two), 'courses/X/Renamed.notebook');
+    expect(f.sent[1]).toMatchObject({ relativePath: 'courses/X/Renamed.notebook', pages: [] });
   });
   test('adding a page sends the new page and the new count', async () => {
     const f = fakes();

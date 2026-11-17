@@ -104,7 +104,12 @@ gives each term a `YYYY-MM` key, `subjects.term_sort`:
 ## Modules drive the scrape, and every body feeds one link crawl
 
 - The engine walks each course's modules and fetches pages and files through
-  them, mirroring Canvas's layout under `courses/<code>/`.
+  them, writing everything under the subject's `courses/<code>/Course/`
+  (`library::layout::synced`): `Files/`, `Media/`, `Pages/`, `Assignments/`,
+  `Quizzes/`, `Announcements/`, `Modules/`, `Images/`, `Discussion/` (Ed
+  threads), `Lessons/` (Ed lessons), `home.md` and `syllabus.md`. Canvas
+  files land flat in `Files/`. A TOC or page links what it names relative to
+  itself (`layout::link_between`: `../Files/x.pdf`, `../Images/<id>.png`).
 - Every phase that converts an HTML body (home/syllabus, announcements,
   assignment/quiz descriptions, pages) reports the pages and files it links
   into a per-course `LinkCrawl`, drained depth-first after the content phases
@@ -218,12 +223,14 @@ cannot write it — see [cli.md](./cli.md).
 ## A sync lists module videos, and the student downloads them
 
 Lecture videos uploaded as Canvas files (`video/*`, or an untyped
-`.mp4/.mov/.m4v/.webm`) are ordinary library files fetched on request; they
-have nothing to do with Echo360 lectures.
+`.mp4/.mov/.m4v/.webm`) are ordinary library files fetched on request, into
+`Course/Media/` rather than `Course/Files/` (`SyncedKind::Media`; their
+category is `file` all the same); they have nothing to do with Echo360
+lectures.
 
 - `fetch_file` records a video without downloading it, and its module TOC line
   carries the Canvas id and the path it will land at:
-  `- [title](../files/<name>.mp4) _(video <id>)_` (`file_toc_line`, parsed by
+  `- [title](../Media/<name>.mp4) _(video <id>)_` (`file_toc_line`, parsed by
   `app/src/lib/pipeline/moduleToc.ts`). Locked videos skip like any file.
 - Once downloaded, a sync reports it `unchanged` while the manifest pair
   matches. A copy Canvas has since changed is left as it is: only the
@@ -251,7 +258,7 @@ the launch, Bearer and CDN signing are in
 
 - `echo360_embed_info` returns the link's `echo_embeds` row, or resolves it
   (launch, Bearer, player properties), saves the poster as
-  `courses/<code>/images/echo-<mediaId>.jpg` (its signed URL expires) and
+  `courses/<code>/Course/Images/echo-<mediaId>.jpg` (its signed URL expires) and
   writes the row. A link's media never changes, so the row is kept for good.
   Its paths are data-dir-relative, and one whose file is gone from disk comes
   back null (a deleted download is cleared from the row).
@@ -268,7 +275,7 @@ the launch, Bearer and CDN signing are in
 - Both streams go through `runtime::stream::copy_to_file` (the same loop as
   `Canvas::download_to`) into `tmp/echo-embeds/<linkId>/` in the data dir,
   which is emptied first and removed on every exit. Only the muxed video and
-  its captions (`<video>.vtt`) move into `courses/<code>/files/`, named after
+  its captions (`<video>.vtt`) move into `courses/<code>/Course/Media/`, named after
   the media name as `.mp4`; a name another file holds gets `-<first 8 of the
   media id>` before the extension.
 - The new file is reported as a `scrape-file` with `source_url` set to the
@@ -335,7 +342,7 @@ every value is a JSON literal, which is also valid YAML. Missing data is
 `https://edstem.org/<region>/…` from the profile's Ed region, and are `null`
 (with no `source_url`) while it is unknown.
 
-A thread, `ed/NNNN-<slug>.md` (`NNNN` is Ed's per-course number), keeps its
+A thread, `Course/Discussion/NNNN-<slug>.md` (`NNNN` is Ed's per-course number), keeps its
 Markdown below the front matter: `ed_thread_id`, `number`, `type`
 (question, post, announcement), `answered` (a question's resolved state, the
 same one its `**#46 · question · resolved …**` meta line shows; `null` for
@@ -377,7 +384,7 @@ first: the board re-reads every thread and is what meets Ed's rate limit. Every
 Ed request that gets a 429 waits (`Retry-After`, capped at a minute, else 2, 4,
 8 … seconds) and is sent again, up to six times (`sources/ed/client.rs`). Lessons go
 in sidebar order (module, then `index` with unset ones last, then id), each to
-an index, `lessons/<lessonId>-<slug>.md`; the id leads so a renamed lesson
+an index, `Course/Lessons/<lessonId>-<slug>.md`; the id leads so a renamed lesson
 keeps its prefix. Progress reports the phase `ed_lessons`. A lesson's slides
 are all fetched before any of its files is written, so a cancelled sync
 leaves the last whole lesson.
@@ -389,10 +396,10 @@ leaves the last whole lesson.
   `index` order with `id`, `title`, `type`, `status` (Ed's `unseen`, `seen`
   or `completed`), `file`, `pdf`, `url` (`…/slides/<s>`) and `challenge_id`
   (a `code` or `jupyter` slide's Ed challenge, its workspace), paths relative
-  to `lessons/`. Its body is the title, module, dates and Ed link, then a
+  to `Course/Lessons/`. Its body is the title, module, dates and Ed link, then a
   numbered link to each slide file (a PDF slide's PDF); it holds no slide
   content.
-- Each slide is `lessons/<lessonId>-<slug>/<NN>-<slide-slug>.md` (`NN` is its
+- Each slide is `Course/Lessons/<lessonId>-<slug>/<NN>-<slide-slug>.md` (`NN` is its
   position), with front matter `ed_slide_id`, `ed_lesson_id`,
   `ed_challenge_id` (as the index's `challenge_id`), `lesson`, `title`,
   `type`, `status`, `index` (`NN`), `pdf`, `url` and `challenge`, then
@@ -476,7 +483,7 @@ the working copy; Ed gets each save as an upload.
 
 - `ed_workspace_open {challengeId}` finds the slide by the `ed_challenge_id`
   in its front matter (the folder the sync record names first, else every
-  `courses/*/lessons/*/*.md`), lists the folder's files, reads the
+  `courses/*/Course/Lessons/*/*.md`), lists the folder's files, reads the
   `challenge` snapshot for `runCommand`, `features` and `dueAt`, starts the
   socket thread and answers at once with status `connecting`. A second open
   answers for the session already running; `ed_workspace_close` ends it and
@@ -722,7 +729,11 @@ Workers share the course session cache and source-qualified cancellation flags.
   `echo360.net.au`, …); `Session::base` keeps it for the syllabus,
   transcripts and downloads.
 - A capture is one media id with the Presenter screen at `hd1.mp4` and the room
-  camera at `hd2.mp4`. They land as `source1.mp4`/`source2.mp4`, trimmed
+  camera at `hd2.mp4`. They land in the lecture's recording folder,
+  `courses/<code>/Course/Recordings/<date>-<slug>/`, chosen once and kept on
+  its row (`lectures.folder_rel`, see
+  [architecture.md](./architecture.md#a-recordings-folder-is-chosen-once-and-kept-on-its-row)),
+  with its `transcript.vtt`, as `source1.mp4`/`source2.mp4`, trimmed
   identically so the player runs them off one clock. The trim is the
   university's intro bumper, `echo360_lead_in_secs` in the profile (UniMelb's
   is 14 s); with none the download is the file and ffmpeg is not run. VTT

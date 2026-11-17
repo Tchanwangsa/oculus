@@ -62,8 +62,11 @@ fn what_the_sync_writes_is_labelled_by_its_kind() {
     for file in [SyncedFile::Home, SyncedFile::Syllabus] {
         assert_eq!(category_of(&synced_file(file)), file.category());
     }
-    assert_eq!(synced(SyncedKind::Files, "a.pdf"), "files/a.pdf");
-    assert_eq!(synced(SyncedKind::Media, "v.mp4"), "files/v.mp4");
-    assert_eq!(synced(SyncedKind::Discussion, "0001-x.md"), "ed/0001-x.md");
-    assert_eq!(synced_file(SyncedFile::Home), "home.md");
+    assert_eq!(synced(SyncedKind::Files, "a.pdf"), "Course/Files/a.pdf");
+    assert_eq!(synced(SyncedKind::Media, "v.mp4"), "Course/Media/v.mp4");
+    assert_eq!(
+        synced(SyncedKind::Discussion, "0001-x.md"),
+        "Course/Discussion/0001-x.md"
+    );
+    assert_eq!(synced_file(SyncedFile::Home), "Course/home.md");
 }

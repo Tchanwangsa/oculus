@@ -8,7 +8,7 @@ use crate::sync::render::{fmt_points, push_ts, submission_status, task_path};
 use crate::sync::{Engine, LinkCrawl, Progress, Subject, TaskDocs};
 
 impl Engine {
-    /// Writes `assignments/*.md` and `quizzes/*.md`; returns where each landed
+    /// Writes `Course/Assignments/*.md` and `Course/Quizzes/*.md`; returns where each landed
     /// so the modules phase can link locally.
     pub(in crate::sync) fn scrape_assignments(
         &self,

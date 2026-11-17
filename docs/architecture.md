@@ -329,15 +329,18 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Windows
 uses the shared profile folder described in [windows.md](./windows.md). Inside:
 
 - `oculus.db` — SQLite, everything structured.
-- `courses/<code>/…` — one folder per subject: what the sync writes, the
-  student's own files and the subject's agent folder. Its shape is the
-  layout module's ([below](#one-module-owns-every-path-shape-in-the-library)).
-  The parser's `.md`, `.pages.json` and `<stem>_images/` and the embedder's
-  `.emb.json` sit beside each PDF.
-- `lectures/<uuid>/` — Echo360 media (`source1.mp4`, optionally
-  `source2.mp4`) and `transcript.vtt`, plus regenerable `frames/` and
-  `outline.md` from the chapter jobs. Which source is the slides is measured,
-  not assumed — see [chapters.md](./chapters.md).
+- `courses/<code>/…` — one folder per subject: `Course/` (what the sync
+  writes, lecture recordings included), the student's own files beside it,
+  and the hidden `.oculus/` (the subject's agent folder and derived
+  records). Its shape is the layout module's
+  ([below](#one-module-owns-every-path-shape-in-the-library)). The parser's
+  `.md` and `<stem>_images/` sit beside each PDF; its `.pages.json` and the
+  embedder's `.emb.json` sit in `.oculus/derived/`.
+- `courses/<code>/Course/Recordings/<date>-<slug>/` — one Echo360 lecture:
+  `source1.mp4`, optionally `source2.mp4`, and `transcript.vtt`, plus
+  regenerable `frames/`, `outline.md` and `thumb.jpg` from the chapter jobs.
+  Which source is the slides is measured, not assumed — see
+  [chapters.md](./chapters.md).
 - `downloads/.incoming/` — browser download staging ([viewers.md](./viewers.md#downloads-wait-for-a-destination-while-their-bytes-arrive)).
 - `agents/` — the docs, skills and memory layer a coding agent reads and
   writes ([cli.md](./cli.md#oculus-docs-writes-the-agents-folder)); the
@@ -379,41 +382,75 @@ layout changes the table, not the callers.
 
 ```
 courses/<code>/
-  files/ lessons/ ed/ pages/ assignments/ quizzes/ announcements/ modules/ images/
-  home.md  syllabus.md          synced: SyncedKind, SyncedFile (module videos land in files/)
-  uploads/ documents/ canvases/ notebooks/   own: OwnKind, each kind's folder
-  agents/                       hidden: the subject's agent folder
-lectures/<media id>/            synced: one recording (recording_dir)
+  Course/                       synced, read-only to the student and agents
+    Files/ Media/ Lessons/ Discussion/ Pages/ Assignments/ Quizzes/
+    Announcements/ Modules/ Images/   SyncedKind (Media: module videos and Echo360 page embeds)
+    home.md  syllabus.md        SyncedFile
+    Recordings/<date>-<slug>/   one lecture recording (lectures.folder_rel)
+  <the student's files and folders, any depth>   own: OwnKind by extension
+  .oculus/                      hidden: app state
+    agents/                     the subject's agent folder
+    derived/<folder>/<stem>.pages.json, .emb.json   a PDF's records
 ```
+
+`LEGACY` in `shape.rs` is the layout before this one (synced folders at the
+subject root, one folder per own kind, `lectures/<media id>/` in the data
+dir); nothing in the app reads it, it is there to recognise old paths.
 
 - **`zone_of(rel)` is the question every guard asks** of a data-dir-relative
   path: `Synced`, `Own`, `Hidden` (inside the data dir, not a library file)
   or `Outside` (absolute, `..`, a backslash, a drive, an empty segment). Folder
   names compare ignoring ASCII case, as macOS and Windows volumes do.
+  `Course` and `.oculus` are reserved at a subject's root (`reserved_name`).
+- **The student's files are everything else in a subject, at any depth.**
+  Their kind is their extension: `.md` a note, `.canvas`, `.notebook`, else an
+  upload. A new one with no folder chosen lands at the subject's root
+  (`own_dir`); `own_files` walks them all for the Documents and drawing
+  listings, skipping `Course/`, `.oculus/`, dot-names and symlinks.
 - **`own_file_ok(rel, kind)` is the guard of every command that writes,
   renames or deletes the student's files** (notes, uploads, canvases,
-  notebooks): in the own zone, below the kind's folder at any depth, the
-  kind's extension, no dot-name (staging files are dot-names), no `:`. A note's
-  pictures folder (`documents/assets/`) holds no notes. Canvases add a refusal
-  of any symlink on the way (`checked` in
+  notebooks): in the own zone, the kind's extension, no dot-name (staging
+  files and a note's `.assets/` are dot-names), no `:`. Canvases add a
+  refusal of any symlink on the way (`checked` in
   `app/src-tauri/src/library/files/canvases.rs`).
 - **IPC commands that read or open what the frontend names go through
   `resolve`** (`read_course_file`, `open_course_file`) or `resolve_absolute`
   (`echo360_read_transcript`, which gets a stored absolute path): `Outside`
-  is refused, and so is a path whose symlinks lead out of the data dir. A
-  lecture id that is not one folder name is refused by `recording_dir`.
+  is refused, and so is a path whose symlinks lead out of the data dir.
 - **`category_of` sets `files.category`** from the path inside the subject:
-  synced folders by their kind, own files by their folder.
-  `app/src/lib/files/libraryLayout.ts` is the frontend's copy for paths with
-  no row (citations, chips); both are held to
+  inside `Course/` by its folder (`Media/` is `file`, like `Files/`), beside
+  it by extension. `app/src/lib/files/libraryLayout.ts` is the frontend's
+  copy for paths with no row (citations, chips); both are held to
   `app/tests/fixtures/library/categories.json`.
-- **`derived(pdf, kind)` names a PDF's parse and embed artifacts**; parse,
-  embed, the sheet converter and the purge all ask it.
+- **`derived(pdf, kind)` names a PDF's parse and embed artifacts**: the
+  `.md` and `<stem>_images/` beside the PDF (the markdown's image links stay
+  relative to it), the `.pages.json` and `.emb.json` under the subject's
+  `.oculus/derived/`, at the PDF's own folder path. Parse, embed, the sheet
+  converter and the purge all ask it. Beside a student's PDF a parsed `.md`
+  looks like a note, so the note listing asks `is_derived_text` and leaves
+  it out.
 - **The purge spares the student's notes.** `parse_artifacts` names what a
   file's parse left: every artifact of a synced PDF, but outside the synced
-  folders a `<stem>.md` only when the parser wrote it (a parse record beside
-  it, or a spreadsheet's text). `purge_parse_artifacts` deletes that list and
+  folders a `<stem>.md` only when the parser wrote it (a parse record for it,
+  or a spreadsheet's text). `purge_parse_artifacts` deletes that list and
   Drive's `list_folder` hides it ([frontend.md](./frontend.md#drive-is-one-folder-browser-over-the-disk)).
+- **Synced files link to each other relatively** (`link_between`): a module
+  TOC in `Course/Modules/` links `../Files/x.pdf`, a page's picture is
+  `../Images/<id>.png`, `home.md`'s is `Images/<id>.png`.
+
+### A recording's folder is chosen once and kept on its row
+
+A lecture's folder is `<YYYY-MM-DD>-<slug>`: its local start date and its
+title lowercased and folded to ASCII, with the subject code's words dropped
+(Echo360 titles are mostly the timetable's `MULT20015_2026_SM2 MO L105`),
+capped at 60 characters, `-2`, `-3`… when another lecture's row or a folder
+on disk holds the name (`layout::new_recording_rel`).
+`db::store::recording_folder` chooses it the first time anything of the
+lecture is written (a download, a transcript, chapter frames) and stores it
+data-dir-relative in `lectures.folder_rel` (unique ignoring case), so a
+later title change never moves it; every reader takes it from the row.
+`lectures.video_path`, `video2_path` and `transcript_path` stay absolute and
+point into it.
 
 ## The database has one schema owner and two writers
 

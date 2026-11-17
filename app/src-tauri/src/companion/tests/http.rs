@@ -121,8 +121,8 @@ async fn the_snapshot_names_the_file_kind_from_its_path() {
     let paper = json!({"pages": [{"id": "p1", "width": 595, "height": 842}]});
     let mut with_pages = document(vec![shape("a", 0.0)]);
     with_pages["paper"] = paper;
-    h.open_at(1, "courses/TEST/notebooks/Week 3.notebook", &with_pages);
-    h.open_at(2, "courses/TEST/canvases/Old notebook.canvas", &with_pages);
+    h.open_at(1, "courses/TEST/Week 3.notebook", &with_pages);
+    h.open_at(2, "courses/TEST/Old notebook.canvas", &with_pages);
     h.open(3, &document(vec![]));
     for (file, kind) in [(1, "notebook"), (2, "canvas"), (3, "canvas")] {
         let s = h.share(file);

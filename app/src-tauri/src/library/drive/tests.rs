@@ -7,7 +7,8 @@ use super::entries::FolderListing;
 use super::listing::{list_folder_at, natural_cmp};
 use super::recordings::Recording;
 use crate::library::layout::{
-    agents_rel, course_rel, in_course, own_dir_rel, synced, synced_dir, OwnKind, SyncedKind,
+    agents_rel, course_rel, derived_rel, in_course, own_dir_rel, synced, synced_dir, DerivedKind,
+    OwnKind, SyncedKind,
 };
 use crate::test_support::Scratch;
 
@@ -29,6 +30,11 @@ fn files_rel(name: &str) -> String {
 
 fn uploads_rel(name: &str) -> String {
     format!("{}/{name}", own_dir_rel(CODE, OwnKind::Upload))
+}
+
+/// A parse record for the source at `rel`, where the parser keeps it.
+fn record(root: &Path, rel: &str) {
+    put(root, &derived_rel(rel, DerivedKind::Pages), b"{}");
 }
 
 fn list(root: &Path, rel: &str) -> FolderListing {
@@ -99,12 +105,9 @@ fn parse_artifacts_and_converted_pdfs_are_hidden_beside_their_source() {
     for name in [
         "a.pdf",
         "a.md",
-        "a.pages.json",
-        "a.emb.json",
         "b.docx",
         "b.docx.pdf",
         "b.docx.md",
-        "b.docx.pages.json",
         "c.xlsx",
         "c.xlsx.md",
         "readme.md",
@@ -112,6 +115,13 @@ fn parse_artifacts_and_converted_pdfs_are_hidden_beside_their_source() {
     ] {
         put(&root, &files_rel(name), b"x");
     }
+    record(&root, &files_rel("a.pdf"));
+    put(
+        &root,
+        &derived_rel(&files_rel("a.pdf"), DerivedKind::Embeddings),
+        b"{}",
+    );
+    record(&root, &files_rel("b.docx.pdf"));
     put(&root, &files_rel("a_images/1.jpg"), b"x");
     put(&root, &files_rel("b.docx_images/1.jpg"), b"x");
     put(&root, &files_rel(".a_images-staging-1-2/x"), b"x");
@@ -141,7 +151,7 @@ fn an_own_note_beside_an_unparsed_pdf_stays() {
     assert!(listing.writable);
     assert!(listing.files.iter().all(|f| f.zone == "own" && f.editable));
 
-    put(&root, &uploads_rel("n.pages.json"), b"{}");
+    record(&root, &uploads_rel("n.pdf"));
     assert_eq!(file_names(&list(&root, &dir)), ["n.pdf"]);
 }
 
@@ -151,7 +161,7 @@ fn folders_carry_counts_and_sizes_and_sort_naturally() {
     put(&root, &uploads_rel("Week 10/a.pdf"), b"%PDF");
     put(&root, &uploads_rel("Week 2/a.pdf"), b"%PDF");
     put(&root, &uploads_rel("Week 2/a.md"), b"x");
-    put(&root, &uploads_rel("Week 2/a.pages.json"), b"x");
+    record(&root, &uploads_rel("Week 2/a.pdf"));
     put(&root, &uploads_rel("Week 2/b.txt"), b"hello");
     mkdir(&root, &uploads_rel("Empty"));
 
@@ -176,7 +186,7 @@ fn a_recursive_listing_is_flat_and_still_hides_artifacts() {
     put(&root, &uploads_rel("x.pdf"), b"%PDF");
     put(&root, &uploads_rel("A/y.pdf"), b"%PDF");
     put(&root, &uploads_rel("A/y.md"), b"x");
-    put(&root, &uploads_rel("A/y.pages.json"), b"x");
+    record(&root, &uploads_rel("A/y.pdf"));
     put(&root, &uploads_rel("A/B/z.txt"), b"x");
     put(&root, &uploads_rel(".hidden/w.txt"), b"x");
 

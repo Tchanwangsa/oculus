@@ -68,6 +68,7 @@ pub(super) async fn lecture_brief(
         id: l.id.clone(),
         title: l.title.clone(),
         date: l.date.clone(),
+        folder: l.folder.clone(),
         has_transcript: l.has_transcript,
         chapters: crate::db::store::chapters(pool, &l.id)
             .await

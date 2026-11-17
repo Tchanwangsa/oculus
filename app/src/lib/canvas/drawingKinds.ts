@@ -1,28 +1,29 @@
 import type { DbFile } from "@/lib/db";
 import type { ImportedFile } from "@/lib/files/uploads";
-import { COURSES_DIR, OWN_DIRS } from "@/lib/files/libraryLayout";
+import { isOwnPath } from "@/lib/files/libraryLayout";
 
 /**
  * The two drawing documents: a canvas (an infinite board, `<title>.canvas`) and a notebook
- * (pages, `<title>.notebook`), each in its kind's folder (`OWN_DIRS`). The same JSON and the same
- * editor; the kind is the file's folder and extension, matching `DrawingKind` in
+ * (pages, `<title>.notebook`), anywhere among a subject's own files. The same JSON and the same
+ * editor; the kind is the file's extension, matching `DrawingKind` in
  * `app/src-tauri/src/library/files/canvases.rs`, and
  * never what the document holds: `paper` in a `.canvas` is kept and ignored (`notebookPaper`).
  */
 export type DrawingKind = "canvas" | "notebook";
 
-export const DRAWING_KINDS: Record<DrawingKind, { folder: string; extension: string; category: string }> = {
-  canvas: { folder: OWN_DIRS.canvas, extension: ".canvas", category: "canvas" },
-  notebook: { folder: OWN_DIRS.notebook, extension: ".notebook", category: "notebook" },
+export const DRAWING_KINDS: Record<DrawingKind, { extension: string; category: string }> = {
+  canvas: { extension: ".canvas", category: "canvas" },
+  notebook: { extension: ".notebook", category: "notebook" },
 };
 
-/** The kind a `courses/<code>/<folder>/<title><extension>` path names, or null. */
+/** The kind an own file's path names (`courses/<code>/…/<title><extension>`), or null. Dot-names
+ *  are staging files and hidden folders, never drawings. */
 export function drawingKindOfPath(path: string): DrawingKind | null {
-  const parts = path.split("/");
-  if (parts.length !== 4 || parts[0] !== COURSES_DIR) return null;
+  if (!isOwnPath(path) || path.split("/").some((part) => part.startsWith("."))) return null;
+  const name = path.slice(path.lastIndexOf("/") + 1);
   for (const kind of Object.keys(DRAWING_KINDS) as DrawingKind[]) {
-    const { folder, extension } = DRAWING_KINDS[kind];
-    if (parts[2] === folder && parts[3].endsWith(extension) && parts[3].length > extension.length) return kind;
+    const { extension } = DRAWING_KINDS[kind];
+    if (name.endsWith(extension) && name.length > extension.length) return kind;
   }
   return null;
 }

@@ -44,9 +44,9 @@ export function checklistProgress(items: { done_at: string | null }[]): {
 }
 
 /**
- * The folder a library file sits in under its subject: `files/week-1` for
- * `courses/MULT20015_2026_SM2/files/week-1/notes.pdf`, empty for a file at
- * the subject's top.
+ * The folder a library file sits in under its subject: `Course/Files/week-1`
+ * for `courses/MULT20015_2026_SM2/Course/Files/week-1/notes.pdf`, empty for a
+ * file at the subject's top.
  */
 export function fileFolder(relativePath: string): string {
   const inSubject = courseRelOf(relativePath);

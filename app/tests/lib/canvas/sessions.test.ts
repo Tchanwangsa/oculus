@@ -5,10 +5,10 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((r) => { resolve = r; }); return { promise, resolve }; }
 function harness(initial = "disk", overrides: Partial<CanvasSessionIO<CanvasFileRef>> = {}) {
   const drafts = new Map<string, string>();
-  const files = new Map([["courses/X/canvases/Ideas.canvas", initial]]);
+  const files = new Map([["courses/X/Ideas.canvas", initial]]);
   const writes: { path: string; text: string; done: ReturnType<typeof deferred> }[] = [];
   let fail = false;
-  const file: CanvasFileRef = { id: 1, relative_path: "courses/X/canvases/Ideas.canvas" };
+  const file: CanvasFileRef = { id: 1, relative_path: "courses/X/Ideas.canvas" };
   const sessions = createCanvasSessions({
     drafts: { getItem: (key) => drafts.get(key) ?? null, setItem: (key, text) => { drafts.set(key, text); }, removeItem: (key) => { drafts.delete(key); } },
     delay: 60_000,
@@ -49,7 +49,7 @@ describe("canvas sessions", () => {
     const rename = session.rename("Plan");
     h.writes[0].done.resolve(); await flush; await rename;
     session.update("after"); const next = session.flush(); await tick();
-    expect(h.writes[1].path).toBe("courses/X/canvases/Plan.canvas");
+    expect(h.writes[1].path).toBe("courses/X/Plan.canvas");
     h.writes[1].done.resolve(); await next;
     expect(h.files.has(h.file.relative_path)).toBe(false);
     expect(h.files.get(session.file.relative_path)).toBe("after");

@@ -810,7 +810,7 @@ fn a_workspace_sync_record_round_trips_beside_the_library() {
 
     let state = WorkspaceState {
         workspace_id: "W1".into(),
-        slide_dir: "courses/COMP30026/lessons/1-l/03-tally".into(),
+        slide_dir: "courses/COMP30026/Course/Lessons/1-l/03-tally".into(),
         base_commit: Some("abc123".into()),
         files: [(
             "tally.py".to_string(),

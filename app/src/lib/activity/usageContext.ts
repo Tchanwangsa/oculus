@@ -1,5 +1,6 @@
 import { browseId } from "@/lib/browser";
-import { OWN_DIRS, inFolder } from "@/lib/files/libraryLayout";
+import { isOwnPath } from "@/lib/files/libraryLayout";
+import { pathFile } from "@/lib/files/pathCategory";
 
 // Each `usage_activity` ping carries the context of the page it came from, and
 // Rust credits the tick's active seconds to it in `usage_context_hours`. The
@@ -34,10 +35,11 @@ export function usageContext(path: string): UsageContext {
   const subjectId = Number(m[1]);
   if (m[2] === "lecture") return { kind: "lecture", subjectId };
   if (m[2] === "file") {
-    // The student's own notes live in their documents folder; everything
-    // else is a downloaded or uploaded file.
+    // The student's own notes are their `.md` files beside `Course/`;
+    // everything else is a downloaded or uploaded file.
     const rel = new URLSearchParams(search).get("path") ?? "";
-    return { kind: inFolder(rel, OWN_DIRS.document) ? "document" : "file", subjectId };
+    const note = isOwnPath(rel) && pathFile(rel).category === "document";
+    return { kind: note ? "document" : "file", subjectId };
   }
   if (m[2] === "projects") return { kind: "planning", subjectId };
   return { kind: "course", subjectId };

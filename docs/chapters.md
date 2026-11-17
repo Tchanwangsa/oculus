@@ -84,7 +84,8 @@ second.
 
 ## Naming is one agent turn over files, not a prompt carrying them
 
-`lectures::chapters::run` detects, writes `lectures/<uuid>/outline.md`, grabs frames,
+`lectures::chapters::run` detects, writes `outline.md` in the lecture's
+recording folder (`Course/Recordings/<date>-<slug>/`), grabs frames,
 and hands one prompt to `harness::run_once` — one turn, no thread. The prompt
 carries paths: the agent opens only the frames and spans it doubts, where an
 API call would have to carry fifty frames and ~2500 cues.
