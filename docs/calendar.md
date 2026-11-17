@@ -104,8 +104,8 @@ activity grows the strip.
 
 `recordingStatus` compares a recording with all its subject's timed classes,
 independently of the title preference used for week numbering. A match is a
-class on the same local day starting from 15 minutes before to 30 minutes
-after the recording, inclusive. A subject with no usable classes has unknown
+class on the same local day starting within 30 minutes either side of the
+recording, inclusive. A subject with no usable classes has unknown
 status. Otherwise an unmatched recording is untimetabled: the Lectures tab
 greys its row but keeps playback and actions available. Grey means outside
 the student's timetable, not a break; another stream or a holiday capture

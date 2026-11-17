@@ -14,11 +14,11 @@ describe("recording timetable status", () => {
     }
   });
 
-  test("classes start within inclusive -15/+30 minutes of the recording", () => {
+  test("classes start within 30 minutes either side of the recording, inclusive", () => {
     const row = lecture("2026-09-21T11:00:00");
-    expect(recordingStatus(row, [event("2026-09-21T10:45:00")])).toBe("timetabled");
+    expect(recordingStatus(row, [event("2026-09-21T10:30:00")])).toBe("timetabled");
     expect(recordingStatus(row, [event("2026-09-21T11:30:00")])).toBe("timetabled");
-    expect(recordingStatus(row, [event("2026-09-21T10:44:59")])).toBe("untimetabled");
+    expect(recordingStatus(row, [event("2026-09-21T10:29:59")])).toBe("untimetabled");
     expect(recordingStatus(row, [event("2026-09-21T11:30:01")])).toBe("untimetabled");
   });
 

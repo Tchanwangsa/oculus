@@ -2,6 +2,9 @@ import type { DbCalendarEvent, Lecture } from "@/lib/db";
 import { timedClasses } from "./timetable";
 import type { RecordingStatus } from "./types";
 
+/** Recordings start a few minutes either side of their class. */
+const MATCH_WINDOW_MINUTES = 30;
+
 export function recordingStatus(lecture: Lecture, classes: DbCalendarEvent[]): RecordingStatus {
   const own = timedClasses(classes).filter((event) => event.subject_id === lecture.subject_id);
   if (own.length === 0) return "unknown";
@@ -12,7 +15,7 @@ export function recordingStatus(lecture: Lecture, classes: DbCalendarEvent[]): R
     return start.getFullYear() === recording.getFullYear()
       && start.getMonth() === recording.getMonth()
       && start.getDate() === recording.getDate()
-      && minutes >= -15 && minutes <= 30;
+      && Math.abs(minutes) <= MATCH_WINDOW_MINUTES;
   });
   return matches ? "timetabled" : "untimetabled";
 }
