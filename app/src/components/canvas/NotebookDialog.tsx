@@ -11,33 +11,12 @@ import type { DbFile } from '@/lib/db';
 import { searchLibraryFiles, type LibraryFileHit } from '@/lib/db/search';
 import { createBlankNotebook, createNotebookFromPdf, type NotebookOrientation } from '@/lib/canvas/notebook';
 import { PAPER_TEMPLATES, type PaperTemplate } from '@/lib/canvas/paper';
+import { PaperThumb, TEMPLATE_LABELS } from './PaperThumb';
 import { cn } from '@/lib/utils';
 
 const MODES = [{ value: 'blank', label: 'Blank paper' }, { value: 'pdf', label: 'From a PDF' }] as const;
 type Mode = typeof MODES[number]['value'];
-const TEMPLATE_LABELS: Record<PaperTemplate, string> = { blank: 'Blank', grid: 'Grid', ruled: 'Ruled', dotted: 'Dotted' };
 const ORIENTATIONS: readonly NotebookOrientation[] = ['portrait', 'landscape'];
-
-/** A small drawing of a page's template: coarse on purpose, since the real pattern is too fine to read at thumbnail size. */
-function thumbPath(template: PaperTemplate, width: number, height: number): string {
-  let d = '';
-  if (template === 'grid') {
-    for (let x = 10; x < width; x += 10) d += `M${x} 0V${height}`;
-    for (let y = 10; y < height; y += 10) d += `M0 ${y}H${width}`;
-  } else if (template === 'ruled') {
-    for (let y = 18; y < height; y += 9) d += `M0 ${y}H${width}`;
-  } else if (template === 'dotted') {
-    for (let x = 10; x < width; x += 10) for (let y = 10; y < height; y += 10) d += `M${x} ${y}h0`;
-  }
-  return d;
-}
-
-function PaperThumb({ template, orientation }: { template: PaperTemplate; orientation: NotebookOrientation }) {
-  const [width, height] = orientation === 'portrait' ? [60, 84] : [84, 60];
-  return <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true" className="rounded-xs bg-white shadow-xs ring-1 ring-border">
-    <path d={thumbPath(template, width, height)} fill="none" strokeLinecap="round" strokeWidth={template === 'dotted' ? 1.6 : 0.6} className="stroke-muted-foreground/50" />
-  </svg>;
-}
 
 /** The subject's PDFs, searchable: what a notebook can start from. */
 function PdfChoices({ subjectId, selected, disabled, onSelect }: { subjectId: number; selected: number | null; disabled: boolean; onSelect: (file: LibraryFileHit) => void }) {

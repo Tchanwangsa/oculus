@@ -21,5 +21,10 @@ export const FILL_PALETTE: PaletteColor[] = [{ name: 'None', color: 'transparent
 
 const pick = (palette: PaletteColor[], names: string[]) => names.map(name => palette.find(c => c.name === name)!);
 /** The row shown in the panel, beside the button for the whole palette. */
-export const STROKE_PICKS = pick(STROKE_PALETTE, ['Graphite', 'Red', 'Green', 'Blue', 'Orange']);
+export const STROKE_PICKS = pick(STROKE_PALETTE, ['Graphite', 'Red', 'Orange', 'Amber', 'Green', 'Teal', 'Blue', 'Violet', 'Pink']);
+/** Fluorescent inks for the highlighter, which the muted palette has none of. */
+export const MARKER_PICKS: PaletteColor[] = [
+  { name: 'Yellow', color: '#ffe14d' }, { name: 'Green', color: '#8be28f' }, { name: 'Blue', color: '#7cc4ff' },
+  { name: 'Pink', color: '#ff8fc7' }, { name: 'Orange', color: '#ffb061' }, { name: 'Purple', color: '#c3a3ff' },
+];
 export const FILL_PICKS = pick(FILL_PALETTE, ['None', 'Red', 'Green', 'Blue', 'Amber']);

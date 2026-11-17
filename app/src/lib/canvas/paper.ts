@@ -1,6 +1,6 @@
 import type { CanvasElement } from './model';
 
-export type PaperTemplate = 'blank' | 'grid' | 'ruled' | 'dotted';
+export type PaperTemplate = 'blank' | 'grid' | 'ruled' | 'dotted' | 'graph' | 'cornell' | 'music' | 'isometric';
 
 /** One sheet. Its position is derived from its place in `Paper.pages` (`pageRects`), never stored. */
 export interface PaperPage {
@@ -30,7 +30,7 @@ export interface PageRect {
   template: PaperTemplate;
 }
 
-export const PAPER_TEMPLATES: readonly PaperTemplate[] = ['blank', 'grid', 'ruled', 'dotted'];
+export const PAPER_TEMPLATES: readonly PaperTemplate[] = ['blank', 'grid', 'ruled', 'dotted', 'graph', 'cornell', 'music', 'isometric'];
 export const PAPER_DEFAULTS = { gap: 24, template: 'blank' } as const satisfies { gap: number; template: PaperTemplate };
 /** A4 in points (210 x 297 mm). */
 export const A4 = { width: 595, height: 842 } as const;
@@ -108,6 +108,12 @@ export function nextPageId(paper: Paper): string {
 export function withAddedPage(paper: Paper): Paper {
   const last = paper.pages[paper.pages.length - 1];
   return { ...paper, pages: [...paper.pages, { ...last, id: nextPageId(paper) }] };
+}
+
+/** `paper` with `template` on page `pageId`, or on every page without one; the same object when nothing changes. */
+export function withTemplate(paper: Paper, template: PaperTemplate, pageId?: string): Paper {
+  if (paper.pages.every(page => (pageId !== undefined && page.id !== pageId) || templateOf(page) === template)) return paper;
+  return { ...paper, pages: paper.pages.map(page => pageId === undefined || page.id === pageId ? { ...page, template } : page) };
 }
 
 /** The camera that shows page `index` from its top, centred, at `zoom` (default: the widest page fills the width, up to 140%). */

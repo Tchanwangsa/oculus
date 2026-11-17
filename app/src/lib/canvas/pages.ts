@@ -1,9 +1,15 @@
 import type { CanvasDocument } from './model';
-import { gapOf, pageOfElement, pageRects, withAddedPage } from './paper';
+import { gapOf, pageOfElement, pageRects, withAddedPage, withTemplate, type PaperTemplate } from './paper';
 
 /** The notebook with one more page after the last, the size and template of that one. */
 export function addPage(document: CanvasDocument): CanvasDocument {
   return document.paper ? { ...document, paper: withAddedPage(document.paper) } : document;
+}
+
+/** The notebook with `template` on page `pageId`, or on every page without one. Nothing drawn on a page moves. */
+export function setPageTemplate(document: CanvasDocument, template: PaperTemplate, pageId?: string): CanvasDocument {
+  const paper = document.paper && withTemplate(document.paper, template, pageId);
+  return paper && paper !== document.paper ? { ...document, paper } : document;
 }
 
 /**

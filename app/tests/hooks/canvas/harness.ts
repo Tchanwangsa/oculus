@@ -35,7 +35,7 @@ export interface Harness {
   canvas: { setPointerCapture: (id: number) => void; releasePointerCapture: (id: number) => void; hasPointerCapture: (id: number) => boolean };
   /** Renders with `next` as the host's document; by default the host echoes the hook's latest document. */
   render: (next?: CanvasDocument) => Editor;
-  options: { eraserAutoReturn: boolean; localViewport: boolean };
+  options: { eraserAutoReturn: boolean; localViewport: boolean; eraserMode?: 'stroke' | 'partial'; eraserSize?: number; onInsertImage?: () => void };
 }
 
 export function createHarness(options: Partial<Harness['options']> = {}): Harness {
@@ -59,7 +59,7 @@ export function createHarness(options: Partial<Harness['options']> = {}): Harnes
       try {
         harness.editor = useCanvasInteraction(document, published => { harness.published.push(published); }, {
           onViewportChange: harness.options.localViewport ? view => { harness.views.push(view); } : undefined,
-          eraserAutoReturn: harness.options.eraserAutoReturn,
+          eraserAutoReturn: harness.options.eraserAutoReturn, eraserMode: harness.options.eraserMode, eraserSize: harness.options.eraserSize, onInsertImage: harness.options.onInsertImage,
         });
       } finally { rendering = false; }
       harness.editor.canvas.current = canvas as unknown as HTMLCanvasElement;

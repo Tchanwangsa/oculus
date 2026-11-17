@@ -1,19 +1,28 @@
 .canvas-editor { container-type: inline-size; isolation: isolate; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .canvas-editor canvas { touch-action: none; -webkit-user-select: none; user-select: none; }
-.canvas-style-trigger { display: none; }
+.canvas-rail { touch-action: pan-y; scrollbar-width: none; }
+.canvas-bar { touch-action: pan-x; scrollbar-width: none; }
+.canvas-rail::-webkit-scrollbar, .canvas-bar::-webkit-scrollbar { display: none; }
 .canvas-text-input { field-sizing: content; min-width: 3ch; min-height: 1.4em; max-width: 70vw; outline: 1px solid var(--color-brand); outline-offset: 5px; resize: none; overflow: hidden; border: 0; padding: 0; margin: 0; background: transparent; line-height: 1.4; white-space: pre; -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .canvas-label-input { field-sizing: fixed; min-width: 1ch; max-width: none; outline-offset: 3px; white-space: pre-wrap; overflow-wrap: anywhere; }
-@container (max-width: 760px) {
-  .canvas-style-desktop { display: none; }
-  .canvas-style-trigger { display: inline-flex; }
-  .canvas-short-hint { display: none; }
-  .canvas-toolbox { gap: 0; padding: 4px; }
-  .canvas-toolbox button { width: 34px; height: 38px; }
-  .canvas-pages { left: 10px; bottom: 64px; transform: none; translate: none; }
+@container (max-width: 1340px) {
+  .canvas-bar-zoom { display: none; }
 }
-@container (max-width: 450px) {
-  .canvas-toolbox button { width: 29px; }
-  .canvas-toolbox button > span { display: none; }
-  .canvas-reset-view { display: none; }
-  .canvas-bottom { gap: 4px; left: 10px; bottom: 10px; }
+@container (max-width: 1280px) {
+  .canvas-bar-fill { display: none; }
+}
+@container (max-width: 1250px) {
+  .canvas-bar-pen-name { display: none; }
+}
+@container (max-width: 1180px) {
+  .canvas-bar-width { display: none; }
+}
+@container (max-width: 1010px) {
+  .canvas-pick-extra, .canvas-short-hint { display: none; }
+}
+@container (max-width: 860px) {
+  .canvas-picks { display: none; }
+}
+@container (max-width: 680px) {
+  .canvas-bar-stroke, .canvas-bar-help { display: none; }
 }

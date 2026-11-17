@@ -19,7 +19,7 @@ describe('inspector sections', () => {
     expect(inspectorSections([tool('ellipse')])).not.toContain('roundness');
     expect(inspectorSections([tool('arrow')])).toEqual(['stroke', 'strokeWidth', 'strokeStyle', 'sketch', 'arrowType', 'arrowheads', 'opacity']);
     expect(inspectorSections([tool('line')])).toEqual(['stroke', 'strokeWidth', 'strokeStyle', 'sketch', 'opacity']);
-    expect(inspectorSections([tool('freedraw')])).toEqual(['stroke', 'strokeWidth', 'opacity']);
+    expect(inspectorSections([tool('freedraw')])).toEqual(['stroke', 'pen', 'strokeWidth', 'opacity']);
     expect(inspectorSections([])).toEqual([]);
   });
   test('text options show on a shape once it has a label or one is being written', () => {

@@ -8,6 +8,9 @@ import { ColorSection } from './ColorSection';
 import { FillSection } from './FillSection';
 import { LayerSection } from './LayerSection';
 import { OpacitySection } from './OpacitySection';
+import { PenSection } from './PenSection';
+import { MARKER_PICKS } from './palette';
+import { isMarker } from '@/lib/canvas/pens';
 import { RoundnessSection } from './RoundnessSection';
 import { SketchSection } from './SketchSection';
 import { StrokeStyleSection } from './StrokeStyleSection';
@@ -31,10 +34,11 @@ export function InspectorControls({ sections, values, colorLabel, onChange, onPr
   const has = (section: InspectorSection) => sections.includes(section);
   const props = { values, onChange };
   return <div className="flex flex-col gap-3.5 text-xs">
-    {has('stroke') ? <ColorSection {...props} label={colorLabel} /> : null}
+    {has('stroke') ? <ColorSection {...props} label={colorLabel} picks={has('pen') && isMarker(values.pen) ? MARKER_PICKS : undefined} /> : null}
+    {has('pen') ? <PenSection {...props} /> : null}
     {has('fill') ? <FillSection {...props} /> : null}
     {has('text') ? <TextSection {...props} vertical={has('verticalAlign')} /> : null}
-    {has('strokeWidth') ? <StrokeWidthSection {...props} /> : null}
+    {has('strokeWidth') ? <StrokeWidthSection {...props} onPreview={onPreview} /> : null}
     {has('strokeStyle') ? <StrokeStyleSection {...props} /> : null}
     {has('sketch') ? <SketchSection {...props} /> : null}
     {has('roundness') ? <RoundnessSection {...props} /> : null}

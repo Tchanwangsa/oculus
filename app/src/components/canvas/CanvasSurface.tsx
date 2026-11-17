@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowsInSimpleIcon, ArrowSquareOutIcon, DownloadSimpleIcon, FileImageIcon, FilePdfIcon, FileSvgIcon, GridFourIcon, MinusIcon, PlusIcon, QuestionIcon, SlidersHorizontalIcon, SpinnerGapIcon } from '@phosphor-icons/react';
+import { ArrowsInSimpleIcon, GearSixIcon, ArrowSquareOutIcon, DownloadSimpleIcon, FileImageIcon, FilePdfIcon, FileSvgIcon, GridFourIcon, MinusIcon, PlusIcon, QuestionIcon, SpinnerGapIcon } from '@phosphor-icons/react';
 import { CANVAS_DEFAULTS, textAlignOf, type CanvasDocument } from '@/lib/canvas/model';
 import { loadCanvasEngine } from '@/lib/canvas/engine';
 import { installBrowserSelectionGuard } from '@/lib/canvas/browserSelectionGuard';
@@ -18,7 +18,9 @@ import { shortcut } from '@/lib/platform';
 import { cn } from '@/lib/utils';
 import { useCanvasPlatform } from '@/lib/canvas/platform';
 import { CanvasHistory, CanvasIconButton, CanvasToolbar } from './CanvasToolbar';
-import { CanvasStylePanel } from './CanvasStylePanel';
+import { CanvasStyleBar } from './CanvasStyleBar';
+import { CanvasEraserBar } from './CanvasEraserBar';
+import { CanvasPresetBar } from './CanvasPresetBar';
 import { CanvasPageBar } from './CanvasPageBar';
 import { CanvasImageDialog } from './CanvasImageDialog';
 import { inspectorPopoverProps } from './inspector/popoverGuards';
@@ -74,18 +76,18 @@ function CanvasEmpty({ onStart }: { onStart: () => void }) {
 }
 
 const hints: Record<string, string> = {
-  select: 'Drag to select · Double-click a shape or text to write in it', hand: 'Drag to move around',
+  select: 'Drag to select · Double-click a shape or text to write in it', lasso: 'Draw a loop round what you want · Drag inside the selection to move it', hand: 'Drag to move around',
   rectangle: 'Drag to draw · Hold Shift for a square', ellipse: 'Drag to draw · Hold Shift for a circle',
   diamond: 'Drag to draw · Hold Shift to constrain', line: 'Drag to draw · Hold Shift to snap angle',
-  arrow: `Drag to connect · Hold Shift to snap angle · Hold ${shortcut('mod')} to place freely`, freedraw: 'Draw freely · Escape to select',
-  text: `Click anywhere or on a shape to write · Escape or ${shortcut('mod+Enter')} to finish`, eraser: 'Drag over shapes to erase · Select an image and use the trash to delete it',
+  arrow: `Drag to connect · Hold Shift to snap angle · Hold ${shortcut('mod')} to place freely`, freedraw: 'Draw freely · Escape to select', highlighter: 'Highlight freely · Escape to select',
+  text: `Click anywhere or on a shape to write · Escape or ${shortcut('mod+Enter')} to finish`, eraser: 'Drag over ink to erase · Select an image and use the trash to delete it',
 };
 
 /** Preferences for this device only; collaborators never see them. */
 function CanvasDrawingPreferences({ preferences, onChange }: { preferences: CanvasToolPreferences; onChange: (preferences: CanvasToolPreferences) => void }) {
   const id = useId();
-  return <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Drawing preferences" className="rounded-lg text-muted-foreground"><SlidersHorizontalIcon size={17} /></Button></PopoverTrigger>
-    <PopoverContent side="top" align="end" className="w-72" {...inspectorPopoverProps}><div className="mb-3 text-[13px] font-medium">Drawing preferences</div>
+  return <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Drawing preferences" className="rounded-lg text-muted-foreground"><GearSixIcon size={17} /></Button></PopoverTrigger>
+    <PopoverContent side="bottom" align="end" className="w-72" {...inspectorPopoverProps}><div className="mb-3 text-[13px] font-medium">Drawing preferences</div>
       <div className="flex items-start justify-between gap-4">
         <label htmlFor={id} className="min-w-0 cursor-pointer">
           <span className="text-xs text-foreground">Return after erasing</span>
@@ -102,13 +104,13 @@ function CanvasDrawingPreferences({ preferences, onChange }: { preferences: Canv
 export function CanvasSurface({ document, onChange, onViewportChange, onPageChange, title }: { document: CanvasDocument; onChange: (document: CanvasDocument) => void; onViewportChange?: (viewport: CanvasDocument['viewport']) => void; onPageChange?: (index: number) => void; title?: string }) {
   const platform = useCanvasPlatform();
   const [toolPreferences, setToolPreferences] = useState(loadCanvasToolPreferences);
-  const editor = useCanvasInteraction(document, onChange, { onViewportChange, eraserAutoReturn: toolPreferences.eraserAutoReturn });
+  const [imageDialogOpen, setImageDialogOpen] = useState(false);
+  const editor = useCanvasInteraction(document, onChange, { onViewportChange, onInsertImage: () => setImageDialogOpen(true), eraserAutoReturn: toolPreferences.eraserAutoReturn, eraserMode: toolPreferences.eraserMode, eraserSize: toolPreferences.eraserSize });
   const changeToolPreferences = (preferences: CanvasToolPreferences) => { setToolPreferences(preferences); saveCanvasToolPreferences(preferences); };
   useEffect(() => { const element = editor.root.current; return element ? installBrowserSelectionGuard(element) : undefined; }, [editor.root]);
   const [engineError, setEngineError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  const [imageDialogOpen, setImageDialogOpen] = useState(false);
   useEffect(() => subscribeCanvasImages(editor.redraw), [editor.redraw]);
   const pageInView = editor.pages?.index;
   useEffect(() => { if (pageInView !== undefined) onPageChange?.(pageInView); }, [pageInView, onPageChange]);
@@ -139,48 +141,65 @@ export function CanvasSurface({ document, onChange, onViewportChange, onPageChan
     } catch (error) { setExportError(error instanceof Error ? error.message : String(error)); }
     finally { setExporting(false); }
   };
-  return <div ref={editor.root} data-canvas-editor="true" tabIndex={0} aria-label="Infinite canvas editor" className="canvas-editor relative h-full min-h-0 w-full overflow-hidden bg-card outline-none"
+  const bar = <span aria-hidden className="h-5 w-px shrink-0 bg-border" />;
+  return <div ref={editor.root} data-canvas-editor="true" tabIndex={0} aria-label="Infinite canvas editor" className="canvas-editor flex h-full min-h-0 w-full overflow-hidden bg-card outline-none"
     onKeyDown={editor.keyDown} onKeyUp={editor.keyUp} onBlur={event => {
       editor.blur();
       // Inspector fields and their portaled pickers belong to the open text edit.
       if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.canvas-text-input, [data-canvas-inspector]'))) editor.commitText();
     }} onCopy={editor.copy} onCut={editor.cut} onPaste={editor.paste}>
-    <canvas ref={editor.canvas} draggable={false} aria-label="Drawing canvas" className="absolute inset-0 block h-full w-full" style={{ cursor: editor.cursor }}
-      onPointerDown={editor.pointerDown} onPointerMove={editor.pointerMove} onPointerUp={editor.pointerUp} onPointerCancel={editor.pointerCancel} onPointerLeave={editor.pointerLeave} onDoubleClick={editor.doubleClick} onContextMenu={event => event.preventDefault()} />
-    {current.elements.length === 0 && !current.paper && editor.tool === 'select' && !editor.textDraft ? <CanvasEmpty onStart={() => { editor.setTool('freedraw'); editor.root.current?.focus(); }} /> : null}
-    <CanvasToolbar tool={editor.tool} onTool={tool => { editor.setTool(tool); editor.root.current?.focus({ preventScroll: true }); }} onAddImage={() => setImageDialogOpen(true)} />
-    <CanvasImageDialog open={imageDialogOpen} onOpenChange={setImageDialogOpen} onImport={editor.insertImages} />
-    {editor.inspector.sections.length ? <CanvasStylePanel {...editor.inspector} onChange={editor.changeStyle} onPreview={editor.previewStyle} selectionCount={editor.selection.length} onDelete={editor.deleteSelected} layerMoves={editor.layerMoves} onReorder={editor.reorder} /> : null}
-    {editor.textDraft ? <CanvasTextInput key={editor.textDraft.element.id} draft={editor.textDraft} viewport={current.viewport} onInput={editor.editText} onCommit={editor.commitText} /> : null}
-    <div className="canvas-bottom absolute bottom-4 left-4 z-10 flex items-center gap-2">
-      <div className="flex items-center rounded-xl border border-border-subtle bg-card p-1 shadow-xs" role="group" aria-label="Canvas zoom">
-        <CanvasIconButton label="Zoom out (−)" onClick={() => editor.zoom(1 / 1.2)} disabled={editor.zoomPercent <= 10}><MinusIcon size={15} /></CanvasIconButton>
-        <Tooltip><TooltipTrigger asChild><button type="button" className="min-w-12 cursor-pointer rounded-md px-1 py-1.5 text-[12px] tabular-nums text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-brand" aria-label={`Zoom ${editor.zoomPercent} percent; reset to 100 percent`} onClick={editor.resetZoom}>{editor.zoomPercent}%</button></TooltipTrigger><TooltipContent side="top" sideOffset={8}>Reset zoom (0)</TooltipContent></Tooltip>
-        <CanvasIconButton label="Zoom in (+)" onClick={() => editor.zoom(1.2)} disabled={editor.zoomPercent >= 800}><PlusIcon size={15} /></CanvasIconButton>
-        <div className="canvas-reset-view ml-1 border-l border-border-subtle pl-1"><CanvasIconButton label={current.paper ? 'Fit page width (1)' : 'Fit drawing (1)'} onClick={editor.fit}><ArrowsInSimpleIcon size={17} /></CanvasIconButton></div>
+    <CanvasToolbar tool={editor.tool} onTool={tool => { editor.setTool(tool); editor.root.current?.focus({ preventScroll: true }); }} onAddImage={() => setImageDialogOpen(true)} onInsert={editor.insertTemplate} />
+    <div className="flex min-w-0 flex-1 flex-col">
+      <div className="canvas-bar flex h-12 shrink-0 items-center gap-2.5 overflow-x-auto border-b border-border-subtle bg-card px-2.5" role="toolbar" aria-label="Style and view">
+        {editor.inkPresets ? <>
+          <CanvasPresetBar items={editor.inkPresets.items} active={editor.inkPresets.active} onSelect={editor.inkPresets.select} label={editor.tool === 'highlighter' ? 'Highlighter' : 'Pen'} />
+          {bar}
+        </> : null}
+        {editor.inspector.sections.length ? <CanvasStyleBar {...editor.inspector} onChange={editor.changeStyle} onPreview={editor.previewStyle} selectionCount={editor.selection.length} onDelete={editor.deleteSelected} layerMoves={editor.layerMoves} onReorder={editor.reorder} /> : editor.tool === 'eraser' ? <CanvasEraserBar preferences={toolPreferences} onChange={changeToolPreferences} /> : null}
+        <div className="ml-auto flex shrink-0 items-center gap-2.5">
+          <CanvasHistory undo={() => editor.history()} redo={() => editor.history(true)} canUndo={editor.canUndo} canRedo={editor.canRedo} />
+          {bar}
+          <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label="Canvas zoom">
+            <CanvasIconButton label="Zoom out (−)" onClick={() => editor.zoom(1 / 1.2)} disabled={editor.zoomPercent <= 10}><MinusIcon size={15} /></CanvasIconButton>
+            <Tooltip><TooltipTrigger asChild><button type="button" className="canvas-bar-zoom min-w-12 cursor-pointer rounded-md px-1 py-1.5 text-[12px] tabular-nums text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-brand" aria-label={`Zoom ${editor.zoomPercent} percent; reset to 100 percent`} onClick={editor.resetZoom}>{editor.zoomPercent}%</button></TooltipTrigger><TooltipContent side="bottom" sideOffset={8}>Reset zoom (0)</TooltipContent></Tooltip>
+            <CanvasIconButton label="Zoom in (+)" onClick={() => editor.zoom(1.2)} disabled={editor.zoomPercent >= 800}><PlusIcon size={15} /></CanvasIconButton>
+            <CanvasIconButton label={current.paper ? 'Fit page width (1)' : 'Fit drawing (1)'} onClick={editor.fit} className="canvas-bar-zoom"><ArrowsInSimpleIcon size={17} /></CanvasIconButton>
+          </div>
+          {bar}
+          <div className="flex shrink-0 items-center gap-0.5">
+            <CanvasDrawingPreferences preferences={toolPreferences} onChange={changeToolPreferences} />
+            {current.paper ? null : <CanvasIconButton label={`Toggle grid (${shortcut('shift+G')})`} active={editor.grid} aria-pressed={editor.grid} onClick={() => editor.setGrid(value => !value)}><GridFourIcon size={17} /></CanvasIconButton>}
+            <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Export drawing" disabled={(!current.elements.length && !current.paper) || exporting} className="rounded-lg text-muted-foreground">{exporting ? <SpinnerGapIcon className="animate-spin" /> : <DownloadSimpleIcon size={17} />}</Button></PopoverTrigger>
+              <PopoverContent side="bottom" align="end" className="w-52 p-1.5"><div className="px-2.5 py-2 text-xs font-medium">Export drawing</div>
+                <Button variant="ghost" className="w-full justify-start rounded-md text-xs" disabled={exporting} onClick={() => void exportImage('png')}><FileImageIcon />PNG image<ArrowSquareOutIcon className="ml-auto text-muted-foreground" /></Button>
+                <Button variant="ghost" className="w-full justify-start rounded-md text-xs" disabled={exporting} onClick={() => void exportImage('svg')}><FileSvgIcon />SVG vector<ArrowSquareOutIcon className="ml-auto text-muted-foreground" /></Button>
+                {current.paper && platform.exportPdf ? <Button variant="ghost" className="w-full justify-start rounded-md text-xs" disabled={exporting} onClick={() => void exportPdf()}><FilePdfIcon />PDF document<ArrowSquareOutIcon className="ml-auto text-muted-foreground" /></Button> : null}
+                <p className="px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">{current.paper ? 'Exports every page, without the selection. The PDF has one page for each notebook page.' : 'Exports the whole drawing without the grid or selection.'}</p>
+              </PopoverContent>
+            </Popover>
+            <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Canvas shortcuts" className="canvas-bar-help rounded-lg text-muted-foreground"><QuestionIcon size={17} /></Button></PopoverTrigger>
+              <PopoverContent side="bottom" align="end" className="w-64"><div className="mb-3 text-[13px] font-medium">A little room to move</div><dl className="space-y-2 text-xs text-muted-foreground">
+                {[["Pan", 'Space + drag'], ['Zoom', `${shortcut('mod')} + scroll`], ['Multiple selection', 'Shift + click'], ['Write in a shape', 'Enter'], ['Constrain shape', 'Shift + drag'], ['Place arrow freely', `${shortcut('mod')} + drag`], ['Duplicate', shortcut('mod+D')], ['Layer up / down', `${shortcut('mod+]')} / ${shortcut('mod+[')}`], ['Layer to front / back', `${shortcut('mod+shift+]')} / ${shortcut('mod+shift+[')}`], ['Undo', shortcut('mod+Z')], ['Fit drawing', '1']].map(([label, key]) => <div key={label} className="flex justify-between gap-4"><dt>{label}</dt><dd className="text-foreground">{key}</dd></div>)}
+              </dl></PopoverContent>
+            </Popover>
+          </div>
+        </div>
       </div>
-      <CanvasHistory undo={() => editor.history()} redo={() => editor.history(true)} canUndo={editor.canUndo} canRedo={editor.canRedo} />
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <canvas ref={editor.canvas} draggable={false} aria-label="Drawing canvas" className="absolute inset-0 block h-full w-full" style={{ cursor: editor.cursor }}
+          onPointerDown={editor.pointerDown} onPointerMove={editor.pointerMove} onPointerUp={editor.pointerUp} onPointerCancel={editor.pointerCancel} onPointerLeave={editor.pointerLeave} onDoubleClick={editor.doubleClick} onContextMenu={event => event.preventDefault()} />
+        <div ref={editor.inkLayer} aria-hidden="true" className="pointer-events-none absolute inset-0">
+          <canvas ref={editor.inkCanvas} className="absolute inset-0 block h-full w-full" />
+          <canvas ref={editor.tailCanvas} className="absolute inset-0 block h-full w-full" />
+        </div>
+        {current.elements.length === 0 && !current.paper && editor.tool === 'select' && !editor.textDraft ? <CanvasEmpty onStart={() => { editor.setTool('freedraw'); editor.root.current?.focus(); }} /> : null}
+        {editor.textDraft ? <CanvasTextInput key={editor.textDraft.element.id} draft={editor.textDraft} viewport={current.viewport} onInput={editor.editText} onCommit={editor.commitText} /> : null}
+        {editor.pages ? <div className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2"><CanvasPageBar pages={editor.pages} /></div> : null}
+        <div className={cn('canvas-short-hint pointer-events-none absolute right-0 left-0 text-center text-[11px] text-muted-foreground/65', editor.pages ? 'bottom-[4.2rem]' : 'bottom-3')}>{hints[editor.tool]}</div>
+        {engineError || exportError || editor.historyError ? <div role="alert" className="absolute top-3 right-3 z-30 max-w-80 rounded-xl border border-destructive/20 bg-card p-3 text-xs text-destructive shadow-sm">{engineError ?? exportError ?? editor.historyError}<button type="button" className="mt-2 block cursor-pointer text-foreground underline" onClick={() => { setEngineError(null); setExportError(null); editor.clearHistoryError(); }}>Dismiss</button></div> : null}
+      </div>
     </div>
-    {editor.pages ? <div className="canvas-pages absolute bottom-4 left-1/2 z-10 -translate-x-1/2"><CanvasPageBar pages={editor.pages} /></div> : null}
-    <div className="canvas-short-hint pointer-events-none absolute right-0 bottom-[4.7rem] left-0 text-center text-[11px] text-muted-foreground/65">{hints[editor.tool]}</div>
-    <div className="absolute right-4 bottom-4 z-10 flex items-center gap-1.5 rounded-xl border border-border-subtle bg-card p-1 shadow-xs">
-      <CanvasDrawingPreferences preferences={toolPreferences} onChange={changeToolPreferences} />
-      {current.paper ? null : <CanvasIconButton label="Toggle grid (G)" active={editor.grid} aria-pressed={editor.grid} onClick={() => editor.setGrid(value => !value)}><GridFourIcon size={17} /></CanvasIconButton>}
-      <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Export drawing" disabled={(!current.elements.length && !current.paper) || exporting} className="rounded-lg text-muted-foreground">{exporting ? <SpinnerGapIcon className="animate-spin" /> : <DownloadSimpleIcon size={17} />}</Button></PopoverTrigger>
-        <PopoverContent side="top" align="end" className="w-52 p-1.5"><div className="px-2.5 py-2 text-xs font-medium">Export drawing</div>
-          <Button variant="ghost" className="w-full justify-start rounded-md text-xs" disabled={exporting} onClick={() => void exportImage('png')}><FileImageIcon />PNG image<ArrowSquareOutIcon className="ml-auto text-muted-foreground" /></Button>
-          <Button variant="ghost" className="w-full justify-start rounded-md text-xs" disabled={exporting} onClick={() => void exportImage('svg')}><FileSvgIcon />SVG vector<ArrowSquareOutIcon className="ml-auto text-muted-foreground" /></Button>
-          {current.paper && platform.exportPdf ? <Button variant="ghost" className="w-full justify-start rounded-md text-xs" disabled={exporting} onClick={() => void exportPdf()}><FilePdfIcon />PDF document<ArrowSquareOutIcon className="ml-auto text-muted-foreground" /></Button> : null}
-          <p className="px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">{current.paper ? 'Exports every page, without the selection. The PDF has one page for each notebook page.' : 'Exports the whole drawing without the grid or selection.'}</p>
-        </PopoverContent>
-      </Popover>
-      <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Canvas shortcuts" className="rounded-lg text-muted-foreground"><QuestionIcon size={17} /></Button></PopoverTrigger>
-        <PopoverContent side="top" align="end" className="w-64"><div className="mb-3 text-[13px] font-medium">A little room to move</div><dl className="space-y-2 text-xs text-muted-foreground">
-          {[["Pan", 'Space + drag'], ['Zoom', `${shortcut('mod')} + scroll`], ['Multiple selection', 'Shift + click'], ['Write in a shape', 'Enter'], ['Constrain shape', 'Shift + drag'], ['Place arrow freely', `${shortcut('mod')} + drag`], ['Duplicate', shortcut('mod+D')], ['Layer up / down', `${shortcut('mod+]')} / ${shortcut('mod+[')}`], ['Layer to front / back', `${shortcut('mod+shift+]')} / ${shortcut('mod+shift+[')}`], ['Undo', shortcut('mod+Z')], ['Fit drawing', '1']].map(([label, key]) => <div key={label} className="flex justify-between gap-4"><dt>{label}</dt><dd className="text-foreground">{key}</dd></div>)}
-        </dl></PopoverContent>
-      </Popover>
-    </div>
-    {engineError || exportError || editor.historyError ? <div role="alert" className="absolute top-[5.5rem] right-4 z-30 max-w-80 rounded-xl border border-destructive/20 bg-card p-3 text-xs text-destructive shadow-sm">{engineError ?? exportError ?? editor.historyError}<button type="button" className="mt-2 block cursor-pointer text-foreground underline" onClick={() => { setEngineError(null); setExportError(null); editor.clearHistoryError(); }}>Dismiss</button></div> : null}
+    <CanvasImageDialog open={imageDialogOpen} onOpenChange={setImageDialogOpen} onImport={editor.insertImages} />
   </div>;
 }
 
