@@ -271,7 +271,7 @@ empty caret not mid-word, outside code and frontmatter and with no
 completion open, up to 4000 characters before the caret and 1500 after go to
 `document_suggest` on the `documentSuggestions` job's model. An answer
 lands only if it is the newest request and the text and caret are
-unchanged. Tab takes it (one undo step), Mod-→ the next word, Esc drops it;
+unchanged. Tab or → takes it (one undo step; without a ghost → is plain caret movement), Mod-→ the next word, Esc drops it;
 typing its front eats it, anything else drops it. Its keymap is
 `Prec.highest` but passes without a ghost, so the note's and snippets' Tab
 are untouched. In Live mode, complete inline and display maths in the ghost
