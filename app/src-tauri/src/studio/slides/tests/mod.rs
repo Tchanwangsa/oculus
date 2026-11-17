@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::test_support::Scratch;
 
-/// A data dir holding the fixture PDF at `courses/TEST101/files/lecture.pdf`,
+/// A data dir holding the fixture PDF at `courses/TEST101/Course/Files/lecture.pdf`,
 /// and an empty video folder at 1920x1080.
 pub(super) struct Setup {
     pub scratch: Scratch,
@@ -19,7 +19,7 @@ pub(super) struct Setup {
 impl Setup {
     pub fn new(name: &str) -> Setup {
         let scratch = Scratch::new(name);
-        let source = "courses/TEST101/files/lecture.pdf";
+        let source = "courses/TEST101/Course/Files/lecture.pdf";
         let pdf = scratch.join(source);
         std::fs::create_dir_all(pdf.parent().unwrap()).unwrap();
         fixture::write(&pdf);

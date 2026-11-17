@@ -63,7 +63,7 @@ describe("dropInlineFiles", () => {
 });
 
 describe("workspaceFilePath", () => {
-  const brief = "courses/C/lessons/1-l/03-tally.md";
+  const brief = "courses/C/Course/Lessons/1-l/03-tally.md";
   test("a link into the slide's folder is its workspace path, decoded", () => {
     expect(workspaceFilePath("./03-tally/tally.py", brief)).toBe("tally.py");
     expect(workspaceFilePath("./03-tally/src/my%20file.py", brief)).toBe("src/my file.py");

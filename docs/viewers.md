@@ -333,7 +333,7 @@ classes work even when there are no dollar delimiters.
   - **Rust's half is `app/src-tauri/src/library/pdf_view/`, on the pure-Rust
     renderer hayro**, opened and rendered through
     `app/src-tauri/src/library/pdf_render/`, which the embedder shares. A path
-    must sit under `courses/`, `lectures/` or `agents/` in the data directory.
+    must sit under `courses/` or `agents/` in the data directory.
     The four most recent documents stay open, keyed by path and modification
     time. Renders and text extraction share half the cores, each on its own
     big-stack thread so a deeply nested page cannot overflow a stack and abort
@@ -381,7 +381,7 @@ picker and timeline are [harness.md](./harness.md).
 
 ## An Ed lesson opens as its slides
 
-A lesson's index, `lessons/<id>-<slug>.md`, carries the lesson and an ordered
+A lesson's index, `Course/Lessons/<id>-<slug>.md`, carries the lesson and an ordered
 `slides` list in its front matter ([sync.md](./sync.md)); `parseLessonIndex`
 (`app/src/lib/ed/lessons.ts`) reads it. When the file page opens an index
 whose list has slides (`useLessonIndex`), its body is `LessonView`
@@ -766,7 +766,7 @@ lecture player shows bottom-right in the frame once the lecture is over.
   last lecture's file is never adopted under the new one's id.
 - **The thumbnail** is `lecture_thumbnail`: one `grab_frame` (with its probes)
   a quarter of the way in, source 1 else source 2, 320 px wide, cached as
-  `lectures/<id>/thumb.jpg` (written aside and renamed). An image, so the card
+  `thumb.jpg` in its recording folder (written aside and renamed). An image, so the card
   loads it over the asset protocol with `convertFileSrc`, not the media
   server. Not downloaded, it returns nothing and the card shows the subject's
   icon and a Download pill (`lectureDownloadStore`) in place of Play; the
@@ -955,7 +955,7 @@ recording on a large model takes minutes.
   loops. Its model (under 1 MB) downloads before the first Whisper model; a run
   without it goes on without `--vad`.
 - **Models live in `~/Library/Application Support/com.tchan.oculus/models/whisper/`**
-  (`whisper_models::dir`), outside `courses/` and `lectures/`, where folder
+  (`whisper_models::dir`), outside `courses/`, where folder
   scans and agents look. `MODELS` is a fixed catalogue of seven, worst to
   best; downloads come from Hugging Face without an account, stream to
   `<file>.part` and rename into place, with no deadline but a 60 s stall.

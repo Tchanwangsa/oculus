@@ -6,7 +6,7 @@ use crate::library::paths::course_rel_path;
 /// Extensions a media name may carry that the muxed MP4 replaces.
 const VIDEO_EXTS: &[&str] = &["mp4", "m4v", "mov", "webm", "mkv", "avi"];
 
-/// The data-dir-relative path for `media_name` under the course's `files/`,
+/// The data-dir-relative path for `media_name` under the course's `Course/Media/`,
 /// always `.mp4`. When another file holds that name, the media id's first
 /// eight characters go before the extension; that name carries this media's
 /// id, so if it too exists it is this video's earlier copy and is replaced.

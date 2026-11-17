@@ -11,7 +11,7 @@ mock.module("@tauri-apps/api/core", () => ({
   },
 }));
 mock.module("@tauri-apps/api/event", () => ({ ...tauriEvent, listen: async () => () => {} }));
-const file = { id: 3, relative_path: "courses/X/files/talk.mp4" } as db.DbFile;
+const file = { id: 3, relative_path: "courses/X/Course/Media/talk.mp4" } as db.DbFile;
 const lookup = spyOn(db, "getFileByRelativePath").mockResolvedValue(file);
 // The store waits on a window event for the row; tests run without a DOM.
 const globals = globalThis as { window?: unknown };

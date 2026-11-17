@@ -83,7 +83,7 @@ before leaving a playing lecture.
   videos (`isVideoFile`), Downloads everything else, so no file shows twice; the
   student's own videos stay in Uploads. Lessons
   (`app/src/pages/subject/content/LessonsPage.tsx`) lists only the lesson
-  indexes, `lessons/<id>-<slug>.md` (`isLessonDoc` in `app/src/lib/ed/lessons.ts`),
+  indexes, `Course/Lessons/<id>-<slug>.md` (`isLessonDoc` in `app/src/lib/ed/lessons.ts`),
   under their Ed modules in Ed's order; a row is the lesson type's glyph, the
   title, the due date and the slides completed (`3/8`, a tick when all are).
   A row opens the lesson full page in its own pane, not beside the list,

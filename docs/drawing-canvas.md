@@ -11,8 +11,8 @@ page.
 | --- | --- |
 | Drive list, type filters and creation menu | `app/src/pages/subject/files/DrivePage.tsx` |
 | File route and editor choice (passes the file's kind to `CanvasEditor`) | `app/src/pages/subject/files/FilePage.tsx` |
-| The two kinds: folder, extension, category, path and row helpers, reconcile plan | `app/src/lib/canvas/drawingKinds.ts`, `DrawingKind` in `app/src-tauri/src/library/files/canvases.rs` |
-| Folder → category for a path (`notebooks/` is `notebook`) | `app/src/lib/files/libraryLayout.ts`, `app/src-tauri/src/library/layout/category.rs` |
+| The two kinds: extension, category, path and row helpers, reconcile plan | `app/src/lib/canvas/drawingKinds.ts`, `DrawingKind` in `app/src-tauri/src/library/files/canvases.rs` |
+| Extension → category for a path (`.notebook` is `notebook`) | `app/src/lib/files/libraryLayout.ts`, `app/src-tauri/src/library/layout/category.rs` |
 | Drawing file rows, reconciles and native command wrappers | `app/src/lib/canvas/files.ts` |
 | Shared ordered saves and the shared-canvas adapter | `app/src/lib/canvas/sessions.ts`, `app/src/lib/canvas/sessionRuntime.ts`, `app/src/lib/canvas/authority.ts` |
 | Desktop recovery drafts | `app/src/lib/canvas/drafts.ts`, `app/src-tauri/src/library/files/canvases/drafts.rs` |
@@ -72,12 +72,16 @@ page.
 | Format, geometry, labels, style, bindings, layer order, pages, WASM parity and save-session tests | `app/tests/lib/canvas/` |
 | Pen, touch, undo, notebook and outside-document tests that drive the hook's handlers | `app/tests/hooks/canvas/` |
 
-## The kind is the file's folder and extension
+## The kind is the file's extension
 
 | Kind | File | `files` row |
 | --- | --- | --- |
-| Canvas | `courses/<code>/canvases/<title>.canvas` | `category = canvas`, `file_type = canvas` |
-| Notebook | `courses/<code>/notebooks/<title>.notebook` | `category = notebook`, `file_type = notebook` |
+| Canvas | `courses/<code>/…/<title>.canvas` | `category = canvas`, `file_type = canvas` |
+| Notebook | `courses/<code>/…/<title>.notebook` | `category = notebook`, `file_type = notebook` |
+
+Either sits anywhere among the student's own files; a new one lands at the
+subject's root. `list_canvases` walks the own files at any depth
+(`layout::own_files`), so a drawing moved into a folder keeps its row.
 
 Both are the same JSON. The kind comes from the path (`DrawingKind::of`, the
 own-file guard, and `drawingKindOfPath`) or the row's category (`drawingKindOf`), never from what

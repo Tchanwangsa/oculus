@@ -173,14 +173,21 @@ can and without artifacts always:
 ## `.pages.json` is the only evidence a parse finished
 
 The seam owns the contract, not the parsing: nothing in the `parse/` seam may
-assume the cloud. Beside each PDF:
+assume the cloud. Where each artifact lives is `library::layout::derived`'s
+([architecture.md](./architecture.md#one-module-owns-every-path-shape-in-the-library)):
 
-- `<stem>.md` — full-document markdown, derived from the record.
+- `<stem>.md` — full-document markdown, derived from the record, beside the
+  PDF.
 - `<stem>.pages.json` — `{pdf, mode, parser_version, page_count, pages:
   [{page_no, markdown, blocks?}]}`, keyed by 1-based `page_no`: **the join key
   retrieval rests on** ([retrieval.md](./retrieval.md)). `blocks` is below.
-- `<stem>_images/` — its *name* is the link prefix written into the markdown,
-  so both are computed in `parse/record.rs`, never by a backend.
+  It is a machine record, so it sits in the subject's hidden
+  `.oculus/derived/`, at the PDF's own folder path
+  (`courses/<code>/.oculus/derived/Course/Files/<stem>.pages.json`); a PDF
+  outside any subject keeps it beside itself.
+- `<stem>_images/` — beside the PDF; its *name* is the link prefix written
+  into the markdown, so both are computed in `parse/record.rs`, never by a
+  backend.
 
 **The record is written last, via temp+rename** (a temp name unique per
 write), so an interrupted parse cannot look finished. `parse_mode` reads only `mode`: `"quality"` means done,
@@ -404,8 +411,9 @@ It has no formulas or merges, so it is only the table.
 - **A sync's conversion can beat the frontend's write of the `files` row**,
   so `pages::sheets::record` inserts a bare row when there is none and the frontend's
   upsert fills in the rest.
-- **PDF-route files beside a sheet are swept**: a `.xlsx.pdf`,
-  `.xlsx.pages.json`, `.xlsx.emb.json` or `.xlsx_images/` makes
+- **PDF-route files of a sheet are swept**: a `.xlsx.pdf` or
+  `.xlsx_images/` beside it, or a `.xlsx.pages.json` or `.xlsx.emb.json` in
+  `.oculus/derived/`, makes
   `needs_conversion` true, and the conversion deletes them
   (`library::paths::purge_parse_artifacts`) before writing its text.
 

@@ -52,11 +52,11 @@ fn doc_pdf_resolution() {
 
 #[test]
 fn a_pdf_is_known_by_its_extension_in_any_case() {
-    assert!(is_pdf("courses/X/files/a.pdf"));
-    assert!(is_pdf("courses/X/files/SCAN.PDF"));
-    assert!(is_pdf("courses/X/files/deck.pptx.Pdf"));
-    assert!(!is_pdf("courses/X/files/deck.pptx"));
-    assert!(!is_pdf("courses/X/files/pdf"));
+    assert!(is_pdf("courses/X/Course/Files/a.pdf"));
+    assert!(is_pdf("courses/X/Course/Files/SCAN.PDF"));
+    assert!(is_pdf("courses/X/Course/Files/deck.pptx.Pdf"));
+    assert!(!is_pdf("courses/X/Course/Files/deck.pptx"));
+    assert!(!is_pdf("courses/X/Course/Files/pdf"));
 }
 
 #[test]
@@ -81,18 +81,18 @@ fn spreadsheets_are_known_by_extension_and_are_never_pdf_backed() {
 #[test]
 fn purging_a_sheet_takes_its_text_and_any_pdf_route_files() {
     let scratch = crate::test_support::Scratch::new("purge-sheet");
-    let dir = scratch.join("courses/X/files");
+    let dir = scratch.join("courses/X/Course/Files");
     std::fs::create_dir_all(dir.join("m.xlsx_images")).unwrap();
-    for name in [
-        "m.xlsx",
-        "m.xlsx.md",
-        "m.xlsx.pdf",
-        "m.xlsx.pages.json",
-        "m.xlsx.emb.json",
-    ] {
+    let records = scratch.join("courses/X/.oculus/derived/Course/Files");
+    std::fs::create_dir_all(&records).unwrap();
+    for name in ["m.xlsx", "m.xlsx.md", "m.xlsx.pdf"] {
         std::fs::write(dir.join(name), b"x").unwrap();
     }
-    purge_parse_artifacts(&scratch, "courses/X/files/m.xlsx");
+    for name in ["m.xlsx.pages.json", "m.xlsx.emb.json"] {
+        std::fs::write(records.join(name), b"x").unwrap();
+    }
+    purge_parse_artifacts(&scratch, "courses/X/Course/Files/m.xlsx");
+    assert_eq!(std::fs::read_dir(&records).unwrap().count(), 0);
     let left: Vec<String> = std::fs::read_dir(&dir)
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -108,46 +108,55 @@ fn filenames_are_portable_to_windows_volumes() {
     assert_eq!(safe_filename("notes..."), "notes_");
     assert_eq!(safe_dir("CON"), "_CON");
     assert_eq!(
-        slash_path(r"courses\X\files\a.pdf"),
-        "courses/X/files/a.pdf"
+        slash_path(r"courses\X\Course\Files\a.pdf"),
+        "courses/X/Course/Files/a.pdf"
     );
 }
 
 #[test]
 fn purging_an_own_pdf_keeps_a_note_the_parser_did_not_write() {
     let scratch = crate::test_support::Scratch::new("purge-own");
-    let dir = scratch.join("courses/X/uploads");
+    let dir = scratch.join("courses/X/Exam prep");
+    let records = scratch.join("courses/X/.oculus/derived/Exam prep");
     std::fs::create_dir_all(dir.join("notes_images")).unwrap();
-    for name in ["notes.pdf", "notes.md", "notes.emb.json"] {
+    std::fs::create_dir_all(&records).unwrap();
+    for name in ["notes.pdf", "notes.md"] {
         std::fs::write(dir.join(name), b"x").unwrap();
     }
-    purge_parse_artifacts(&scratch, "courses/X/uploads/notes.pdf");
+    std::fs::write(records.join("notes.emb.json"), b"x").unwrap();
+    purge_parse_artifacts(&scratch, "courses/X/Exam prep/notes.pdf");
     assert!(dir.join("notes.md").is_file(), "the student's note stays");
-    assert!(!dir.join("notes.emb.json").exists());
+    assert!(!records.join("notes.emb.json").exists());
     assert!(!dir.join("notes_images").exists());
 
-    // With a parse record beside it, the markdown is the parser's.
-    std::fs::write(dir.join("notes.pages.json"), b"{}").unwrap();
-    purge_parse_artifacts(&scratch, "courses/X/uploads/notes.pdf");
+    // With a parse record, the markdown is the parser's.
+    std::fs::write(records.join("notes.pages.json"), b"{}").unwrap();
+    purge_parse_artifacts(&scratch, "courses/X/Exam prep/notes.pdf");
     assert!(!dir.join("notes.md").exists());
-    assert!(!dir.join("notes.pages.json").exists());
+    assert!(!records.join("notes.pages.json").exists());
     assert!(dir.join("notes.pdf").is_file());
 }
 
 #[test]
 fn purging_a_synced_pdf_takes_every_artifact() {
     let scratch = crate::test_support::Scratch::new("purge-synced");
-    let dir = scratch.join("courses/X/files");
+    let dir = scratch.join("courses/X/Course/Files");
+    let records = scratch.join("courses/X/.oculus/derived/Course/Files");
     std::fs::create_dir_all(dir.join("w1_images")).unwrap();
-    for name in ["w1.pdf", "w1.md", "w1.pages.json", "w1.emb.json"] {
+    std::fs::create_dir_all(&records).unwrap();
+    for name in ["w1.pdf", "w1.md"] {
         std::fs::write(dir.join(name), b"x").unwrap();
     }
-    purge_parse_artifacts(&scratch, "courses/X/files/w1.pdf");
+    for name in ["w1.pages.json", "w1.emb.json"] {
+        std::fs::write(records.join(name), b"x").unwrap();
+    }
+    purge_parse_artifacts(&scratch, "courses/X/Course/Files/w1.pdf");
+    assert_eq!(std::fs::read_dir(&records).unwrap().count(), 0);
     let left: Vec<String> = std::fs::read_dir(&dir)
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     assert_eq!(left, vec!["w1.pdf".to_string()]);
     // A path that could leave the data dir purges nothing.
-    purge_parse_artifacts(&scratch, "courses/X/files/../../../w1.pdf");
+    purge_parse_artifacts(&scratch, "courses/X/Course/Files/../../../w1.pdf");
 }

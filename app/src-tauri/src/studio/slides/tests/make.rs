@@ -183,13 +183,12 @@ fn a_name_from_another_pdf_is_not_overwritten() {
     req.name = Some("fig".into());
     req.width = Some(200);
     make(&req).unwrap();
-    let other = "courses/TEST101/files/other.pdf";
+    let other = "courses/TEST101/Course/Files/other.pdf";
     std::fs::copy(s.pdf(), s.data().join(other)).unwrap();
-    std::fs::copy(
-        crate::parse::pages_path(&s.pdf()),
+    crate::test_support::write_creating(
         crate::parse::pages_path(&s.data().join(other)),
-    )
-    .unwrap();
+        std::fs::read(crate::parse::pages_path(&s.pdf())).unwrap(),
+    );
     req.source = other;
     assert!(make(&req).unwrap_err().contains("already a crop of"));
     req.replace = true;

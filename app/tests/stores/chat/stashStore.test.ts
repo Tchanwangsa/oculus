@@ -59,9 +59,9 @@ describe("stashSnippet", () => {
     expect(stashSnippet({ text: "x".repeat(100), pastes: [], pictures: [] })).toBe(`${"x".repeat(90)}…`);
     expect(stashSnippet({ text: "", pastes: ["p"], pictures: ["./attachments/a.png", "./attachments/b.png"] })).toBe("(2 pictures, 1 pasted text)");
     expect(stashSnippet({ text: "", pastes: [], pictures: [] })).toBe("(empty)");
-    const text = "compare `./attachments/a.png` with `./attachments/b.pdf` in `courses/X/files/w.pdf`";
+    const text = "compare `./attachments/a.png` with `./attachments/b.pdf` in `courses/X/Course/Files/w.pdf`";
     expect(stashSnippet({ text, pastes: [], pictures: [] }, 90, (p) => (p.endsWith("a.png") ? "Figure 1.png" : undefined))).toBe(
-      "compare Figure 1.png with PDF in `courses/X/files/w.pdf`",
+      "compare Figure 1.png with PDF in `courses/X/Course/Files/w.pdf`",
     );
   });
 });

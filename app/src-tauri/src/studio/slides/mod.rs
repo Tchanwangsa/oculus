@@ -358,7 +358,7 @@ fn default_name(select: &Select, page: u32) -> String {
     }
 }
 
-/// `lecture 04, p. 12` from `courses/X/files/lecture_04.pdf`.
+/// `lecture 04, p. 12` from `courses/X/Course/Files/lecture_04.pdf`.
 pub fn source_label(source: &str, page: u32) -> String {
     let stem = Path::new(source)
         .file_stem()

@@ -133,6 +133,9 @@ pub struct LectureBrief {
     /// `YYYY-MM-DD`: the title is the timetable's, so the date is what says
     /// which week (and slide deck) this is.
     pub date: String,
+    /// The recording folder, data-dir-relative; `None` until something of
+    /// the lecture is downloaded.
+    pub folder: Option<String>,
     pub has_transcript: bool,
     pub chapters: Vec<crate::lectures::chapters::Chapter>,
 }

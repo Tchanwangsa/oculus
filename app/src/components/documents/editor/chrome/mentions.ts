@@ -36,7 +36,7 @@ const NO_MENTION = new Set(["InlineCode", "FencedCode", "CodeBlock", "Frontmatte
 /** The file behind each option, for `mentionOptionIcon`. */
 const optionFiles = new WeakMap<Completion, NoteLinkFile>();
 
-/** The folder under the subject (`files/Week 1`), else the category. */
+/** The folder under the subject (`Course/Files/Week 1`), else the category. */
 function folderLabel(file: NoteLinkFile): string {
   const rel = courseRelOf(file.relative_path);
   const dir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";

@@ -35,7 +35,7 @@ fn any_file_lands_in_the_subjects_uploads_and_the_staged_copy_goes() {
     };
     assert_eq!(subject_code, "COMP10001");
     let file = outcome.file.expect("landed");
-    assert_eq!(file.relative_path, "courses/COMP10001/uploads/data_set.zip");
+    assert_eq!(file.relative_path, "courses/COMP10001/data_set.zip");
     assert_eq!(file.file_type, "zip");
     assert_eq!(
         outcome.error, None,
@@ -61,15 +61,15 @@ fn uploads_rules_apply_a_taken_name_steps_aside_and_same_bytes_dedupe() {
     let code = oculus("MAST20004");
     assert_eq!(
         rel(deliver(&data, &first, &code).unwrap()),
-        "courses/MAST20004/uploads/notes.txt"
+        "courses/MAST20004/notes.txt"
     );
     assert_eq!(
         rel(deliver(&data, &again, &code).unwrap()),
-        "courses/MAST20004/uploads/notes.txt"
+        "courses/MAST20004/notes.txt"
     );
     assert_eq!(
         rel(deliver(&data, &other, &code).unwrap()),
-        "courses/MAST20004/uploads/notes-2.txt"
+        "courses/MAST20004/notes-2.txt"
     );
 }
 

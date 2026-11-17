@@ -62,8 +62,10 @@ share one SQLite snapshot, with scan order breaking score ties.
 Ingest reads and validates each parse/embed JSON artifact once on its blocking
 worker, and uses the already-read parse page count to check cached coverage.
 
-`.emb.json` beside each PDF records that it is indexed (`{pdf, model, dim,
-dtype, instruction, page_count, pages}`), written temp-then-rename.
+A PDF's `.emb.json`, beside its `.pages.json` in the subject's
+`.oculus/derived/` (`library::layout::derived`), records that it is indexed
+(`{pdf, model, dim, dtype, instruction, page_count, pages}`), written
+temp-then-rename.
 
 Embedding and parsing meet **only** on `(file, page_no)` via `.pages.json`.
 Both count pages with the same function (`pdf_render::page_count`), and the

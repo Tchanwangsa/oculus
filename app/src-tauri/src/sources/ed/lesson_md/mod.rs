@@ -2,8 +2,8 @@
 //! whatever the sync fetched for a slide (quiz questions, the PDF and
 //! workspace files it stored) arrives as [`SlideExtras`] on its [`SlideFile`].
 //!
-//! The index sits at `lessons/<lessonId>-<slug>.md` and links each slide's
-//! file, `lessons/<lessonId>-<slug>/<NN>-<slide-slug>.md`; a slide's PDF and
+//! The index sits at `Course/Lessons/<lessonId>-<slug>.md` and links each slide's
+//! file, `Course/Lessons/<lessonId>-<slug>/<NN>-<slide-slug>.md`; a slide's PDF and
 //! workspace share its stem. A PDF slide has no file of its own, since its
 //! stem's `.md` is where the parser writes the PDF's text: the index links
 //! the PDF instead. Every local link is relative to the linking file's
@@ -47,7 +47,7 @@ pub struct LinkedFile {
 /// A lesson's place in the library and in Ed.
 pub struct LessonPlace<'a> {
     /// The index file's path without `.md`, course-relative:
-    /// `lessons/<lessonId>-<slug>`. Its slides sit in the folder of that name.
+    /// `Course/Lessons/<lessonId>-<slug>`. Its slides sit in the folder of that name.
     pub stem: &'a str,
     pub course_id: i64,
     pub lesson_id: i64,
@@ -87,7 +87,7 @@ pub struct SlideFile<'a> {
     /// 1-based position among the lesson's slides, the `NN` of its files.
     pub index: usize,
     /// Its `.md` path without the extension, course-relative:
-    /// `lessons/<lessonId>-<slug>/<NN>-<slide-slug>`.
+    /// `Course/Lessons/<lessonId>-<slug>/<NN>-<slide-slug>`.
     pub stem: String,
     pub extras: SlideExtras,
 }

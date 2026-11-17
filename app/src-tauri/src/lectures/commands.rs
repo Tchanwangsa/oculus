@@ -8,6 +8,16 @@ use super::downloads::{cancel_key, DownloadCancels};
 use super::{get_or_auth, Echo360Cache, LectureData};
 use crate::sources::echo360;
 
+/// A lecture's recording folder (`store::recording_folder`), chosen now if
+/// this is the first thing written into it.
+async fn recording_dir(media_id: &str) -> Result<std::path::PathBuf, String> {
+    let pool = crate::db::store::open_pool().await?;
+    let dir =
+        crate::db::store::recording_dir(&pool, &crate::library::paths::data_dir(), media_id).await;
+    pool.close().await;
+    dir
+}
+
 #[tauri::command]
 pub async fn echo360_sync_lectures(
     cache: tauri::State<'_, Echo360Cache>,
@@ -41,10 +51,10 @@ pub async fn echo360_download_video(
 ) -> Result<String, String> {
     let cache = cache.inner().clone();
     let cancels = cancels.inner().clone();
+    let dir = recording_dir(&media_id).await?;
     crate::runtime::blocking::run(move || {
         let source = source.unwrap_or(1);
         let session = get_or_auth(&cache, canvas_course_id)?;
-        let dir = echo360::lecture_dir(&crate::library::paths::data_dir(), &media_id)?;
         let url = echo360::download_url(&session, &media_id, &lesson_id, source)?;
 
         // Removed on every exit path, so a late cancel cannot poison a retry.
@@ -148,9 +158,15 @@ pub async fn echo360_delete_video(
     source: Option<u8>,
 ) -> Result<u64, String> {
     let cancels = cancels.inner().clone();
+    // A lecture with no folder yet has nothing on disk to delete.
+    let pool = crate::db::store::open_pool().await?;
+    let folder = crate::db::store::recorded_folder(&pool, &media_id).await?;
+    pool.close().await;
+    let Some(folder) = folder else {
+        return Ok(0);
+    };
+    let dir = crate::library::layout::recording_dir(&crate::library::paths::data_dir(), &folder)?;
     crate::runtime::blocking::run(move || {
-        let dir = echo360::lecture_dir(&crate::library::paths::data_dir(), &media_id)?;
-
         let sources: Vec<u8> = match source {
             Some(s) => vec![s],
             None => vec![1, 2],
@@ -191,11 +207,11 @@ pub async fn echo360_download_transcript(
     canvas_course_id: i64,
 ) -> Result<String, String> {
     let cache = cache.inner().clone();
+    let dir = recording_dir(&media_id).await?;
     crate::runtime::blocking::run(move || {
         let session = get_or_auth(&cache, canvas_course_id)?;
         let vtt = echo360::transcript(&session, &lesson_id, &media_id)?;
 
-        let dir = echo360::lecture_dir(&crate::library::paths::data_dir(), &media_id)?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let path = dir.join("transcript.vtt");
         std::fs::write(&path, vtt.as_bytes()).map_err(|e| e.to_string())?;

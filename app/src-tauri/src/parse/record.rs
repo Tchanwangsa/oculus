@@ -1,8 +1,10 @@
-//! The artifacts beside a PDF, and the parsed document they record.
+//! A PDF's parse artifacts, and the parsed document they record.
 //!
-//! Where each artifact lives is `library::layout::derived`'s. The image
-//! directory's name is also the link prefix written into the markdown
-//! (`![](<stem>_images/x.jpg)`), so a backend never computes either.
+//! Where each artifact lives is `library::layout::derived`'s: the text and
+//! its pictures beside the PDF, the record in the subject's
+//! `.oculus/derived/`. The image directory's name is also the link prefix
+//! written into the markdown (`![](<stem>_images/x.jpg)`), so a backend never
+//! computes either.
 
 use super::{ImageStaging, ParseError, MODE, PARSER_VERSION};
 use crate::library::layout::{derived, DerivedKind};
@@ -23,7 +25,7 @@ pub fn images_dir_for(pdf: &Path) -> PathBuf {
     derived(pdf, DerivedKind::Images)
 }
 
-/// The record beside this PDF, read back as the type that wrote it.
+/// This PDF's record, read back as the type that wrote it.
 pub fn read_record(pdf: &Path) -> Option<ParseOutput> {
     serde_json::from_str(&fs::read_to_string(pages_path(pdf)).ok()?).ok()
 }
@@ -154,6 +156,10 @@ impl ParseOutput {
         // The temp name is unique per write, so two writers never share one.
         static SEQUENCE: AtomicU64 = AtomicU64::new(0);
         let final_path = pages_path(pdf);
+        if let Some(dir) = final_path.parent() {
+            fs::create_dir_all(dir)
+                .map_err(|e| ParseError::Io(format!("create {}: {e}", dir.display())))?;
+        }
         let body = serde_json::to_vec(self)
             .map_err(|e| ParseError::Io(format!("encode {}: {e}", final_path.display())))?;
         let tmp = final_path.with_extension(format!(

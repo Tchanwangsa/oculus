@@ -2,7 +2,7 @@ use sqlx::{Row, SqlitePool};
 
 #[derive(Debug)]
 pub struct LectureRow {
-    /// Echo360's media id and the folder under `lectures/`; the CLI's handle.
+    /// Echo360's media id; the CLI's handle.
     pub id: String,
     pub title: String,
     pub date: String,
@@ -40,6 +40,79 @@ pub async fn upsert_lectures(
         .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// A lecture's recording folder, data-dir-relative
+/// (`courses/<code>/Course/Recordings/<date>-<slug>`). Chosen from the row's
+/// date and title the first time it is asked for and stored on the row, so
+/// a later title change never moves it: `layout::new_recording_rel` names
+/// it, stepping past a name another lecture's row or a folder on disk holds.
+pub async fn recording_folder(
+    pool: &SqlitePool,
+    data_dir: &std::path::Path,
+    id: &str,
+) -> Result<String, String> {
+    let row = sqlx::query(
+        "SELECT l.folder_rel, l.title, l.date, s.code
+           FROM lectures l LEFT JOIN subjects s ON s.id = l.subject_id
+          WHERE l.id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| format!("no lecture {id}"))?;
+    if let Some(folder) = row.get::<Option<String>, _>("folder_rel") {
+        return Ok(folder);
+    }
+    let code: String = row
+        .get::<Option<String>, _>("code")
+        .ok_or_else(|| format!("lecture {id} has no subject"))?;
+    let title: String = row.get("title");
+    let date: String = row.get("date");
+    let taken: Vec<String> =
+        sqlx::query_scalar("SELECT lower(folder_rel) FROM lectures WHERE folder_rel IS NOT NULL")
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    let rel = crate::library::layout::new_recording_rel(&code, &date, &title, |rel| {
+        taken.contains(&rel.to_lowercase()) || data_dir.join(rel).exists()
+    });
+    // Only an unset row takes it, so a concurrent first call keeps its own
+    // choice; the unique index refuses a name another row took meanwhile.
+    sqlx::query("UPDATE lectures SET folder_rel = ?1 WHERE id = ?2 AND folder_rel IS NULL")
+        .bind(&rel)
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    sqlx::query_scalar::<_, Option<String>>("SELECT folder_rel FROM lectures WHERE id = ?1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("lecture {id} has no folder"))
+}
+
+/// `recording_folder` on disk.
+pub async fn recording_dir(
+    pool: &SqlitePool,
+    data_dir: &std::path::Path,
+    id: &str,
+) -> Result<std::path::PathBuf, String> {
+    let rel = recording_folder(pool, data_dir, id).await?;
+    crate::library::layout::recording_dir(data_dir, &rel)
+}
+
+/// The recording folder already chosen for a lecture, if any; for readers
+/// that must not choose one (deleting a download).
+pub async fn recorded_folder(pool: &SqlitePool, id: &str) -> Result<Option<String>, String> {
+    sqlx::query_scalar::<_, Option<String>>("SELECT folder_rel FROM lectures WHERE id = ?1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())
+        .map(Option::flatten)
 }
 
 /// Record where a downloaded artifact landed.

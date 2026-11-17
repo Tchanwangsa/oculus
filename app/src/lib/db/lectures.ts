@@ -16,6 +16,10 @@ export interface Lecture {
   /** 1 when Echo360 publishes a camera stream for this capture. */
   has_source2: number;
   transcript_path: string | null;
+  /** The recording folder, data-dir-relative
+   *  (`courses/<code>/Course/Recordings/<date>-<slug>`): chosen once, when
+   *  something of the lecture is first downloaded; null until then. */
+  folder_rel: string | null;
   progress_seconds: number;
   /** UTC `datetime('now')`, comparable with `files.last_accessed_at`; NULL
    *  is never watched. Home's Recent row ranks on it. */
@@ -84,6 +88,17 @@ export async function upsertLectures(subjectId: number, lectures: LectureData[])
 export async function getLecture(id: string): Promise<Lecture | null> {
   const db = await getDb();
   const rows = await db.select<Lecture[]>(`SELECT * FROM lectures WHERE id = $1`, [id]);
+  return rows[0] ?? null;
+}
+
+/** The lecture whose recording folder is `folder` (as `recordingOf` spells
+ *  it, so compared ignoring case). */
+export async function getLectureByFolder(folder: string): Promise<Lecture | null> {
+  const db = await getDb();
+  const rows = await db.select<Lecture[]>(
+    `SELECT * FROM lectures WHERE folder_rel = $1 COLLATE NOCASE`,
+    [folder],
+  );
   return rows[0] ?? null;
 }
 

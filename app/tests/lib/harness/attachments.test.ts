@@ -19,7 +19,7 @@ test("a message of only pictures has no words left", () => {
 test("a last paragraph of anything else is text", () => {
   for (const message of [
     "see `./attachments/a.png` here",
-    "words\n\n`courses/MAST10006/files/a.pdf`",
+    "words\n\n`courses/MAST10006/Course/Files/a.pdf`",
     "words\n\n`./attachments/a.png` and more",
     // A PDF or text file is a chip in the sentence, never a lifted line.
     "words\n\n`./attachments/a.png` `./attachments/b.pdf`",

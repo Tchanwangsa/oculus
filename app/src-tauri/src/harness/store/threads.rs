@@ -120,6 +120,8 @@ pub struct LectureRef {
     /// `YYYY-MM-DD`. The title is the timetable's (`… TU L105`), so the date is
     /// what says which lecture this is, and which week's slides go with it.
     pub date: String,
+    /// The recording folder, data-dir-relative (`lectures.folder_rel`).
+    pub folder: Option<String>,
     /// Whether `transcript.vtt` is on disk: clearing transcripts leaves the
     /// column's path behind, and the agent must not be sent to a missing file.
     pub has_transcript: bool,
@@ -129,7 +131,7 @@ pub async fn thread(pool: &SqlitePool, id: i64) -> Result<ThreadRow, String> {
     let r = sqlx::query(
         "SELECT t.id, t.provider, t.model, t.effort, t.completed_at, s.code AS subject_code,
                 l.id AS lecture_id, l.title AS lecture_title, l.date AS lecture_date,
-                l.transcript_path
+                l.folder_rel AS lecture_folder, l.transcript_path
          FROM harness_threads t
          LEFT JOIN subjects s ON s.id = t.subject_id
          LEFT JOIN lectures l ON l.id = t.lecture_id
@@ -151,6 +153,7 @@ pub async fn thread(pool: &SqlitePool, id: i64) -> Result<ThreadRow, String> {
                 .chars()
                 .take(10)
                 .collect(),
+            folder: r.get("lecture_folder"),
             has_transcript: r
                 .get::<Option<String>, _>("transcript_path")
                 .is_some_and(|p| std::path::Path::new(&p).exists()),

@@ -1,6 +1,6 @@
 //! Versioned drawing documents among each subject's own files: canvases
-//! (`<title>.canvas`) and notebooks (`<title>.notebook`), each created in its
-//! kind's folder (`layout::own_dir`).
+//! (`<title>.canvas`) and notebooks (`<title>.notebook`), anywhere in the
+//! own zone, created in the folder `layout::own_dir` gives their kind.
 pub(crate) mod authority;
 pub(crate) mod drafts;
 pub(crate) mod export;
@@ -15,7 +15,7 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 /// The two drawing documents. Both are the same `oculus-canvas` JSON; a
-/// notebook has its own extension (and, today, folder) and always has
+/// notebook has its own extension and always has
 /// `paper`. Only a notebook has pages: `paper` in a canvas is kept as written
 /// and means nothing, and the kind always comes from the path.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -306,36 +306,19 @@ pub async fn list_canvases(
     .await
 }
 
+/// Every drawing of `kind` in the subject's own files, at any depth
+/// (`layout::own_files`); one behind a symlink is not listed.
 pub(super) fn list_at(
     root: &Path,
     kind: DrawingKind,
     code: &str,
 ) -> Result<Vec<ImportedFile>, String> {
-    let prefix = folder_of(kind, code);
-    let probe = match checked(
-        root,
-        &format!("{prefix}/Untitled{}", kind.extension()),
-        false,
-    ) {
-        Ok(path) => path,
-        Err(_) if !root.join(&prefix).exists() => return Ok(Vec::new()),
-        Err(e) => return Err(e),
-    };
     let mut files = Vec::new();
-    for entry in
-        std::fs::read_dir(probe.parent().ok_or("Missing parent")?).map_err(|e| e.to_string())?
-    {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let rel = format!("{prefix}/{}", entry.file_name().to_string_lossy());
-        if DrawingKind::of(&rel) != Some(kind) {
+    for (rel, meta) in layout::own_files(root, code) {
+        if DrawingKind::of(&rel) != Some(kind) || checked(root, &rel, false).is_err() {
             continue;
         }
-        let path = checked(root, &rel, false)?;
-        files.push(file(
-            kind,
-            rel,
-            std::fs::metadata(path).map_err(|e| e.to_string())?.len(),
-        ));
+        files.push(file(kind, rel, meta.len()));
     }
     files.sort_by(|a, b| a.filename.cmp(&b.filename));
     Ok(files)

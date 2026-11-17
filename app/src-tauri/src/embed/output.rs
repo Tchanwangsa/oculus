@@ -87,6 +87,10 @@ impl EmbedOutput {
     /// could otherwise read as a complete record for a partly-indexed file.
     pub fn write(&self, pdf: &Path) -> Result<(), EmbedError> {
         let final_path = emb_path(pdf);
+        if let Some(dir) = final_path.parent() {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| EmbedError::Io(format!("create {}: {e}", dir.display())))?;
+        }
         let body = serde_json::to_vec(self)
             .map_err(|e| EmbedError::Io(format!("encode {}: {e}", final_path.display())))?;
         let tmp = final_path.with_extension(format!("json.tmp{}", std::process::id()));

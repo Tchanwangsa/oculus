@@ -11,7 +11,6 @@ import {
   toLibraryPath,
   type InfoTarget,
 } from "./targets";
-import { recordingRel } from "@/lib/files/libraryLayout";
 
 /**
  * Thread info's Read and Made groups, projected from a thread's rows with no
@@ -183,11 +182,11 @@ function scanOculus(rest: string[], at: number, lists: Lists) {
 
 export function deriveThreadInfo(
   items: readonly HarnessItem[],
-  { threadId, lectureId }: { threadId: number; lectureId?: string | null },
+  { threadId, lectureFolder }: { threadId: number; lectureFolder?: string | null },
 ): ThreadInfoLists {
   const lists = new Lists();
   // The lecture a lecture thread is about leads Read before any message.
-  if (lectureId) lists.addRead(recordingRel(lectureId), -1, { pinned: true });
+  if (lectureFolder) lists.addRead(lectureFolder, -1, { pinned: true });
   items.forEach((item, at) => {
     if (item.thread_id !== threadId) return;
     if (item.kind === "user" || item.kind === "steer") {
@@ -201,8 +200,8 @@ export function deriveThreadInfo(
           lists.addRead(part.path, at);
         }
       }
-      const moment = lectureId ? messageAt(item) : null;
-      if (moment != null && lectureId) lists.addRead(recordingRel(lectureId), at, { time: moment });
+      const moment = lectureFolder ? messageAt(item) : null;
+      if (moment != null && lectureFolder) lists.addRead(lectureFolder, at, { time: moment });
       return;
     }
     if (item.kind !== "tool") return;

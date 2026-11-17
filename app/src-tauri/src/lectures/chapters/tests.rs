@@ -409,7 +409,7 @@ fn the_prompt_names_the_outline_and_the_two_paths() {
     let job = Job {
         title: "Lecture 7: Grover",
         duration_secs: 2534,
-        lecture_dir: "../lectures/abc-123",
+        lecture_dir: "../courses/X/Course/Recordings/2026-08-04-intro",
         course_dir: Some("../courses/MULT20015_2026_SM2"),
         detected: 17,
         has_transcript: true,
@@ -418,11 +418,11 @@ fn the_prompt_names_the_outline_and_the_two_paths() {
     assert!(text.contains("Lecture 7: Grover"));
     assert!(text.contains("00:42:14"), "the duration as a clock");
     assert!(
-        text.contains("\n  ../lectures/abc-123/outline.md"),
+        text.contains("\n  ../courses/X/Course/Recordings/2026-08-04-intro/outline.md"),
         "indented under the folder"
     );
     assert!(
-        text.contains("\n  ../lectures/abc-123/frames/<second>.jpg"),
+        text.contains("\n  ../courses/X/Course/Recordings/2026-08-04-intro/frames/<second>.jpg"),
         "indented under the folder"
     );
     assert!(text.contains("../courses/MULT20015_2026_SM2/"));

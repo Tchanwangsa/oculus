@@ -84,7 +84,7 @@ export function listener(log: string[] = []): SessionListener & { log: string[] 
   };
 }
 
-export const NOTE: Note = { id: 1, relative_path: "courses/X/documents/a.md", filename: "a.md" };
+export const NOTE: Note = { id: 1, relative_path: "courses/X/a.md", filename: "a.md" };
 
 export async function opened(sessions: ReturnType<typeof createDocumentSessions<Note>>, disk: ReturnType<typeof fakeDisk>) {
   const lease = sessions.open(NOTE, listener());

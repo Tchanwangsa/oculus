@@ -15,7 +15,6 @@
       "assetProtocol": {
         "scope": [
           "$HOME/Oculus/courses/**",
-          "$HOME/Oculus/lectures/**",
           "$HOME/Oculus/agents/**"
         ]
       }

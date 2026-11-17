@@ -100,7 +100,7 @@ describe("Ed lesson index", () => {
 
   test("a lesson scraped before the split has no index", () => {
     expect(parseLessonIndex("# Week 1\n\n## Slide one\n\nBody")).toBeNull();
-    const lesson = parseEdLesson("# Week 1", file(9, "courses/C/lessons/77-week-1.md"));
+    const lesson = parseEdLesson("# Week 1", file(9, "courses/C/Course/Lessons/77-week-1.md"));
     expect(lesson.index).toBeNull();
     expect(lesson.lessonId).toBe(77);
     expect(lesson.title).toBe("Week 1");
@@ -110,9 +110,9 @@ describe("Ed lesson index", () => {
     const at = (id: number, module: string | null, order: number) =>
       parseEdLesson(
         indexText({ ed_lesson_id: String(id), title: `"L${id}"`, module: JSON.stringify(module), order: String(order) }),
-        file(id, `courses/C/lessons/${id}-l.md`),
+        file(id, `courses/C/Course/Lessons/${id}-l.md`),
       );
-    const old = (id: number) => parseEdLesson("# Old", file(id, `courses/C/lessons/${id}-old.md`));
+    const old = (id: number) => parseEdLesson("# Old", file(id, `courses/C/Course/Lessons/${id}-old.md`));
     const groups = groupLessons([old(5), at(3, "Week 2", 3), at(1, "Week 1", 1), old(8), at(2, "Week 1", 0), at(4, null, 2)]);
     expect(groups.map((g) => g.label)).toEqual(["Week 1", "No module", "Week 2", "Other"]);
     expect(groups[0].lessons.map((l) => l.lessonId)).toEqual([2, 1]);
@@ -121,10 +121,10 @@ describe("Ed lesson index", () => {
   });
 
   test("resolves a slide's files beside the index", () => {
-    const index = file(1, "courses/C/lessons/123-assignment-1.md");
+    const index = file(1, "courses/C/Course/Lessons/123-assignment-1.md");
     const slides = parseLessonIndex(A1)!.slides;
-    const md = file(2, "courses/C/lessons/123-assignment-1/02-notes.md");
-    const pdf = file(3, "courses/C/lessons/123-assignment-1/02-notes.pdf");
+    const md = file(2, "courses/C/Course/Lessons/123-assignment-1/02-notes.md");
+    const pdf = file(3, "courses/C/Course/Lessons/123-assignment-1/02-notes.pdf");
     expect(slideFiles(index, slides[1], [index, md, pdf])).toEqual({ md, pdf });
     expect(slideFiles(index, slides[0], [index, md, pdf])).toEqual({ md: undefined, pdf: undefined });
     expect(resolveBeside("a/b/c.md", "./d/../e.md")).toBe("a/b/e.md");

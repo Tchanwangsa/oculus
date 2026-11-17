@@ -2,7 +2,7 @@
 
 use crate::library::layout::{self, SyncedKind};
 use crate::pages::md;
-use crate::sync::render::{escape_md, file_toc_line, items_of, slug, up_to_course_root};
+use crate::sync::render::{escape_md, file_toc_line, items_of, slug};
 use crate::sync::{Engine, Fetched, LinkCrawl, Progress, Subject, TaskDocs};
 
 impl Engine {
@@ -39,8 +39,6 @@ impl Engine {
                 SyncedKind::Modules,
                 &format!("{pos:02}-{}.md", slug(mod_name)),
             );
-            // Every link climbs from the TOC to the course root first.
-            let up = up_to_course_root(&path);
             let mut toc = vec![format!("# {mod_name}\n")];
 
             for item in items_of(m) {
@@ -81,10 +79,12 @@ impl Engine {
                                 ),
                             }
                         }
+                        let page =
+                            layout::synced(SyncedKind::Pages, &format!("{}.md", slug(title)));
                         toc.push(format!(
-                            "{indent}- [{}]({up}{})",
+                            "{indent}- [{}]({})",
                             escape_md(title),
-                            layout::synced(SyncedKind::Pages, &format!("{}.md", slug(title)))
+                            layout::link_between(&path, &page)
                         ));
                     }
                     "File" => {
@@ -113,9 +113,11 @@ impl Engine {
                         };
                         let local = item["content_id"].as_i64().and_then(|id| map.get(&id));
                         toc.push(match local {
-                            Some(path) => {
-                                format!("{indent}- [{}]({up}{path}) _({kind})_", escape_md(title))
-                            }
+                            Some(task) => format!(
+                                "{indent}- [{}]({}) _({kind})_",
+                                escape_md(title),
+                                layout::link_between(&path, task)
+                            ),
                             None => format!(
                                 "{indent}- [{}]({}) _({kind})_",
                                 escape_md(title),

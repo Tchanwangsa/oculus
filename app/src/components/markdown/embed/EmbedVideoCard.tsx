@@ -166,7 +166,7 @@ function RowActions({
   );
 }
 
-/** The poster Rust saved under the course's `images/`; `attachmentSrc` stays
+/** The poster Rust saved under the course's `Course/Images/`; `attachmentSrc` stays
  *  empty until the data dir resolves. */
 function Poster({ rel }: { rel: string | null }) {
   const dataDir = useDataDir();

@@ -487,14 +487,14 @@ still update the picker.
   of replies alone keeps its own label.
 - **A Read of a picture expands to the picture** (`ReadPicture` in
   `WorkRow.tsx`), click for the lightbox. It loads over the asset protocol, so
-  only `courses/`, `lectures/` and `agents/` under the data dir show; any other
-  path fails to load and the row falls back to its args.
+  only `courses/` and `agents/` under the data dir show; any other path fails
+  to load and the row falls back to its args.
 - **A citation opens the file at the cited spot.** One grammar
   (`app/src/lib/citations/`) reads an inline code span, a link's href or a
-  bare path in prose: `courses/…`, `../courses/…`, `agents/…`, `lectures/…`,
-  absolute, agent-cwd `./x`, plus `:97-120` / `#L97-L120` / `#page=12`. It is
+  bare path in prose: `courses/…`, `../courses/…`, `agents/…`, absolute,
+  agent-cwd `./x`, plus `:97-120` / `#L97-L120` / `#page=12`. It is
   shape-only and decodes first (the data dir has a space); a course-relative
-  path or bare filename is a *tail*, rendered as code until one cached
+  path into a synced folder (`Course/Files/…`) or a bare filename is a *tail*, rendered as code until one cached
   `LIKE '%/<tail>'` finds a unique row. A line of a parsed `.md` maps to its
   PDF page because the `.md` is the `.pages.json` pages joined with `\n\n`;
   `openCitation` opens the file there in the side panel and `PDFViewer` marks
@@ -889,10 +889,13 @@ row per file, most recently touched first:
 | Read | Read tool rows (a PDF's `pages`), `oculus read` (`-p`), `cat`/`sed`/`head` and the other shell readers, `@` mentions and attachments in the student's messages and steers, a lecture thread's lecture (always first) and the playhead each question was asked at | `p. 12`, `pp. 3, 12–19`, or a lecture's `12:20–31:05` |
 | Made | Write and Edit rows (Codex's `fileChange` paths, opencode's `apply_patch` headers), a shell line's files under `outputs/` other than those it only reads, `oculus memory write/append/fold` (the memory's file, or its bucket), `oculus studio render/narrate/frame` (the video) | `New` or `Edited` |
 
-A parsed `.md` is its PDF, and anything under `lectures/<id>/` is that
-lecture. Read keeps to `courses/`, `lectures/`, `agents/attachments/` and
-`agents/outputs/`, so the agent's own instructions, skills and memories are
-not listed; a file the thread made is listed under Made only. A Studio file
+A parsed `.md` in `Course/Files/` is its PDF (beside the student's own files
+a `.md` may be a note, so it stays itself), and anything in a recording
+folder (`Course/Recordings/<date>-<slug>/`, `recordingOf`) is that lecture,
+looked up by `lectures.folder_rel`. Read keeps to `courses/`,
+`agents/attachments/` and `agents/outputs/`, so the agent's own
+instructions, skills and memories are not listed; a file the thread made is
+listed under Made only. A Studio file
 opens its video, component or theme page. A failed or refused call counts for
 neither; a running one does. An `oculus read` of a fragment rather than a
 full path is not listed, since naming it takes a lookup.
@@ -2949,8 +2952,9 @@ so it names its scope too ([studio-page.md](./studio-page.md)).
 takes. Words are ANDed against filenames (`safe_filename` turns spaces into
 `_`); the token is bounded (no space after `@`, four words, 60 characters, a
 backtick ends it). Folders come first (`searchMentionFolders`): the subject's
-own top-level folders (`pages/`, `files/`, `uploads/`…), or in a General
-thread each subject's folder, read off the files table and most recently
+top-level folders with `Course/` opened one level (`Course/Pages/`,
+`Course/Files/`, the student's own `Exam prep/`…), or in a General thread
+each subject's folder, read off the files table and most recently
 opened first. A folder's chip holds its path with a trailing `/`, which the
 agent lists itself. Then up to eight readable files, which for a bare `@` are
 the most recently opened.
@@ -3228,7 +3232,8 @@ and draws `DropOverlay` (`app/src/components/ui/layout/DropOverlay.tsx`) from
 
 `harness_threads.lecture_id` scopes a thread to one recording, fixed at
 creation; Rust reads the subject off the lecture row. `instructions()` appends
-`../lectures/<id>/`, the transcript if present, the recording's date (Echo360
+its recording folder (`../<lectures.folder_rel>/`, once anything of it is
+downloaded), the transcript if present, the recording's date (Echo360
 titles are timetable codes), the VTT's shape, the deck-finding recipe and the
 chapter list inline — rebuilt on every send and before any spawn.
 
@@ -3388,7 +3393,7 @@ later, and the card shows the reason under its body (`CardFrame`'s `note`).
 
 The `oculus-revision` skill drafts course-style questions as unaccepted items and offers condensed `NewCheatNotes` proposals after concept explanations. The `revisionMarking` job marks a submitted written answer in one tool-less turn, with strict rubric JSON validation. State, scheduling and error behavior are in [revision.md](./revision.md).
 
-Live Task/TaskList, Deadline/Upcoming, Lecture, StudioVideo, CheatNote and ReviewDue widgets read current rows by CLI-supplied id. `Task(number)` is live; `Task(string, ...)` remains a proposed new task. Lecture citations accept `lectures/<id>#t=<seconds>` and open the player at that moment.
+Live Task/TaskList, Deadline/Upcoming, Lecture, StudioVideo, CheatNote and ReviewDue widgets read current rows by CLI-supplied id. `Task(number)` is live; `Task(string, ...)` remains a proposed new task. Lecture citations accept a recording folder path with `#t=<seconds>` (`courses/<code>/Course/Recordings/<date>-<slug>#t=723`) and open the player at that moment.
 
 ## Gotchas
 

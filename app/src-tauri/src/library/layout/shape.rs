@@ -2,9 +2,10 @@
 
 use super::{OwnKind, SyncedFile, SyncedKind};
 
-/// One library layout. Every function in this module reads `CURRENT`; a test
-/// holds the target layout beside it, so the same rules are checked on both.
-pub(super) struct Shape {
+/// One library layout. Every function in this module reads `CURRENT`;
+/// `LEGACY` is the layout before the Drive tree, kept so the one-shot move
+/// can recognise old paths, and checked by the same rules in the tests.
+pub struct Shape {
     /// The folder at a subject's root that holds everything synced, or `None`
     /// when the synced folders sit at the root themselves.
     pub synced_root: Option<&'static str>,
@@ -23,17 +24,65 @@ pub(super) struct Shape {
     pub hidden: &'static [&'static str],
     /// The subject's agent workspace, under its root.
     pub agents: &'static str,
+    /// Where a PDF's parse record and page vectors go, under the subject
+    /// root, mirroring the PDF's own folder; `None` keeps them beside it.
+    pub derived: Option<&'static str>,
     /// The folder beside a note that holds its pictures, and the prefix of
     /// the `![](…)` links the note carries.
     pub note_assets: &'static str,
-    /// The data-dir folder holding one folder per lecture recording, or
-    /// `None` when recordings sit inside their subject.
-    pub recordings_root: Option<&'static str>,
+    /// Where lecture recordings live.
+    pub recordings: Recordings,
 }
 
-pub(super) const CURRENT: &Shape = &TODAY;
+/// Where a layout keeps one folder per lecture recording.
+#[derive(Clone, Copy)]
+pub enum Recordings {
+    /// A data-dir folder, one folder per Echo360 media id inside it.
+    DataDir(&'static str),
+    /// A synced folder in the recording's subject, one folder per recording
+    /// named by its date and title.
+    Synced(&'static str),
+}
 
-pub(super) const TODAY: Shape = Shape {
+pub(super) const CURRENT: &Shape = &TARGET;
+
+/// The Drive tree: `Course/` holds everything synced, the student's own files
+/// sit beside it at any depth, and `.oculus/` is app state.
+pub(super) const TARGET: Shape = Shape {
+    synced_root: Some("Course"),
+    synced_dirs: &[
+        (SyncedKind::Files, "Files"),
+        (SyncedKind::Media, "Media"),
+        (SyncedKind::Lessons, "Lessons"),
+        (SyncedKind::Discussion, "Discussion"),
+        (SyncedKind::Pages, "Pages"),
+        (SyncedKind::Assignments, "Assignments"),
+        (SyncedKind::Quizzes, "Quizzes"),
+        (SyncedKind::Announcements, "Announcements"),
+        (SyncedKind::Modules, "Modules"),
+        (SyncedKind::Images, "Images"),
+    ],
+    synced_files: &[
+        (SyncedFile::Home, "home.md"),
+        (SyncedFile::Syllabus, "syllabus.md"),
+    ],
+    own_dirs: &[
+        (OwnKind::Upload, ""),
+        (OwnKind::Document, ""),
+        (OwnKind::Canvas, ""),
+        (OwnKind::Notebook, ""),
+    ],
+    own_kind_by_folder: false,
+    hidden: &[".oculus"],
+    agents: ".oculus/agents",
+    derived: Some(".oculus/derived"),
+    note_assets: ".assets",
+    recordings: Recordings::Synced("Recordings"),
+};
+
+/// The layout before the Drive tree: synced kinds at the subject root, one
+/// folder per own kind, recordings in the data dir's `lectures/`.
+pub const LEGACY: Shape = Shape {
     synced_root: None,
     synced_dirs: &[
         (SyncedKind::Files, "files"),
@@ -60,8 +109,9 @@ pub(super) const TODAY: Shape = Shape {
     own_kind_by_folder: true,
     hidden: &["agents"],
     agents: "agents",
+    derived: None,
     note_assets: "assets",
-    recordings_root: Some("lectures"),
+    recordings: Recordings::DataDir("lectures"),
 };
 
 impl Shape {
@@ -97,5 +147,14 @@ impl Shape {
             .filter(|p| !p.is_empty())
             .collect::<Vec<_>>()
             .join("/")
+    }
+
+    /// The data-dir folder recordings live in, when they live outside the
+    /// subjects.
+    pub fn recordings_root(&self) -> Option<&'static str> {
+        match self.recordings {
+            Recordings::DataDir(root) => Some(root),
+            Recordings::Synced(_) => None,
+        }
     }
 }

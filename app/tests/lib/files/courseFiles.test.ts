@@ -3,7 +3,7 @@ import { createCourseFileDataLoader } from "@/lib/files/courseFiles";
 import type { DbFile } from "@/lib/db";
 
 const file = (id: number, overrides: Partial<DbFile> = {}) => ({
-  id, relative_path: `courses/X/modules/${id}.md`, scraped_at: "2026-10-03 10:00:00",
+  id, relative_path: `courses/X/Course/Modules/${id}.md`, scraped_at: "2026-10-03 10:00:00",
   last_accessed_at: null, ...overrides,
 }) as DbFile;
 

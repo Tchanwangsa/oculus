@@ -325,7 +325,8 @@ its last-opened time.
   by path. `recordUploads` handles picked files and
   [browser saves](./viewers.md#downloads-wait-for-a-destination-while-their-bytes-arrive).
   Paths cross IPC, never bytes, and a taken name steps aside (`notes-2.pdf`)
-  unless the bytes are identical.
+  unless the bytes are identical. A new upload lands at the subject's root,
+  beside `Course/` (`layout::own_dir`).
 - **The drop target is the Files tab's root**, so the import state lives in the
   tab (`app/src/hooks/data/useUploadImport.ts`) to survive switching to Uploads.
   `useFileDrop` ignores a `visibility: hidden` element — how background panes
@@ -369,10 +370,12 @@ its last-opened time.
 - **A YouTube or Vimeo video in a page only plays**, in a browser tab.
   `webVideoStore` holds each video's oEmbed answer (`web_video_info`), asked
   once per app session ([viewers.md](./viewers.md#one-markdown-renderer-serves-every-surface)).
-- **A document is `courses/<code>/documents/<title>.md`** with a
-  `category = 'document'` row. The title is the filename (`fileTitle`); a rename
-  moves the file and keeps the row id. `reconcileDocuments` brings rows in line
-  with the folder on mount, so a note written elsewhere just appears.
+- **A document is a `.md` among the student's own files**
+  (`courses/<code>/<title>.md`, or deeper) with a `category = 'document'`
+  row. The title is the filename (`fileTitle`); a rename moves the file and
+  keeps the row id. `reconcileDocuments` brings rows in line with
+  `list_documents` (every own `.md` at any depth, less a parsed PDF's or a
+  sheet's text) on mount, so a note written elsewhere just appears.
 
 The editor a document opens in is [editor.md](./editor.md). Drawing canvases have
 the Drive list, a `canvas` category and versioned `.canvas` files; see

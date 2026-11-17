@@ -2,7 +2,7 @@ import { getDb } from "./connection";
 import { terms } from "./match";
 import type { DbFile } from "./types";
 import { PDF_BACKED_SQL_LIST } from "@/lib/files/fileTypes";
-import { COURSES_DIR } from "@/lib/files/libraryLayout";
+import { COURSE_DIR, COURSES_DIR } from "@/lib/files/libraryLayout";
 
 /** A file the chat composer's `@` can point the agent at. */
 export interface MentionFile {
@@ -71,8 +71,8 @@ export async function searchMentionFiles(
 /** A folder the chat composer's `@` can point the agent at; the agent lists it
  *  itself. */
 export interface MentionFolder {
-  /** Library-root path ending in `/`: `courses/<subject>/pages/`, or a whole
-   *  subject's `courses/<subject>/` in a General thread. */
+  /** Library-root path ending in `/`: `courses/<subject>/Course/Pages/`, or
+   *  a whole subject's `courses/<subject>/` in a General thread. */
   path: string;
   /** Its own name: the folder's, or the subject's folder's. */
   name: string;
@@ -81,9 +81,10 @@ export interface MentionFolder {
 }
 
 /**
- * The folders an `@` offers, first in its menu: a subject's own top-level
- * folders (`pages/`, `files/`, `uploads/`…), or in a General thread each
- * subject's folder. Read off the files table, so a folder holding no file is
+ * The folders an `@` offers, first in its menu: a subject's top-level
+ * folders, with `Course/` opened one level (`Course/Pages/`, `Course/Files/`,
+ * the student's own `Exam prep/`…), or in a General thread each subject's
+ * folder. Read off the files table, so a folder holding no file is
  * not offered. Most recently opened first; the query's words are ANDed
  * against the folder's name.
  */
@@ -117,14 +118,20 @@ export function mentionFoldersQuery(
               substr(rest, 1, instr(rest, '/')) AS top,
               substr(rest, instr(rest, '/') + 1) AS inner
        FROM d
+     ), u AS (
+       SELECT subject_id, subject_code, seen, top,
+              CASE WHEN substr(inner, 1, ${COURSE_DIR.length + 1}) = '${COURSE_DIR}/' THEN '${COURSE_DIR}/' ELSE '' END AS lead,
+              CASE WHEN substr(inner, 1, ${COURSE_DIR.length + 1}) = '${COURSE_DIR}/' THEN substr(inner, ${COURSE_DIR.length + 2})
+                   ELSE inner END AS below
+       FROM t
      ), n AS (
        SELECT subject_id, subject_code, seen,
               CASE WHEN $1 IS NULL THEN '${COURSES_DIR}/' || top
-                   ELSE '${COURSES_DIR}/' || top || substr(inner, 1, instr(inner, '/')) END AS path,
+                   ELSE '${COURSES_DIR}/' || top || lead || substr(below, 1, instr(below, '/')) END AS path,
               CASE WHEN $1 IS NULL THEN substr(top, 1, length(top) - 1)
-                   ELSE substr(inner, 1, instr(inner, '/') - 1) END AS name
-       FROM t
-       WHERE $1 IS NULL OR instr(inner, '/') > 0
+                   ELSE substr(below, 1, instr(below, '/') - 1) END AS name
+       FROM u
+       WHERE $1 IS NULL OR instr(below, '/') > 0
      )
      SELECT path, name, subject_id, subject_code
      FROM n

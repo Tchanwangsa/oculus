@@ -31,7 +31,7 @@ const att = (path: string): Chunk => ({ kind: "attachment", path });
 
 describe("attachment chips in the box", () => {
   test("a draft's attachment paths load as chips and read back as the same text", () => {
-    const draft = `compare \`${A}\` with \`${B}\` and \`courses/MAST10006/files/notes.pdf\`, see \`${PDF}\``;
+    const draft = `compare \`${A}\` with \`${B}\` and \`courses/MAST10006/Course/Files/notes.pdf\`, see \`${PDF}\``;
     const chunks = toChunks(draft);
     expect(chunks.filter((c) => c.kind === "attachment")).toEqual([att(A), att(B), att(PDF)]);
     expect(chunks.some((c) => c.kind === "chip")).toBe(true);

@@ -110,7 +110,7 @@ impl Harness {
     pub fn open(&self, file_id: i64, document: &Value) -> String {
         self.open_at(
             file_id,
-            &format!("courses/TEST/canvases/File{file_id}.canvas"),
+            &format!("courses/TEST/File{file_id}.canvas"),
             document,
         )
     }

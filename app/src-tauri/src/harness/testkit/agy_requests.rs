@@ -365,7 +365,7 @@ fn write_into_library(file: &str) -> Rig {
 fn a_write_naming_a_protected_path_or_the_database_never_reaches_the_student() {
     for file in [
         "courses/maths/native.txt",
-        "lectures/x/native.txt",
+        "courses/maths/Course/Recordings/x/native.txt",
         "settings.json",
         "vault.bin",
         "agents/skills/x/SKILL.md",

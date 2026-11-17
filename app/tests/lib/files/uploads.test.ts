@@ -32,7 +32,7 @@ const subject = { id: 7, code: "COMP10001_2026_SM2" };
 function outcome(filename: string, error: string | null = null) {
   return {
     source: filename,
-    file: { filename, relative_path: `courses/${subject.code}/uploads/${filename}`, file_type: "x", size_bytes: 1 },
+    file: { filename, relative_path: `courses/${subject.code}/${filename}`, file_type: "x", size_bytes: 1 },
     error,
   };
 }
@@ -56,7 +56,7 @@ test("addUploads copies, writes each row before its parse kick, and announces", 
   expect(log).toEqual([
     `import_uploads ${subject.code}`,
     "row week1.pdf upload",
-    `parse_file courses/${subject.code}/uploads/week1.pdf`,
+    `parse_file courses/${subject.code}/week1.pdf`,
     "row data.zip upload",
     "row slides.pptx upload",
   ]);
@@ -67,7 +67,7 @@ test("recordUploads does the same for outcomes Rust already landed", async () =>
   await recordUploads(subject, [outcome("sheet.xlsx"), outcome("photo.png")]);
   expect(log).toEqual([
     "row sheet.xlsx upload",
-    `parse_file courses/${subject.code}/uploads/sheet.xlsx`,
+    `parse_file courses/${subject.code}/sheet.xlsx`,
     "row photo.png upload",
   ]);
   expect(announced).toBe(1);

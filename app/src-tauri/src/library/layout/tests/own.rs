@@ -1,97 +1,127 @@
-use crate::library::layout::{own_dir_rel, own_file_ok, own_kind_of, own_path_ok, OwnKind};
+use crate::library::layout::{
+    own_dir_rel, own_file_ok, own_files, own_kind_of, own_path_ok, OwnKind,
+};
+use crate::test_support::Scratch;
 
 #[test]
-fn only_files_below_an_own_folder_pass() {
+fn own_files_sit_beside_course_at_any_depth() {
     for rel in [
-        "courses/COMP30026/uploads/notes.pdf",
-        "courses/COMP30026/uploads/deeper/scan.png",
-        "courses/COMP30026/documents/week-3.md",
-        "courses/COMP30026_2026_SM2/documents/Untitled-2.md",
-        "courses/X/canvases/Board.canvas",
-        "courses/X/notebooks/Week 3.notebook",
-        "courses/X/UPLOADS/odd.pdf",
-        "courses/X/uploads/U\u{308}bung.pdf",
-        "courses/数学/documents/笔记.md",
+        "courses/COMP30026/notes.pdf",
+        "courses/COMP30026/Exam prep/deeper/scan.png",
+        "courses/COMP30026_2026_SM2/Untitled-2.md",
+        "courses/X/Board.canvas",
+        "courses/X/Week 3/Week 3.notebook",
+        "courses/X/Courses/a.pdf",
+        "courses/X/U\u{308}bung.pdf",
+        "courses/数学/笔记.md",
     ] {
         assert!(own_path_ok(rel), "{rel}");
     }
     for rel in [
-        // The folders themselves are not the student's to rename or delete.
-        "courses/X/uploads",
-        "courses/X/documents",
-        // Everything else belongs to a sync or to the app.
-        "courses/X/files/lecture.pdf",
-        "courses/X/home.md",
-        "courses/X/agents/INSTRUCTIONS.md",
+        // The subject folder itself is not the student's to rename or delete.
+        "courses/X",
+        // Everything synced belongs to the sync, whatever its case.
+        "courses/X/Course",
+        "courses/X/Course/Files/lecture.pdf",
+        "courses/X/course/home.md",
+        "courses/X/Course/Recordings/2026-08-04-x/source1.mp4",
+        // App state.
+        "courses/X/.oculus/agents/INSTRUCTIONS.md",
         "lectures/abc/source1.mp4",
         "agents/memories/x.md",
         // Traversal, however it is spelled.
         "courses/../oculus.db",
-        "courses/X/uploads/../../../oculus.db",
-        "courses//uploads/x",
-        r"courses/X/documents/..\secret.md",
-        r"courses/X/documents/C:\secret.md",
-        "/courses/X/uploads/a.pdf",
-        // Dot-names: staging files and hidden folders.
-        "courses/X/uploads/.DS_Store",
-        "courses/X/documents/.week-3.md.123-456.tmp",
-        "courses/X/uploads/.hidden/a.pdf",
+        "courses/X/Exam prep/../../../oculus.db",
+        "courses//Exam prep/x",
+        r"courses/X/..\secret.md",
+        r"courses/X/C:\secret.md",
+        "/courses/X/a.pdf",
+        // Dot-names: staging files, a note's pictures and hidden folders.
+        "courses/X/.DS_Store",
+        "courses/X/.week-3.md.123-456.tmp",
+        "courses/X/.assets/p.png",
+        "courses/X/Exam prep/.hidden/a.pdf",
         // A Windows stream.
-        "courses/X/uploads/file.txt:stream",
+        "courses/X/file.txt:stream",
     ] {
         assert!(!own_path_ok(rel), "{rel}");
     }
 }
 
 #[test]
-fn the_folder_decides_the_kind() {
-    assert_eq!(own_kind_of("courses/X/uploads/a.md"), Some(OwnKind::Upload));
+fn the_extension_decides_the_kind() {
     assert_eq!(
-        own_kind_of("courses/X/documents/a.md"),
+        own_kind_of("courses/X/Exam prep/notes.md"),
         Some(OwnKind::Document)
     );
+    assert_eq!(own_kind_of("courses/X/b.canvas"), Some(OwnKind::Canvas));
     assert_eq!(
-        own_kind_of("courses/X/canvases/a.canvas"),
-        Some(OwnKind::Canvas)
-    );
-    assert_eq!(
-        own_kind_of("courses/X/notebooks/a.notebook"),
+        own_kind_of("courses/X/w/p.notebook"),
         Some(OwnKind::Notebook)
     );
-    assert_eq!(own_kind_of("courses/X/files/a.pdf"), None);
+    assert_eq!(own_kind_of("courses/X/scan.png"), Some(OwnKind::Upload));
+    assert_eq!(own_kind_of("courses/X/Course/Files/a.pdf"), None);
 }
 
 #[test]
 fn a_kinds_files_carry_its_extension() {
     let doc = OwnKind::Document;
-    assert!(own_file_ok("courses/X/documents/week-3.md", doc));
-    assert!(own_file_ok("courses/X/documents/drafts/x.md", doc));
-    assert!(!own_file_ok("courses/X/documents/x.pdf", doc));
-    assert!(!own_file_ok("courses/X/documents/.md", doc));
-    assert!(!own_file_ok("courses/X/documents/assets/x.md", doc));
-    assert!(!own_file_ok("courses/X/uploads/x.md", doc));
-    assert!(!own_file_ok("lectures/abc/documents/x.md", doc));
+    assert!(own_file_ok("courses/X/week-3.md", doc));
+    assert!(own_file_ok("courses/X/drafts/x.md", doc));
+    assert!(!own_file_ok("courses/X/x.pdf", doc));
+    assert!(!own_file_ok("courses/X/.md", doc));
+    assert!(!own_file_ok("courses/X/.assets/x.md", doc));
+    assert!(!own_file_ok("courses/X/Course/Pages/x.md", doc));
+    assert!(!own_file_ok("lectures/abc/x.md", doc));
 
     let canvas = OwnKind::Canvas;
-    assert!(own_file_ok("courses/X/canvases/Week 3.canvas", canvas));
-    assert!(!own_file_ok("courses/X/canvases/.canvas", canvas));
-    assert!(!own_file_ok("courses/X/canvases/Week 3.notebook", canvas));
-    assert!(!own_file_ok("courses/X/notebooks/Week 3.canvas", canvas));
-    assert!(own_file_ok(
-        "courses/X/notebooks/Week 3.notebook",
-        OwnKind::Notebook
-    ));
+    assert!(own_file_ok("courses/X/Week 3.canvas", canvas));
+    assert!(!own_file_ok("courses/X/.canvas", canvas));
+    assert!(!own_file_ok("courses/X/Week 3.notebook", canvas));
+    assert!(own_file_ok("courses/X/Week 3.notebook", OwnKind::Notebook));
 
-    assert!(own_file_ok("courses/X/uploads/anything", OwnKind::Upload));
+    assert!(own_file_ok("courses/X/anything", OwnKind::Upload));
 }
 
 #[test]
-fn new_files_land_in_their_kinds_folder() {
+fn new_files_land_at_the_subjects_root() {
     assert_eq!(
         own_dir_rel("COMP 30026", OwnKind::Upload),
-        "courses/COMP_30026/uploads"
+        "courses/COMP_30026"
     );
-    assert_eq!(own_dir_rel("X", OwnKind::Document), "courses/X/documents");
-    assert_eq!(own_dir_rel("X", OwnKind::Canvas), "courses/X/canvases");
-    assert_eq!(own_dir_rel("X", OwnKind::Notebook), "courses/X/notebooks");
+    for kind in [OwnKind::Document, OwnKind::Canvas, OwnKind::Notebook] {
+        assert_eq!(own_dir_rel("X", kind), "courses/X");
+    }
+}
+
+#[test]
+fn the_walk_lists_own_files_only() {
+    let dir = Scratch::new("layout-own-walk");
+    for rel in [
+        "courses/X/a.md",
+        "courses/X/Exam prep/b.pdf",
+        "courses/X/Exam prep/deep/c.canvas",
+        "courses/X/Course/Files/synced.pdf",
+        "courses/X/.oculus/agents/INSTRUCTIONS.md",
+        "courses/X/.assets/p.png",
+        "courses/X/.DS_Store",
+    ] {
+        let path = dir.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "x").unwrap();
+    }
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("../../agents/AGENTS.md", dir.join("courses/X/AGENTS.md")).unwrap();
+    let found: Vec<String> = own_files(&dir, "X")
+        .into_iter()
+        .map(|(rel, _)| rel)
+        .collect();
+    assert_eq!(
+        found,
+        [
+            "courses/X/Exam prep/b.pdf",
+            "courses/X/Exam prep/deep/c.canvas",
+            "courses/X/a.md",
+        ]
+    );
 }

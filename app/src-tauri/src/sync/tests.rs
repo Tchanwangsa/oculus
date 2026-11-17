@@ -1,9 +1,7 @@
 use super::office::{
     is_csv_type, is_generic_binary, is_sheet_type, is_video, office_ext, office_ext_of,
 };
-use super::render::{
-    content_type_of, file_toc_line, locked_until, rel_within_course, slug, up_to_course_root,
-};
+use super::render::{content_type_of, file_toc_line, locked_until, rel_within_course, slug};
 use super::*;
 use crate::library::paths;
 
@@ -20,19 +18,15 @@ fn slugs_are_lowercase_dashed_and_capped() {
 }
 
 #[test]
-fn module_links_are_relative_to_the_course_root() {
+fn a_library_path_loses_its_subject_folder() {
     assert_eq!(
-        rel_within_course("courses/ABC_2026/files/x.pdf"),
-        "files/x.pdf"
+        rel_within_course("courses/ABC_2026/Course/Files/x.pdf"),
+        "Course/Files/x.pdf"
     );
-    assert_eq!(rel_within_course("files/x.pdf"), "files/x.pdf");
-}
-
-#[test]
-fn assets_are_addressed_from_the_document_that_references_them() {
-    assert_eq!(up_to_course_root("home.md"), "");
-    assert_eq!(up_to_course_root("pages/week-one.md"), "../");
-    assert_eq!(up_to_course_root("announcements/2026-08-14-x.md"), "../");
+    assert_eq!(
+        rel_within_course("Course/Files/x.pdf"),
+        "Course/Files/x.pdf"
+    );
 }
 
 #[test]
@@ -102,24 +96,24 @@ fn videos_are_known_by_type_or_an_untyped_upload_s_extension() {
     assert!(!is_video("application/octet-stream", "archive.mkv.zip"));
     assert!(!is_video("audio/mpeg", "talk.mp3"));
     // Never fed to the parse/embed pipeline.
-    assert!(paths::doc_pdf_rel("courses/X/files/a.mp4").is_none());
+    assert!(paths::doc_pdf_rel("courses/X/Course/Media/a.mp4").is_none());
 }
 
 #[test]
 fn a_module_video_lists_its_canvas_id_and_where_it_will_land() {
-    const TOC: &str = "modules/01-intro.md";
+    const TOC: &str = "Course/Modules/01-intro.md";
     let video = Fetched::Video {
-        rel: "courses/MAST_2026/files/Matrices_Part_1.mp4".into(),
+        rel: "courses/MAST_2026/Course/Media/Matrices_Part_1.mp4".into(),
         canvas_id: 12345,
     };
     assert_eq!(
         file_toc_line(TOC, "  ", "Matrices [Part 1]", &video),
-        "  - [Matrices \\[Part 1\\]](../files/Matrices_Part_1.mp4) _(video 12345)_"
+        "  - [Matrices \\[Part 1\\]](../Media/Matrices_Part_1.mp4) _(video 12345)_"
     );
-    let saved = Fetched::Saved("courses/MAST_2026/files/w1.pdf".into());
+    let saved = Fetched::Saved("courses/MAST_2026/Course/Files/w1.pdf".into());
     assert_eq!(
         file_toc_line(TOC, "", "Week 1", &saved),
-        "- [Week 1](../files/w1.pdf)"
+        "- [Week 1](../Files/w1.pdf)"
     );
     assert_eq!(
         file_toc_line(TOC, "", "Gone", &Fetched::Skipped),

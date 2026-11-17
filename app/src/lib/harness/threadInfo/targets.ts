@@ -1,6 +1,6 @@
 import { fullCitation, parsedSourceOf } from "@/lib/citations/parse";
 import { videoHref } from "@/lib/studio/routes";
-import { RECORDINGS_PREFIX, recordingRel } from "@/lib/files/libraryLayout";
+import { recordingOf } from "@/lib/files/libraryLayout";
 
 /** What a Thread info row opens: a library path the way a file chip opens
  *  it (`openCitation`), or an app route beside the chat. */
@@ -10,7 +10,7 @@ export type InfoTarget =
 
 /** Where an agent's own instructions, skills and memories are read from;
  *  reading them is how every turn starts, not what the thread read. */
-const READ_ROOTS = /^(?:courses\/|lectures\/|agents\/(?:attachments|outputs)\/)/;
+const READ_ROOTS = /^(?:courses\/|agents\/(?:attachments|outputs)\/)/;
 
 /** What an agent can make: its outputs, its memories, and (from a thread
  *  rooted at the library) course files. */
@@ -23,9 +23,7 @@ const STUDIO = /\/com\.tchan\.oculus[^/]*\/studio\/(videos|components|themes)\/(
 /** The one key a file is known by: a parsed `.md` is the PDF or Office file
  *  it came from, and anything under a lecture's folder is the lecture. */
 export function libraryKey(path: string): string {
-  const lecture = new RegExp(`${RECORDINGS_PREFIX}([^/#]+)`).exec(path);
-  if (lecture) return recordingRel(lecture[1]);
-  return parsedSourceOf(path) ?? path;
+  return recordingOf(path) ?? parsedSourceOf(path) ?? path;
 }
 
 export function isReadPath(path: string): boolean {

@@ -7,12 +7,13 @@ use super::shape::{Shape, CURRENT};
 use crate::runtime::platform::canonicalize;
 
 /// * `Synced` — written by Oculus's sync, read-only to the student and the
-///   agents (a subject's synced folders, lecture recordings, and the
+///   agents (a subject's `Course/` with its lecture recordings, and the
 ///   `courses/` and subject folders themselves).
-/// * `Own` — the student's own files.
+/// * `Own` — the student's own files: everything else in a subject.
 /// * `Hidden` — inside the data dir but not a library file: a subject's
-///   agent workspace, and everything at the data dir's top level outside
-///   the library (the agents' workspace, Studio, the database).
+///   `.oculus/` (its agent workspace and derived records), and everything at
+///   the data dir's top level outside the library (the agents' workspace,
+///   Studio, the database).
 /// * `Outside` — could leave the data dir: absolute, `..`, a backslash, a
 ///   drive, an empty or `.` segment, a NUL.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,6 +29,16 @@ pub enum Zone {
 /// filesystems Oculus runs on do.
 pub fn zone_of(rel: &str) -> Zone {
     CURRENT.zone_of(rel)
+}
+
+/// True for a name the layout keeps for itself at a subject's root (`Course`,
+/// `.oculus`), ignoring case: no folder of the student's may take it.
+pub fn reserved_name(name: &str) -> bool {
+    CURRENT
+        .synced_root
+        .into_iter()
+        .chain(CURRENT.hidden.iter().copied())
+        .any(|r| same_name(name, r))
 }
 
 /// `/`-separated segments, or `None` for any spelling that could leave the
@@ -47,7 +58,7 @@ pub(super) fn same_name(a: &str, b: &str) -> bool {
 }
 
 impl Shape {
-    pub(super) fn zone_of(&self, rel: &str) -> Zone {
+    pub fn zone_of(&self, rel: &str) -> Zone {
         let Some(parts) = segments(rel) else {
             return Zone::Outside;
         };
@@ -57,7 +68,10 @@ impl Shape {
                 _ => Zone::Synced,
             };
         }
-        if self.recordings_root.is_some_and(|r| same_name(parts[0], r)) {
+        if self
+            .recordings_root()
+            .is_some_and(|r| same_name(parts[0], r))
+        {
             return Zone::Synced;
         }
         Zone::Hidden

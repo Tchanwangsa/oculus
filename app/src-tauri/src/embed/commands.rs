@@ -244,7 +244,7 @@ pub async fn embed_set_engine(engine: String) -> Result<EmbedSettings, String> {
     let base = crate::library::paths::data_dir();
     let db = pool(&database).await?;
 
-    // 1. The records beside the PDFs.
+    // 1. Every PDF's record.
     for relative in embeddable_paths(&db).await? {
         let Some(pdf_rel) = crate::library::paths::doc_pdf_rel(&relative) else {
             continue;
@@ -289,7 +289,7 @@ pub async fn embed_set_engine(engine: String) -> Result<EmbedSettings, String> {
     view(&database).await
 }
 
-/// Every library file that could have a `.emb.json` beside it — PDFs and
+/// Every library file that could have a `.emb.json` — PDFs and
 /// Office documents with a PDF sibling; the index queue's predicate.
 async fn embeddable_paths(db: &sqlx::SqlitePool) -> Result<Vec<String>, String> {
     let sql = format!(

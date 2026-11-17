@@ -55,39 +55,31 @@ pub(super) fn modified_of(info: &serde_json::Value) -> String {
         .to_string()
 }
 
-/// One line of the TOC at `toc_path` for a file item; links climb to the
-/// course root first. A video carries its Canvas id — `_(video <id>)_` — for
-/// the app's on-demand download, and links where that download lands.
+/// One line of the TOC at `toc_path` (subject-relative) for a file item,
+/// linked relative to the TOC. A video carries its Canvas id —
+/// `_(video <id>)_` — for the app's on-demand download, and links where that
+/// download lands.
 pub(super) fn file_toc_line(
     toc_path: &str,
     indent: &str,
     title: &str,
     fetched: &Fetched,
 ) -> String {
-    let up = up_to_course_root(toc_path);
+    let link = |rel: &str| layout::link_between(toc_path, layout::within_course(rel));
     match fetched {
-        Fetched::Saved(rel) => format!(
-            "{indent}- [{}]({up}{})",
-            escape_md(title),
-            rel_within_course(rel)
-        ),
+        Fetched::Saved(rel) => format!("{indent}- [{}]({})", escape_md(title), link(rel)),
         Fetched::Video { rel, canvas_id } => format!(
-            "{indent}- [{}]({up}{}) _(video {canvas_id})_",
+            "{indent}- [{}]({}) _(video {canvas_id})_",
             escape_md(title),
-            rel_within_course(rel)
+            link(rel)
         ),
         Fetched::Skipped => format!("{indent}- {} _(file)_", escape_md(title)),
     }
 }
 
-/// `courses/CODE/files/x.pdf` → `files/x.pdf`.
+/// `courses/CODE/Course/Files/x.pdf` → `Course/Files/x.pdf`.
 pub(super) fn rel_within_course(rel: &str) -> String {
     layout::within_course(rel).to_string()
-}
-
-/// The `../` prefix a document at `out_path` needs to reach the course root.
-pub(super) fn up_to_course_root(out_path: &str) -> String {
-    "../".repeat(out_path.matches('/').count())
 }
 
 /// `<kind's folder>/<slug>.md`, or `<slug>-<id>.md` when two titles slug

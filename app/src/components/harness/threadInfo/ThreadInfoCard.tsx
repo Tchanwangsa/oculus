@@ -7,9 +7,9 @@ import { EntryRow } from "./EntryRow";
 import { InfoGroup } from "./InfoRow";
 import { CARD_WIDTH } from "./layout";
 import { ThreadRows } from "./ThreadRows";
-import { useLectureTitles } from "./useLectureTitles";
+import { useLectureFolder, useLectureTitles } from "./useLectureTitles";
 import { WorkRows } from "./WorkRows";
-import { RECORDINGS_PREFIX } from "@/lib/files/libraryLayout";
+import { recordingOf } from "@/lib/files/libraryLayout";
 
 export interface ThreadInfoProps {
   thread: HarnessThread;
@@ -44,19 +44,19 @@ export function ThreadInfoCard({
   onOpened?: () => void;
   className?: string;
 }) {
+  const lectureFolder = useLectureFolder(thread.lecture_id);
   const { read, made } = useMemo(
-    () => deriveThreadInfo(items, { threadId: thread.id, lectureId: thread.lecture_id }),
-    [items, thread.id, thread.lecture_id],
+    () => deriveThreadInfo(items, { threadId: thread.id, lectureFolder }),
+    [items, thread.id, lectureFolder],
   );
-  const lectureIds = useMemo(
+  const lectureFolders = useMemo(
     () =>
       read.flatMap((e) => {
-        const id = new RegExp(`${RECORDINGS_PREFIX}([^/]+)$`).exec(e.key)?.[1];
-        return id ? [id] : [];
+        return recordingOf(e.key) === e.key ? [e.key] : [];
       }),
     [read],
   );
-  const lectureTitle = useLectureTitles(lectureIds);
+  const lectureTitle = useLectureTitles(lectureFolders);
 
   const box = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {

@@ -5,7 +5,7 @@ import { download } from "./fixtures";
 
 const upload = {
   source: "a.pdf",
-  file: { filename: "a.pdf", relative_path: "courses/X/uploads/a.pdf", file_type: "pdf", size_bytes: 10 },
+  file: { filename: "a.pdf", relative_path: "courses/X/a.pdf", file_type: "pdf", size_bytes: 10 },
   error: null,
 };
 

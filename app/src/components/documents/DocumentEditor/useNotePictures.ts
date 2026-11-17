@@ -17,7 +17,7 @@ export function useNotePictures(fileRef: RefObject<DbFile>, viewRef: RefObject<E
   /**
    * Write a picture beside the note immediately and link it at the caret.
    * A note has no send to defer to, so a deleted tag leaves a file in
-   * `assets/` — accepted over a dangling image. Undoable like typing.
+   * `.assets/` — accepted over a dangling image. Undoable like typing.
    */
   const embed = useCallback(async (write: (note: DbFile) => Promise<string>, name: string) => {
     try {

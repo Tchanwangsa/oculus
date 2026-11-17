@@ -11,7 +11,7 @@ import {
 import { hasFailed, isComplete, statusOf, type PipelineItem } from "@/stores/sync/pipelineStore";
 
 const row = (filename: string, patch: Partial<PipelineItem>): PipelineItem => ({
-  relativePath: `courses/X/files/${filename}`,
+  relativePath: `courses/X/Course/Files/${filename}`,
   subjectId: 1,
   code: "X",
   filename,
@@ -35,9 +35,9 @@ describe("spreadsheets", () => {
       expect(isPdfBacked(name)).toBe(false);
       expect(isPipelineFile(name)).toBe(true);
     }
-    const file = { filename: "marks.xlsx", relative_path: "courses/X/files/marks.xlsx" };
-    expect(parsedMdRelPath(file)).toBe("courses/X/files/marks.xlsx.md");
-    expect(parsedMdSource("courses/X/files/marks.xlsx.md")).toBe("courses/X/files/marks.xlsx");
+    const file = { filename: "marks.xlsx", relative_path: "courses/X/Course/Files/marks.xlsx" };
+    expect(parsedMdRelPath(file)).toBe("courses/X/Course/Files/marks.xlsx.md");
+    expect(parsedMdSource("courses/X/Course/Files/marks.xlsx.md")).toBe("courses/X/Course/Files/marks.xlsx");
   });
 
   test("the SQL lists mirror paths.rs", () => {

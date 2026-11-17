@@ -1,4 +1,5 @@
-//! Markdown notes, in the folder `layout::own_dir` gives documents: Rust moves
+//! Markdown notes among the student's own files, created in the folder
+//! `layout::own_dir` gives documents: Rust moves
 //! the bytes, the frontend writes the `files` row. A note is rewritten on save
 //! and moves on rename, so every mutating command checks the path's shape
 //! (`layout::own_file_ok`) before resolving it.
@@ -36,9 +37,9 @@ fn document_path(relative_path: &str) -> Result<std::path::PathBuf, String> {
     Ok(crate::library::paths::data_dir().join(relative_path))
 }
 
-/// A note's pictures: `assets/` beside it, so they resolve relative to the note
-/// for every reader (`useLibraryMdComponents` in `FileViewer.tsx`). Takes the
-/// path `document_path` guarded.
+/// A note's pictures: `layout::note_assets_dir()` beside it, so they resolve
+/// relative to the note for every reader (`useLibraryMdComponents` in
+/// `FileViewer.tsx`). Takes the path `document_path` guarded.
 pub(super) fn document_assets_dir(note: &Path) -> Result<std::path::PathBuf, String> {
     let dir = note
         .parent()
@@ -221,40 +222,25 @@ pub fn delete_document(relative_path: String) -> Result<(), String> {
     std::fs::remove_file(path).map_err(|e| e.to_string())
 }
 
-/// Every note in a subject's folder, for the Documents tab to reconcile
-/// against — including ones written outside the app. Only guard-accepted names.
+/// Every note among a subject's own files at any depth, for the Documents
+/// tab to reconcile against — including ones written outside the app. Only
+/// guard-accepted names, and never a `.md` the parser or the sheet converter
+/// wrote beside its source (`layout::is_derived_text`).
 #[tauri::command]
 pub fn list_documents(subject_code: String) -> Result<Vec<ImportedFile>, String> {
     let data_dir = crate::library::paths::data_dir();
-    let dir = documents_dir(&data_dir, &subject_code);
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(entries) => entries,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(e.to_string()),
-    };
-    let dir_rel = layout::own_dir_rel(&subject_code, OwnKind::Document);
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let Ok(name) = entry.file_name().into_string() else {
-            continue;
-        };
-        let rel = format!("{dir_rel}/{name}");
-        if !layout::own_file_ok(&rel, OwnKind::Document) {
-            continue;
-        }
-        let Ok(meta) = entry.metadata() else { continue };
-        if !meta.is_file() {
-            continue;
-        }
-        out.push(document_file(rel, meta.len()));
-    }
-    out.sort_by(|a, b| a.filename.cmp(&b.filename));
-    Ok(out)
+    Ok(layout::own_files(&data_dir, &subject_code)
+        .into_iter()
+        .filter(|(rel, _)| {
+            layout::own_file_ok(rel, OwnKind::Document) && !layout::is_derived_text(&data_dir, rel)
+        })
+        .map(|(rel, meta)| document_file(rel, meta.len()))
+        .collect())
 }
 
-/// A picture pasted into a note (base64), written now into `assets/` and
-/// returned as the link. A tag later deleted leaves an orphan file — accepted.
-/// Cap, sniff and naming are `crate::harness::attach`'s.
+/// A picture pasted into a note (base64), written now into its pictures
+/// folder and returned as the link. A tag later deleted leaves an orphan
+/// file — accepted. Cap, sniff and naming are `crate::harness::attach`'s.
 #[tauri::command]
 pub async fn attach_document_image(relative_path: String, data: String) -> Result<String, String> {
     let dir = document_assets_dir(&document_path(&relative_path)?)?;

@@ -240,7 +240,7 @@ log("(b) desktop commit reaches both: ok");
 // A fresh desktop JS runtime joins the authority that survived its reload.
 // Use the real session implementation over serialized native responses/events,
 // rather than issuing a synthetic desktop commit directly to the authority.
-const desktopFile = { id: 7, relative_path: "courses/TEST/canvases/File7.canvas" };
+const desktopFile = { id: 7, relative_path: "courses/TEST/File7.canvas" };
 const desktopListeners = new Set<(event: CanvasAuthorityEvent) => void>();
 const snapshotDesktop = () => desktop<Awaited<ReturnType<CanvasAuthorityIO<typeof desktopFile>["snapshot"]>>>("desktop-snapshot");
 const unexpected = async (): Promise<never> => { throw new Error("A rejoined shared canvas used the ordinary file path."); };

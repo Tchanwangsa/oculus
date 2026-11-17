@@ -79,12 +79,12 @@ fn file(code: &str, rel: &str) -> LibFile {
 
 #[test]
 fn file_json_keeps_the_public_names_without_a_database_id() {
-    let row = file("COMP30026", "courses/COMP30026/files/week-01.pdf");
+    let row = file("COMP30026", "courses/COMP30026/Course/Files/week-01.pdf");
     assert_eq!(
         serde_json::to_value(&row).unwrap(),
         serde_json::json!({
             "subject": "COMP30026",
-            "path": "courses/COMP30026/files/week-01.pdf",
+            "path": "courses/COMP30026/Course/Files/week-01.pdf",
             "filename": "week-01.pdf",
             "file_type": "pdf",
             "category": null,
@@ -100,12 +100,12 @@ fn file_json_keeps_the_public_names_without_a_database_id() {
 #[test]
 fn resolution_prefers_the_most_exact_tier() {
     let files = vec![
-        file("COMP30026", "courses/COMP30026/files/week-01.pdf"),
-        file("MULT20015", "courses/MULT20015/files/week-01.pdf"),
-        file("MULT20015", "courses/MULT20015/files/notes.pdf"),
+        file("COMP30026", "courses/COMP30026/Course/Files/week-01.pdf"),
+        file("MULT20015", "courses/MULT20015/Course/Files/week-01.pdf"),
+        file("MULT20015", "courses/MULT20015/Course/Files/notes.pdf"),
     ];
     assert_eq!(
-        resolve_file(&files, "courses/MULT20015/files/week-01.pdf")
+        resolve_file(&files, "courses/MULT20015/Course/Files/week-01.pdf")
             .unwrap()
             .code,
         "MULT20015"
@@ -113,7 +113,9 @@ fn resolution_prefers_the_most_exact_tier() {
     assert_eq!(resolve_file(&files, "notes.pdf").unwrap().code, "MULT20015");
     assert_eq!(resolve_file(&files, "NOTES.PDF").unwrap().code, "MULT20015");
     assert_eq!(
-        resolve_file(&files, "COMP30026/files/week").unwrap().code,
+        resolve_file(&files, "COMP30026/Course/Files/week")
+            .unwrap()
+            .code,
         "COMP30026"
     );
     assert!(resolve_file(&files, "week-01.pdf").is_err());
@@ -132,12 +134,12 @@ fn filed(rel: &str, category: &str) -> LibFile {
 fn categories_narrow_the_scan() {
     let rows = || {
         vec![
-            filed("courses/COMP30026/ed/0001-teams.md", "ed"),
+            filed("courses/COMP30026/Course/Discussion/0001-teams.md", "ed"),
             filed(
-                "courses/COMP30026/announcements/2026-07-14-welcome.md",
+                "courses/COMP30026/Course/Announcements/2026-07-14-welcome.md",
                 "announcement",
             ),
-            filed("courses/COMP30026/files/week-01.pdf", "file"),
+            filed("courses/COMP30026/Course/Files/week-01.pdf", "file"),
         ]
     };
 
@@ -159,7 +161,12 @@ fn categories_narrow_the_scan() {
 /// is an empty answer.
 #[test]
 fn a_typo_is_refused_but_an_honest_miss_is_empty() {
-    let rows = || vec![filed("courses/COMP30026/ed/0001-teams.md", "ed")];
+    let rows = || {
+        vec![filed(
+            "courses/COMP30026/Course/Discussion/0001-teams.md",
+            "ed",
+        )]
+    };
 
     let err = filter_categories(rows(), &["eds".into()]).err().unwrap();
     assert!(err.contains("no category \"eds\""), "{err}");
@@ -219,7 +226,7 @@ mod notebook_read {
             std::fs::write(dir.join(&entry.image), b"png").unwrap();
         }
         let manifest = NotebookPages {
-            canvas: "courses/X/notebooks/Work.notebook".into(),
+            canvas: "courses/X/Work.notebook".into(),
             page_count: pages,
             pages: entries,
         };
@@ -234,8 +241,7 @@ mod notebook_read {
     fn lists_every_page_with_its_picture_and_age() {
         let root = root("nb-list");
         written(&root, 7, 3, &[]);
-        let view =
-            notebook_view(&root, 7, "courses/X/notebooks/Work.notebook", None, 1_060).unwrap();
+        let view = notebook_view(&root, 7, "courses/X/Work.notebook", None, 1_060).unwrap();
         assert_eq!(view.page_count, 3);
         assert_eq!(
             view.pages.iter().map(|p| p.page).collect::<Vec<_>>(),
@@ -251,7 +257,7 @@ mod notebook_read {
     fn pages_narrows_the_list_and_a_missing_page_names_the_range() {
         let root = root("nb-pages");
         written(&root, 7, 3, &[]);
-        let path = "courses/X/notebooks/Work.notebook";
+        let path = "courses/X/Work.notebook";
         let two = notebook_view(&root, 7, path, Some(&[(2, 2)]), 2_000).unwrap();
         assert_eq!(two.pages.iter().map(|p| p.page).collect::<Vec<_>>(), [2]);
         let error = notebook_view(&root, 7, path, Some(&[(9, 9)]), 2_000)
@@ -272,14 +278,14 @@ mod notebook_read {
         use super::super::notebook::reads_as_pictures;
         assert!(!reads_as_pictures("canvas"));
         assert!(!super::super::library::is_text_file(
-            "courses/X/canvases/Work.canvas"
+            "courses/X/Work.canvas"
         ));
     }
 
     #[test]
     fn a_notebook_with_no_pictures_yet_says_how_to_get_them() {
         let root = root("nb-none");
-        let error = notebook_view(&root, 7, "courses/X/notebooks/Work.notebook", None, 1)
+        let error = notebook_view(&root, 7, "courses/X/Work.notebook", None, 1)
             .err()
             .unwrap();
         assert!(
@@ -292,14 +298,13 @@ mod notebook_read {
     fn a_picture_that_has_gone_missing_is_left_out_not_listed() {
         let root = root("nb-missing");
         written(&root, 7, 3, &[2]);
-        let view =
-            notebook_view(&root, 7, "courses/X/notebooks/Work.notebook", None, 5_000).unwrap();
+        let view = notebook_view(&root, 7, "courses/X/Work.notebook", None, 5_000).unwrap();
         assert_eq!(
             view.pages.iter().map(|p| p.page).collect::<Vec<_>>(),
             [1, 3]
         );
         written(&root, 8, 1, &[1]);
-        assert!(notebook_view(&root, 8, "courses/X/notebooks/Work.notebook", None, 5_000).is_err());
+        assert!(notebook_view(&root, 8, "courses/X/Work.notebook", None, 5_000).is_err());
     }
 
     #[test]

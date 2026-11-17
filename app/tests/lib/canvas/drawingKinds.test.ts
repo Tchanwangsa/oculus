@@ -11,10 +11,10 @@ const disk = (relative_path: string, size_bytes = 10, file_type = 'canvas') =>
   ({ filename: relative_path.split('/').pop()!, relative_path, file_type, size_bytes });
 
 describe('drawing kinds', () => {
-  test('the folder and the extension name the kind, never the contents', () => {
-    expect(drawingKindOfPath('courses/X/notebooks/Week 3.notebook')).toBe('notebook');
-    expect(drawingKindOfPath('courses/X/canvases/Old notebook.canvas')).toBe('canvas');
-    for (const path of ['courses/X/canvases/a.notebook', 'courses/X/notebooks/a.canvas', 'courses/X/notebooks/.notebook', 'courses/X/documents/a.md', 'notebooks/a.notebook']) {
+  test('the extension names the kind anywhere in the own files, never the contents', () => {
+    expect(drawingKindOfPath('courses/X/Week 3.notebook')).toBe('notebook');
+    expect(drawingKindOfPath('courses/X/Exam prep/Old notebook.canvas')).toBe('canvas');
+    for (const path of ['courses/X/Course/Files/a.notebook', 'courses/X/.oculus/a.canvas', 'courses/X/.notebook', 'courses/X/.drafts/a.canvas', 'courses/X/a.md', 'notebooks/a.notebook']) {
       expect(drawingKindOfPath(path)).toBeNull();
     }
     expect(drawingKindOf({ category: 'notebook' })).toBe('notebook');
@@ -24,10 +24,10 @@ describe('drawing kinds', () => {
 });
 
 describe('planDrawingRows', () => {
-  const canvasRow = row(1, 'canvas', 'courses/X/canvases/Board.canvas');
-  const legacyRow = row(2, 'canvas', 'courses/X/canvases/Old notebook.canvas');
-  const notebookRow = row(3, 'notebook', 'courses/X/notebooks/Week 3.notebook');
-  const noteRow = row(4, 'document', 'courses/X/documents/Notes.md');
+  const canvasRow = row(1, 'canvas', 'courses/X/Board.canvas');
+  const legacyRow = row(2, 'canvas', 'courses/X/Old notebook.canvas');
+  const notebookRow = row(3, 'notebook', 'courses/X/Week 3.notebook');
+  const noteRow = row(4, 'document', 'courses/X/Notes.md');
   const rows = [canvasRow, legacyRow, notebookRow, noteRow];
 
   test('a notebook reconcile never removes a canvas row, even with no notebooks on disk', () => {
@@ -43,15 +43,15 @@ describe('planDrawingRows', () => {
 
   test('each kind adds and resizes only its own files', () => {
     const notebooks = planDrawingRows('notebook', [
-      disk('courses/X/notebooks/Week 3.notebook', 99, 'notebook'),
-      disk('courses/X/notebooks/Week 4.notebook', 5, 'notebook'),
-      disk('courses/X/canvases/Board.canvas'),
+      disk('courses/X/Week 3.notebook', 99, 'notebook'),
+      disk('courses/X/Week 4.notebook', 5, 'notebook'),
+      disk('courses/X/Board.canvas'),
     ], rows);
-    expect(notebooks.add.map(f => f.relative_path)).toEqual(['courses/X/notebooks/Week 4.notebook']);
+    expect(notebooks.add.map(f => f.relative_path)).toEqual(['courses/X/Week 4.notebook']);
     expect(notebooks.touch).toEqual([{ row: notebookRow, size: 99 }]);
     expect(notebooks.remove).toEqual([]);
 
-    const canvases = planDrawingRows('canvas', [disk('courses/X/canvases/Board.canvas'), disk('courses/X/canvases/Old notebook.canvas')], rows);
+    const canvases = planDrawingRows('canvas', [disk('courses/X/Board.canvas'), disk('courses/X/Old notebook.canvas')], rows);
     expect(canvases).toEqual({ add: [], touch: [], remove: [] });
   });
 });

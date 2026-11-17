@@ -156,7 +156,7 @@ pub struct Features {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceInfo {
     pub challenge_id: i64,
-    /// Data-dir-relative: `courses/<CODE>/lessons/<id>-<slug>/<NN>-<slide-slug>`.
+    /// Data-dir-relative: `courses/<CODE>/Course/Lessons/<id>-<slug>/<NN>-<slide-slug>`.
     pub slide_dir: String,
     /// Workspace-relative, sorted, as on disk.
     pub files: Vec<String>,

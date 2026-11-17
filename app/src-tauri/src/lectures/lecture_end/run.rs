@@ -40,7 +40,7 @@ pub async fn load(pool: &sqlx::SqlitePool, data_dir: &Path, id: &str) -> Result<
             transcript.display()
         ));
     }
-    let dir = crate::sources::echo360::lecture_dir(data_dir, id)?;
+    let dir = crate::db::store::recording_dir(pool, data_dir, id).await?;
     // The column, else the stream's own path on disk (as `chapters::detect` does).
     let first = source
         .video

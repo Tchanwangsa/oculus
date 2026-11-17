@@ -48,7 +48,7 @@ pub async fn echo360_embed_info(
     current(&pool, &data_dir, row).await
 }
 
-/// Download a link's video into the course's `files/`, with its captions
+/// Download a link's video into the course's `Course/Media/`, with its captions
 /// beside it. The `files` row arrives as a `scrape-file` event, like a synced
 /// file; progress as `echo-embed-progress`.
 #[tauri::command]

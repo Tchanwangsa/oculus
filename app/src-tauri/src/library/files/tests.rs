@@ -27,15 +27,15 @@ fn content_metadata_distinguishes_files_and_stays_inside_the_library() {
     }
 }
 
-/// `assets/` sits beside the note and is not itself reachable as a note.
+/// `.assets/` sits beside the note and is not itself reachable as a note.
 #[test]
 fn a_note_s_pictures_sit_beside_it() {
-    let note = Path::new("/data/courses/MULT20015/documents/Week 3.md");
+    let note = Path::new("/data/courses/MULT20015/Exam prep/Week 3.md");
     assert_eq!(
         document_assets_dir(note).unwrap(),
-        Path::new("/data/courses/MULT20015/documents/assets")
+        Path::new("/data/courses/MULT20015/Exam prep/.assets")
     );
-    let other = Path::new("/data/courses/MULT20015/documents/Ideas.md");
+    let other = Path::new("/data/courses/MULT20015/Exam prep/Ideas.md");
     assert_eq!(
         document_assets_dir(note).unwrap(),
         document_assets_dir(other).unwrap()
@@ -43,10 +43,10 @@ fn a_note_s_pictures_sit_beside_it() {
 
     assert_eq!(
         document_asset_ref("20260922-101112-0a1b2c3d.png"),
-        "assets/20260922-101112-0a1b2c3d.png"
+        ".assets/20260922-101112-0a1b2c3d.png"
     );
     assert!(!crate::library::layout::own_file_ok(
-        "courses/MULT20015/documents/assets/20260922-101112-0a1b2c3d.png",
+        "courses/MULT20015/.assets/20260922-101112-0a1b2c3d.png",
         crate::library::layout::OwnKind::Document
     ));
 }
@@ -69,7 +69,7 @@ fn a_note_is_replaced_whole() {
         "{name}"
     );
     assert!(!crate::library::layout::own_file_ok(
-        &format!("courses/X/documents/{name}"),
+        &format!("courses/X/{name}"),
         crate::library::layout::OwnKind::Document
     ));
 }

@@ -1,15 +1,15 @@
-import { getFileByRelativePath, getLecture } from "@/lib/db";
+import { getFileByRelativePath, getLecture, getLectureByFolder } from "@/lib/db";
 import { fileTitle } from "@/lib/files/openFile";
 import { parsedSourceOf } from "@/lib/citations";
 import { fmtBytes } from "@/lib/format/format";
 import { fmtDurationSecs } from "@/lib/lectures/format";
 import type { ReferenceDetails } from "./ReferencePreview";
-import { RECORDINGS_PREFIX } from "@/lib/files/libraryLayout";
+import { recordingOf } from "@/lib/files/libraryLayout";
 
 export async function fileReferenceDetails(path: string): Promise<ReferenceDetails | null> {
-  const lectureId = new RegExp(`${RECORDINGS_PREFIX}([^/]+)/`).exec(path)?.[1];
-  if (lectureId) {
-    const lecture = await getLecture(lectureId);
+  const folder = recordingOf(path);
+  if (folder) {
+    const lecture = await getLectureByFolder(folder);
     return lecture ? { title: lecture.title, meta: fmtDurationSecs(lecture.duration_seconds) } : null;
   }
   const file = await getFileByRelativePath(parsedSourceOf(path) ?? path);

@@ -7,7 +7,7 @@ import { applyCanvasTransaction, diffCanvasContent, hasCanvasChanges, sameValue 
 import { createCanvasDocument, parseCanvasDocument, serializeCanvasDocument, type CanvasDocument, type CanvasElement, type CanvasViewport } from "@/lib/canvas/model";
 import { createCanvasSessions, type CanvasFileRef } from "@/lib/canvas/sessions";
 
-const PATH = "courses/X/canvases/Ideas.canvas";
+const PATH = "courses/X/Ideas.canvas";
 const FILE: CanvasFileRef = { id: 1, relative_path: PATH };
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 const settle = async () => { for (let i = 0; i < 10; i++) await tick(); };
@@ -462,9 +462,9 @@ describe("shared canvas sessions", () => {
     const { h, a } = await shared();
     await a.session.rename("Plan");
     expect(a.calls).toEqual([]); expect(h.authority.calls).toContain("rename");
-    expect(a.session.file.relative_path).toBe("courses/X/canvases/Plan.canvas");
+    expect(a.session.file.relative_path).toBe("courses/X/Plan.canvas");
     a.session.update(canvas([rect("a"), rect("p")])); await a.session.flush();
-    expect(ids(h.disk.get("courses/X/canvases/Plan.canvas"))).toEqual(["a", "p"]); expect(a.writes.length).toBe(0);
+    expect(ids(h.disk.get("courses/X/Plan.canvas"))).toEqual(["a", "p"]); expect(a.writes.length).toBe(0);
     await a.session.remove();
     expect(a.calls).toEqual([]); expect(h.authority.calls).toContain("remove");
     expect(a.session.snapshot().status).toBe("deleted"); expect(a.session.authority).toBe("ended");

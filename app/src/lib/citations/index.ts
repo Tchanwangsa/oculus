@@ -1,6 +1,6 @@
 /**
  * How an agent cites the library, as one grammar: the path spellings it
- * writes (`courses/…`, `../courses/…`, absolute, `agents/…`, `lectures/…`,
+ * writes (`courses/…`, `../courses/…`, absolute, `agents/…`,
  * agent-cwd-relative), a line or page suffix, and the partial spellings
  * (course-relative, bare filename) that need a lookup. Parsing is shape-only
  * and sync, so rendering a reply costs no queries; partials resolve through

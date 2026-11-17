@@ -349,7 +349,7 @@ fn a_saved_upload_resolves_to_the_library_file() {
         source: "notes.pdf".into(),
         file: Some(crate::library::files::ImportedFile {
             filename: "notes.pdf".into(),
-            relative_path: "courses/COMP30027/uploads/notes.pdf".into(),
+            relative_path: "courses/COMP30027/notes.pdf".into(),
             file_type: "pdf".into(),
             size_bytes: 42,
         }),
@@ -364,7 +364,7 @@ fn a_saved_upload_resolves_to_the_library_file() {
     );
     assert_eq!(
         d.saved_path(id, Path::new("/data")).unwrap(),
-        Path::new("/data/courses/COMP30027/uploads/notes.pdf")
+        Path::new("/data/courses/COMP30027/notes.pdf")
     );
 }
 

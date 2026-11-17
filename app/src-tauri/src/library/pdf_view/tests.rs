@@ -145,10 +145,10 @@ fn pdf_view_text_drops_glyphs_off_the_page() {
 fn pdf_view_paths_stay_inside_the_library_roots() {
     let root = Path::new("/data");
     assert_eq!(
-        resolve_in(root, "courses/X/files/a.pdf"),
-        Ok(PathBuf::from("/data/courses/X/files/a.pdf"))
+        resolve_in(root, "courses/X/Course/Files/a.pdf"),
+        Ok(PathBuf::from("/data/courses/X/Course/Files/a.pdf"))
     );
-    assert!(resolve_in(root, "lectures/a.pdf").is_ok());
+    assert!(resolve_in(root, "lectures/a.pdf").is_err());
     assert!(resolve_in(root, "agents/a.pdf").is_ok());
     for bad in [
         "",

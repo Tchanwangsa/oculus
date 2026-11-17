@@ -191,6 +191,8 @@ struct Streams {
     title: String,
     /// Echo360's catalogue length.
     duration: u32,
+    /// The recording folder, data-dir-relative (`store::recording_folder`).
+    folder: String,
     dir: PathBuf,
     sources: Vec<(crate::sources::echo360::SourceNum, PathBuf)>,
 }
@@ -206,7 +208,25 @@ async fn downloaded_streams(lecture_id: &str) -> Result<Streams, String> {
     .map_err(|e| e.to_string())?;
     let (title, duration, first, second) = row.ok_or_else(|| format!("no lecture {lecture_id}"))?;
 
-    let dir = crate::sources::echo360::lecture_dir(&crate::library::paths::data_dir(), lecture_id)?;
+    let duration = u32::try_from(duration).unwrap_or(0);
+    // Never downloaded: no folder is chosen just to find nothing in it.
+    if first.is_none()
+        && second.is_none()
+        && crate::db::store::recorded_folder(&pool, lecture_id)
+            .await?
+            .is_none()
+    {
+        return Ok(Streams {
+            title,
+            duration,
+            folder: String::new(),
+            dir: PathBuf::new(),
+            sources: Vec::new(),
+        });
+    }
+    let data_dir = crate::library::paths::data_dir();
+    let folder = crate::db::store::recording_folder(&pool, &data_dir, lecture_id).await?;
+    let dir = crate::library::layout::recording_dir(&data_dir, &folder)?;
     // The column, else the stream's own path on disk (as `detect` does).
     let sources = [(1, first), (2, second)]
         .into_iter()
@@ -220,7 +240,8 @@ async fn downloaded_streams(lecture_id: &str) -> Result<Streams, String> {
         .collect();
     Ok(Streams {
         title,
-        duration: u32::try_from(duration).unwrap_or(0),
+        duration,
+        folder,
         dir,
         sources,
     })
@@ -228,7 +249,7 @@ async fn downloaded_streams(lecture_id: &str) -> Result<Streams, String> {
 
 /// The Up Next card's thumbnail (`docs/viewers.md`): one frame a quarter
 /// of the way in ([`thumbnail_pick`]), probed like a chapter's, cached at
-/// `lectures/<id>/thumb.jpg`. Returns its path for the asset protocol, or
+/// `thumb.jpg` in its recording folder. Returns its path for the asset protocol, or
 /// `None` while the lecture is not downloaded.
 #[tauri::command]
 pub async fn lecture_thumbnail(lecture_id: String) -> Result<Option<String>, String> {
@@ -271,7 +292,7 @@ pub struct MomentFrame {
 ///
 /// Every source is grabbed, not the one on screen: either stream may be the
 /// one with the teaching on it. Returns paths the agent reads
-/// (`../lectures/<id>/frames/live/<seconds>-source<n>.jpg`), in `live/` so
+/// (`../<recording folder>/frames/live/<seconds>-source<n>.jpg`), in `live/` so
 /// they never collide with a chaptering run's. A stream that fails to decode
 /// is skipped; only no frame at all is an error.
 #[tauri::command]
@@ -281,6 +302,7 @@ pub async fn lecture_grab_frames(
 ) -> Result<Vec<MomentFrame>, String> {
     let Streams {
         title,
+        folder,
         dir,
         sources,
         ..
@@ -319,10 +341,7 @@ pub async fn lecture_grab_frames(
         .into_iter()
         .map(|source| MomentFrame {
             source,
-            path: format!(
-                "../{}/frames/live/{seconds}-source{source}.jpg",
-                crate::library::layout::recording_rel(&lecture_id)
-            ),
+            path: format!("../{folder}/frames/live/{seconds}-source{source}.jpg"),
         })
         .collect())
 }

@@ -5,7 +5,7 @@ import { promptHistoryEntries, recallablePrompt, stepPromptHistory, type PromptH
 
 describe("recallablePrompt", () => {
   test("drops pasted blocks and the picture line, keeps mentions and skills", () => {
-    const typed = "/oculus-plan read `courses/MAST20004/pages/week-1.md`";
+    const typed = "/oculus-plan read `courses/MAST20004/Course/Pages/week-1.md`";
     const message = withAttachments(`${typed}\n\n${pastedBlock("a long paste")}`, ["./attachments/1.png"]);
     expect(recallablePrompt(message)).toBe(typed);
   });
@@ -17,8 +17,8 @@ describe("recallablePrompt", () => {
   });
 
   test("strips attachment chips from the sentence, closing each gap, and keeps mentions", () => {
-    const sent = "compare `./attachments/1.png` with `./attachments/2.png` in `courses/MAST20004/pages/week-1.md`";
-    expect(recallablePrompt(sent)).toBe("compare with in `courses/MAST20004/pages/week-1.md`");
+    const sent = "compare `./attachments/1.png` with `./attachments/2.png` in `courses/MAST20004/Course/Pages/week-1.md`";
+    expect(recallablePrompt(sent)).toBe("compare with in `courses/MAST20004/Course/Pages/week-1.md`");
     expect(recallablePrompt("`./attachments/3.pdf` summarise this\nthen `./attachments/4.md`")).toBe("summarise this\nthen");
   });
 });

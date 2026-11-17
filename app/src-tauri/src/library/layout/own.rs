@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::roots::{course_rel, course_root};
 use super::shape::{Shape, CURRENT};
-use super::zone::{same_name, segments, Zone};
+use super::zone::{same_name, segments, zone_of, Zone};
 
 /// A file the student made or brought in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,7 +53,43 @@ pub fn own_root(data_dir: &Path, code: &str) -> PathBuf {
 
 /// The folder a new file of `kind` lands in, on disk.
 pub fn own_dir(data_dir: &Path, code: &str, kind: OwnKind) -> PathBuf {
-    own_root(data_dir, code).join(CURRENT.own_dir(kind))
+    match CURRENT.own_dir(kind) {
+        "" => own_root(data_dir, code),
+        dir => own_root(data_dir, code).join(dir),
+    }
+}
+
+/// Every file in a subject's own zone at any depth, as data-dir-relative
+/// paths `own_path_ok` accepts, with their metadata. The synced and hidden
+/// folders, dot-names and symlinks (a subject's `AGENTS.md`) are not walked.
+pub fn own_files(data_dir: &Path, code: &str) -> Vec<(String, std::fs::Metadata)> {
+    let mut out = Vec::new();
+    let mut pending = vec![(own_root(data_dir, code), course_rel(code))];
+    while let Some((dir, rel)) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            let Ok(meta) = entry.metadata() else { continue };
+            let child = format!("{rel}/{name}");
+            if name.starts_with('.')
+                || zone_of(&child) != Zone::Own
+                || entry.file_type().is_ok_and(|t| t.is_symlink())
+            {
+                continue;
+            }
+            if meta.is_dir() {
+                pending.push((entry.path(), child));
+            } else if meta.is_file() && own_path_ok(&child) {
+                out.push((child, meta));
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
 }
 
 /// The same folder, data-dir-relative.
@@ -100,7 +136,7 @@ impl Shape {
         Some(segments(rel)?.split_off(2))
     }
 
-    pub(super) fn own_path_ok(&self, rel: &str) -> bool {
+    pub fn own_path_ok(&self, rel: &str) -> bool {
         let Some(inner) = self.own_inner(rel) else {
             return false;
         };
@@ -111,7 +147,7 @@ impl Shape {
                 .all(|part| !part.starts_with('.') && !part.contains(':'))
     }
 
-    pub(super) fn own_kind_of(&self, rel: &str) -> Option<OwnKind> {
+    pub fn own_kind_of(&self, rel: &str) -> Option<OwnKind> {
         if !self.own_path_ok(rel) {
             return None;
         }
@@ -126,7 +162,7 @@ impl Shape {
         }
     }
 
-    pub(super) fn own_file_ok(&self, rel: &str, kind: OwnKind) -> bool {
+    pub fn own_file_ok(&self, rel: &str, kind: OwnKind) -> bool {
         if self.own_kind_of(rel) != Some(kind) {
             return false;
         }

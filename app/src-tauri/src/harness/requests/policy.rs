@@ -121,7 +121,7 @@ mod tests {
     fn protected_folders_and_root_files_are_refused_and_the_rest_is_not() {
         for path in [
             "/lib/oculus/courses/maths/notes.md",
-            "/lib/oculus/lectures",
+            "/lib/oculus/courses/maths/Course/Recordings/x/transcript.vtt",
             "/lib/oculus/canvas-session/x",
             "/lib/oculus/vault.bin",
             "/lib/oculus/.vault.bin.tmp",
@@ -135,7 +135,7 @@ mod tests {
             "/lib/oculus/agents/../courses/y",
             "/lib",
             "/",
-            "/lib/oculus/Lectures/x.md",
+            "/lib/oculus/Courses/x/COURSE/home.md",
             "/LIB/Oculus/COURSES",
             "/lib/oculus/Settings.JSON",
             "/lib/oculus/agents/Skills/x",

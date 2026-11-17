@@ -97,13 +97,13 @@ mod tests {
     #[test]
     fn the_prompt_names_the_note_and_marks_the_caret() {
         let p = prompt(
-            "courses/COMP3121/documents/week_3_notes.md",
+            "courses/COMP3121/week_3_notes.md",
             "Greedy algorithms ",
             "\n\nNext",
         )
         .unwrap();
         assert!(p.contains("\"week 3 notes\", in the subject COMP3121"));
-        assert!(p.contains("`courses/COMP3121/documents/week_3_notes.md`"));
+        assert!(p.contains("`courses/COMP3121/week_3_notes.md`"));
         assert!(p.contains("Greedy algorithms <CARET/>\n\nNext"));
         assert!(p.contains("follows a space"));
         let mid = prompt("documents/x.md", "The algori", "").unwrap();
@@ -113,8 +113,8 @@ mod tests {
 
     #[test]
     fn no_turn_is_spent_inside_a_word() {
-        assert!(prompt("courses/X/documents/a.md", "algo", "rithm").is_none());
-        assert!(prompt("courses/X/documents/a.md", "algo", " rithm").is_some());
+        assert!(prompt("courses/X/a.md", "algo", "rithm").is_none());
+        assert!(prompt("courses/X/a.md", "algo", " rithm").is_some());
     }
 
     #[test]
@@ -122,7 +122,7 @@ mod tests {
         let before = format!("START{}", "a".repeat(BEFORE_CHARS));
         let after = format!("{}END", "b".repeat(AFTER_CHARS));
         let p = prompt(
-            "courses/X/documents/a.md",
+            "courses/X/a.md",
             &format!("{before} "),
             &format!(" {after}"),
         )

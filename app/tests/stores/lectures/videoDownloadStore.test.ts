@@ -5,7 +5,7 @@ import * as db from "@/lib/db";
 let answer: () => Promise<unknown> = async () => "";
 mock.module("@tauri-apps/api/core", () => ({ invoke: () => answer() }));
 mock.module("@tauri-apps/api/event", () => ({ ...tauriEvent, listen: async () => () => {} }));
-const row = { id: 7, relative_path: "courses/X/files/a.mp4" } as db.DbFile;
+const row = { id: 7, relative_path: "courses/X/Course/Media/a.mp4" } as db.DbFile;
 const lookup = spyOn(db, "getFileByRelativePath").mockResolvedValue(row);
 // The store waits on a window event for the row; tests run without a DOM.
 const globals = globalThis as { window?: unknown };

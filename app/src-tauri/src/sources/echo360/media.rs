@@ -132,12 +132,6 @@ pub fn cleanup_partial_downloads(data_dir: &Path) {
     }
 }
 
-/// A lecture's folder (`layout::recording_dir`); refuses an id that is not
-/// one folder name.
-pub fn lecture_dir(data_dir: &Path, media_id: &str) -> Result<PathBuf, String> {
-    crate::library::layout::recording_dir(data_dir, media_id)
-}
-
 /// Where a trimmed stream lives.
 pub fn source_path(dir: &Path, source: SourceNum) -> PathBuf {
     dir.join(format!("source{source}.mp4"))

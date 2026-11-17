@@ -2,9 +2,14 @@ import { useMemo } from "react";
 import { parseModuleToc, type ModuleToc } from "@/lib/pipeline/moduleToc";
 import type { DbFile } from "@/lib/db";
 import { useCourseFileData } from "@/hooks/data/useCourseFileData";
+import { MODULES_DIR } from "@/lib/files/libraryLayout";
+
+/** A TOC's Canvas module position, from its `NN-slug.md` name. */
+const MODULE_POSITION = new RegExp(`(?:^|/)${MODULES_DIR}/(\\d+)-`);
 
 export interface LoadedModule extends ModuleToc {
-  /** `modules/03-week-1.md` — hrefs inside resolve against this. */
+  /** `courses/<code>/Course/Modules/03-week-1.md` — hrefs inside resolve
+   *  against this. */
   relPath: string;
   scrapedAt: string;
 }
@@ -26,7 +31,7 @@ export function useModuleTocs(
       if (!modules) return null;
       const latestByPosition = new Map<string, LoadedModule>();
       for (const module of modules) {
-        const position = /(?:^|\/)modules\/(\d+)-/.exec(module.relPath)?.[1];
+        const position = MODULE_POSITION.exec(module.relPath)?.[1];
         const key = position ?? module.relPath;
         const current = latestByPosition.get(key);
         if (!current || module.scrapedAt > current.scrapedAt) {

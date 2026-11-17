@@ -259,7 +259,7 @@ async fn files_attach_and_detach_by_path() {
     let pool = migrated_pool().await;
     seed_subject(&pool, 1, "COMP1").await;
     seed_subject(&pool, 2, "COMP2").await;
-    let brief = seed_file(&pool, 1, "courses/COMP1/assignments/brief.pdf").await;
+    let brief = seed_file(&pool, 1, "courses/COMP1/Course/Assignments/brief.pdf").await;
     seed_file(&pool, 1, "courses/COMP1/lectures/week1.pdf").await;
     seed_file(&pool, 1, "shared/slides.pdf").await;
     seed_file(&pool, 2, "shared/slides.pdf").await;
@@ -272,9 +272,9 @@ async fn files_attach_and_detach_by_path() {
         id,
         &TaskPatch {
             attach: vec![
-                "courses/COMP1/assignments/brief.pdf".into(),
+                "courses/COMP1/Course/Assignments/brief.pdf".into(),
                 "courses/COMP1/lectures/week1.pdf".into(),
-                "courses/COMP1/assignments/brief.pdf".into(),
+                "courses/COMP1/Course/Assignments/brief.pdf".into(),
             ],
             ..TaskPatch::default()
         },
@@ -287,7 +287,7 @@ async fn files_attach_and_detach_by_path() {
     let attached_brief = attached.iter().find(|file| file.file_id == brief).unwrap();
     assert_eq!(
         attached_brief.relative_path,
-        "courses/COMP1/assignments/brief.pdf"
+        "courses/COMP1/Course/Assignments/brief.pdf"
     );
     assert_eq!(attached_brief.subject_code.as_deref(), Some("COMP1"));
     assert_ne!(
@@ -297,7 +297,7 @@ async fn files_attach_and_detach_by_path() {
 
     age(&pool, "project_tasks", id).await;
     let again = TaskPatch {
-        attach: vec!["courses/COMP1/assignments/brief.pdf".into()],
+        attach: vec!["courses/COMP1/Course/Assignments/brief.pdf".into()],
         ..TaskPatch::default()
     };
     update_task(&pool, id, &again).await.unwrap();
@@ -325,7 +325,7 @@ async fn files_attach_and_detach_by_path() {
         id,
         &TaskPatch {
             attach: vec![
-                "courses/COMP1/assignments/brief.pdf".into(),
+                "courses/COMP1/Course/Assignments/brief.pdf".into(),
                 "nope.pdf".into(),
             ],
             detach: vec!["courses/COMP1/lectures/week1.pdf".into()],

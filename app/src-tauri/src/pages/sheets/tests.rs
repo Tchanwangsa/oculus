@@ -353,13 +353,13 @@ fn a_sheet_lists_its_formulas_once_per_pattern() {
 #[test]
 fn converting_writes_the_text_and_clears_the_pdf_route() {
     let scratch = crate::test_support::Scratch::new("sheets-convert");
-    let dir = scratch.join("courses/X/files");
+    let dir = scratch.join("courses/X/Course/Files");
     std::fs::create_dir_all(dir.join("m.xlsx_images")).unwrap();
     std::fs::write(dir.join("m.xlsx"), workbook()).unwrap();
     for stale in ["m.xlsx.pdf", "m.xlsx.pages.json", "m.xlsx.md"] {
         std::fs::write(dir.join(stale), b"old").unwrap();
     }
-    let rel = "courses/X/files/m.xlsx";
+    let rel = "courses/X/Course/Files/m.xlsx";
     assert!(needs_conversion(&scratch, rel));
 
     let pages = convert(&scratch, rel).unwrap();
@@ -400,7 +400,7 @@ async fn recording_replaces_the_pages_and_marks_the_sheet_finished() {
     .await
     .unwrap();
 
-    let rel = "courses/X/files/m.xlsx";
+    let rel = "courses/X/Course/Files/m.xlsx";
     let page = |n: u32, text: &str| ParsePage {
         page_no: n,
         markdown: text.into(),

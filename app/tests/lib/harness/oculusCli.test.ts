@@ -31,7 +31,7 @@ describe("oculus CLI row titles", () => {
       .toEqual({ title: "Searched the library for", em: `"word limit"`, icon: "search" });
     expect(title(`oculus search "phase kickback" -s MULT20015`, false))
       .toEqual({ title: "Searching the library for", em: `"phase kickback" · MULT20015`, icon: "search" });
-    expect(title(`oculus read courses/COMP30026_2026_SM2/files/15.pdf -p 3-5`)?.em).toBe("15.pdf · p. 3-5 · COMP30026");
+    expect(title(`oculus read courses/COMP30026_2026_SM2/Course/Files/15.pdf -p 3-5`)?.em).toBe("15.pdf · p. 3-5 · COMP30026");
     expect(title(`/Applications/Oculus.app/Contents/MacOS/oculus read Lecture_8.pdf`)?.em).toBe("Lecture_8.pdf");
   });
 

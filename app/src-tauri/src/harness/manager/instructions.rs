@@ -88,15 +88,18 @@ pub fn thread_sections(
 /// real flags are spelled out because an agent otherwise spends its turn
 /// rediscovering them.
 fn lecture_section(lec: &LectureBrief, scope: Option<&str>) -> String {
-    let dir = format!("../{}", layout::recording_rel(&lec.id));
+    let dir = lec.folder.as_deref().map(|folder| format!("../{folder}"));
     let mut s = format!(
         "\n## The lecture being watched\n\n\
-         The student is watching **{}**, recorded **{}**. Its recording folder is \
-         `{dir}/`. Lecture titles here come from the timetable, so the date is what \
-         says which one this is.\n\n",
-        lec.title, lec.date
+         The student is watching **{}**, recorded **{}**.{} Lecture titles here come \
+         from the timetable, so the date is what says which one this is.\n\n",
+        lec.title,
+        lec.date,
+        dir.as_deref()
+            .map(|dir| format!(" Its recording folder is `{dir}/`."))
+            .unwrap_or_default()
     );
-    if lec.has_transcript {
+    if let (true, Some(dir)) = (lec.has_transcript, dir) {
         s.push_str(&format!(
             "- `{dir}/transcript.vtt` — the whole transcript, WebVTT, with timestamps. \
              It is long (an hour of speech) and every cue is followed by a `NOTE CONF` \
@@ -180,9 +183,9 @@ mod tests {
             "the scope is appended to the same brief"
         );
         assert!(scoped.contains("`../courses/COMP30026_2026_SM2/`"));
-        assert!(scoped.contains("../courses/COMP30026_2026_SM2/agents/INSTRUCTIONS.md"));
+        assert!(scoped.contains("../courses/COMP30026_2026_SM2/.oculus/agents/INSTRUCTIONS.md"));
         assert!(
-            !scoped.contains("../courses/COMP30026_2026_SM2/agents/memories"),
+            !scoped.contains("../courses/COMP30026_2026_SM2/.oculus/agents/memories"),
             "the unwritable path is not offered as a place to write"
         );
     }
@@ -199,6 +202,9 @@ mod tests {
             id: "abc-123".into(),
             title: "Lecture 14".into(),
             date: "2026-09-08".into(),
+            folder: Some(
+                "courses/COMP30026_2026_SM2/Course/Recordings/2026-09-08-lecture-14".into(),
+            ),
             has_transcript: true,
             chapters: vec![crate::lectures::chapters::Chapter {
                 start_seconds: 1382,
@@ -213,10 +219,14 @@ mod tests {
             "the lecture is appended to the subject's brief"
         );
         assert!(
-            full.contains("`../lectures/abc-123/`"),
+            full.contains(
+                "`../courses/COMP30026_2026_SM2/Course/Recordings/2026-09-08-lecture-14/`"
+            ),
             "the folder as the agent would type it"
         );
-        assert!(full.contains("`../lectures/abc-123/transcript.vtt`"));
+        assert!(full.contains(
+            "`../courses/COMP30026_2026_SM2/Course/Recordings/2026-09-08-lecture-14/transcript.vtt`"
+        ));
         assert!(
             full.contains("00:23:02 — Resolution"),
             "chapters are inline"
@@ -239,7 +249,7 @@ mod tests {
             None,
         );
         assert!(
-            !no_transcript.contains("`../lectures/abc-123/transcript.vtt`"),
+            !no_transcript.contains("transcript.vtt`"),
             "a transcript that is not on disk is not named"
         );
     }

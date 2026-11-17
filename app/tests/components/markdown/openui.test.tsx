@@ -198,7 +198,7 @@ describe("proposal signatures", () => {
     expect(effectiveChanges({ from: { due: null }, to: { due: null } })).toEqual({});
   });
   test("a library path passed as a cheat tag becomes the source", () => {
-    const path = "courses/MULT20015_2026_SM2/files/MULT20015_Lecture_17.pdf";
+    const path = "courses/MULT20015_2026_SM2/Course/Files/MULT20015_Lecture_17.pdf";
     const state = initialProposal("NewCheatNotes", { notes: [{ title: "T", body: "B", tags: [path, "Formula"], source: "Lecture 17 p14" }] });
     expect(state.notes).toEqual([{ title: "T", body: "B", tags: ["Formula"], source: `${path}#page=14` }]);
     const kept = initialProposal("NewCheatNotes", { notes: [{ title: "T", body: "B", tags: [path], source: `${path}#page=3` }] });
