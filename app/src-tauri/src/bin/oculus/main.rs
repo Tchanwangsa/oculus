@@ -46,16 +46,21 @@ fn main() {
         }
         std::process::exit(1);
     }
-    // An old library moves into the Drive tree before any command reads it
-    // (docs/library-move.md). `library migrate` runs or previews it itself;
-    // `docs --stdout` must not touch the data dir.
-    let moves_itself = matches!(
+    // An old library moves into the Drive tree before any command reads or
+    // writes it (docs/library-move.md). `library migrate` runs or previews it
+    // itself. `keyd` touches no library and runs inside `tauri dev`'s
+    // preflight, where a move's failure would read as keyd's; `docs` writes
+    // only the agents' folder, and `docs --stdout` nothing.
+    let skips_move = matches!(
         cli.command,
-        Some(Command::Library {
-            action: LibraryAction::Migrate(_)
-        })
-    ) || matches!(&cli.command, Some(Command::Docs(a)) if a.stdout);
-    if !moves_itself {
+        Some(
+            Command::Library {
+                action: LibraryAction::Migrate(_)
+            } | Command::Keyd { .. }
+                | Command::Docs(_)
+        )
+    );
+    if !skips_move {
         if let Err(e) = app_lib::library::migrate::at_startup(&paths::data_dir()) {
             fail(cli.json, &format!("the library move failed: {e}"));
         }

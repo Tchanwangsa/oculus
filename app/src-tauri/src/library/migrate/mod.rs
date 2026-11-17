@@ -138,6 +138,7 @@ pub fn dry_run(data_dir: &Path) -> Result<Option<Plan>, String> {
         if let Some(plan) = journal::load(&data_dir)? {
             return Ok(Some(plan));
         }
+        plan::refuse(&data_dir)?;
         if !plan::has_legacy(&data_dir) {
             return Ok(None);
         }
@@ -195,6 +196,7 @@ async fn run_async(data_dir: &Path, hooks: &Hooks) -> Result<Outcome, String> {
     let (mut plan, resumed) = match journal::load(data_dir)? {
         Some(plan) => (plan, true),
         None => {
+            plan::refuse(data_dir)?;
             if !plan::has_legacy(data_dir) {
                 journal::mark_done(data_dir)?;
                 return Ok(Outcome::NothingToMove);

@@ -18,9 +18,11 @@ in both processes, since they share `oculus.db` and the folders:
   A failure is kept until `setup`, which destroys the window before its page
   runs, says why in a dialog (`refuse_to_start`) and exits; the next launch
   resumes.
-- **The CLI** calls it in `main` before dispatching any command, except
-  `library migrate` (which runs or previews it itself) and `docs --stdout`
-  (which must not touch the data dir). A failure exits 1 with the message.
+- **The CLI** calls it in `main` before dispatching any command that reads
+  or writes the library. Not before `library migrate` (which runs or
+  previews it itself), `keyd …` (no library, and `tauri dev`'s preflight runs
+  `keyd install`, where a move's failure would read as keyd's) or `docs …`
+  (only the agents' folder). A failure exits 1 with the message.
 
 A marker, `<data dir>/.library-move/done` holding `drive`, makes every later
 call a no-op without opening anything. A data dir with no old folder (a new
@@ -34,7 +36,12 @@ moving at once: the second waits, then finds the marker.
    walk of the folders and the database's rows, and written to
    `.library-move/journal.json`. Each step's source is where the thing is
    when that step runs. Names are chosen against the disk plus what earlier
-   steps put there, ignoring case.
+   steps put there, compared as APFS and NTFS compare them: one Unicode form
+   (NFC) and no case.
+   - **Reserved names** first: anything at a subject's root named `Course` or
+     `.oculus` in any case (the student's) becomes `Course (mine)` before
+     anything moves in under that name. It gets no `path_moves` row, since
+     its old path is the new tree's.
    - **Debris** first: `.claude/` agent scratch and the hidden
      `-staging-`/`-quality-` folders an interrupted parse left, under
      `courses/` and `lectures/`, deleted when they hold no file.
@@ -47,7 +54,7 @@ moving at once: the second waits, then finds the marker.
      flatten into the subject's root, keeping everything below them. A file
      travels with what its parse made of it, so a clash renames them together
      (`a.pdf` → `a (2).pdf` with `a (2).md`, `a (2)_images/` and its records).
-     A folder named `Course` or `.oculus` becomes `Course (mine)`. The notes'
+     An entry named `Course` or `.oculus` becomes `Course (mine)`. The notes'
      `assets/` becomes `.assets/` at every depth.
    - **Parse records** (`<stem>.pages.json`, `<stem>.emb.json`) go to
      `.oculus/derived/<the PDF's folder>/` (`layout::derived`); the parsed
@@ -63,6 +70,15 @@ moving at once: the second waits, then finds the marker.
      left empty is removed and its lecture keeps no `folder_rel`.
    - Loose files at `courses/` itself and folders with no lecture row stay,
      logged once.
+   - **Rows that would meet**: a `files` row whose file is gone can map onto
+     the path a file from another folder lands on (a stale `documents/a.pdf`
+     and a real `uploads/a.pdf` both flatten to `a.pdf`). The row with its
+     file keeps the path; the stale one gets `a (2).pdf`. Should a clash still
+     reach the database, that row keeps its old path and is logged, rather
+     than fail the transaction on every launch.
+   - A `lectures/` that is a symlink is refused with a message: the student
+     puts the folder back in the data dir, since the move only renames inside
+     it.
 2. **Move** (`apply.rs`) with `std::fs::rename` only. Each step's index is
    appended to `.library-move/done.log` as it lands; a crash resumes from the
    journal, and a rename whose source is gone and target present counts as
@@ -94,14 +110,17 @@ stored path by its `…/lectures/<id>/<file>` tail, joined to this data dir
 (`db/rewrite.rs`, `lecture_path`). An `asset://` link in a note is read the
 same way, by its `courses/…` tail.
 
-## Links are re-pointed only when they no longer resolve
+## Links follow what they named before the move
 
-A relative link that resolves from the file's new place, in exact case (a
-case-insensitive volume would find `files/` for `Files/`), is left alone.
-Otherwise it is read from the file's old place, followed through the rules,
-and rewritten with `link_between`, the spelling the sync now writes. A target
-not on disk is followed only when a rule moved its folder (a page or a video
-not fetched yet; a video lands in `Media/`).
+A relative link is read from the file's old place and followed through the
+rules; when that target is not what the link names from the file's new place
+(in exact case: a case-insensitive volume would find `files/` for `Files/`),
+it is rewritten with `link_between`, the spelling the sync now writes. So a
+note's link to a sibling renamed on a clash (`brief.pdf` → `brief (2).pdf`)
+follows it, even though an uploaded `brief.pdf` now sits beside the note. A
+target not on disk is followed only when a rule moved its folder (a page or a
+video not fetched yet; a video lands in `Media/`). A re-pointed link names
+nothing from the old place, so a second pass leaves it.
 
 ## Old paths resolve through `path_moves`
 

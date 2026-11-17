@@ -23,6 +23,8 @@ pub struct Rows {
     pub videos: HashSet<String>,
     /// Recording folders lectures already hold, lowercased.
     pub taken_folders: HashSet<String>,
+    /// Every `files` row: id, subject, path.
+    pub files: Vec<(i64, i64, String)>,
 }
 
 /// Extensions of the videos the sync files as a module's or a page's media.
@@ -73,10 +75,12 @@ pub async fn rows(pool: &SqlitePool) -> Result<Rows, String> {
 
     let files_dir = layout::legacy_files_dir();
     let mut videos = HashSet::new();
-    let paths: Vec<String> = sqlx::query_scalar("SELECT relative_path FROM files")
-        .fetch_all(pool)
-        .await
-        .map_err(|e| format!("read files: {e}"))?;
+    let files: Vec<(i64, i64, String)> =
+        sqlx::query_as("SELECT id, subject_id, relative_path FROM files ORDER BY id")
+            .fetch_all(pool)
+            .await
+            .map_err(|e| format!("read files: {e}"))?;
+    let paths: Vec<String> = files.iter().map(|(_, _, p)| p.clone()).collect();
     let embeds: Vec<Option<String>> = sqlx::query_scalar("SELECT file_rel FROM echo_embeds")
         .fetch_all(pool)
         .await
@@ -92,5 +96,6 @@ pub async fn rows(pool: &SqlitePool) -> Result<Rows, String> {
         lectures,
         videos,
         taken_folders,
+        files,
     })
 }

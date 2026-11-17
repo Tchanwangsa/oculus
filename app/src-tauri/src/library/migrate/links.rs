@@ -1,14 +1,15 @@
 //! Paths inside markdown: relative links and absolute `asset://` picture
 //! links, re-pointed after the move.
 //!
-//! A relative link that already resolves from the file's new place, in
-//! exact case, is left alone; otherwise it is read from the file's old place,
-//! that target is followed through the rules, and the link is rewritten to
-//! it with `link_between`, as the sync now writes links. A target that does
-//! not exist either way stays as it was. That makes a second pass a no-op,
-//! so a run cut short can rewrite again. An `asset://` link holds an absolute
-//! path from wherever the library was; its `courses/…` tail is followed
-//! through the rules and joined to this data dir.
+//! A relative link is read from the file's old place and its target followed
+//! through the rules; when that is not what the link names from the file's
+//! new place (exact case), it is rewritten with `link_between`, as the sync
+//! now writes links. So a link to a sibling renamed on a clash follows it to
+//! its new name, even when a file with the old name now sits beside the note.
+//! A re-pointed link no longer names anything from the old place, so a
+//! second pass leaves it and a run cut short can rewrite again. An
+//! `asset://` link holds an absolute path from wherever the library was; its
+//! `courses/…` tail is followed through the rules and joined to this data dir.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -92,19 +93,25 @@ impl<'a> Linker<'a> {
         } else {
             path.to_string()
         };
-        if normalize(parent(new), &path).is_some_and(|p| self.exists_exact(&p)) {
-            return None;
-        }
+        let here = normalize(parent(new), &path);
+        let reads_here = here.as_deref().is_some_and(|p| self.exists_exact(p));
         let was = normalize(parent(old), &path)?;
-        // A target not on disk is followed only when a rule moved its folder:
-        // a page or video the sync has not fetched yet, linked where it will
-        // land. A video lands in `Media/`, not beside the documents.
+        // The target is what the link named from the file's old place,
+        // followed through the rules. One not on disk is followed only when a
+        // rule moved its folder: a page or video the sync has not fetched
+        // yet, linked where it will land (a video in `Media/`). A link whose
+        // old reading names nothing but whose new one does was re-pointed by
+        // an earlier pass.
         let now = match self.rules.map(&was) {
             Some(now) if self.exists_exact(&now) => now,
-            Some(now) => pending_video(&was).unwrap_or(now),
             None if self.exists_exact(&was) => was,
+            _ if reads_here => return None,
+            Some(now) => pending_video(&was).unwrap_or(now),
             None => return None,
         };
+        if here.as_deref() == Some(now.as_str()) {
+            return None;
+        }
         let link = layout::link_between(new, &now);
         let link = if encoded { encode(&link, true) } else { link };
         let link = if angled || link.contains([' ', '(', ')', '<', '>']) {

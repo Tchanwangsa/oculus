@@ -1,3 +1,4 @@
+mod clashes;
 mod fixture;
 mod fresh;
 mod library;

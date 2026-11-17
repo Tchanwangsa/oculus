@@ -3,7 +3,7 @@
 //! Each step's `from` is where the thing is when that step runs, so a step
 //! that picks a file out of a folder renamed earlier names its new place.
 //! Names are chosen against what is on disk now plus what earlier steps put
-//! there, ignoring case as the filesystem does.
+//! there, compared as the filesystem compares them (`name_key`).
 
 mod agents;
 mod lectures;
@@ -38,6 +38,30 @@ pub fn has_legacy(data_dir: &Path) -> bool {
     })
 }
 
+/// Refuse a library the move cannot do by renaming: a recordings folder
+/// that is a symlink (to another volume, most likely) would have its
+/// recordings renamed across the link, or skipped. It is refused, so the
+/// student moves it back first.
+pub fn refuse(data_dir: &Path) -> Result<(), String> {
+    let root = layout::legacy_recordings_root();
+    let path = data_dir.join(root);
+    match std::fs::symlink_metadata(&path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            let target = std::fs::read_link(&path)
+                .map(|t| t.display().to_string())
+                .unwrap_or_else(|_| "somewhere else".into());
+            Err(format!(
+                "the recordings folder {} is a link to {target}. Oculus moves the library \
+                 only by renaming inside the data folder, so put that folder back at {} \
+                 (not a link) and open Oculus again",
+                path.display(),
+                path.display()
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Every step of the move, from the folders on disk and the database's rows.
 pub fn build(data_dir: &Path, rows: &Rows) -> Plan {
     let mut b = Builder::new(data_dir, rows);
@@ -47,7 +71,45 @@ pub fn build(data_dir: &Path, rows: &Rows) -> Plan {
     }
     loose_files(&mut b);
     lectures::plan(&mut b);
+    stale_rows(&mut b);
     b.finish()
+}
+
+/// A `files` row's claim on a new path: its id, its old path, and whether
+/// its file is on disk.
+type Claim = (i64, String, bool);
+
+/// Two `files` rows of one subject must not end at one path: a row whose
+/// file is gone can map onto a file that moved there from another folder
+/// (`uploads/a.pdf` and a stale `documents/a.pdf` both flatten to `a.pdf`),
+/// and the UPDATE would break the table's uniqueness. A row whose file is
+/// on disk keeps the path; the stale one takes a free name beside it.
+fn stale_rows(b: &mut Builder) {
+    let mut ends: HashMap<(i64, String), Vec<Claim>> = HashMap::new();
+    for (id, subject, old) in &b.rows.files {
+        let new = b.rules.apply(old);
+        let on_disk = b.exists(old);
+        ends.entry((*subject, new))
+            .or_default()
+            .push((*id, old.clone(), on_disk));
+    }
+    let mut clashes: Vec<((i64, String), Vec<Claim>)> = ends
+        .into_iter()
+        .filter(|(_, rows)| rows.len() > 1)
+        .collect();
+    clashes.sort();
+    for ((_, new), mut rows) in clashes {
+        // The row on disk (or else the oldest) keeps the path.
+        rows.sort_by_key(|(id, _, on_disk)| (!on_disk, *id));
+        for (_, old, _) in rows.into_iter().skip(1) {
+            let chosen = b.free_name(parent(&new), base(&new), false);
+            let to = join(parent(&new), &chosen);
+            b.rules.add(&old, &to);
+            b.plan.left.push(format!(
+                "{old}: its file is gone, and its row now says {to} to keep {new} for the file there"
+            ));
+        }
+    }
 }
 
 /// The subject folders, by name, in order.
@@ -123,6 +185,13 @@ pub(super) fn base(rel: &str) -> &str {
     rel.rsplit_once('/').map_or(rel, |(_, name)| name)
 }
 
+/// How the volumes Oculus runs on compare names: one Unicode form (an NFC
+/// `café` and an NFD one are the same file on APFS) and no case.
+pub(super) fn name_key(name: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    name.nfc().collect::<String>().to_lowercase()
+}
+
 /// `name (n)`, before the extension for a file: `notes (2).md`, `Week 3 (2)`.
 pub(super) fn suffixed(name: &str, n: usize, is_dir: bool) -> String {
     if n < 2 {
@@ -142,11 +211,13 @@ pub(super) struct Builder<'a> {
     /// Data-dir-relative folders the debris sweep deletes, so nothing plans
     /// to move them.
     pub debris: HashSet<String>,
-    /// Names each folder (data-dir-relative, lowercased) will hold that are
+    /// Names each folder (data-dir-relative, `name_key`) will hold that are
     /// not on disk yet, or that the plan treats as held.
     placed: HashMap<String, HashSet<String>>,
-    /// Lowercased names on disk per folder, read once.
+    /// Names on disk per folder (`name_key`), read once.
     on_disk: HashMap<String, HashSet<String>>,
+    /// Folders moved aside by an earlier step (`name_key`).
+    vacated: Vec<String>,
 }
 
 impl<'a> Builder<'a> {
@@ -159,6 +230,7 @@ impl<'a> Builder<'a> {
             debris: HashSet::new(),
             placed: HashMap::new(),
             on_disk: HashMap::new(),
+            vacated: Vec::new(),
         }
     }
 
@@ -177,32 +249,49 @@ impl<'a> Builder<'a> {
 
     /// True when `dir/name` is on disk now or some step puts something there.
     pub fn taken(&mut self, dir: &str, name: &str) -> bool {
-        let lower = name.to_lowercase();
+        let (dir, name) = (name_key(dir), name_key(name));
         if self
             .placed
-            .get(dir)
-            .is_some_and(|names| names.contains(&lower))
+            .get(&dir)
+            .is_some_and(|names| names.contains(&name))
         {
             return true;
         }
+        if self.vacated_under(&dir) || self.vacated_under(&format!("{dir}/{name}")) {
+            return false;
+        }
         let data_dir = self.data_dir;
         self.on_disk
-            .entry(dir.to_string())
-            .or_insert_with(|| {
+            .entry(dir)
+            .or_insert_with_key(|dir| {
                 list(&data_dir.join(dir))
                     .into_iter()
-                    .map(|(n, _)| n.to_lowercase())
+                    .map(|(n, _)| name_key(&n))
                     .collect()
             })
-            .contains(&lower)
+            .contains(&name)
+    }
+
+    /// True when `dir` (a `name_key`) is, or is inside, a folder an earlier
+    /// step moved aside: what is on disk there now is not there any more.
+    fn vacated_under(&self, dir: &str) -> bool {
+        self.vacated
+            .iter()
+            .any(|v| dir == v || dir.starts_with(&format!("{v}/")))
     }
 
     /// Hold `name` in `dir`, so no later step picks it.
     pub fn hold(&mut self, dir: &str, name: &str) {
         self.placed
-            .entry(dir.to_string())
+            .entry(name_key(dir))
             .or_default()
-            .insert(name.to_lowercase());
+            .insert(name_key(name));
+    }
+
+    /// Say that `rel` is moved away before anything else is put at its
+    /// path, so its contents on disk now count for nothing there.
+    pub fn vacate(&mut self, rel: &str) {
+        self.vacated.push(name_key(rel));
     }
 
     /// `name`, or `name (2)`, `name (3)`… — the first one `dir` does not

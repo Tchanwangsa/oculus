@@ -98,3 +98,23 @@ fn helpers() {
     assert_eq!(percent_decode("a%20b%2F").as_deref(), Some("a b/"));
     assert_eq!(encode("/a b/c(1).png", false), "%2Fa%20b%2Fc(1).png");
 }
+
+#[test]
+fn a_link_to_a_renamed_sibling_follows_it_and_a_second_pass_leaves_it() {
+    let d = Scratch::new("migrate-links-sibling");
+    file(&d, "courses/X/brief.pdf", "the upload");
+    file(&d, "courses/X/brief (2).pdf", "the note's sibling");
+    file(&d, "courses/X/sub/deep.pdf", "deep");
+    let r = rules(&[
+        ("courses/X/documents", "courses/X"),
+        ("courses/X/documents/brief.pdf", "courses/X/brief (2).pdf"),
+    ]);
+    let linker = Linker::new(&d, &r);
+    let (old, new) = ("courses/X/documents/plan.md", "courses/X/plan.md");
+    let (out, n) = linker.relink("[b](brief.pdf) [d](sub/deep.pdf)", old, new);
+    assert_eq!(
+        (out.as_str(), n),
+        ("[b](<brief (2).pdf>) [d](sub/deep.pdf)", 1)
+    );
+    assert_eq!(linker.relink(&out, old, new), (out.clone(), 0));
+}

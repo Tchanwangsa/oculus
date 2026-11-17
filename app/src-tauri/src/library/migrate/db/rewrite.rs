@@ -112,7 +112,7 @@ async fn files(
         } else {
             filename
         };
-        sqlx::query(
+        let updated = sqlx::query(
             "UPDATE files SET relative_path = ?1, category = COALESCE(?2, category), filename = ?3
               WHERE id = ?4",
         )
@@ -121,8 +121,20 @@ async fn files(
         .bind(&filename)
         .bind(id)
         .execute(&mut **tx)
-        .await
-        .map_err(|e| format!("update files row {id} ({old} → {new}): {e}"))?;
+        .await;
+        // The plan gives clashing rows distinct paths (`plan::stale_rows`);
+        // should one still clash, it keeps its old path rather than fail the
+        // whole rewrite on every launch from now on.
+        match updated {
+            Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
+                elog!(
+                    "[oculus] library move: files row {id} stays at {old}: {new} is another row's"
+                );
+                continue;
+            }
+            Err(e) => return Err(format!("update files row {id} ({old} → {new}): {e}")),
+            Ok(_) => {}
+        }
         counts.files += 1;
         if new.to_ascii_lowercase().ends_with(".md") {
             notes.insert(id, (old, new));

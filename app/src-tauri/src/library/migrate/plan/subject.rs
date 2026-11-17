@@ -31,6 +31,7 @@ pub(super) fn plan(b: &mut Builder, name: &str) {
         b.hold(&root, &held);
     }
 
+    reserved_aside(b, &root);
     for m in &moves {
         let (old, new) = (join(&root, &m.old), join(&root, &m.new));
         match m.kind {
@@ -73,6 +74,27 @@ pub(super) fn plan(b: &mut Builder, name: &str) {
         }
     }
     left_at_root(b, &root, &moves);
+}
+
+/// A folder or file the student keeps at the root under a name the layout
+/// now takes (`Course`, `.oculus`, any case) steps aside first, as
+/// `Course (mine)`, before anything is moved in under that name.
+fn reserved_aside(b: &mut Builder, root: &str) {
+    for (name, kind) in list(&b.data_dir.join(root)) {
+        if !layout::reserved_name(&name) {
+            continue;
+        }
+        let from = join(root, &name);
+        let chosen = b.free_name(root, &layout::reserved_rename(&name), kind == Entry::Dir);
+        let to = join(root, &chosen);
+        b.vacate(&from);
+        // No rule: the old name is the new tree's, so mapping it would send
+        // every new `Course/` path here.
+        b.step(Kind::Own, Op::Rename { from, to });
+        b.plan.left.push(format!(
+            "{root}/{name}: renamed {chosen}, since the layout keeps its name"
+        ));
+    }
 }
 
 /// Videos the database knows in the old `Files/` (module videos, page-embed
