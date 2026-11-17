@@ -19,7 +19,9 @@ export type DownloadState =
 
 /** The student's answer to the Save dialog. */
 export type Dest =
-  | { kind: "oculus"; subject_code: string }
+  /** `target_dir`: a data-dir-relative folder of the student's own in that
+   *  subject; the subject's root when absent. */
+  | { kind: "oculus"; subject_code: string; target_dir?: string }
   | { kind: "path"; path: string }
   | { kind: "discard" };
 

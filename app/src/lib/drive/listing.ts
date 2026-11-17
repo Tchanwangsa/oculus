@@ -62,6 +62,18 @@ export async function notebookCover(fileId: number): Promise<Blob | null> {
   return bytes.byteLength > 0 ? new Blob([bytes], { type: "image/png" }) : null;
 }
 
+/** What a folder command did, on the `drive-changed` Tauri event
+ *  (`library/drive/ops/events.rs`). A folder's files moved or went with it,
+ *  under the same prefix; a tab on a moved file follows `moved`. */
+export interface DriveChange {
+  subjectIds: number[];
+  moved: { from: string; to: string }[];
+  removed: string[];
+  added: string[];
+}
+
+export const DRIVE_CHANGED_BACKEND_EVENT = "drive-changed";
+
 /** Fired after Drive adds, renames, moves or deletes entries, so listings,
  *  trees and file lists of those subjects reload. */
 export const DRIVE_CHANGED_EVENT = "oculus:drive-changed";

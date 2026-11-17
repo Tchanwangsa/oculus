@@ -295,8 +295,9 @@ only those to `canvas_write_page_snapshots`. A canvas gets none of this.
   per page (2 pixels a point, about 1190 × 1680 for A4) and `pages.json`, the
   notebook's path, page count and, for each page, its id, picture and the Unix
   time it was last redrawn (`library::paths::notebook`). It is keyed by the
-  `files` row, so a rename only rewrites the manifest, and it is removed when
-  the notebook is deleted or reconciled away. The command refuses a path that
+  `files` row, so a rename or a Drive move only rewrites the manifest's path
+  (`snapshots::retarget`), and it is removed when the notebook is deleted
+  (also by Drive's delete) or reconciled away. The command refuses a path that
   is not a notebook's, a page the notebook does not have, anything but a PNG,
   and a symlinked folder.
 - **`oculus read <notebook>`** prints each page's picture path and how long
@@ -390,7 +391,9 @@ must equal the file on disk. The native registry fences ordinary `write_canvas`,
 `rename_canvas` and `delete_canvas` commands against a session owning the same
 path, including a paused session. Opening and whole-file mutations take the
 same registry lock, so a delayed desktop autosave cannot overwrite shared
-changes between the ownership check and the write. One path cannot have two
+changes between the ownership check and the write. Drive's move, rename and
+delete take the same lock for their disk step (`while_unshared`) and refuse a
+folder holding a shared canvas. One path cannot have two
 sessions under different file IDs. Outside a session, `write_canvas` saves as
 above.
 

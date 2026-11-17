@@ -32,12 +32,10 @@ pub(super) enum Effect {
 pub(super) enum Target {
     Oculus {
         subject_code: String,
+        target_dir: Option<String>,
     },
     /// `may_replace` only when the save panel confirmed this very path.
-    Path {
-        path: PathBuf,
-        may_replace: bool,
-    },
+    Path { path: PathBuf, may_replace: bool },
 }
 
 /// A download a `Finished` event settled.
@@ -296,7 +294,7 @@ impl Downloads {
     /// refused takes no choice.
     pub(super) fn choose(&mut self, id: u32, dest: Dest) -> Result<Vec<Effect>, String> {
         match &dest {
-            Dest::Oculus { subject_code } if subject_code.trim().is_empty() => {
+            Dest::Oculus { subject_code, .. } if subject_code.trim().is_empty() => {
                 return Err("pick a subject first".into());
             }
             Dest::Path { path } if !Path::new(path).is_absolute() => {
@@ -334,8 +332,12 @@ impl Downloads {
                 e.row.choice = None;
                 return Effect::Remove(e.staged.clone());
             }
-            Dest::Oculus { ref subject_code } => Target::Oculus {
+            Dest::Oculus {
+                ref subject_code,
+                ref target_dir,
+            } => Target::Oculus {
                 subject_code: subject_code.clone(),
+                target_dir: target_dir.clone(),
             },
             Dest::Path { ref path } => {
                 let path = PathBuf::from(path);

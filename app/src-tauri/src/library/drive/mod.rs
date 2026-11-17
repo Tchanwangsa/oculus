@@ -7,11 +7,14 @@
 //! folder. What the listing leaves out: dot-names, symlinks, hidden app state
 //! (`layout::zone_of`), and a file's parse artifacts and converted PDF
 //! (`paths::parse_artifacts`), which its row already toggles to.
+//! The student's folder commands (create, rename, move, copy, delete) and
+//! the target folders every own-file creator takes are `ops`.
 //! docs/frontend.md has the browser this feeds.
 
 pub(crate) mod commands;
 mod entries;
 mod listing;
+pub(crate) mod ops;
 mod recordings;
 
 #[cfg(test)]

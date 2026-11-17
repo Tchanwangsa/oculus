@@ -105,6 +105,24 @@ impl Authority {
         mutation()
     }
 
+    /// Run `work` while no session can open, handing it the first of `rels`
+    /// (data-dir-relative) a live session owns, if any: Drive moves and
+    /// deletes whole folders inside this, and refuses when one is shared.
+    pub(crate) fn while_unshared<T>(
+        &self,
+        root: &Path,
+        rels: &[String],
+        work: impl FnOnce(Option<String>) -> T,
+    ) -> T {
+        let sessions = self.registry();
+        let shared = root.canonicalize().ok().and_then(|root| {
+            rels.iter()
+                .find(|rel| sessions.values().any(|s| s.lock().owns(&root, rel)))
+                .cloned()
+        });
+        work(shared)
+    }
+
     /// Start sharing `rel` from `text`, the desktop's flushed document, which
     /// must equal the file on disk. A file that is already shared answers with
     /// its live snapshot instead.

@@ -4,7 +4,9 @@
 //! stops writing and sends it here. Each lands in `canvas-pages/<file id>/` with a
 //! manifest (`library::paths::notebook`), and `oculus read <notebook>` hands the
 //! agent those paths. Keyed by file id like the recovery drafts, so a rename moves
-//! nothing; a deleted notebook's folder is removed by `canvas_delete_page_snapshots`.
+//! no picture: Drive's move only points the manifest's `canvas` at the new path
+//! (`retarget`). A deleted notebook's folder is removed by
+//! `canvas_delete_page_snapshots`, or by Drive's delete.
 
 use crate::library::paths::{
     notebook_page_image, read_notebook_pages, NotebookPage, NotebookPages, PAGES_DIR,
@@ -126,7 +128,24 @@ fn write_at(
     write_file(&dir.join(PAGES_MANIFEST), json.as_bytes())
 }
 
-fn remove_at(root: &Path, file_id: i64) -> Result<(), String> {
+/// Point a notebook's manifest at the path it moved to; nothing to do when
+/// it has no pictures yet.
+pub(crate) fn retarget(root: &Path, file_id: i64, relative_path: &str) -> Result<(), String> {
+    let Some(mut manifest) = read_notebook_pages(root, file_id) else {
+        return Ok(());
+    };
+    if manifest.canvas == relative_path {
+        return Ok(());
+    }
+    let Some(dir) = dir_at(root, file_id, false)? else {
+        return Ok(());
+    };
+    manifest.canvas = relative_path.into();
+    let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    write_file(&dir.join(PAGES_MANIFEST), json.as_bytes())
+}
+
+pub(crate) fn remove_at(root: &Path, file_id: i64) -> Result<(), String> {
     match dir_at(root, file_id, false)? {
         Some(dir) => std::fs::remove_dir_all(dir).map_err(|e| e.to_string()),
         None => Ok(()),

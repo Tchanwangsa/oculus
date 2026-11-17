@@ -150,26 +150,79 @@ pub fn purge_parse_artifacts(data_dir: &std::path::Path, library_rel: &str) {
 /// beside it, or a spreadsheet's text (whose name carries the sheet's
 /// extension).
 pub fn parse_artifacts(data_dir: &std::path::Path, library_rel: &str) -> Vec<std::path::PathBuf> {
+    artifact_slots(data_dir, library_rel)
+        .into_iter()
+        .filter(|(slot, _)| *slot != ArtifactSlot::Converted)
+        .map(|(_, path)| path)
+        .collect()
+}
+
+/// One file a library file carries with it: its converted PDF, one of its
+/// parse artifacts, or a spreadsheet's PDF-route leftover.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArtifactSlot {
+    Converted,
+    Derived(crate::library::layout::DerivedKind),
+    SheetPdf,
+}
+
+/// `parse_artifacts`, plus an Office file's converted PDF, each tagged with
+/// its slot, so a move can ask `artifact_at` where the same slot lives for
+/// the file's new path.
+pub fn artifact_slots(
+    data_dir: &std::path::Path,
+    library_rel: &str,
+) -> Vec<(ArtifactSlot, std::path::PathBuf)> {
     use crate::library::layout::{derived, zone_of, DerivedKind, Zone};
     let zone = zone_of(library_rel);
     if zone == Zone::Outside {
         return Vec::new();
     }
     let sheet = is_sheet(library_rel);
-    let Some(pdf_rel) =
-        doc_pdf_rel(library_rel).or_else(|| sheet.then(|| format!("{library_rel}.pdf")))
-    else {
+    let Some(pdf_rel) = parsed_pdf_rel(library_rel) else {
         return Vec::new();
     };
     let pdf = data_dir.join(&pdf_rel);
     let parsers_md = zone == Zone::Synced || sheet || derived(&pdf, DerivedKind::Pages).is_file();
-    let mut artifacts: Vec<_> = DerivedKind::ALL
+    let mut slots: Vec<ArtifactSlot> = DerivedKind::ALL
         .into_iter()
         .filter(|kind| *kind != DerivedKind::Markdown || parsers_md)
-        .map(|kind| derived(&pdf, kind))
+        .map(ArtifactSlot::Derived)
         .collect();
     if sheet {
-        artifacts.push(pdf);
+        slots.push(ArtifactSlot::SheetPdf);
     }
-    artifacts
+    if pdf_rel != library_rel && !sheet {
+        slots.push(ArtifactSlot::Converted);
+    }
+    slots
+        .into_iter()
+        .filter_map(|slot| Some((slot, artifact_at(data_dir, library_rel, slot)?)))
+        .collect()
+}
+
+/// Where `slot` lives for the file at `library_rel`; `None` when a file of
+/// that name has no such artifact (a rename from `.docx` to `.txt`).
+pub fn artifact_at(
+    data_dir: &std::path::Path,
+    library_rel: &str,
+    slot: ArtifactSlot,
+) -> Option<std::path::PathBuf> {
+    use crate::library::layout::derived;
+    let sheet = is_sheet(library_rel);
+    match slot {
+        ArtifactSlot::Converted => doc_pdf_rel(library_rel)
+            .filter(|pdf| pdf != library_rel)
+            .map(|pdf| data_dir.join(pdf)),
+        ArtifactSlot::Derived(kind) => {
+            parsed_pdf_rel(library_rel).map(|pdf| derived(&data_dir.join(pdf), kind))
+        }
+        ArtifactSlot::SheetPdf => sheet.then(|| data_dir.join(format!("{library_rel}.pdf"))),
+    }
+}
+
+/// The PDF whose stem names a file's parse artifacts: the file itself, an
+/// Office file's converted PDF, or for a spreadsheet `{name}.pdf`.
+fn parsed_pdf_rel(library_rel: &str) -> Option<String> {
+    doc_pdf_rel(library_rel).or_else(|| is_sheet(library_rel).then(|| format!("{library_rel}.pdf")))
 }

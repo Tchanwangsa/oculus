@@ -1064,9 +1064,11 @@ hook must name its destination synchronously and WebKit starts writing at
 once, so the Save dialog asks while bytes arrive. Delivery waits for both the
 last byte and a choice, whichever comes second (`Downloads`):
 
-- **In Oculus** imports into a subject's uploads through `import_files` in
+- **In Oculus** imports into a subject through `import_into` in
   `app/src-tauri/src/library/files/uploads.rs`, the same path as picked
-  uploads. `useBrowserDownloads` calls `recordUploads` in
+  uploads: into `Dest`'s optional `target_dir` (a folder of the student's in
+  that subject, checked by `own_target`), else the subject's root. The Save
+  dialog sends no folder yet. `useBrowserDownloads` calls `recordUploads` in
   `app/src/lib/files/uploads.ts` through `createSavedRecorder` in
   `app/src/lib/browser/downloads/recordSaved.ts`: it claims each
   download once, skips an existing `files` row (including after a frontend

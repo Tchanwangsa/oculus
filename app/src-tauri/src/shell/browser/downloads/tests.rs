@@ -80,6 +80,7 @@ fn state(d: &Downloads, id: u32) -> State {
 fn oculus() -> Dest {
     Dest::Oculus {
         subject_code: "COMP30027".into(),
+        target_dir: None,
     }
 }
 
@@ -125,7 +126,8 @@ fn a_choice_before_the_finish_delivers_once_at_the_finish() {
                 id,
                 staged: staged.clone(),
                 to: Target::Oculus {
-                    subject_code: "COMP30027".into()
+                    subject_code: "COMP30027".into(),
+                    target_dir: None,
                 }
             }]
         }]
@@ -352,6 +354,7 @@ fn a_saved_upload_resolves_to_the_library_file() {
             relative_path: "courses/COMP30027/notes.pdf".into(),
             file_type: "pdf".into(),
             size_bytes: 42,
+            category: "upload".into(),
         }),
         error: None,
     };
@@ -473,7 +476,8 @@ fn a_choice_needs_a_subject_or_a_full_path() {
         .choose(
             id,
             Dest::Oculus {
-                subject_code: " ".into()
+                subject_code: " ".into(),
+                target_dir: None,
             }
         )
         .is_err());

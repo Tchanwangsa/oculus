@@ -40,6 +40,16 @@ pub async fn embed_file(
 
     embed::events::queued(&relative_path, subject_id);
 
+    // Held for the whole embed, so Drive refuses to move or delete the PDF
+    // under it (`parse::InFlight::embedding`). A second embed of the same
+    // PDF waits for the first.
+    let key = pdf.clone();
+    let _claim = tauri::async_runtime::spawn_blocking(move || {
+        crate::parse::InFlight::embedding().claim(&key)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
     let path = relative_path.clone();
     let outcome = ingest_reporting(
         &db,

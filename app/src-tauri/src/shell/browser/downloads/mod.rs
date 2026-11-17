@@ -8,7 +8,7 @@
 //!
 //! - `stage.rs` is the hook; `correlate.rs` matches a `Finished` to its
 //!   download by staged path; `deliver.rs` moves it (In Oculus is the
-//!   uploads path, `import_files`); `sweep.rs` clears a crash's leftovers.
+//!   uploads path, `import_into` a chosen folder); `sweep.rs` clears a crash's leftovers.
 //! - The list is per session, pushed whole on `browser-downloads` to the
 //!   app's webview. A download's URL can carry a signed token, so it is
 //!   never kept, sent or logged: only its host, and a hash for matching.
@@ -69,9 +69,12 @@ pub enum State {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Dest {
-    /// A subject's uploads, under its code.
+    /// A subject's files: `target_dir` (a data-dir-relative folder of the
+    /// student's own in that subject), else its root.
     Oculus {
         subject_code: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_dir: Option<String>,
     },
     /// A path on the Mac, normally from `browser_download_save_panel`.
     Path {

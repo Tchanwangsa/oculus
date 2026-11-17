@@ -5,14 +5,18 @@ import { deleteFileRow, upsertFile, type DbFile } from "@/lib/db";
 import { isPipelineFile } from "@/lib/files/fileTypes";
 import { parseFile } from "@/lib/files/courseFiles";
 
-// The student's own files: Rust copies them into `courses/<code>/uploads/`,
-// then they are ordinary library files. This adds the row and the parse kick.
+// The student's own files: Rust copies them into one of their folders (or the
+// subject's root), then they are ordinary library files. This adds the row
+// and the parse kick.
 
 export interface ImportedFile {
   filename: string;
   relative_path: string;
   file_type: string;
   size_bytes: number;
+  /** The row's category, from the path (`layout::category_of`): a dropped
+   *  `.md` is a document, a `.canvas` a canvas. */
+  category: string;
 }
 
 /** `file` and `error` are both set when the bytes landed but the Office → PDF
@@ -76,7 +80,7 @@ export async function recordUploads(
       file.relative_path,
       file.file_type,
       file.size_bytes,
-      "upload",
+      file.category,
     );
     // Fire-and-forget: the parse (a spreadsheet's conversion to text) runs in
     // Rust, a retryable failure is re-kicked by `useQualitySweep` and any

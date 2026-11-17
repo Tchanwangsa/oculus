@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useIndexStore } from "@/stores/sync/indexStore";
 import { embedReady } from "@/lib/pipeline/retrieval";
+import { useDriveEvents } from "./useDriveEvents";
 import { useEmbedEvents } from "./useEmbedEvents";
 import { useHarnessEvents } from "./useHarnessEvents";
 import { useParseEvents } from "./useParseEvents";
@@ -22,5 +23,6 @@ export function useBackendEvents() {
   useScrapeEvents();
   useParseEvents();
   useEmbedEvents();
+  useDriveEvents();
   useStudioEvents();
 }

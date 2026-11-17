@@ -142,3 +142,65 @@ fn content_type_ignores_charset_and_either_spelling() {
     assert_eq!(content_type_of(&b), "image/png");
     assert_eq!(content_type_of(&serde_json::json!({})), "");
 }
+
+/// Whatever path a phase computes, the sync's writer lands it in the
+/// subject's `Course/` or refuses it: never among the student's own files.
+#[test]
+fn the_sync_writes_only_into_course() {
+    use crate::library::layout::{synced, synced_file, SyncedFile, SyncedKind};
+    let data = crate::test_support::Scratch::new("sync-course-only");
+    let mut engine = super::Engine::new(&data, Box::new(super::Silent));
+    engine.parse_pdfs = false;
+    let subject = super::Subject {
+        id: 1,
+        code: "COMP10001".into(),
+    };
+    let kinds = [
+        SyncedKind::Files,
+        SyncedKind::Media,
+        SyncedKind::Lessons,
+        SyncedKind::Discussion,
+        SyncedKind::Pages,
+        SyncedKind::Assignments,
+        SyncedKind::Quizzes,
+        SyncedKind::Announcements,
+        SyncedKind::Modules,
+        SyncedKind::Images,
+    ];
+    for kind in kinds {
+        engine
+            .write(&subject, &synced(kind, "week-1/a.md"), b"x", None)
+            .unwrap();
+    }
+    for file in [SyncedFile::Home, SyncedFile::Syllabus] {
+        engine
+            .write(&subject, &synced_file(file), b"x", None)
+            .unwrap();
+    }
+    for hostile in [
+        "notes.md",
+        "Exam prep/a.pdf",
+        ".oculus/agents/x.md",
+        "../COMP20001/notes.md",
+        "Course/../notes.md",
+    ] {
+        let _ = engine.write(&subject, hostile, b"x", None);
+    }
+
+    let mut pending = vec![data.join("courses")];
+    let mut written = Vec::new();
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            if entry.file_type().unwrap().is_dir() {
+                pending.push(entry.path());
+            } else {
+                written.push(entry.path());
+            }
+        }
+    }
+    let course = data.join("courses/COMP10001/Course");
+    assert_eq!(written.len(), kinds.len() + 3, "{written:?}");
+    for path in written {
+        assert!(path.starts_with(&course), "{}", path.display());
+    }
+}

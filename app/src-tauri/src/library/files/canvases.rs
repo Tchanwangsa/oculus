@@ -120,12 +120,7 @@ fn checked(root: &Path, rel: &str, create_parents: bool) -> Result<PathBuf, Stri
 }
 
 fn file(kind: DrawingKind, rel: String, size_bytes: u64) -> ImportedFile {
-    ImportedFile {
-        filename: rel.rsplit('/').next().unwrap_or_default().into(),
-        relative_path: rel,
-        file_type: kind.file_type().into(),
-        size_bytes,
-    }
+    ImportedFile::new(rel, kind.file_type(), size_bytes)
 }
 
 /// The envelope every drawing has; a notebook also needs valid `paper`.
@@ -156,10 +151,8 @@ pub(super) fn write_at(root: &Path, rel: &str, content: &str) -> Result<u64, Str
     Ok(content.len() as u64)
 }
 
-fn folder_of(kind: DrawingKind, code: &str) -> String {
-    layout::own_dir_rel(code, kind.own())
-}
-
+/// `create_in` at the subject's own folder for `kind`, for the tests.
+#[cfg(test)]
 pub(super) fn create_at(
     root: &Path,
     kind: DrawingKind,
@@ -167,8 +160,24 @@ pub(super) fn create_at(
     title: &str,
     content: &str,
 ) -> Result<ImportedFile, String> {
+    create_in(
+        root,
+        kind,
+        &layout::own_dir_rel(code, kind.own()),
+        title,
+        content,
+    )
+}
+
+/// A new drawing in the folder `prefix` (data-dir-relative).
+pub(super) fn create_in(
+    root: &Path,
+    kind: DrawingKind,
+    prefix: &str,
+    title: &str,
+    content: &str,
+) -> Result<ImportedFile, String> {
     validate(kind, content)?;
-    let prefix = folder_of(kind, code);
     let wanted = name(kind, title);
     let ext = kind.extension();
     for index in 1.. {
@@ -198,19 +207,27 @@ pub(super) fn create_at(
     unreachable!()
 }
 
-/// A new canvas, or with `kind: "notebook"` a new notebook.
+/// A new canvas, or with `kind: "notebook"` a new notebook, in `target_dir`
+/// (data-dir-relative, in the subject) or the subject's root.
 #[tauri::command]
 pub async fn create_canvas(
     subject_code: String,
     title: String,
     content: String,
     kind: Option<DrawingKind>,
+    target_dir: Option<String>,
 ) -> Result<ImportedFile, String> {
     crate::runtime::blocking::run(move || {
-        create_at(
-            &crate::library::paths::data_dir(),
-            kind.unwrap_or_default(),
+        let root = crate::library::paths::data_dir();
+        let target = crate::library::drive::ops::guard::own_target(
+            &root,
             &subject_code,
+            target_dir.as_deref(),
+        )?;
+        create_in(
+            &root,
+            kind.unwrap_or_default(),
+            &target.rel,
             &title,
             &content,
         )

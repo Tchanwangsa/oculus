@@ -9,7 +9,8 @@ use tauri::AppHandle;
 
 use super::state::{Effect, Target};
 use super::{broadcast, SavedTo};
-use crate::library::files::uploads::import_files;
+use crate::library::drive::ops::guard::own_target;
+use crate::library::files::uploads::import_into;
 use crate::shell::browser::with_state;
 
 /// Runs each effect off the caller's thread; a delivery reports back through
@@ -45,8 +46,13 @@ fn apply(app: &AppHandle, effect: Effect) {
 /// untouched after a failure, so another choice can be made.
 pub(super) fn deliver(data_dir: &Path, staged: &Path, to: &Target) -> Result<SavedTo, String> {
     match to {
-        Target::Oculus { subject_code } => {
-            let outcome = import_files(data_dir, subject_code, &[staged])
+        Target::Oculus {
+            subject_code,
+            target_dir,
+        } => {
+            let target =
+                own_target(data_dir, subject_code, target_dir.as_deref()).map_err(|e| e.message)?;
+            let outcome = import_into(data_dir, &target, &[staged])
                 .pop()
                 .ok_or("nothing was imported")?;
             if outcome.file.is_none() {

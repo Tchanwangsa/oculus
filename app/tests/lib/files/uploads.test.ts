@@ -30,9 +30,10 @@ const { addUploads, recordUploads, UPLOADS_CHANGED_EVENT } = await import("@/lib
 const subject = { id: 7, code: "COMP10001_2026_SM2" };
 
 function outcome(filename: string, error: string | null = null) {
+  const category = filename.endsWith(".md") ? "document" : "upload";
   return {
     source: filename,
-    file: { filename, relative_path: `courses/${subject.code}/${filename}`, file_type: "x", size_bytes: 1 },
+    file: { filename, relative_path: `courses/${subject.code}/${filename}`, file_type: "x", size_bytes: 1, category },
     error,
   };
 }
@@ -71,4 +72,9 @@ test("recordUploads does the same for outcomes Rust already landed", async () =>
     "row photo.png upload",
   ]);
   expect(announced).toBe(1);
+});
+
+test("each row takes the category Rust read off its path", async () => {
+  await recordUploads(subject, [outcome("plan.md")]);
+  expect(log).toEqual(["row plan.md document"]);
 });
