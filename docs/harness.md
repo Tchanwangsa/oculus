@@ -52,6 +52,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Commands and skills: the catalogue, its search, the ranking, how a picked skill reaches each bridge | `app/src/lib/harness/skills.ts`, `app/src/lib/harness/composerCommands.ts`, `app/src/stores/chat/skillStore.ts`, `app/src/lib/search/ranking.ts`, `app/src-tauri/src/harness/app/skills.rs`, `app/src-tauri/src/harness/providers/*/skill.rs` |
 | Earlier messages on ArrowUp, and the ⌘S stash | `app/src/lib/harness/promptHistory.ts`, `app/src/hooks/agents/usePromptHistory.ts`, `app/src/stores/chat/stashStore.ts`, `app/src/components/harness/composer/useComposerStash.ts`, `app/src/components/harness/composer/StashMenu.tsx`, `app/src/components/harness/composer/StashBadge.tsx` |
 | Studio's thread column and New video box, which use `Composer`'s `leading` (chips after the subject's) and `placeholder` | `app/src/components/studio/thread/ThreadColumn.tsx`, `app/src/components/studio/new/NewVideo.tsx` ([studio-page.md](./studio-page.md)) |
+| The subject Overview's ask bar: `Composer`'s `compact` mode, and the warp into the thread it starts | `app/src/pages/subject/content/overview/AskBar.tsx`, `app/src/components/harness/composer/compactOpen.ts`, `app/src/lib/ui/warp.ts`, `app/src/hooks/ui/useWarpLanding.ts`, `app/src/styles/warp.css` |
 | Voice dictation, microphone capture and cleanup job | `app/src/components/harness/dictation/`, `app/src/lib/dictation/recording.ts`, `app/src-tauri/src/harness/app/dictation.rs` |
 | Send, queue, stop and resume controls shared by both composers, the rule that picks them, and the held-queue notice | `app/src/components/harness/composer/SendControls.tsx`, `app/src/lib/harness/runControls.ts`, `app/src/components/harness/composer/useRunControls.ts`, `app/src/components/harness/composer/ThreadBanners.tsx` |
 | Steer or queue into a running turn: the send mode, ⌘↩ and ⌘⇧↩, "Send now", the steer row, Settings → Chat | `app/src/pages/settings/integrations/ChatPage.tsx`, `app/src/lib/harness/sendMode.ts`, `app/src/components/harness/composer/useSendMode.ts`, `app/src/hooks/agents/useSteerKind.ts`, `app/src/components/harness/timeline/SteerRow.tsx`, `app/src/stores/chat/chatPrefsStore.ts`, `app/src/components/settings/chat/FollowUpSection.tsx` |
@@ -3317,6 +3318,47 @@ theme, subject library and length target read from video.json and the link,
 and the order of work (direct it with the skill, draft, ask before the
 final). It is the per-thread half the opencode bridge sends ahead
 of the first message.
+
+## The subject Overview's ask bar starts a thread
+
+`OverviewAskBar` (`app/src/pages/subject/content/overview/AskBar.tsx`),
+docked at the bottom of a subject's Overview, is Chat's `Composer` with its
+subject locked to the page's, the hint "Ask about <code>. @ files, /
+skills" (`displayCode`) and a draft of its own per subject
+(`new:overview:<id>`). It names what Chat's new thread would: the session's
+agent, model and level (`useComposerSelection(null)`), filled from the
+catalogue like any composer, so no send goes without an explicit model and
+level, on any of the four agents.
+
+- **`compact` rests as one bar.** A pill with the hint cut to one line, the
+  model picker drawn as the agent's mark and caret (`markOnly`; its title
+  still names model and level), the mic and send. Focus anywhere in it,
+  words or attachments, the picker's menu, dictation, a waiting question or
+  the sign-in dialog open it into the full box: model name, level, usage
+  ring, `@` and `/` menus (`compactOpen`). Opening swaps classes only, so
+  the editor keeps the focus that opened it. A click on the bar outside its
+  buttons puts the caret at the end. Without `compact`, the box is as it
+  always was.
+- **A send is Chat's new-thread send.** `useThreadActions`' `send` with
+  `chatScope` set to the subject, as `ChatPage` sends a new thread: Rust
+  creates the thread under that subject and the thread list reloads. `send`
+  resolves to Rust's reason when the send is refused; the bar then puts the
+  words back (`restore`) and shows the reason on a line under itself. A
+  thread made after the student left the Overview stays in Chat's list and
+  the pane is not moved.
+- **The bar warps into the thread** (`warpTo` in `app/src/lib/ui/warp.ts`).
+  The pane navigates to `chatHref(id)` inside a same-document View
+  Transition: the bar takes the `composer-warp` name for the old snapshot,
+  and the thread page's composer takes it for the new one
+  (`useWarpLanding`, matched on this pane and the new thread), so the bar
+  morphs into that composer and the rest cross-fades, 280 ms
+  (`app/src/styles/warp.css`). The update callback waits for that
+  composer's first render, since the router commits after the lazy route
+  loads and inside a React transition; past 800 ms it animates whatever is
+  drawn. Only one element holds the name at a time, because a second (a
+  hidden tab's composer) would make the browser skip the transition. With no
+  `document.startViewTransition`, or with `prefers-reduced-motion`, it is a
+  plain navigation.
 
 ## Proposal context is read at dispatch, and confirmation lives in Rust
 

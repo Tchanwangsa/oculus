@@ -56,6 +56,7 @@ export const ModelPicker = memo(function ModelPicker({
   emptyLabel = "Choose a model",
   emptyIcon,
   keepEmptyTrigger = false,
+  markOnly = false,
   className,
 }: {
   providers: PickerProvider[];
@@ -87,6 +88,9 @@ export const ModelPicker = memo(function ModelPicker({
   /** The trigger keeps its empty look with a model set: an "add" menu whose
    *  pick lands in a row of its own. */
   keepEmptyTrigger?: boolean;
+  /** The trigger is the agent's mark and its caret alone (a compact composer
+   *  at rest); the title still names model and level. */
+  markOnly?: boolean;
   className?: string;
 }) {
   const [openState, setOpenState] = useState(false);
@@ -213,10 +217,12 @@ export const ModelPicker = memo(function ModelPicker({
       ) : (
         <ProviderMark provider={provider} className="size-3.5 shrink-0" />
       )}
-      <span className={cn("min-w-0 truncate", label != null && !keepEmptyTrigger && "text-foreground")}>
-        {keepEmptyTrigger ? emptyLabel : (label ?? emptyLabel)}
-      </span>
-      {levelText && !keepEmptyTrigger ? (
+      {!markOnly && (
+        <span className={cn("min-w-0 truncate", label != null && !keepEmptyTrigger && "text-foreground")}>
+          {keepEmptyTrigger ? emptyLabel : (label ?? emptyLabel)}
+        </span>
+      )}
+      {levelText && !keepEmptyTrigger && !markOnly ? (
         <span className="shrink-0 text-muted-foreground">{levelText}</span>
       ) : null}
       <CaretDown className="size-3 shrink-0 text-muted-foreground" />

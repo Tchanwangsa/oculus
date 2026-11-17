@@ -25,6 +25,7 @@ import { useSideNavPanel } from "@/hooks/ui/useSideNavPanel";
 import { SideNavShell } from "@/components/ui/layout/SideNavShell";
 import { useRateLimits } from "@/hooks/agents/useRateLimits";
 import { useStickToBottom } from "@/hooks/ui/useStickToBottom";
+import { useWarpLanding } from "@/hooks/ui/useWarpLanding";
 import { useScrollFade } from "@/hooks/ui/useScrollFade";
 import {
   harnessDeleteThread,
@@ -43,6 +44,7 @@ import {
 } from "@/lib/harness";
 import { itemsFor, useHarnessStore } from "@/stores/chat/harnessStore";
 import { draftKey, useDraftStore } from "@/stores/chat/draftStore";
+import { WARP_NAME } from "@/lib/ui/warp";
 
 /**
  * Chat with a CLI agent running from the library's `agents/` folder
@@ -238,6 +240,8 @@ export default function ChatPage() {
     [newKey, navigate],
   );
   const composerRef = useRef<HTMLDivElement>(null);
+  // The Overview's ask bar, sent from this pane, morphs into this composer.
+  const warping = useWarpLanding(paneId, activeId);
   const focusComposer = useCallback(() => {
     const box = composerRef.current?.querySelector<HTMLElement>('[role="textbox"]');
     if (!box) return;
@@ -371,7 +375,9 @@ export default function ChatPage() {
           </div>
         )}
         <div ref={composerRef} style={shift} className="shrink-0 px-6 pb-4">
-          <div className="mx-auto max-w-[760px]">{composer}</div>
+          <div className="mx-auto max-w-[760px]" style={warping ? { viewTransitionName: WARP_NAME } : undefined}>
+            {composer}
+          </div>
         </div>
 
         <DropOverlay show={dropping} label="Drop to attach a picture" />

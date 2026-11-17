@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 impl Ed {
     /// Every thread on a course's board, newest first (list entries only —
-    /// no replies; those come with [`Ed::thread_markdown`]).
+    /// no replies; those come with [`Ed::thread_detail`]).
     pub fn threads(&self, course_id: i64) -> Result<Vec<serde_json::Value>, String> {
         let mut out = Vec::new();
         loop {
@@ -31,15 +31,10 @@ impl Ed {
         Ok(out)
     }
 
-    /// One thread with its replies, rendered to Markdown ([`thread_md`]).
-    pub fn thread_markdown(
-        &self,
-        listing: &serde_json::Value,
-        board: &Board,
-    ) -> Result<String, String> {
+    /// One thread with its replies, shared by the renderer and source dates.
+    pub fn thread_detail(&self, listing: &serde_json::Value) -> Result<serde_json::Value, String> {
         let id = listing["id"].as_i64().ok_or("thread without id")?;
-        let detail = self.get(&format!("/threads/{id}"))?;
-        Ok(thread_md(listing, &detail, board))
+        self.get(&format!("/threads/{id}"))
     }
 }
 

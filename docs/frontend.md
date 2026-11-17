@@ -40,6 +40,8 @@ library files; the rest of the frontend has its own pages:
 | Parser and embedding engine selection UI | `app/src/components/settings/shared/EngineSelect.tsx` |
 | Parse state, pipeline ledger, recovery sweep | `app/src/lib/pipeline/parseState.ts`, `app/src/stores/sync/parseStore.ts`, `app/src/stores/sync/pipelineStore.ts`, `app/src/hooks/sync/useQualitySweep.ts` |
 | Scraped document metadata loaders | `app/src/hooks/data/useCourseFileData.ts`, `app/src/hooks/data/useModuleTocs.ts` |
+| Subject Overview data, section derivations and public item types | `app/src/hooks/data/overview/` |
+| Pure file titles and routes, shared with file opening | `app/src/lib/files/labels.ts` |
 | Spotify ([music.md](./music.md)): the `music-state` snapshot type and the command wrappers; the snapshot mirror and Settings → Music's switch; the listener mounted in `AppLayout` | `app/src/lib/music/index.ts`, `app/src/stores/music/musicStore.ts`, `app/src/stores/music/musicPrefsStore.ts`, `app/src/hooks/music/useMusicState.ts` |
 | Module videos and page embeds downloaded on demand; YouTube/Vimeo metadata | `app/src/pages/subject/content/ModulesPage.tsx`, `app/src/stores/lectures/videoDownloadStore.ts`, `app/src/stores/lectures/embedDownloadStore.ts`, `app/src/stores/lectures/webVideoStore.ts`, `app/src/lib/files/scrapedRow.ts` |
 
@@ -124,12 +126,10 @@ Subject file and content rows use flat divided lists without a surrounding
 card. Downloaded files and Canvas module items use a single list level. Module
 rows stay individually collapsible; the newest TOC for each Canvas position
 wins when an old position path remains, and exact repeated TOCs appear once.
-Lecture recordings are grouped by local Monday–Sunday weeks from the first
-available lecture date (`app/src/lib/lectures/weeks.ts`). Gaps inside the
-subject's synced class timetable render grey as **Break** and do not advance
-the teaching-week number; recordings in those gaps remain accessible. Named
-lecture events take precedence over other class types. Without a timetable,
-missing recordings do not imply a break. Undated recordings stay in their own
+Lecture recordings use the shared
+[term teaching weeks](./calendar.md#teaching-weeks-are-shared-across-a-term),
+presented by `app/src/lib/lectures/weeks.ts`. Rows outside the subject's
+timetable are grey and remain playable; undated recordings have their own
 group. File glyphs use
 the `reference-*` tokens: PDFs red, Office documents blue, notes purple,
 spreadsheets teal, and lecture videos pink. Search remains in the subject
@@ -268,6 +268,55 @@ A refusal arrives as a JSON-serialised `{ kind, message }`, `kind` one of
 `read_only`, `exists`, `not_found`, `invalid_name`, `io`; `driveErrorText`
 words `read_only` as "Course files are read-only" and shows any other
 message, or the raw text when it isn't one.
+
+## The subject Overview derives activity from source dates
+
+`useSubjectOverview` in `app/src/hooks/data/overview/` takes a subject id and
+a week key; null or omitted selects the current week. Its exported
+`SubjectOverviewData` and item types are the page's data contract. It returns
+the [term-wide strip](./calendar.md#teaching-weeks-are-shared-across-a-term),
+activity, the next five deadlines, classes or fallback recordings, student
+work, behind lectures, teaching-week progress and the subject's revision due
+count. An empty strip yields no weekly items, progress or behind warning;
+deadlines and revision remain independent of the selected week.
+
+Activity uses [source dates](./sync.md#library-source-dates-describe-activity-at-canvas-and-ed),
+falling back to SQLite UTC `first_seen_at` only when source creation is NULL.
+One row per item shows its latest qualifying change in the selected week:
+file/page updates must be more than an hour after creation; Ed updates mean
+replies and have no one-hour gate. `parseEdThread` counts rendered reply
+headers, including nested comments; a file without a known count says
+Replies. Announcements use creation only. Student documents, canvases,
+notebooks and uploads appear in Yours, by creation or content change; chats
+merge live harness rows and every page of the subject's completed threads.
+All comparisons use parsed instants. Weekly sections use `weekOf`, including
+its folding of early activity into week 1 and late activity into +3.
+
+Canvas deadlines match task documents by assignment id or source link
+(`parseTaskDoc` reads the Open in Canvas link), then by a unique title and
+due minute for quiz shells whose assignment id is absent. Submitted/graded
+documents are excluded. Dated open project tasks join by their project's
+subject. Events prefer the subject's entire valid Canvas class layer over
+recordings, even when the selected week has no classes; a local event cannot
+establish that layer. An event becomes past after its end, or start without
+an end. Behind counts only already-dated, unwatched recordings in teaching
+weeks through the current one, excludes untimetabled streams and stays quiet
+before teaching, in breaks and after teaching. Progress counts all recordings
+in teaching weeks, including other streams; watched means marked Done or past
+the player's `isWatched` threshold. `app/src/lib/revision/due.ts` shares the
+active-and-due rule with `app/src/pages/revision/ReviewPage.tsx`.
+
+`sinceLastVisit` is an epoch-millisecond snapshot from per-subject device
+storage. A first visit marks every dated activity item new; later visits mark
+items strictly newer than that snapshot. `markVisited` writes the current
+time without changing the snapshot, so the page calls it on unmount and dots
+survive the visit. Every storage access tolerates unavailable storage.
+
+The hook reuses subject files and weeks, rejects stale asynchronous reads,
+and refreshes after file access/scrapes, document/canvas/upload changes, calendar,
+lecture/download/progress, project, revision and harness-thread events. Its
+minute clock advances deadlines, past events and revision counts. Loading
+and read errors are exposed; metadata read failures retain filename fallbacks.
 
 ## Backend events are the write path
 

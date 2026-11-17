@@ -115,10 +115,24 @@ impl Engine {
                 continue;
             };
             let path = format!("{}.md", slide.stem);
-            self.write_from(c, &path, md.as_bytes(), None, place.slide_url(slide.id))?;
+            self.write_from(
+                c,
+                &path,
+                md.as_bytes(),
+                None,
+                place.slide_url(slide.id),
+                Default::default(),
+            )?;
         }
         let md = ed::lesson_index_md(&lesson, &place, &slides);
-        self.write_from(c, &format!("{stem}.md"), md.as_bytes(), None, place.url())?;
+        self.write_from(
+            c,
+            &format!("{stem}.md"),
+            md.as_bytes(),
+            None,
+            place.url(),
+            Default::default(),
+        )?;
         Ok(())
     }
 
@@ -155,6 +169,7 @@ impl Engine {
                 category: layout::category_of(&rel_path).to_string(),
                 canvas_id: None,
                 source_url: None,
+                source_dates: Default::default(),
                 action: "unchanged",
             });
             return SlideExtras {
@@ -174,7 +189,7 @@ impl Engine {
             .fetch_bytes(url)
             .map_err(|e| format!("Download failed: {e}."))
             .and_then(|bytes| {
-                self.store(c, &rel_path, &bytes, None, None)
+                self.store(c, &rel_path, &bytes, None, None, Default::default())
                     .map(|_| bytes.len() as u64)
                     .map_err(|e| format!("Could not save the file: {e}."))
             });
@@ -280,6 +295,7 @@ impl Engine {
                     category: layout::category_of(&k.rel).to_string(),
                     canvas_id: None,
                     source_url: None,
+                    source_dates: Default::default(),
                     action: if updated { "updated" } else { "unchanged" },
                 });
             }
@@ -416,6 +432,7 @@ impl Engine {
             category: layout::category_of(&rel).to_string(),
             canvas_id: None,
             source_url: None,
+            source_dates: Default::default(),
             action: action.as_str(),
         });
         if self.parse_pdfs && paths::is_pdf(&rel) {

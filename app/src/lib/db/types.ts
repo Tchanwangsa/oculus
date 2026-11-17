@@ -60,6 +60,9 @@ export interface DbFile {
   category: string | null;
   canvas_id: number | null;
   source_url: string | null;
+  /** UTC source timestamps; unknown for student-made files. */
+  source_created_at: string | null;
+  source_updated_at: string | null;
   modified_at: string | null;
   scraped_at: string;
   parse_status: string | null;

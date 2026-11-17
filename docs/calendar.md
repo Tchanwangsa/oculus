@@ -19,6 +19,9 @@ database, so it works offline.
 | Pinning a project to an event | `app/src/components/projects/page/EventLink.tsx` |
 | Page + views (week, month, agenda, card, mark, row) | `app/src/pages/tools/CalendarPage.tsx`, `app/src/components/calendar/` |
 | Minute clock for "now" | `app/src/hooks/ui/useNow.ts` |
+| Pure term teaching weeks, date assignment and recording status | `app/src/lib/weeks/` |
+| Subject week loader and refresh | `app/src/hooks/data/useSubjectWeeks.ts` |
+| Lectures tab's week groups and rows | `app/src/lib/lectures/weeks.ts`, `app/src/pages/subject/content/LecturesPage.tsx` |
 | Post-sync refresh (`CALENDAR_UPDATED_EVENT`) | `app/src/hooks/backend/useBackendEvents.ts` |
 
 ## Five layers, three owners
@@ -65,6 +68,54 @@ database, so it works offline.
 - A subject with any `class` rows suppresses its `lecture` layer, or a class
   and its recording draw twice. Many subjects (most at UniMelb) publish
   nothing, so the recordings are the timetable.
+
+## Teaching weeks are shared across a term
+
+`subjectWeeks` derives a subject's strip from subjects with the same
+`term_name`. Only timed, valid Canvas `class` rows count; deadlines and
+all-day rows cannot establish a timetable. Each subject prefers rows whose
+titles contain the word lecture or lectures, falling back to all its classes
+when none are named lectures. A week is teaching when at least
+`ceil(timetabled subjects × TEACHING_WEEK_THRESHOLD)` distinct subjects have
+one of these classes. The threshold is 0.5; a two-subject term needs one.
+Repeated classes for one subject never increase its vote.
+
+Week 1 is the term's first qualifying week. Teaching weeks number 1…N;
+non-qualifying weeks between them are unnumbered Breaks. A missing class for
+one subject does not by itself make a break. A lone late class below the
+threshold cannot extend the term. A subject ends at its own last preferred
+class week that qualifies as teaching, followed by exactly +1, +2 and +3.
+A subject with no qualifying class inherits the term's span, including future
+weeks even when it only has recordings so far.
+
+Only a term with no usable classes falls back to the subject's recordings:
+every week from its first to last valid recording is numbered, including
+gaps, then +1…+3. Without dated recordings, or when a term has classes but no
+week reaches the threshold, the strip is empty and its current index is -1.
+The Lectures tab keeps recordings visible even without a strip and lists
+invalid dates under Undated.
+
+Week boundaries are local civil Mondays with exclusive next-Monday ends.
+Keys encode the civil Monday in UTC, so DST does not change their spacing.
+`weekOf` returns a week key, folding dates before week 1 into week 1 and
+dates after +3 into +3; an empty strip or invalid date returns null. The
+current week uses the same clamping. Neither late recordings nor other
+activity grows the strip.
+
+`recordingStatus` compares a recording with all its subject's timed classes,
+independently of the title preference used for week numbering. A match is a
+class on the same local day starting within 30 minutes either side of the
+recording, inclusive. A subject with no usable classes has unknown
+status. Otherwise an unmatched recording is untimetabled: the Lectures tab
+greys its row but keeps playback and actions available. Grey means outside
+the student's timetable, not a break; another stream or a holiday capture
+can be grey inside a numbered week.
+
+`useSubjectWeeks` loads subjects, calendar rows and recordings, exposes only
+the subject's term, and refreshes on calendar updates and lecture changes.
+It uses the minute clock for the current index and discards stale reads after
+a subject change or unmount. The Lectures tab groups through this model;
+its download and progress events also reload the rows.
 
 ## What Oculus owns lives outside the Canvas table
 

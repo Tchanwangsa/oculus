@@ -251,6 +251,7 @@ impl Download {
                 category: layout::category_of(layout::within_course(&rel)).to_string(),
                 canvas_id: None,
                 source_url: Some(self.retrieve.clone()),
+                source_dates: Default::default(),
                 action: if existed { "updated" } else { "new" },
             },
         )

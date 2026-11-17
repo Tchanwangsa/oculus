@@ -5,6 +5,9 @@
 //! Progress leaves through [`Reporter`]: the app forwards it as Tauri events,
 //! the CLI prints it.
 
+mod dates;
+#[cfg(test)]
+mod dates_tests;
 mod engine;
 mod office;
 mod parse;
@@ -16,6 +19,7 @@ pub mod terms;
 #[cfg(test)]
 mod tests;
 
+pub use dates::SourceDates;
 pub use engine::Engine;
 pub(crate) use office::{office_ext_of, office_to_pdf};
 pub use parse::{parse_key, parse_pdf, parse_pdf_reporting, ParseSummary};
@@ -90,6 +94,8 @@ pub struct FileEvent {
     /// Set for pages: the URL slug survives renames while the filename tracks
     /// the title, so matching a body link to the local copy needs this.
     pub source_url: Option<String>,
+    #[serde(flatten)]
+    pub source_dates: SourceDates,
     /// `"new"`, `"updated"`, or `"unchanged"` — feeds the per-run sync history.
     pub action: &'static str,
 }

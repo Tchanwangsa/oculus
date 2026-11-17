@@ -3,6 +3,7 @@
 use crate::library::layout::{self, SyncedKind};
 use crate::pages::md;
 use crate::sync::render::slug;
+use crate::sync::SourceDates;
 use crate::sync::{Engine, LinkCrawl, Progress, Subject};
 
 impl Engine {
@@ -59,7 +60,14 @@ impl Engine {
             };
             let name = layout::synced(SyncedKind::Announcements, &file);
             let md = format!("{header}{}", self.convert(message, c, &name));
-            self.write(c, &name, md.as_bytes(), None)?;
+            self.write_from(
+                c,
+                &name,
+                md.as_bytes(),
+                None,
+                None,
+                SourceDates::announcement(a),
+            )?;
         }
         Ok(())
     }

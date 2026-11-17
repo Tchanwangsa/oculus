@@ -46,7 +46,7 @@ pub use lesson_md::{
 };
 pub use lessons::LessonList;
 pub use live::open_live_workspace;
-pub use threads::{thread_url, Board};
+pub use threads::{thread_md, thread_url, Board};
 pub use workspace::{unpack as unpack_workspace, WorkspaceFile};
 
 /// Ed's API base for `data_dir`: what a launch landed on (`institution.json`),

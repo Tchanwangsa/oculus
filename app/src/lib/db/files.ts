@@ -11,12 +11,14 @@ export async function upsertFile(
   sizeBytes?: number,
   category?: string,
   canvasId?: number,
-  sourceUrl?: string
+  sourceUrl?: string,
+  sourceCreatedAt?: string | null,
+  sourceUpdatedAt?: string | null,
 ): Promise<void> {
   const db = await getDb();
   await db.execute(
-    `INSERT INTO files (subject_id, filename, relative_path, file_type, size_bytes, category, canvas_id, source_url, first_seen_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, datetime('now'))
+    `INSERT INTO files (subject_id, filename, relative_path, file_type, size_bytes, category, canvas_id, source_url, first_seen_at, source_created_at, source_updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, datetime('now'), $9, $10)
      ON CONFLICT(subject_id, relative_path) DO UPDATE SET
        filename   = excluded.filename,
        file_type  = excluded.file_type,
@@ -24,9 +26,12 @@ export async function upsertFile(
        category   = excluded.category,
        canvas_id  = excluded.canvas_id,
        source_url = excluded.source_url,
+       source_created_at = COALESCE(excluded.source_created_at, files.source_created_at),
+       source_updated_at = COALESCE(excluded.source_updated_at, files.source_updated_at),
        scraped_at = datetime('now')`,
     [subjectId, filename, relativePath, fileType, sizeBytes ?? null,
-     category ?? null, canvasId ?? null, sourceUrl ?? null]
+     category ?? null, canvasId ?? null, sourceUrl ?? null,
+     sourceCreatedAt ?? null, sourceUpdatedAt ?? null]
   );
 }
 

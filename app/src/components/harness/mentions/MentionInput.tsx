@@ -21,6 +21,7 @@ import {
 import { isChip, readEditor, repaintCaret, revealCaret, toChunks, type Point } from "./dom";
 import { ComposerLink } from "./ComposerLink";
 import { SkillChip } from "./SkillChip";
+import { cn } from "@/lib/utils";
 import type { Landing, MentionInputHandle } from "./types";
 
 export type { MentionInputHandle } from "./types";
@@ -57,9 +58,12 @@ export function MentionInput({
   onPasteText,
   onKeyDown,
   onBlur,
+  oneLinePlaceholder = false,
 }: {
   ref?: Ref<MentionInputHandle>;
   placeholder: string;
+  /** The hint stays on one line, cut with an ellipsis (a compact composer at rest). */
+  oneLinePlaceholder?: boolean;
   /** Read once at mount; after that the DOM is the truth. */
   initialText?: string;
   /** The installed skills' names: a `/name` in loaded text becomes a chip only
@@ -411,7 +415,12 @@ export function MentionInput({
         )}
       </div>
       {blank && (
-        <div className="pointer-events-none absolute inset-0 select-none text-[13px] leading-[16px] text-muted-foreground">
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-0 select-none text-[13px] leading-[16px] text-muted-foreground",
+            oneLinePlaceholder && "truncate",
+          )}
+        >
           {placeholder}
         </div>
       )}

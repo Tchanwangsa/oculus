@@ -165,6 +165,8 @@ async fn file_upserts_preserve_content_time_unless_bytes_changed() {
         category: "files",
         canvas_id: Some(7),
         source_url: None,
+        source_created_at: None,
+        source_updated_at: None,
         changed: false,
     };
     upsert_file(&pool, &row).await.unwrap();

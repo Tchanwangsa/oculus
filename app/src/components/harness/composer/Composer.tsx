@@ -17,6 +17,7 @@ import { QuestionEditor } from "@/components/harness/composer/QuestionEditor";
 import { useQuestionComposer } from "@/components/harness/composer/useQuestionComposer";
 import { PermissionModeControl } from "@/components/harness/composer/PermissionModeControl";
 import { canSend, UNSCOPED_PLACEHOLDER } from "@/components/harness/composer/sendGate";
+import { compactOpen } from "@/components/harness/composer/compactOpen";
 import { useRunControls } from "@/components/harness/composer/useRunControls";
 import { useSendMode } from "@/components/harness/composer/useSendMode";
 import { type Subject } from "@/lib/db";
@@ -62,6 +63,9 @@ export const COMPOSER_PLACEHOLDER = "Ask anything. @ files, / skills";
  * insert library paths (drawn as chips by `MentionInput`), never file content.
  * Unsent text lives in `draftStore` under `draftKey`, so it outlives the box;
  * so do long pastes, held as cards in the attachment strip.
+ * `compact` rests as one pill-shaped bar — the hint, the agent's mark (the
+ * model picker collapsed), the mic and send — and opens into the full box
+ * while anything in it has focus or holds something to send.
  */
 export function Composer({
   draftKey,
@@ -94,6 +98,7 @@ export function Composer({
   leading,
   placeholder,
   threadId = null,
+  compact = false,
 }: {
   /** Whose draft this box shows (`draftKey` in `stores/chat/draftStore.ts`). */
   draftKey: string;
@@ -146,6 +151,8 @@ export function Composer({
   placeholder?: string;
   /** The open thread, whose notices (`ThreadBanners`) sit above the box. */
   threadId?: number | null;
+  /** One bar at rest, the full box once used (the subject Overview's ask bar). */
+  compact?: boolean;
 }) {
   /** The serialized message (chips as paths); emptiness checks read this. */
   const text = useDraftStore((s) => s.drafts[draftKey] ?? "");
@@ -204,6 +211,18 @@ export function Composer({
   const question = useQuestionComposer(threadId, draftKey);
 
   const ready = text.trim().length > 0 || att.items.length > 0 || att.texts.length > 0;
+  /** Focus anywhere in the box: popups portal out, so they keep it open themselves. */
+  const [focused, setFocused] = useState(false);
+  const open =
+    !compact ||
+    compactOpen({
+      focused,
+      ready,
+      picking: tools.modelOpen,
+      dictating: dictation.busy,
+      answering: question != null,
+      signingIn: signInOpen,
+    });
   const mode = useSendMode({ threadId, running, text });
   const controls = useRunControls({
     threadId,
@@ -232,8 +251,20 @@ export function Composer({
   };
 
   return (
-    <div ref={wrapRef} className="flex flex-col gap-1.5">
-      {((!subjectLocked && onSubject) || leading || stash.menu.entries.length > 0) && (
+    <div
+      ref={wrapRef}
+      className="flex flex-col gap-1.5"
+      data-compact={compact ? (open ? "open" : "rest") : undefined}
+      onFocus={compact ? () => setFocused(true) : undefined}
+      onBlur={
+        compact
+          ? (e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
+            }
+          : undefined
+      }
+    >
+      {open && ((!subjectLocked && onSubject) || leading || stash.menu.entries.length > 0) && (
         <div className="flex items-center gap-1.5 px-0.5">
           {!subjectLocked && onSubject && (
             <SubjectPicker
@@ -303,13 +334,19 @@ export function Composer({
       <RequestBar threadId={threadId} />
       {question && <QuestionPanel flow={question} />}
 
+      {/* Opening changes classes, never the tree: a remounted editor would
+          lose the focus that opened it. */}
       <div
         className={cn(
-          "flex flex-col gap-4 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25",
+          "flex border border-border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25",
+          open
+            ? "flex-col gap-4 rounded-xl px-3 py-3"
+            : "cursor-text flex-row items-center gap-1.5 rounded-full py-1 pr-1 pl-3.5",
           att.dropping && !dropRef && "border-brand ring-[3px] ring-brand/25",
         )}
+        onClick={open ? undefined : (e) => focusAtRest(e.target, e.currentTarget)}
       >
-        <div className="flex flex-col gap-2">
+        <div className={cn("flex flex-col gap-2", !open && "min-w-0 flex-1")}>
           {question ? (
             <QuestionEditor flow={question} inputRef={answerRef} />
           ) : (
@@ -340,6 +377,7 @@ export function Composer({
                 onFiles={att.attach}
                 onPasteText={att.attachText}
                 onBlur={mentions.close}
+                oneLinePlaceholder={!open}
                 onKeyDown={(e) => {
                   // The menu's claimed keys come back prevented, so a pick never sends.
                   mentions.keyDown(e);
@@ -363,9 +401,10 @@ export function Composer({
             </>
           )}
         </div>
-        {dictation.busy ? <DictationBar dictation={dictation} /> : <div className="flex items-center gap-1">
+        {dictation.busy ? <DictationBar dictation={dictation} /> : <div className={cn("flex items-center gap-1", !open && "shrink-0")}>
           <ModelPicker
-            className="-ml-1.5"
+            className={open ? "-ml-1.5" : "gap-1 px-1"}
+            markOnly={!open}
             providers={pickerProviders}
             provider={provider}
             locked={locked}
@@ -379,9 +418,13 @@ export function Composer({
             open={tools.modelOpen}
             onOpenChange={tools.setModelOpen}
           />
-          <PermissionModeControl threadId={threadId} provider={provider} />
-          <div className="flex-1" />
-          <UsageMeter usage={usage} rateLimits={rateLimits} />
+          {open && (
+            <>
+              <PermissionModeControl threadId={threadId} provider={provider} />
+              <div className="flex-1" />
+              <UsageMeter usage={usage} rateLimits={rateLimits} />
+            </>
+          )}
           <DictationMic dictation={dictation} />
           <SendControls
             stop={controls.stop}
@@ -394,4 +437,16 @@ export function Composer({
       </div>
     </div>
   );
+}
+
+/** A click on the resting bar outside its controls puts the caret at the end
+ *  of the text box; WebKit would put a focused contenteditable's at its start. */
+function focusAtRest(target: EventTarget, bar: HTMLElement) {
+  if (target instanceof Element && target.closest("button, [role=\"textbox\"]")) return;
+  const box = bar.querySelector<HTMLElement>('[role="textbox"]');
+  if (!box) return;
+  box.focus();
+  const sel = window.getSelection();
+  sel?.selectAllChildren(box);
+  sel?.collapseToEnd();
 }

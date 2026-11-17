@@ -20,6 +20,7 @@
 @import "./styles/pdf.css";
 @import "./styles/settings.css";
 @import "./styles/projects.css";
+@import "./styles/warp.css";
 
 /* `dark:` follows the `.dark` class (lib/ui/themes/apply.ts), not the OS preference. */
 @custom-variant dark (&:is(.dark *));

@@ -94,6 +94,33 @@ before leaving a playing lecture.
   or its links, PDFs and challenge files open and title like downloads
   (`isLessonAsset` in `app/src/lib/files/fileTypes.ts`), and none counts toward
   the tab's never-opened count.
+- **A subject's Overview** (`app/src/pages/subject/content/OverviewPage.tsx`,
+  its parts in `overview/`) is the subject's week, read from
+  `useSubjectOverview` ([frontend.md](./frontend.md#the-subject-overview-derives-activity-from-source-dates)).
+  Under the subject's name, with a Review pill while revision is due there,
+  a warning says "You're N lectures behind" with Catch up (the oldest one,
+  beside the page) only while that is true, never inside a week. The week
+  strip (`WeekStrip`) is every week of the
+  [term](./calendar.md#teaching-weeks-are-shared-across-a-term): numbered
+  teaching weeks with a thin bar of lectures watched, wider dashed Breaks,
+  then +1 to +3 after a hairline. The current week is in the brand colour
+  and the selected one is filled; a click or the arrow keys pick the week
+  below, for this visit only. Under it, the week's activity (new and updated
+  files, recordings, announcements, Ed replies) as a `ListCard` with a badge,
+  the day and a brand dot for what is new since the last visit, recordings
+  outside the timetable greyed; then Coming up, the next deadlines as "Fri ·
+  4 days". A side column holds Events, past ones grey, and Yours, what the
+  student made that week; it sits beside the lists from a 42rem pane (a
+  container query, so split panes and page zoom count) and under them below
+  that. Rows open as the subject's tabs open the same things: files through
+  `openFileSmart`, lectures beside the page, Canvas links in the browser,
+  chats and tasks in the pane. An empty week is one muted line. Only the
+  first load shows skeletons; reloads keep the rows. A subject with nothing
+  synced shows the Sync prompt instead. The ask bar docks at the bottom of
+  the page's own column (`AskDock`), which is Chat's 760px so the bar and
+  the content share one width with the composer it warps into. The bar
+  starts a Chat thread filed under the subject and warps this pane into it
+  ([harness.md](./harness.md#the-subject-overviews-ask-bar-starts-a-thread)).
 - **`/subjects` is a redirect, not a page** (`SubjectsRedirect`): it replaces
   itself with the Overview of the last subject `SubjectLayout` resolved
   (`localStorage`, `oculus-last-subject`), else the first current subject,
