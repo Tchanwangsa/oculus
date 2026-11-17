@@ -23,6 +23,7 @@ Read this before any UI work.
 | Subject grouping and persisted collapsed groups | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
 | Flat divided lists, table chrome | `app/src/components/ui/layout/PageParts.tsx`, `app/src/components/ui/table/GridTable.tsx`, `app/src/components/ui/table/TableGroup.tsx`, `app/src/components/ui/table/ViewTabs.tsx`, `app/src/components/ui/table/TablePagination.tsx` |
 | Toolbar filters: pill popovers, checklists, applied-filter chips | `app/src/components/ui/filter/` |
+| Right-click menus: rows, a muted icon column, hints, and a note under greyed items saying why | `app/src/components/ui/context-menu.tsx` |
 | The colour control: a swatch that opens a pad, hue and opacity strips and hex text (`opaque` drops the opacity strip), or with a `palette` a grid of colours, their shades and the hex code with the pad behind Custom | `app/src/components/ui/color/`, `app/src/lib/ui/color.ts` |
 | Identity icons, shared picker and colour palette | `app/src/components/ui/icon/`, `app/src/lib/ui/iconPreferences.ts` |
 | A titled block that folds, its state kept by the caller | `app/src/components/ui/CollapsibleSection.tsx` |
@@ -436,7 +437,8 @@ glyph; subject and project crumbs retain their custom identity icons.
 
 - **Drag in-window on pointer events via `usePointerDrag`** (tab strip,
   `ViewTabs`, the sidebar rail, chat groups, boards and tables via `useCardDrag`); HTML5 DnD only
-  for leaving the window.
+  for leaving the window, and for Drive's entries, whose drags cross from the
+  browser to the tree in the nav column (`app/src/lib/drive/drop.ts`).
 - **HTML5 drag needs `dataTransfer.setData()`** or WebKit cancels it silently,
   and `preventDefault()` on `dragstart` cancels it outright — see the drag-out
   in `dragAsMarkdown` (`app/src/lib/markdown/selection.ts`), wired up in

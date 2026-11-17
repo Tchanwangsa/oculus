@@ -20,20 +20,21 @@ async function rowFor(subjectId: number, file: ImportedFile, kind: DrawingKind):
   return row;
 }
 
-/** A new drawing of `kind` in the subject's own folder for it. */
-export async function createDrawing(kind: DrawingKind, subject: { id: number; code: string }, title: string, content: string): Promise<DbFile> {
-  const imported = await invoke<ImportedFile>("create_canvas", { subjectCode: subject.code, title, content, kind });
+/** A new drawing of `kind` in the subject's own folder for it, or in
+ *  `targetDir` (a data-dir-relative folder of the student's own). */
+export async function createDrawing(kind: DrawingKind, subject: { id: number; code: string }, title: string, content: string, targetDir?: string): Promise<DbFile> {
+  const imported = await invoke<ImportedFile>("create_canvas", { subjectCode: subject.code, title, content, kind, ...(targetDir == null ? {} : { targetDir }) });
   const row = await rowFor(subject.id, imported, kind);
   announce(subject.id);
   return row;
 }
 
-export const createCanvas = (subject: { id: number; code: string }, title = "Untitled", content = serializeCanvasDocument(createCanvasDocument())): Promise<DbFile> =>
-  createDrawing("canvas", subject, title, content);
+export const createCanvas = (subject: { id: number; code: string }, title = "Untitled", content = serializeCanvasDocument(createCanvasDocument()), targetDir?: string): Promise<DbFile> =>
+  createDrawing("canvas", subject, title, content, targetDir);
 
 /** `content` must have `paper`: the native side refuses a notebook without pages. */
-export const createNotebook = (subject: { id: number; code: string }, title: string, content: string): Promise<DbFile> =>
-  createDrawing("notebook", subject, title, content);
+export const createNotebook = (subject: { id: number; code: string }, title: string, content: string, targetDir?: string): Promise<DbFile> =>
+  createDrawing("notebook", subject, title, content, targetDir);
 
 export const readCanvas = (relativePath: string) => invoke<string>("read_canvas", { relativePath });
 

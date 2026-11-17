@@ -34,7 +34,7 @@ import type { DbFile } from "@/lib/db";
  * Live state from the store, falling back to `files.parse_status` — a failure
  * from a previous session exists only in that column.
  */
-function useFileParseState(file: DbFile | null): ParseState | null {
+export function useFileParseState(file: DbFile | null): ParseState | null {
   const path = file?.relative_path ?? "";
   const live = useParseStore((s) => s.statuses[path]);
   const failure = useParseStore((s) => s.failures[path]);

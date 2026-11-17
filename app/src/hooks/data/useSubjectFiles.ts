@@ -3,6 +3,7 @@ import { getFilesForSubject, type DbFile } from "@/lib/db";
 import { FILE_ACCESSED_EVENT } from "@/lib/files/openFile";
 import { CANVASES_CHANGED_EVENT } from "@/lib/canvas/files";
 import { DOCUMENTS_CHANGED_EVENT } from "@/lib/notes/documents";
+import { DRIVE_CHANGED_EVENT } from "@/lib/drive/listing";
 import { useWindowEvent } from "@/hooks/backend/useEvents";
 import { createPendingReader } from "@/lib/platform/pendingRead";
 
@@ -39,9 +40,10 @@ export function useSubjectFiles(subjectId: number | null) {
 
   const reload = useCallback(() => setRefresh((r) => r + 1), []);
 
-  // Both events change `files` rows (an open stamps last_accessed_at), so every
-  // list of a subject's files refetches here rather than page by page.
-  useWindowEvent([FILE_ACCESSED_EVENT, DOCUMENTS_CHANGED_EVENT, CANVASES_CHANGED_EVENT], (event) => {
+  // These events change `files` rows (an open stamps last_accessed_at, Drive
+  // moves and renames), so every list of a subject's files refetches here
+  // rather than page by page.
+  useWindowEvent([FILE_ACCESSED_EVENT, DOCUMENTS_CHANGED_EVENT, CANVASES_CHANGED_EVENT, DRIVE_CHANGED_EVENT], (event) => {
     const changedId = (event as CustomEvent<{ subjectId?: number } | undefined>).detail?.subjectId;
     if (changedId == null || changedId === subjectId) reload();
   });

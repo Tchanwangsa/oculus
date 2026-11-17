@@ -1,3 +1,4 @@
+pub(crate) mod drive;
 pub(crate) mod files;
 pub mod layout;
 pub mod paths;

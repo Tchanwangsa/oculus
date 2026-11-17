@@ -409,10 +409,11 @@ lectures/<media id>/            synced: one recording (recording_dir)
   `app/tests/fixtures/library/categories.json`.
 - **`derived(pdf, kind)` names a PDF's parse and embed artifacts**; parse,
   embed, the sheet converter and the purge all ask it.
-- **The purge spares the student's notes.** `purge_parse_artifacts` deletes
-  every artifact of a synced PDF, but outside the synced folders a
-  `<stem>.md` goes only when the parser wrote it: a parse record beside it,
-  or a spreadsheet's text.
+- **The purge spares the student's notes.** `parse_artifacts` names what a
+  file's parse left: every artifact of a synced PDF, but outside the synced
+  folders a `<stem>.md` only when the parser wrote it (a parse record beside
+  it, or a spreadsheet's text). `purge_parse_artifacts` deletes that list and
+  Drive's `list_folder` hides it ([frontend.md](./frontend.md#drive-is-one-folder-browser-over-the-disk)).
 
 ## The database has one schema owner and two writers
 

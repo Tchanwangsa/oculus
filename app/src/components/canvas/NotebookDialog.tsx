@@ -66,11 +66,13 @@ function PdfChoices({ subjectId, selected, disabled, onSelect }: { subjectId: nu
 const stem = (filename: string) => filename.replace(/\.pdf$/i, '');
 
 /** New notebook: blank paper in a template, or a copy of one of the subject's PDFs to write on. */
-export function NotebookDialog({ open, onOpenChange, subject, onCreated }: {
+export function NotebookDialog({ open, onOpenChange, subject, onCreated, targetDir }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   subject: { id: number; code: string };
   onCreated: (file: DbFile) => void;
+  /** The student's folder it is made in (data-dir-relative); the notebooks folder when unset. */
+  targetDir?: string;
 }) {
   const groupId = useId();
   const nameId = useId();
@@ -95,8 +97,8 @@ export function NotebookDialog({ open, onOpenChange, subject, onCreated }: {
     const title = name.trim() || suggested;
     try {
       const file = mode === 'pdf' && pdf
-        ? await createNotebookFromPdf(subject, pdf.relative_path, title, (done, total) => setProgress(`Copying page ${Math.min(done + 1, total)} of ${total}…`))
-        : await createBlankNotebook(subject, title, template, orientation);
+        ? await createNotebookFromPdf(subject, pdf.relative_path, title, (done, total) => setProgress(`Copying page ${Math.min(done + 1, total)} of ${total}…`), targetDir)
+        : await createBlankNotebook(subject, title, template, orientation, targetDir);
       onOpenChange(false);
       onCreated(file);
     } catch (problem) {

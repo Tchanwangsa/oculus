@@ -47,14 +47,17 @@ async function rowFor(
   return row;
 }
 
-/** A new, empty document; a taken title steps aside (`notes-2.md`). */
+/** A new, empty document, in `targetDir` (a data-dir-relative folder of the
+ *  student's own) when given; a taken title steps aside (`notes-2.md`). */
 export async function createDocument(
   subject: { id: number; code: string },
   title = "Untitled",
+  targetDir?: string,
 ): Promise<DbFile> {
   const file = await invoke<ImportedFile>("create_document", {
     subjectCode: subject.code,
     title,
+    ...(targetDir == null ? {} : { targetDir }),
   });
   const row = await rowFor(subject.id, file);
   announce(subject.id);

@@ -25,16 +25,16 @@ export function notebookFromPages(sizes: readonly { width: number; height: numbe
 
 type Subject = { id: number; code: string };
 
-export const createBlankNotebook = (subject: Subject, title: string, template: PaperTemplate, orientation: NotebookOrientation): Promise<DbFile> =>
-  createNotebook(subject, title, serializeCanvasDocument(blankNotebook(template, orientation)));
+export const createBlankNotebook = (subject: Subject, title: string, template: PaperTemplate, orientation: NotebookOrientation, targetDir?: string): Promise<DbFile> =>
+  createNotebook(subject, title, serializeCanvasDocument(blankNotebook(template, orientation)), targetDir);
 
 /**
  * A new notebook on a copy of a library PDF's pages. The PDF is only read: its pages are rendered into
  * the notebook file, so the original is never touched and the notebook outlives it.
  */
 export async function createNotebookFromPdf(
-  subject: Subject, relativePath: string, title: string, onProgress?: (done: number, total: number) => void,
+  subject: Subject, relativePath: string, title: string, onProgress?: (done: number, total: number) => void, targetDir?: string,
 ): Promise<DbFile> {
   const { sizes, images } = await readPdfPages(relativePath, 'a notebook', onProgress);
-  return createNotebook(subject, title, serializeCanvasDocument(notebookFromPages(sizes, images)));
+  return createNotebook(subject, title, serializeCanvasDocument(notebookFromPages(sizes, images)), targetDir);
 }

@@ -30,21 +30,30 @@ const announce = () =>
   window.dispatchEvent(new CustomEvent(UPLOADS_CHANGED_EVENT));
 
 /** The native open panel; `[]` if cancelled. Deliberately unfiltered: any file
- *  can be kept, only PDF-backed ones and spreadsheets also become searchable. */
-export async function pickUploads(): Promise<string[]> {
-  const picked = await open({ multiple: true, title: "Add files to this subject" });
+ *  can be kept, only PDF-backed ones and spreadsheets also become searchable.
+ *  `folders` picks folders instead of files. */
+export async function pickUploads(folders = false): Promise<string[]> {
+  const picked = await open({
+    multiple: true,
+    directory: folders,
+    title: folders ? "Add folders to this subject" : "Add files to this subject",
+  });
   if (picked == null) return [];
   return Array.isArray(picked) ? picked : [picked];
 }
 
-/** Copies picked files into the subject's uploads, then records them. */
+/** Copies picked files (or folders) into the subject's uploads, or into
+ *  `targetDir` (a data-dir-relative folder of the student's own), then records
+ *  them. */
 export async function addUploads(
   subject: { id: number; code: string },
   paths: string[],
+  targetDir?: string,
 ): Promise<ImportOutcome[]> {
   const outcomes = await invoke<ImportOutcome[]>("import_uploads", {
     subjectCode: subject.code,
     paths,
+    ...(targetDir == null ? {} : { targetDir }),
   });
   await recordUploads(subject, outcomes);
   return outcomes;

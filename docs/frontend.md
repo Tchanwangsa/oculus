@@ -25,6 +25,7 @@ library files; the rest of the frontend has its own pages:
 | Backend events → SQLite and stores | `app/src/hooks/backend/useBackendEvents.ts`, `app/src/hooks/backend/useEvents.ts`, `app/src/lib/pipeline/parseStatusWriter.ts`, `app/src/lib/db/connection.ts` |
 | Files tab: uploads and Drive (notes and drawing canvases) | `app/src/pages/subject/files/FilesPage.tsx`, `app/src/pages/subject/files/DrivePage.tsx`, `app/src/lib/files/uploads.ts`, `app/src/lib/notes/documents.ts`, `app/src/lib/canvas/files.ts`, `app/src-tauri/src/library/files/commands.rs` |
 | Subject file rows and category icons | `app/src/components/files/DownloadRow.tsx`, `app/src/pages/subject/files/DrivePage.tsx` |
+| Drive's folder browser and folder tree ([below](#drive-is-one-folder-browser-over-the-disk)); `list_folder` | `app/src/components/drive/`, `app/src/hooks/drive/`, `app/src/lib/drive/`, `app/src-tauri/src/library/drive/` |
 | Ed board, keyword search and filters | `app/src/pages/subject/content/DiscussionPage.tsx`, `app/src/pages/subject/content/discussion/`, `app/src/lib/ed/threads.ts` |
 | Ed lessons under their modules; the lesson index reader | `app/src/pages/subject/content/LessonsPage.tsx`, `app/src/pages/subject/content/lessons/`, `app/src/lib/ed/lessons.ts` |
 | Weekly lecture groups and collapsible Canvas modules | `app/src/pages/subject/content/LecturesPage.tsx`, `app/src/components/lectures/LectureRow.tsx`, `app/src/pages/subject/content/ModulesPage.tsx`, `app/src/pages/subject/content/modules/` |
@@ -167,6 +168,106 @@ A file row's recency slot (`FileRecency`) shows an indigo dot and *NEW* while
 the file has never been opened (new, or rewritten by a sync before then), the
 same *NEW* in amber once it changed since it was last opened, and otherwise
 its last-opened time.
+
+## Drive is one folder browser over the disk
+
+`DriveBrowser({ root, folder, folderHref, rootLabel?, leading? })`
+(`app/src/components/drive/`) shows one folder of the library. `root` is
+`""` for every subject (the Drive rail section) or `courses/<code>` for one
+(a subject's Files tab); `folder` is the folder on screen at or below it and
+`folderHref` the route that shows a folder, so the route's path is the only
+state. `DriveTree({ current, folderHref })` is the nav column's tree beside
+it: subjects under Subjects, the rest folded under Past subjects, each opening
+in place to its folders, read when first opened; which rows are open is a
+`useStoredSet`. With `onPick` and a subject `root` the same tree is the folder
+picker of Copy to my files… and Move to…. Neither is routed yet: the Drive
+plan's stage 6 puts them in the rail section and the Files tab.
+
+- **`list_folder({ rel, recursive? })` reads the disk**
+  (`app/src-tauri/src/library/drive/`), so empty folders show and a file
+  without a row still lists. It returns the folder's `zone` and `writable`
+  (a file or folder made there would be the student's), its `folders`
+  (`relativePath`, `name`, `zone`, `writable`, `editable`, `childCount`,
+  `modified`), `files` (`relativePath`, `name`, `zone`, `editable`, `size`,
+  `modified` in Unix ms) and `recordings`. `rel` must be `""` (whose folders are
+  the subject folders) or inside a subject, with no dot-name and no symlink on
+  the way; anything else, app state included, is refused. Left out of every
+  listing: dot-names, symlinks, what `layout::zone_of` hides, and each file's
+  parse artifacts and converted PDF (`paths::parse_artifacts`, the same rule
+  the purge deletes by, so a student's own `x.md` beside an unparsed `x.pdf`
+  stays). `recursive` lists every folder and file below `rel`, flat (at the
+  root, every subject's).
+- **A recording lists as its lecture.** The command reads the subject's
+  `lectures` rows and asks `layout::recording_dir` for each one's folder; a
+  lecture whose folder sits in the listed folder is a `recordings` entry
+  (`lectureId`, `subjectId`, `title`, `date`), listed whether or not its folder
+  exists yet, and opens the lecture page. The folder itself is not listed.
+- **Rows are joined in the frontend**, as every file list reads them
+  (`getFilesForSubject`, `useDriveRows`), by `relative_path`. A file's name is
+  its row's (`fileTitle`), its parse state `ParseStateBadge` and
+  `useFileParseState` (the parse store over `files.parse_status`), its new dot
+  `RecencyDot`. Listings and rows re-read on `DRIVE_CHANGED_EVENT` and the
+  upload, note, canvas and scrape events, once they stop for 300 ms.
+- **The view.** The header holds the trail, a search scoped to the folder
+  and everything below it, and New (folder, note, canvas, notebook, upload
+  files or a folder), drawn only where the folder is `writable`. The Type,
+  From and Modified pills, like the search, switch to the flat recursive list,
+  narrowed by `filterListing` (`lib/drive/filters.ts`); a search alone keeps
+  matching folders. Grid or list is remembered per root (`useStoredState`,
+  grid at the Drive root, list in a subject by default). The grid draws folder
+  cards and picture cards; the list is `GridTable` with Name, Kind (Status:
+  the parse state, in a synced folder), Modified (Synced) and Size, down to
+  Name and the day in a pane under 560px. One selected file gets the details
+  panel from 900px. Widths are the browser's own (`useElementWidth`). A
+  synced folder says once, above its entries, that it is read-only.
+- **Pictures** come from what already draws each kind: a PDF's, or an Office
+  file's converted PDF's, first page through the viewer's renderer
+  (`openPdf`, `renderPage`); a notebook's first page from the pictures its
+  editor writes for chat agents (`drive_notebook_cover`, PNG bytes from
+  `canvas-pages/<file id>/`); a recording's frame from `lecture_thumbnail`; an
+  image itself. A canvas, a video file and anything else show their glyph.
+- **Selection is Finder's** (`lib/drive/selection.ts`): a click picks one,
+  ⌘-click toggles, ⇧-click takes the run from the anchor, ⌘A picks all,
+  Escape clears, a click in empty space clears. Double-click or Enter opens
+  (`openItem`: a folder here, a recording's lecture page, a file as
+  `openFileSmart` does). Delete or ⌘⌫ on the student's own entries asks first,
+  listing every file the delete removes (`delete_preview`). ⇧⌘N makes a
+  folder. A new folder, and Rename, edit the name in place.
+- **The right-click menu** (`components/ui/context-menu.tsx`) acts on the
+  selection when the entry is in it: Open, Open in new tab, Copy to my files…
+  for synced entries, Show in Finder, then Rename, Move to… and Delete, greyed
+  on synced entries with "Course files are read-only" under them.
+- **Drag and drop.** Finder files drop through the webview's native events
+  on a folder card, a list row, a tree row or empty space (the folder on
+  screen), and go to `import_uploads` with that folder as `targetDir`. Entries
+  drag with HTML5 events, so a drag reaches the tree in the nav column;
+  `dragstart` puts the paths on the transfer (`DRIVE_DRAG_TYPE`) or WebKit
+  cancels it. Between the student's folders a drag moves (`move_entries`), out
+  of a synced folder it copies (`copy_to_own`), and each copy's parse is
+  kicked. A folder the student can't add to fades with "Can't add here" while
+  the drag is over it and takes nothing (`planDrop`, `useDriveDrop`).
+- **Failures are a line above the entries** (`DRIVE_PROBLEM_EVENT`), never a
+  toast.
+
+The folder commands Drive calls are typed in `app/src/lib/drive/commands.ts`;
+all are data-dir-relative and refuse anything outside the student's own
+files:
+
+| Command | Arguments | Returns |
+| --- | --- | --- |
+| `create_folder` | `rel` | the new folder's path |
+| `rename_entry` | `rel`, `newName` | the new path |
+| `move_entries` | `rels`, `targetDir` | the new paths, in order |
+| `delete_entries` | `rels` | nothing |
+| `delete_preview` | `rels` | every file a delete would remove |
+| `copy_to_own` | `rels`, `targetDir` | the copies' paths, in order |
+| `import_uploads` | `subjectCode`, `paths`, optional `targetDir` | one outcome per path |
+| `create_document`, `create_canvas` | as before, optional `targetDir` | the new file |
+
+A refusal arrives as a JSON-serialised `{ kind, message }`, `kind` one of
+`read_only`, `exists`, `not_found`, `invalid_name`, `io`; `driveErrorText`
+words `read_only` as "Course files are read-only" and shows any other
+message, or the raw text when it isn't one.
 
 ## Backend events are the write path
 

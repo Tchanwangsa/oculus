@@ -126,42 +126,50 @@ pub fn write_course_bytes(
     Ok((rel, content.len() as u64, action))
 }
 
-/// Delete a file's derived text and parse/embed artifacts (`layout::derived`).
+/// Delete a file's derived text and parse/embed artifacts (`parse_artifacts`).
 /// The skip checks read those records, not the source, so changed bytes would
-/// otherwise keep the old text. A spreadsheet's stem is its own name, and a
-/// `{name}.pdf` beside it is a PDF-route leftover that goes too.
-/// `library_rel` is data-dir-relative.
+/// otherwise keep the old text. `library_rel` is data-dir-relative.
+pub fn purge_parse_artifacts(data_dir: &std::path::Path, library_rel: &str) {
+    for artifact in parse_artifacts(data_dir, library_rel) {
+        let _ = if artifact.is_dir() {
+            std::fs::remove_dir_all(artifact)
+        } else {
+            std::fs::remove_file(artifact)
+        };
+    }
+}
+
+/// The parse and embed artifacts of the file at `library_rel`
+/// (`layout::derived`), whether or not they exist yet: what a purge deletes
+/// and Drive hides. A spreadsheet's stem is its own name, and a `{name}.pdf`
+/// beside it is a PDF-route leftover that counts too. An Office file's
+/// converted PDF is not one: it is the file's viewable copy.
 ///
 /// Outside the synced folders a `<stem>.md` may be the student's own note, so
-/// there it goes only when it is provably the parser's: a parse record beside
-/// it, or a spreadsheet's text (whose name carries the sheet's extension).
-pub fn purge_parse_artifacts(data_dir: &std::path::Path, library_rel: &str) {
+/// there it counts only when it is provably the parser's: a parse record
+/// beside it, or a spreadsheet's text (whose name carries the sheet's
+/// extension).
+pub fn parse_artifacts(data_dir: &std::path::Path, library_rel: &str) -> Vec<std::path::PathBuf> {
     use crate::library::layout::{derived, zone_of, DerivedKind, Zone};
     let zone = zone_of(library_rel);
     if zone == Zone::Outside {
-        return;
+        return Vec::new();
     }
     let sheet = is_sheet(library_rel);
     let Some(pdf_rel) =
         doc_pdf_rel(library_rel).or_else(|| sheet.then(|| format!("{library_rel}.pdf")))
     else {
-        return;
+        return Vec::new();
     };
     let pdf = data_dir.join(&pdf_rel);
     let parsers_md = zone == Zone::Synced || sheet || derived(&pdf, DerivedKind::Pages).is_file();
-    for kind in DerivedKind::ALL {
-        let path = derived(&pdf, kind);
-        match kind {
-            DerivedKind::Images => {
-                let _ = std::fs::remove_dir_all(path);
-            }
-            DerivedKind::Markdown if !parsers_md => {}
-            _ => {
-                let _ = std::fs::remove_file(path);
-            }
-        }
-    }
+    let mut artifacts: Vec<_> = DerivedKind::ALL
+        .into_iter()
+        .filter(|kind| *kind != DerivedKind::Markdown || parsers_md)
+        .map(|kind| derived(&pdf, kind))
+        .collect();
     if sheet {
-        let _ = std::fs::remove_file(&pdf);
+        artifacts.push(pdf);
     }
+    artifacts
 }
