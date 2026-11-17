@@ -78,6 +78,8 @@ pub fn parse_pdf_reporting(
             "the parser crashed on this file".into(),
         ))
     });
+    // A press is spent once the parse ends, however it ended.
+    parse::Priority::shared().clear(&key);
     match outcome {
         Ok(summary) => Ok(summary),
         Err(error) => {

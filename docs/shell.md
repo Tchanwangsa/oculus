@@ -79,8 +79,9 @@ before leaving a playing lecture.
   routes (`files/downloads`, `files/media`, `files/uploads`, `files/drive`),
   and its `useFilesTab()` context *extends* the subject, because
   `useOutletContext` reads the nearest Outlet and a different shape would make
-  `useSubject()` lie. Downloads and Media split the `file` rows: Media lists the
-  videos (`isVideoFile`), Downloads everything else, so no file shows twice; the
+  `useSubject()` lie. Course files and Canvas videos (the `downloads` and `media` routes) split the
+  `file` rows: Canvas videos lists the videos (`isVideoFile`), Course files
+  everything else, so no file shows twice; the
   student's own videos stay in Uploads. Lessons
   (`app/src/pages/subject/content/LessonsPage.tsx`) lists only the lesson
   indexes, `lessons/<id>-<slug>.md` (`isLessonDoc` in `app/src/lib/ed/lessons.ts`),

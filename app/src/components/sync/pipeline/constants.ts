@@ -21,4 +21,6 @@ export const HATCH: CSSProperties = {
     "repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-muted-foreground) 45%, transparent) 0 1.5px, transparent 1.5px 4px)",
 };
 
+export const PRIORITISE_HINT = "Prioritise — moves this file to the front of the queue.";
+
 export const SKIP_HINT = "Skip — stops this file's parse. You can parse it later.";

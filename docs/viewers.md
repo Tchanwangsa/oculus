@@ -637,7 +637,7 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
   resize handle and T does nothing; `captions={false}` leaves out the captions
   button. `useLibraryPlayback` is what `VideoFileViewer` and Studio's element
   share: pause with the tab, and one sound across lectures and library videos.
-- **Files ▸ Media lists the videos Oculus fetched** — module videos and
+- **Files ▸ Canvas videos lists the videos Oculus fetched** — module videos and
   Canvas-page embeds, the `file` rows that are videos
   (`app/src/pages/subject/files/MediaPage.tsx`) — with a captions mark when the
   sibling `.vtt` has content. A video not yet downloaded shows only on its

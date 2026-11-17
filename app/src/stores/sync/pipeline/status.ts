@@ -62,7 +62,8 @@ export function statusOf(it: PipelineItem, embedStage = false, now = Date.now())
     return { phase: "skipped", label: "Not parsed until you ask", percent: null };
   }
   if (it.parse === "active" && it.parsePhase === "upload_wait") {
-    return { phase: "active", label: "Waiting for upload", percent: null };
+    const label = it.prioritisedAt ? "Waiting for upload — prioritised" : "Waiting for upload";
+    return { phase: "active", label, percent: null };
   }
   if (it.parse === "active" && it.parsePhase === "uploading") {
     const total = it.bytesTotal ?? 0;
@@ -108,14 +109,17 @@ export function statusOf(it: PipelineItem, embedStage = false, now = Date.now())
     return { phase: "done", label, percent: 100 };
   }
   if (it.embed === "queued") {
-    return { phase: "waiting", label: "Queued to embed", percent: null };
+    const label = it.prioritisedAt ? "Queued to embed — prioritised" : "Queued to embed";
+    return { phase: "waiting", label, percent: null };
   }
   if (it.paused) {
     const stage = it.parse === "done" ? "embed" : sheet ? "conversion" : "parse";
     return { phase: "paused", label: `Paused — ${stage} pending`, percent: null };
   }
   if (it.parse === "queued") {
-    const label = it.parseQueuePos
+    const label = it.prioritisedAt
+      ? "Queued to parse — prioritised"
+      : it.parseQueuePos
       ? it.parseQueuePos === 1
         ? "Queued to parse — next up"
         : `Queued to parse — #${it.parseQueuePos} in line`

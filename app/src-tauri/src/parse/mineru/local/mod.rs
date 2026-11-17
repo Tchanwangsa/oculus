@@ -8,6 +8,7 @@
 //!
 //! No quota, no token, and (the seam's rule) no server text in any error.
 
+mod gate;
 mod probe;
 mod request;
 #[cfg(test)]
@@ -20,11 +21,11 @@ use request::{envelope, http_failure};
 use std::fs;
 use std::io::{BufReader, BufWriter, Cursor, Read, Write};
 use std::path::Path;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use crate::parse::{
-    check_skipped, parse_config, Health, ParseError, ParseOutput, Parser, Progress, PARSER_VERSION,
+    check_skipped, parse_config, Health, ParseError, ParseOutput, Parser, Priority, Progress,
+    PARSER_VERSION,
 };
 use crate::providers::ratelimit::transport_detail;
 
@@ -54,9 +55,9 @@ const COPY_CHUNK: usize = 1024 * 1024;
 /// cloud `Batcher` absorbs that, here nothing would, and a full sync would
 /// park a socket per PDF on a server that serves one request at a time
 /// (`mineru-api` reports `max_concurrent_requests: 1`). Taken before the first
-/// progress report, so a file waiting here still reads as queued. Poisoning is
-/// stepped over so one panicked parse cannot disable the engine.
-static PARSE_GATE: Mutex<()> = Mutex::new(());
+/// progress report, so a file waiting here still reads as queued. Waiters are
+/// seated by `parse::Priority`, then by arrival (`gate.rs`).
+static PARSE_GATE: gate::Gate = gate::Gate::new();
 
 /// The form fields: `backend`/`lang_list` are the cloud's
 /// `model_version`/`language` (see `client::run_batch`). `return_content_list`
@@ -164,9 +165,7 @@ impl Parser for MinerULocal {
         let extracted = scratch.path().join("result");
         {
             // Held until the result ZIP is read off the socket.
-            let _permit = PARSE_GATE
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let _permit = PARSE_GATE.acquire(pdf, Priority::shared());
             check_skipped(pdf)?;
             // `/file_parse` blocks with nothing to subscribe to, so progress is
             // the page count and then the finish — never an estimate between.

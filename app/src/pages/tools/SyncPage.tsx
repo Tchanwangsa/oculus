@@ -68,6 +68,7 @@ export default function SyncPage() {
     handleSyncClick,
     resumeItem,
     skipItem,
+    prioritiseItem,
     resumeAll,
     toggleSubject,
   } = useSyncActions({
@@ -260,7 +261,12 @@ export default function SyncPage() {
         {view === "history" ? (
           <SyncHistoryTable runs={runs} progress={progress} />
         ) : (
-          <PipelineTable items={items} onResume={resumeItem} onSkip={skipItem} />
+          <PipelineTable
+            items={items}
+            onResume={resumeItem}
+            onSkip={skipItem}
+            onPrioritise={prioritiseItem}
+          />
         )}
       </div>
     </div>

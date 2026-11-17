@@ -16,8 +16,8 @@ import type { Subject } from "@/lib/db";
 /** The Files tab's sub-tabs, in strip order; each is a child route in
  *  `app/src/routes.tsx`. */
 const SUB_TABS = [
-  { value: "downloads", label: "Downloads" },
-  { value: "media", label: "Media" },
+  { value: "downloads", label: "Course files" },
+  { value: "media", label: "Canvas videos" },
   { value: "uploads", label: "Uploads" },
   { value: "drive", label: "Drive" },
 ] as const satisfies ReadonlyArray<{ value: string; label: string }>;
@@ -40,7 +40,7 @@ export function useFilesTab(): FilesTab {
 }
 
 /**
- * One subject tab for every file: Downloads, Media, Uploads and Drive as routed
+ * One subject tab for every file: Course files, Canvas videos, Uploads and Drive as routed
  * sub-tabs (so restore, crumbs and ⌘-click key off the path), drawn as
  * `PillTabs` under the subject's underline strip.
  *
@@ -55,7 +55,7 @@ export default function SubjectFilesPage() {
   const { pathname } = useLocation();
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Anything else is the index route's one-frame redirect to Downloads.
+  // Anything else is the index route's one-frame redirect to Course files.
   const segment = pathname.split("/").pop();
   const active: SubTab = SUB_TABS.some((t) => t.value === segment)
     ? (segment as SubTab)

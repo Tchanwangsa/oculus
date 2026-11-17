@@ -6,7 +6,8 @@ use super::errors::is_batch_id;
 use super::task::{basename, scope_of, Scope, Task};
 use super::MinerUCloud;
 use super::{FIRST_POLL_DELAY, MAX_POLL_DELAY, POLL_DEADLINE};
-use crate::parse::{ParseError, Phase};
+use crate::parse::priority::sort_key;
+use crate::parse::{ParseError, Phase, Priority};
 use crate::providers::ratelimit::nap;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -102,10 +103,9 @@ impl MinerUCloud {
             return Ok(());
         }
 
-        // Smallest file first: extraction starts only once every PUT is in,
-        // so the small ones must not queue behind a slow large upload.
+        // Picked one at a time (`take_next_upload`), so a file pushed ahead
+        // while others are uploading goes up next.
         let mut uploads: Vec<(&Task, &str)> = live.iter().copied().zip(urls).collect();
-        uploads.sort_by_key(|(task, _)| documents[task.document].bytes());
         // A document over several tasks uploads its whole file once per task.
         let mut puts_left: HashMap<usize, u32> = HashMap::new();
         for (task, _) in &uploads {
@@ -114,9 +114,16 @@ impl MinerUCloud {
         for (&index, &puts) in &puts_left {
             documents[index].await_upload(documents[index].bytes() * u64::from(puts));
         }
+        let upload_order = |(task, _): &(&Task, &str)| {
+            let document = &documents[task.document];
+            (
+                sort_key(Priority::shared().rank(document.path())),
+                document.bytes(),
+            )
+        };
 
         let mut remaining: HashMap<&str, &Task> = HashMap::new();
-        for (task, url) in uploads {
+        while let Some((task, url)) = take_next_upload(&mut uploads, upload_order) {
             if failures[task.document].is_some() {
                 continue;
             }
@@ -353,5 +360,59 @@ impl MinerUCloud {
 
         document.push_content(rebased);
         Ok(())
+    }
+}
+
+/// Take the next file to upload: the one pushed ahead longest ago, else the
+/// smallest (extraction starts only once every PUT is in, so the small ones
+/// must not queue behind a slow large upload), else the earliest listed.
+fn take_next_upload<T>(waiting: &mut Vec<T>, key: impl Fn(&T) -> (u64, u64)) -> Option<T> {
+    let index = waiting
+        .iter()
+        .enumerate()
+        .min_by_key(|(index, item)| (key(item), *index))
+        .map(|(index, _)| index)?;
+    Some(waiting.remove(index))
+}
+
+#[cfg(test)]
+mod upload_order_tests {
+    use super::take_next_upload;
+
+    /// (rank, bytes): a lower rank was pushed earlier; `u64::MAX` never was.
+    fn order(mut files: Vec<(u64, u64)>) -> Vec<(u64, u64)> {
+        let mut taken = Vec::new();
+        while let Some(next) = take_next_upload(&mut files, |file| *file) {
+            taken.push(next);
+        }
+        taken
+    }
+
+    #[test]
+    fn unpushed_files_go_up_smallest_first() {
+        assert_eq!(
+            order(vec![(u64::MAX, 30), (u64::MAX, 10), (u64::MAX, 20)]),
+            vec![(u64::MAX, 10), (u64::MAX, 20), (u64::MAX, 30)]
+        );
+    }
+
+    #[test]
+    fn pushed_files_go_first_in_the_order_pushed_whatever_their_size() {
+        assert_eq!(
+            order(vec![(u64::MAX, 10), (4, 90), (3, 50), (u64::MAX, 20)]),
+            vec![(3, 50), (4, 90), (u64::MAX, 10), (u64::MAX, 20)]
+        );
+    }
+
+    #[test]
+    fn a_push_made_while_files_are_uploading_goes_next() {
+        let mut waiting = vec![(u64::MAX, 10), (u64::MAX, 20), (u64::MAX, 30)];
+        assert_eq!(
+            take_next_upload(&mut waiting, |file| *file),
+            Some((u64::MAX, 10))
+        );
+        // Pushed after the first went up: its rank now beats the rest.
+        waiting[1].0 = 0;
+        assert_eq!(take_next_upload(&mut waiting, |file| *file), Some((0, 30)));
     }
 }

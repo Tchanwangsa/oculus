@@ -35,7 +35,7 @@ const FILE_TAB: Record<string, CrumbTab> = {
   lessons: { to: "lessons", label: "Lessons" },
 };
 
-/** Downloaded videos are listed under Media, not Downloads (`MediaPage`). */
+/** Downloaded videos are listed under Canvas videos, not Course files (`MediaPage`). */
 const MEDIA_TAB: CrumbTab = { to: "files/media", label: "Files" };
 
 export const fileCrumbTab = (file: { category: string | null; filename: string }): CrumbTab | null =>

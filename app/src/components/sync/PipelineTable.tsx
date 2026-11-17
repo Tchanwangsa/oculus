@@ -63,10 +63,12 @@ export const PipelineTable = memo(function PipelineTable({
   items,
   onResume,
   onSkip,
+  onPrioritise,
 }: {
   items: PipelineItem[];
   onResume?: (item: PipelineItem) => void;
   onSkip?: (item: PipelineItem) => void;
+  onPrioritise?: (item: PipelineItem) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const embedStage = usePipelineStore((s) => s.embedStage);
@@ -104,6 +106,7 @@ export const PipelineTable = memo(function PipelineTable({
               onToggle={toggle}
               onResume={onResume}
               onSkip={onSkip}
+              onPrioritise={onPrioritise}
             />
           ))}
         </div>

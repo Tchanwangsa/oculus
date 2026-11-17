@@ -190,6 +190,7 @@ pub fn run() {
             sources::oembed::web_video_info,
             sync::scrape::parse_file,
             sync::scrape::parse_skip,
+            sync::scrape::parse_prioritise,
             library::files::commands::read_course_file,
             library::files::commands::course_file_has_content,
             library::files::commands::open_course_file,

@@ -12,6 +12,7 @@ mod error;
 mod health;
 mod inflight;
 mod parser;
+mod priority;
 mod progress;
 mod record;
 mod skips;
@@ -30,6 +31,7 @@ pub use error::{check_size, ParseError, CONVERSION_FAILED, SHEET_UNREADABLE};
 pub use health::{preflight, Health};
 pub use inflight::{InFlight, InFlightClaim};
 pub use parser::Parser;
+pub use priority::{Priority, Rank};
 pub use progress::{Phase, Progress};
 pub use record::{
     images_dir_for, is_outdated, md_path, pages_path, parse_mode, read_record, ParseBlock,

@@ -13,7 +13,7 @@ import { isVideoFile } from "@/lib/files/fileTypes";
 import { ListCard } from "@/components/ui/layout/PageParts";
 
 /**
- * Every file downloaded from Canvas, flat, except videos, which Media lists.
+ * Every file downloaded from Canvas, flat, except videos, which Canvas videos lists.
  * PDFs open in the side panel; other types hand off to the system viewer.
  */
 export default function SubjectDownloadsPage() {
@@ -38,7 +38,7 @@ export default function SubjectDownloadsPage() {
   }
 
   if (downloads.length === 0) {
-    // Every download so far is a video: point at Media, not at a sync.
+    // Every download so far is a video: point at Canvas videos, not at a sync.
     const onlyVideos = byCategory.file.length > 0;
     return (
       <SubjectEmpty
@@ -50,7 +50,7 @@ export default function SubjectDownloadsPage() {
           className="h-auto p-0 text-xs font-normal"
           onClick={() => navigate(onlyVideos ? "../media" : "/sync")}
         >
-          {onlyVideos ? "Open Media →" : "Run a sync →"}
+          {onlyVideos ? "Open Canvas videos →" : "Run a sync →"}
         </Button>
       </SubjectEmpty>
     );

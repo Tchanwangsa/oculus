@@ -284,8 +284,13 @@ its last-opened time.
   caption hides behind that tooltip, and narrower still the subject code goes,
   so the name keeps the room. Clicking the name opens the file beside the page (⌘-click a new
   tab, via `data-tab-href`); clicking elsewhere expands it. Row actions
-  (▶ resume, retry, embed or parse a skipped file; Skip; Open beside) take the
-  time's place on hover or keyboard focus. Skip is offered until the parse
+  (Prioritise; ▶ resume, retry, embed or parse a skipped file; Skip; Open
+  beside) take the time's place on hover or keyboard focus. Prioritise (an
+  up-arrow bar, `rowActions.ts`) is offered only to a file still waiting — a
+  parse queued or its upload waiting behind another, or an embed queued. It
+  moves the file to the front of its queue (`parse_prioritise`, or
+  `indexStore.prioritise` for an embed) behind files already pushed; the
+  caption then ends "— prioritised" until the file starts (`prioritisedAt`). Skip is offered until the parse
   finishes and needs no confirmation — Parse now undoes it. The expanded row
   holds only what the row leaves out: each step with its clock time (and the
   upload's size), the whole error sentence or what a wait means, the path, and
