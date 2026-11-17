@@ -27,8 +27,7 @@ source. This file is only the rules; the reasons behind them live in `docs/`.
   (`apple-speech`, `whisper-cli`); the local MinerU engine is the user's own
   server over HTTP, not ours. Rust comments citing
   `sidecar/*.py` point at commit `f875bb1`.
-- A BYOK API layer (opencode is the API path), or automations/the Inbox (last
-  at `d64dc11`).
+- Automations/the Inbox (last at `d64dc11`).
 
 ## Rules
 
