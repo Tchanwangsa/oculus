@@ -13,15 +13,20 @@ export function useSubjectFiles(subjectId: number | null) {
   const [loadedSubjectId, setLoadedSubjectId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [failure, setFailure] = useState<{ subjectId: number; error: string } | null>(null);
 
   const run = useRef(0);
   const load = useCallback(async (id: number, fresh: boolean) => {
     const token = ++run.current;
     setLoading(true);
+    setFailure(null);
     try {
       const rows = await readFiles(id, fresh);
       if (token === run.current) { setFiles(rows); setLoadedSubjectId(id); }
       return rows;
+    } catch (error) {
+      if (token === run.current) setFailure({ subjectId: id, error: String(error) });
+      throw error;
     } finally {
       if (token === run.current) setLoading(false);
     }
@@ -62,5 +67,6 @@ export function useSubjectFiles(subjectId: number | null) {
     return groups;
   }, [files]);
 
-  return { files, loading, loaded: subjectId != null && loadedSubjectId === subjectId, byCategory, reload };
+  return { files, loading, loaded: subjectId != null && loadedSubjectId === subjectId, byCategory, reload,
+    error: failure?.subjectId === subjectId ? failure.error : null };
 }

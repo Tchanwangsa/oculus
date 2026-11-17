@@ -11,6 +11,7 @@ export interface TaskDoc {
   lock: Date | null;
   /** `**Status:** submitted|graded` — the user has handed it in. */
   submitted: boolean;
+  sourceUrl: string | null;
   points: string | null;
 }
 
@@ -54,6 +55,7 @@ export function parseTaskDoc(md: string, file: DbFile): TaskDoc {
     due: parseTs(md, "Due"),
     lock: parseTs(md, "Available until"),
     submitted: /^\*\*Status:\*\* (submitted|graded)\s*$/m.test(md),
+    sourceUrl: /^\[Open in Canvas\]\((https?:\/\/[^\s)]+)\)\s*$/m.exec(md)?.[1] ?? file.source_url,
     points: /^\*\*Points:\*\* (.+?)\s*$/m.exec(md)?.[1] ?? null,
   };
 }

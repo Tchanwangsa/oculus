@@ -3,6 +3,7 @@ import { RevisionPage } from "@/components/revision/RevisionPage";
 import { QuestionSession } from "@/components/revision/QuestionSession";
 import { useRevisionClock } from "@/hooks/revision/useRevisionClock";
 import { useRevisionData } from "@/layouts/RevisionLayout";
+import { isRevisionDue } from "@/lib/revision/due";
 
 export default function ReviewPage() {
   const { items, scope, topicScope } = useRevisionData();
@@ -31,8 +32,7 @@ export default function ReviewPage() {
   const due = items
     .filter(
       (item) =>
-        item.status === "active" &&
-        new Date(item.due).getTime() <= now &&
+        isRevisionDue(item, now) &&
         pending.get(item.id) !== item.reps,
     )
     .sort((a, b) => a.due.localeCompare(b.due));

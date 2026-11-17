@@ -32,6 +32,8 @@ export interface EdThread {
   searchText: string;
   /** The post and replies as one line of plain prose, for match snippets. */
   prose: string;
+  /** Replies represented in the synced file, including nested comments; null when unknown. */
+  replyCount: number | null;
 }
 
 const KINDS = ["question", "post", "announcement"] as const;
@@ -76,6 +78,9 @@ export function parseEdThread(markdown: string, file: DbFile): EdThread {
   const by = /^\*\*By:\*\* .* · (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})\s*$/m.exec(header);
   // Scraped timestamps are written in the course's local timezone.
   const posted = by ? new Date(`${by[1]}T${by[2]}:00`) : null;
+  const replies = /^## Replies\s*$/m.exec(body);
+  const replyHeads = replies ? body.slice(replies.index + replies[0].length)
+    .match(/^(?:>\s*)*\*\*.+?\*\*(?: \([^\n)]*\))* · \d{4}-\d{2}-\d{2} \d{2}:\d{2}\s*$/gm) : null;
   return {
     file, number, title, kind, category,
     resolved: kind === "question" ? answered : null,
@@ -84,6 +89,7 @@ export function parseEdThread(markdown: string, file: DbFile): EdThread {
     posted: posted && !Number.isNaN(posted.getTime()) ? posted : null,
     searchText: normalize(`${number == null ? "" : `#${number}`} ${title} ${body}`),
     prose: plainProse(body.slice(header.length)),
+    replyCount: replyHeads?.length ?? null,
   };
 }
 

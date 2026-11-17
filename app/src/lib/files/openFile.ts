@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useTabStore } from "@/stores/shell/tabStore";
 import { openBeside, openLink } from "@/lib/shell/tabRouters";
-import { displayCode, humanizeSlug } from "@/lib/format/format";
 import { isLessonAsset, isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath, parsedMdSource } from "@/lib/files/fileTypes";
 import { getFileByRelativePath, getLecture, markFileAccessed, type DbFile } from "@/lib/db";
 import { isWebUrl } from "@/lib/browser";
@@ -9,29 +8,8 @@ import { libraryLinkTarget } from "@/lib/files/libraryLinks";
 import { readCourseFile } from "@/lib/files/courseFiles";
 import { lecturePagePath } from "@/lib/lectures";
 import { citedPage, fullCitation, quoteFromLines, type Citation } from "@/lib/citations";
-
-/** Categories whose rows carry real filenames, not Canvas slugs. */
-const REAL_FILENAME = new Set(["file", "image", "upload"]);
-
-/** A file's display title: real filenames stay, slugs get humanised. Takes
- *  two columns so the chat's `@` menu can label a path the same way. */
-export function fileTitle(file: Pick<DbFile, "category" | "filename">): string {
-  // A document's filename was typed by the student: never humanise it.
-  if (file.category === "canvas") return file.filename.replace(/\.canvas$/i, "");
-  if (file.category === "notebook") return file.filename.replace(/\.notebook$/i, "");
-  if (file.category === "document") return file.filename.replace(/\.md$/i, "");
-  return REAL_FILENAME.has(file.category ?? "") || isLessonAsset(file)
-    ? file.filename
-    : humanizeSlug(file.filename);
-}
-
-/** A folder path's (`courses/<CODE>/pages/`) display name: a subject's own
- *  folder by its code, any other humanised. */
-export function folderTitle(path: string): string {
-  const parts = path.replace(/\/+$/, "").split("/");
-  const name = parts[parts.length - 1] ?? "";
-  return parts.length === 2 && parts[0] === "courses" ? displayCode(name) : humanizeSlug(name);
-}
+import { filePagePath } from "./labels";
+export { filePagePath, fileTitle, folderTitle } from "./labels";
 
 /** Fired after a file's last_accessed_at is stamped, so open lists refresh. */
 export const FILE_ACCESSED_EVENT = "oculus:file-accessed";
@@ -106,10 +84,6 @@ export function openFileSmart(file: DbFile, locate?: FileLocate): void {
     filePagePath(file.subject_id, file.relative_path),
     locate ? { locate } : undefined,
   );
-}
-
-export function filePagePath(subjectId: number, relativePath: string): string {
-  return `/subjects/${subjectId}/file?path=${encodeURIComponent(relativePath)}`;
 }
 
 /** A row's `data-tab-href` (`lib/shell/newTabClicks.ts`): its ⌘-click route, or
