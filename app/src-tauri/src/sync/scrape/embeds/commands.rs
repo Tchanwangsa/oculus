@@ -252,6 +252,7 @@ impl Download {
                 category: paths::category_from_path(&format!("files/{name}")).to_string(),
                 canvas_id: None,
                 source_url: Some(self.retrieve.clone()),
+                source_dates: Default::default(),
                 action: if existed { "updated" } else { "new" },
             },
         )

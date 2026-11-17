@@ -214,6 +214,36 @@ cannot write it — see [cli.md](./cli.md).
 - An `application/octet-stream` upload is judged by extension (`office_ext_of`, `is_video`; allowlists).
 - `MAX_FILE_BYTES` (100 MB) skips any larger file except a video, which a sync never downloads.
 
+## Library source dates describe activity at Canvas and Ed
+
+Migration 62 adds nullable `files.source_created_at` and
+`files.source_updated_at`. `app/src-tauri/src/sync/dates.rs` normalizes valid
+RFC 3339 timestamps to UTC ISO 8601 with fixed nanosecond precision; missing
+or malformed dates are unknown, never the sync's clock.
+
+| Library row | `source_created_at` | `source_updated_at` |
+| --- | --- | --- |
+| Canvas file (including downloaded module videos) | Later of `created_at` and `unlock_at`, using whichever is known | `modified_at`, else `updated_at` |
+| Canvas page or front-page home | Page `created_at` | Page `updated_at` |
+| Announcement | `posted_at`, else `created_at` | Same as creation |
+| Assignment or quiz | `unlock_at`, else `created_at` | `updated_at` |
+| Ed thread | Thread `created_at` | Latest answer/comment `created_at`, including nested comments; NULL without replies |
+| Ed lesson, module, student document/canvas/upload | NULL | NULL |
+
+The course API's `syllabus_body` and description-only home have no
+content-specific timestamps, so their source dates stay NULL; course creation
+and updates do not date those bodies. A syllabus saved as an ordinary Canvas
+page uses that page's dates. Ed post edits, endorsements and user-profile dates
+never count as reply activity.
+
+Every `scrape-file` event carries the dates, including manifest skips and
+byte-identical bodies. Both the frontend's `upsertFile` and the CLI's
+`db::store::upsert_file` write them on every event, independently of the
+content-change flag, so the next sync backfills existing rows without
+re-downloading unchanged files or changing `first_seen_at` and
+`content_changed_at`. Unknown incoming dates preserve known values; undated
+student-made rows remain NULL and use `first_seen_at` for local creation.
+
 ## A sync lists module videos, and the student downloads them
 
 Lecture videos uploaded as Canvas files (`video/*`, or an untyped
@@ -224,9 +254,10 @@ have nothing to do with Echo360 lectures.
   carries the Canvas id and the path it will land at:
   `- [title](../files/<name>.mp4) _(video <id>)_` (`file_toc_line`, parsed by
   `app/src/lib/pipeline/moduleToc.ts`). Locked videos skip like any file.
-- Once downloaded, a sync reports it `unchanged` while the manifest pair
-  matches. A copy Canvas has since changed is left as it is: only the
-  student downloads a video, through the Modules page.
+- Once downloaded, a sync reports its local bytes `unchanged` and refreshes
+  source dates even without a matching manifest. A copy Canvas has since
+  changed is left as it is: only the student downloads a video, through the
+  Modules page.
 - `canvas_download_video` (`app/src-tauri/src/sync/scrape/videos.rs`) streams it with
   `Canvas::download_to` into a `.part` sibling, renamed on success and removed
   on any failure or cancel, then reports a `scrape-file` like a synced file, so
@@ -444,7 +475,7 @@ leaves the last whole lesson.
   connects and holds the workspace live itself, as for a download. It
   leaves the folder alone, with an `info` line, while the challenge is open
   in the app (its session reconciles it) or when the record names another
-  folder (the lesson was renamed). A conflict is a `warning` line; a file
+  folder for the same lesson. A conflict is a `warning` line; a file
   reconcile wrote is reported `updated`. The record is
   `{"workspace_id", "slide_dir", "base_commit", "files"}`,
   `files` mapping each path in the workspace to the SHA-256 (hex) of the
@@ -546,7 +577,7 @@ the working copy; Ed gets each save as an upload.
   (what Ed's web app does after a reload). The pane gets a listed terminal it
   does not hold yet first (`resumed: true`), else a new id. Each connect
   re-attaches every terminal the pane holds at its last size, and reports one
-  the server no longer lists as `termState exited`, so the pane opens a
+  the server omits as `termState exited`, so the pane opens a
   terminal once per session. `ed_terminal_input {id, data}` sends
   `program_data` with the UTF-8 text in base64, `ed_terminal_resize` sends
   `program_set_pty`, `ed_terminal_kill` sends `program_signal {signal:

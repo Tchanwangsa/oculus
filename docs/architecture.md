@@ -387,6 +387,10 @@ In the app the *frontend* writes the scrape tables, upserting through
 same rows with the same SQL, so a CLI sync looks like an app sync. The CLI
 never creates the database, so a fresh machine opens the app once first.
 
+- `files.source_created_at` / `source_updated_at` are nullable UTC source
+  dates, independent of the local write and first-seen clocks. Both scrape
+  writers backfill them on unchanged items; category semantics live in
+  [sync.md](./sync.md#library-source-dates-describe-activity-at-canvas-and-ed).
 - `pages` (markdown + embedding per PDF page) is the retrieval substrate. Its
   `embed_model`/`embed_dim` columns filter every scan, because a dot product
   across two models is meaningless but still sorts. `pages_fts` is a local FTS5

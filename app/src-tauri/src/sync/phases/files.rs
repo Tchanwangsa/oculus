@@ -9,7 +9,8 @@ use crate::sync::office::{
 };
 use crate::sync::render::{content_type_of, file_name, locked_until, modified_of};
 use crate::sync::{
-    Engine, Fetched, FileEvent, FileFailed, FileStart, Subject, DOWNLOADABLE_TYPES, MAX_FILE_BYTES,
+    Engine, Fetched, FileEvent, FileFailed, FileStart, SourceDates, Subject, DOWNLOADABLE_TYPES,
+    MAX_FILE_BYTES,
 };
 
 impl Engine {
@@ -72,15 +73,16 @@ impl Engine {
                 .is_some_and(|(m, s)| *m == modified && *s == meta_size);
         let on_disk = self.data_dir.join(&rel).is_file()
             && paths::doc_pdf_rel(&rel).is_none_or(|p| self.data_dir.join(p).is_file());
-        let unchanged = || {
+        let unchanged = |size_bytes| {
             self.reporter.file(&FileEvent {
                 subject_id: c.id,
                 code: c.code.clone(),
                 relative_path: rel.clone(),
-                size_bytes: meta_size,
+                size_bytes,
                 category: paths::category_from_path(&format!("files/{name}")).to_string(),
                 canvas_id: Some(file_id),
                 source_url: None,
+                source_dates: SourceDates::file(&info),
                 action: "unchanged",
             });
         };
@@ -88,8 +90,10 @@ impl Engine {
         if video {
             // A copy Canvas has since changed is left as it is: the student
             // chose to download it, and a sync never does.
-            if known && on_disk {
-                unchanged();
+            if let Ok(metadata) = std::fs::metadata(self.data_dir.join(&rel)) {
+                if metadata.is_file() {
+                    unchanged(metadata.len());
+                }
             }
             return Ok(Fetched::Video {
                 rel,
@@ -98,7 +102,7 @@ impl Engine {
         }
 
         if known && on_disk {
-            unchanged();
+            unchanged(meta_size);
             // Unchanged bytes with no text of their own, or PDF-route files
             // beside them, are converted again without a download.
             if sheet && crate::pages::sheets::needs_conversion(&self.data_dir, &rel) {
@@ -137,7 +141,14 @@ impl Engine {
         // "deck.pptx.pdf" beside them — never announced, never a database row
         // — and spreadsheets their text, "marks.xlsx.md".
         let (rel, action) = self
-            .store(c, &format!("files/{name}"), &bytes, Some(file_id), None)
+            .store(
+                c,
+                &format!("files/{name}"),
+                &bytes,
+                Some(file_id),
+                None,
+                SourceDates::file(&info),
+            )
             .map_err(|e| failed(format!("Could not save the file: {e}.")))?;
 
         // A failed Office conversion stays out of the manifest so it retries.

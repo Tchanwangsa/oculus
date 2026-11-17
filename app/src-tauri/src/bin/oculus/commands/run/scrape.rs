@@ -226,6 +226,8 @@ impl Ctx {
                         category: &f.category,
                         canvas_id: f.canvas_id,
                         source_url: f.source_url.as_deref(),
+                        source_created_at: f.source_dates.source_created_at.as_deref(),
+                        source_updated_at: f.source_dates.source_updated_at.as_deref(),
                         changed: f.action != "unchanged",
                     };
                     if let Err(e) = store::upsert_file(p, &row).await {

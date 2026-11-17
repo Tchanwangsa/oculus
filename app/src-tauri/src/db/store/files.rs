@@ -10,6 +10,8 @@ pub struct FileRow<'a> {
     pub category: &'a str,
     pub canvas_id: Option<i64>,
     pub source_url: Option<&'a str>,
+    pub source_created_at: Option<&'a str>,
+    pub source_updated_at: Option<&'a str>,
     /// The engine's action: content_changed_at moves only on new bytes.
     pub changed: bool,
 }
@@ -22,6 +24,8 @@ pub async fn upsert_file(pool: &SqlitePool, row: &FileRow<'_>) -> Result<(), Str
         category,
         canvas_id,
         source_url,
+        source_created_at,
+        source_updated_at,
         changed,
     } = *row;
     let filename = relative_path
@@ -35,9 +39,9 @@ pub async fn upsert_file(pool: &SqlitePool, row: &FileRow<'_>) -> Result<(), Str
         .unwrap_or_else(|| "md".into());
 
     sqlx::query(
-        r#"INSERT INTO files (subject_id, filename, relative_path, file_type, size_bytes, category, canvas_id, source_url, first_seen_at, content_changed_at)
+        r#"INSERT INTO files (subject_id, filename, relative_path, file_type, size_bytes, category, canvas_id, source_url, first_seen_at, content_changed_at, source_created_at, source_updated_at)
            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'),
-                   CASE WHEN ?9 THEN datetime('now') ELSE NULL END)
+                   CASE WHEN ?9 THEN datetime('now') ELSE NULL END, ?10, ?11)
            ON CONFLICT(subject_id, relative_path) DO UPDATE SET
              filename   = excluded.filename,
              file_type  = excluded.file_type,
@@ -45,6 +49,8 @@ pub async fn upsert_file(pool: &SqlitePool, row: &FileRow<'_>) -> Result<(), Str
              category   = excluded.category,
              canvas_id  = excluded.canvas_id,
              source_url = excluded.source_url,
+             source_created_at = COALESCE(excluded.source_created_at, files.source_created_at),
+             source_updated_at = COALESCE(excluded.source_updated_at, files.source_updated_at),
              scraped_at = datetime('now'),
              content_changed_at = CASE WHEN ?9 THEN excluded.content_changed_at ELSE files.content_changed_at END"#,
     )
@@ -57,6 +63,8 @@ pub async fn upsert_file(pool: &SqlitePool, row: &FileRow<'_>) -> Result<(), Str
     .bind(canvas_id)
     .bind(source_url)
     .bind(changed)
+    .bind(source_created_at)
+    .bind(source_updated_at)
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;

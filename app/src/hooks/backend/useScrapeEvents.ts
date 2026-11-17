@@ -48,10 +48,10 @@ export function useScrapeEvents() {
       });
     },
   );
-  useTauriEvent<{ subject_id: number; relative_path: string; size_bytes: number; category: string | null; canvas_id: number | null; source_url: string | null; action: SyncFileAction }>(
+  useTauriEvent<{ subject_id: number; relative_path: string; size_bytes: number; category: string | null; canvas_id: number | null; source_url: string | null; source_created_at: string | null; source_updated_at: string | null; action: SyncFileAction }>(
     "scrape-file",
     async (e) => {
-      const { subject_id, relative_path, size_bytes, category, canvas_id, source_url, action } = e.payload;
+      const { subject_id, relative_path, size_bytes, category, canvas_id, source_url, source_created_at, source_updated_at, action } = e.payload;
       if (isPipelineFile(relative_path)) {
         if (action === "unchanged") {
           pipeline().confirmDownload(relative_path);
@@ -84,7 +84,7 @@ export function useScrapeEvents() {
       const ext = filename.includes(".") ? filename.split(".").pop()! : "md";
       try {
         await parseStatuses.mutate(subject_id, relative_path, async () => {
-          await upsertFile(subject_id, filename, relative_path, ext, size_bytes, category ?? undefined, canvas_id ?? undefined, source_url ?? undefined);
+          await upsertFile(subject_id, filename, relative_path, ext, size_bytes, category ?? undefined, canvas_id ?? undefined, source_url ?? undefined, source_created_at, source_updated_at);
           if (action === "new" || action === "updated") {
             await markFileContentChanged(subject_id, relative_path);
           }

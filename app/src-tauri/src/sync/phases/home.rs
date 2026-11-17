@@ -1,7 +1,7 @@
 //! Phase: the course home page and syllabus.
 
 use crate::pages::md;
-use crate::sync::{Engine, LinkCrawl, Subject};
+use crate::sync::{Engine, LinkCrawl, SourceDates, Subject};
 
 impl Engine {
     pub(in crate::sync) fn scrape_home(
@@ -41,7 +41,8 @@ impl Engine {
             format!("# {title}\n\n{}\n{extra}\n", meta.join("  \n"))
         };
 
-        // Separate from the front page — a course can have both.
+        // A course can have both a syllabus and a front page. Course timestamps
+        // date the shell, not the syllabus body, so its source dates stay unknown.
         if let Some(syllabus) = course["syllabus_body"].as_str().filter(|s| !s.is_empty()) {
             crawl.absorb(md::canvas_links(syllabus, c.id));
             let body = self.convert(syllabus, c, "syllabus.md");
@@ -52,29 +53,31 @@ impl Engine {
             self.write(c, "syllabus.md", md.as_bytes(), None)?;
         }
 
-        let (body, source) = match self
+        let (body, source, dates) = match self
             .canvas
             .get(&format!("/api/v1/courses/{}/front_page", c.id))
         {
             Ok(r) if r.ok() => match r.json() {
                 Ok(j) => match j["body"].as_str() {
-                    Some(b) if !b.is_empty() => (b.to_string(), "Front Page"),
-                    _ => (String::new(), ""),
+                    Some(b) if !b.is_empty() => {
+                        (b.to_string(), "Front Page", SourceDates::page(&j))
+                    }
+                    _ => (String::new(), "", SourceDates::default()),
                 },
-                Err(_) => (String::new(), ""),
+                Err(_) => (String::new(), "", SourceDates::default()),
             },
-            _ => (String::new(), ""),
+            _ => (String::new(), "", SourceDates::default()),
         };
-        let (body, source) = if body.is_empty() {
+        let (body, source, dates) = if body.is_empty() {
             match course["public_description"]
                 .as_str()
                 .filter(|s| !s.is_empty())
             {
-                Some(d) => (format!("<p>{d}</p>"), "Description"),
-                None => (String::new(), ""),
+                Some(d) => (format!("<p>{d}</p>"), "Description", SourceDates::default()),
+                None => (String::new(), "", SourceDates::default()),
             }
         } else {
-            (body, source)
+            (body, source, dates)
         };
 
         if body.is_empty() {
@@ -87,7 +90,7 @@ impl Engine {
             "{}\n---\n\n{converted}",
             header(&name, &format!("\n> Source: {source}\n"))
         );
-        self.write(c, "home.md", md.as_bytes(), None)?;
+        self.write_from(c, "home.md", md.as_bytes(), None, None, dates)?;
         Ok(())
     }
 }

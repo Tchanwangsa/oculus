@@ -3,7 +3,7 @@
 use crate::library::paths;
 use crate::sync::office::is_video;
 use crate::sync::render::{content_type_of, file_name, locked_until, modified_of};
-use crate::sync::{Engine, FileEvent, Subject};
+use crate::sync::{Engine, FileEvent, SourceDates, Subject};
 
 impl Engine {
     /// Download one module video on request, past the size cap a sync
@@ -81,6 +81,7 @@ impl Engine {
             category: paths::category_from_path(&format!("files/{name}")).to_string(),
             canvas_id: Some(file_id),
             source_url: None,
+            source_dates: SourceDates::file(info),
             action: if existed { "updated" } else { "new" },
         });
         let modified = modified_of(info);

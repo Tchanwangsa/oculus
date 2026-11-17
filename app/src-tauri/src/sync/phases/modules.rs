@@ -2,6 +2,7 @@
 
 use crate::pages::md;
 use crate::sync::render::{escape_md, file_toc_line, items_of, slug};
+use crate::sync::SourceDates;
 use crate::sync::{Engine, Fetched, LinkCrawl, Progress, Subject, TaskDocs};
 
 impl Engine {
@@ -214,7 +215,14 @@ impl Engine {
         // The *requested* slug, not canonical `full["url"]`: old body links to
         // a renamed page still use it, and Canvas still resolves it.
         let source = format!("{}/courses/{}/pages/{page_url}", self.canvas.base()?, c.id);
-        self.write_from(c, &out, md_body.as_bytes(), None, Some(source))?;
+        self.write_from(
+            c,
+            &out,
+            md_body.as_bytes(),
+            None,
+            Some(source),
+            SourceDates::page(&full),
+        )?;
         Ok(Some(links))
     }
 }

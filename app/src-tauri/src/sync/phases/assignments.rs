@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use crate::pages::md;
 use crate::sync::render::{fmt_points, push_ts, submission_status, task_path};
+use crate::sync::SourceDates;
 use crate::sync::{Engine, LinkCrawl, Progress, Subject, TaskDocs};
 
 impl Engine {
@@ -162,7 +163,14 @@ impl Engine {
             None => md.push_str("_No description._"),
         }
         md.push('\n');
-        self.write(c, path, md.as_bytes(), None)?;
+        self.write_from(
+            c,
+            path,
+            md.as_bytes(),
+            None,
+            None,
+            SourceDates::assignment(item),
+        )?;
         Ok(())
     }
 }

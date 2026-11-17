@@ -978,11 +978,46 @@ INSERT OR IGNORE INTO task_tags (name, color, position) VALUES
             sql: include_str!("../harness/store/search.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 62,
+            description: "library source dates",
+            sql: "ALTER TABLE files ADD COLUMN source_created_at TEXT;
+ALTER TABLE files ADD COLUMN source_updated_at TEXT;",
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn source_dates_start_unknown_for_existing_library_rows() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for migration in super::all().into_iter().filter(|m| m.version < 62) {
+            sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+        }
+        sqlx::raw_sql(
+            "INSERT INTO subjects (id, code, name) VALUES (1, 'SUBJ', 'Subject');
+             INSERT INTO files (subject_id, filename, relative_path, file_type, first_seen_at)
+             VALUES (1, 'a.pdf', 'courses/SUBJ/files/a.pdf', 'pdf', 'first');",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let migration = super::all().into_iter().find(|m| m.version == 62).unwrap();
+        sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+        let row: (Option<String>, Option<String>, String) =
+            sqlx::query_as("SELECT source_created_at, source_updated_at, first_seen_at FROM files")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(row, (None, None, "first".into()));
+    }
+
     #[test]
     fn versions_strictly_increase() {
         let versions: Vec<i64> = super::all()

@@ -2,7 +2,7 @@
 
 use crate::sources::ed::{self, Board};
 use crate::sync::render::slug;
-use crate::sync::{Engine, Progress, Subject};
+use crate::sync::{Engine, Progress, SourceDates, Subject};
 
 impl Engine {
     /// Resolve the subject's Ed course once (session minting:
@@ -65,9 +65,17 @@ impl Engine {
                 .region
                 .zip(t["id"].as_i64())
                 .map(|(region, id)| ed::thread_url(region, course_id, id));
-            match self.ed.thread_markdown(t, &board) {
-                Ok(md) => {
-                    self.write_from(c, &path, md.as_bytes(), None, url)?;
+            match self.ed.thread_detail(t) {
+                Ok(detail) => {
+                    let md = ed::thread_md(t, &detail, &board);
+                    self.write_from(
+                        c,
+                        &path,
+                        md.as_bytes(),
+                        None,
+                        url,
+                        SourceDates::thread(t, &detail),
+                    )?;
                 }
                 Err(e) => self
                     .reporter

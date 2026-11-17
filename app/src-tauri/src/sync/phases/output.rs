@@ -3,7 +3,7 @@
 use crate::library::paths;
 use crate::parse;
 use crate::sync::parse::parse_pdf;
-use crate::sync::{Engine, FileEvent, Subject};
+use crate::sync::{Engine, FileEvent, SourceDates, Subject};
 
 impl Engine {
     /// Write one artifact and announce it. Returns `courses/CODE/...`.
@@ -14,7 +14,7 @@ impl Engine {
         data: &[u8],
         canvas_id: Option<i64>,
     ) -> Result<String, String> {
-        self.write_from(c, rel_path, data, canvas_id, None)
+        self.write_from(c, rel_path, data, canvas_id, None, SourceDates::default())
     }
 
     pub(in crate::sync) fn write_from(
@@ -24,8 +24,9 @@ impl Engine {
         data: &[u8],
         canvas_id: Option<i64>,
         source_url: Option<String>,
+        source_dates: SourceDates,
     ) -> Result<String, String> {
-        self.store(c, rel_path, data, canvas_id, source_url)
+        self.store(c, rel_path, data, canvas_id, source_url, source_dates)
             .map(|(rel, _)| rel)
     }
 
@@ -37,6 +38,7 @@ impl Engine {
         data: &[u8],
         canvas_id: Option<i64>,
         source_url: Option<String>,
+        source_dates: SourceDates,
     ) -> Result<(String, paths::WriteAction), String> {
         let (rel, size, action) =
             paths::write_course_bytes(&self.data_dir, &c.code, rel_path, data)?;
@@ -53,6 +55,7 @@ impl Engine {
             category: paths::category_from_path(rel_path).to_string(),
             canvas_id,
             source_url,
+            source_dates,
             action: action.as_str(),
         });
 
