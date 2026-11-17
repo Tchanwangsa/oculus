@@ -14,7 +14,7 @@ use super::error::{shown, DriveError, DriveResult};
 use super::guard::{readable_entry, target_folder, Entry, Target};
 use super::journal::Journal;
 use super::moves::blocking;
-use super::names::free_name;
+use super::names::free_name_where;
 use super::pictures;
 use super::rows::{self, NewRow};
 use crate::library::layout;
@@ -58,6 +58,7 @@ pub async fn copy_to_own_at(
     }
     let dir = data_dir.to_path_buf();
     blocking(move || {
+        journal.commit();
         for (from, to) in notes {
             if let Err(e) = pictures::carry(&dir, &from, &to, true) {
                 elog!("[oculus] drive: pictures of {to}: {e}");
@@ -77,9 +78,9 @@ fn on_disk(data_dir: &Path, target: &Target, entries: &[Entry]) -> DriveResult<C
     let mut new_rows = Vec::new();
     let mut notes = Vec::new();
     for entry in entries {
-        let name = free_name(&target.path, shown(&entry.rel), entry.dir, |_| false);
+        let name = copy_name(data_dir, target, shown(&entry.rel), entry.dir);
         let name = if target.is_subject_root() && layout::reserved_name(&name) {
-            free_name(&target.path, &format!("{name} copy"), entry.dir, |_| false)
+            copy_name(data_dir, target, &format!("{name} copy"), entry.dir)
         } else {
             name
         };
@@ -108,6 +109,27 @@ fn on_disk(data_dir: &Path, target: &Target, entries: &[Entry]) -> DriveResult<C
     Ok((journal, copies, new_rows, notes))
 }
 
+/// A name in `target` free for the copy and, for a file, for its converted
+/// PDF (`x.docx` → `x.docx.pdf`), so a copy never lands on anything.
+fn copy_name(data_dir: &Path, target: &Target, name: &str, folder: bool) -> String {
+    free_name_where(name, folder, |candidate| {
+        let rel = target.child_rel(candidate);
+        let taken = |path: &Path| std::fs::symlink_metadata(path).is_ok();
+        !taken(&data_dir.join(&rel))
+            && (folder
+                || crate::library::paths::artifact_at(data_dir, &rel, ArtifactSlot::Converted)
+                    .is_none_or(|pdf| !taken(&pdf)))
+    })
+}
+
+/// `std::fs::copy`, refusing to replace anything at `to`.
+fn copy_new(from: &Path, to: &Path) -> DriveResult<u64> {
+    if std::fs::symlink_metadata(to).is_ok() {
+        return Err(DriveError::exists(&to.to_string_lossy()));
+    }
+    Ok(std::fs::copy(from, to)?)
+}
+
 /// One file, and its converted PDF when it has one.
 fn copy_file(
     data_dir: &Path,
@@ -117,7 +139,7 @@ fn copy_file(
     new_rows: &mut Vec<NewRow>,
 ) -> DriveResult<()> {
     let to = data_dir.join(to_rel);
-    let size = std::fs::copy(data_dir.join(from_rel), &to)?;
+    let size = copy_new(&data_dir.join(from_rel), &to)?;
     journal.made(&to);
     new_rows.push(NewRow {
         rel: to_rel.to_string(),
@@ -128,7 +150,7 @@ fn copy_file(
             continue;
         }
         if let Some(dest) = crate::library::paths::artifact_at(data_dir, to_rel, slot) {
-            std::fs::copy(&from, &dest)?;
+            copy_new(&from, &dest)?;
             journal.made(&dest);
         }
     }

@@ -40,15 +40,21 @@ impl Target {
     }
 }
 
-/// The subject folder a path is in, or the path's own name when it is one.
+/// The subject folder a path is in, or the path's own name when it is one;
+/// `None` for a spelling that could leave the library (an empty, `.` or `..`
+/// segment: `layout::zone_of`'s `Outside`) and for a dot-name subject.
 pub fn subject_folder(rel: &str) -> Option<&str> {
+    if layout::zone_of(rel) == Zone::Outside {
+        return None;
+    }
     let rest = rel.strip_prefix(layout::COURSES_DIR)?.strip_prefix('/')?;
     let folder = rest.split('/').next()?;
-    (!folder.is_empty()).then_some(folder)
+    (!folder.is_empty() && !folder.starts_with('.')).then_some(folder)
 }
 
+/// `courses/<folder>` itself.
 pub fn is_subject_root(rel: &str) -> bool {
-    layout::split_course(&format!("{rel}/x")).is_some_and(|(_, inner)| inner == "x")
+    subject_folder(rel).is_some() && rel.matches('/').count() == 1
 }
 
 pub fn parent_rel(rel: &str) -> &str {
@@ -76,7 +82,7 @@ fn through_symlink(data_dir: &Path, rel: &str) -> bool {
 
 /// `rel` as an existing entry the student may rename, move or delete.
 pub fn own_entry(data_dir: &Path, rel: &str) -> DriveResult<Entry> {
-    if !layout::own_path_ok(rel) {
+    if subject_folder(rel).is_none() || !layout::own_path_ok(rel) {
         return Err(refusal(rel));
     }
     if through_symlink(data_dir, rel) {
@@ -114,8 +120,9 @@ pub fn readable_entry(data_dir: &Path, rel: &str) -> DriveResult<Entry> {
 
 /// `rel` as a folder new entries may land in: a subject's root, or an
 /// existing folder of the student's.
+/// The subject folder must exist: it is never made here.
 pub fn target_folder(data_dir: &Path, rel: &str) -> DriveResult<Target> {
-    if !is_subject_root(rel) && !layout::own_path_ok(rel) {
+    if subject_folder(rel).is_none() || (!is_subject_root(rel) && !layout::own_path_ok(rel)) {
         return Err(refusal(rel));
     }
     if through_symlink(data_dir, rel) {

@@ -147,6 +147,7 @@ async fn run(
     drop(held);
     let dir = data_dir.to_path_buf();
     blocking(move || {
+        journal.commit();
         finish(&dir, after, &moved);
         Ok(())
     })
@@ -162,18 +163,25 @@ pub(super) async fn blocking<T: Send + 'static>(
         .map_err(|e| DriveError::io(e.to_string()))?
 }
 
-/// No two entries go to one name, and nothing is at any destination except,
-/// on a case-insensitive volume, the entry itself (a case-only rename).
+/// No two entries go to one name, as a case-insensitive or normalising
+/// volume compares names (`same_name_key`). The disk is asked again right
+/// before each rename (`Journal::rename`), so a fold this misses still
+/// refuses instead of overwriting.
 fn check_free(plans: &[Plan]) -> DriveResult<()> {
     for (i, plan) in plans.iter().enumerate() {
-        if plans[..i]
-            .iter()
-            .any(|p| p.to.eq_ignore_ascii_case(&plan.to))
-        {
+        let key = same_name_key(&plan.to);
+        if plans[..i].iter().any(|p| same_name_key(&p.to) == key) {
             return Err(DriveError::exists(&plan.to));
         }
     }
     Ok(())
+}
+
+/// A path as APFS and NTFS compare it: Unicode NFC, then case folded
+/// (upper then lower, so `ß` meets `SS`).
+fn same_name_key(path: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    path.nfc().collect::<String>().to_uppercase().to_lowercase()
 }
 
 fn taken(at: &Path, by: &Path) -> bool {

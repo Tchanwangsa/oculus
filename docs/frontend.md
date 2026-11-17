@@ -276,13 +276,22 @@ target folder is a subject's root or an existing folder of the student's:
   NUL or a control character, or start or end with a space; `Course` and
   `.oculus` are refused at a subject's root. A taken name is `exists` for
   `create_folder`, `rename_entry` and `move_entries` (nothing is
-  overwritten); imports and copies step aside to `name (2).ext`, and an
-  import of identical bytes reuses its name. A picked file or folder keeps
-  its name, with what the rules refuse replaced (`names::entry_name`).
+  overwritten): names are compared as the volume does (Unicode NFC, case
+  folded), so `Étude.pdf` and `étude.pdf` moved into one folder refuse, and
+  every rename asks the disk again right before it lands. A case-only rename
+  is not a clash. Imports and copies step aside to `name (2).ext` (a copy
+  until its converted PDF's name is free too), and an import of identical
+  bytes reuses its name. A picked file or folder keeps its name, with what
+  the rules refuse replaced (`names::entry_name`). A path whose subject
+  segment is empty, `.`, `..` or a dot-name is refused, and no command makes
+  a subject folder.
 - **Rows follow by id.** A move or rename updates the `files` row in place:
   path, name, `file_type` on a rename, `category` (`layout::category_of`, so
   `.md` to `.txt` stops being a note) and, across subjects, `subject_id`; a
-  folder's rows all follow. A parsed file takes its artifacts with it and
+  folder's rows all follow. The disk moves first and goes back if the rows
+  fail (`ops/journal.rs`): folders it made or emptied, and a stale record a
+  merge replaced, which is set aside under a dot-name until the rows commit
+  rather than deleted. A parsed file takes its artifacts with it and
   stays parsed and embedded ([architecture.md](./architecture.md#one-module-owns-every-path-shape-in-the-library)),
   a note its pictures ([editor.md](./editor.md#pictures-mentions-and-citations-resolve-to-library-files)).
   A delete removes rows with their pages, versions and task links, then the

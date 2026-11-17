@@ -94,3 +94,21 @@ async fn nothing_is_copied_into_course() {
     .unwrap_err();
     assert_eq!(error.kind, Kind::ReadOnly);
 }
+
+#[tokio::test]
+async fn an_office_copy_never_lands_on_a_pdf_of_that_name() {
+    let lib = Lib::new("drive-copy-office").await;
+    let deck = course_file("deck.pptx");
+    lib.put(&deck, b"pptx");
+    lib.put(&format!("{deck}.pdf"), b"%PDF converted");
+    let mine = own(CODE, "deck.pptx.pdf");
+    lib.file(&mine, b"%PDF my own").await;
+
+    let copies = copy_to_own_at(&lib.dir, &lib.pool, &rels(&[&deck]), &root(CODE))
+        .await
+        .unwrap();
+
+    assert_eq!(copies, [own(CODE, "deck (2).pptx")]);
+    assert_eq!(lib.read(&own(CODE, "deck (2).pptx.pdf")), "%PDF converted");
+    assert_eq!(lib.read(&mine), "%PDF my own");
+}

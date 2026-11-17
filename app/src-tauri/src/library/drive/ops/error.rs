@@ -66,6 +66,10 @@ impl From<DriveError> for String {
 
 impl From<std::io::Error> for DriveError {
     fn from(error: std::io::Error) -> Self {
-        Self::io(error.to_string())
+        let kind = match error.kind() {
+            std::io::ErrorKind::AlreadyExists => Kind::Exists,
+            _ => Kind::Io,
+        };
+        Self::new(kind, error.to_string())
     }
 }

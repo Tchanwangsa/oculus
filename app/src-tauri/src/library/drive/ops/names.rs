@@ -88,6 +88,15 @@ fn truncate(name: &str) -> String {
 /// entry. Existence is the disk's, so a case-only clash counts on a
 /// case-insensitive volume.
 pub fn free_name(dir: &Path, name: &str, folder: bool, ours: impl Fn(&Path) -> bool) -> String {
+    free_name_where(name, folder, |candidate| {
+        let path = dir.join(candidate);
+        std::fs::symlink_metadata(&path).is_err() || ours(&path)
+    })
+}
+
+/// The same steps, taking the first candidate `free` accepts: for a name
+/// whose companions (an Office file's converted PDF) must be free too.
+pub fn free_name_where(name: &str, folder: bool, free: impl Fn(&str) -> bool) -> String {
     let (stem, ext) = match name.rsplit_once('.') {
         Some((s, e)) if !folder && !s.is_empty() => (s, format!(".{e}")),
         _ => (name, String::new()),
@@ -98,8 +107,7 @@ pub fn free_name(dir: &Path, name: &str, folder: bool, ours: impl Fn(&Path) -> b
         } else {
             format!("{stem} ({n}){ext}")
         };
-        let path = dir.join(&candidate);
-        if std::fs::symlink_metadata(&path).is_err() || ours(&path) {
+        if free(&candidate) {
             return candidate;
         }
     }

@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use crate::library::drive::ops::guard::{own_target, Target};
-use crate::library::drive::ops::names::{entry_name, free_name};
+use crate::library::drive::ops::names::{entry_name, free_name, free_name_where};
 use crate::library::layout;
 
 /// A picked folder is read this many folders down.
@@ -177,12 +177,7 @@ fn store_upload(
         .ok_or_else(|| "that file has no name".to_string())?;
     let bytes = std::fs::read(src).map_err(|e| format!("could not read it — {e}"))?;
 
-    let name = free_name(
-        &target.path,
-        &upload_name(target, picked),
-        false,
-        |existing| std::fs::read(existing).is_ok_and(|b| b == bytes),
-    );
+    let name = upload_free_name(data_dir, target, &upload_name(target, picked), &bytes);
     let rel = target.child_rel(&name);
     let path = target.path.join(&name);
     let unchanged = std::fs::read(&path).is_ok_and(|b| b == bytes);
@@ -217,6 +212,28 @@ fn store_upload(
         ImportedFile::new(rel, &file_type, bytes.len() as u64),
         warning,
     ))
+}
+
+/// A name in `target` for these bytes: free, or holding these very bytes
+/// (a re-import keeps its name and its parse). An Office file's converted
+/// PDF (`x.docx.pdf`) must be free too, unless the name is this file's
+/// already, whose PDF it is; so an import never writes over another PDF.
+fn upload_free_name(data_dir: &Path, target: &Target, name: &str, bytes: &[u8]) -> String {
+    free_name_where(name, false, |candidate| {
+        let path = target.path.join(candidate);
+        if std::fs::read(&path).is_ok_and(|b| b == bytes) {
+            return true;
+        }
+        let taken = |path: &Path| std::fs::symlink_metadata(path).is_ok();
+        let rel = target.child_rel(candidate);
+        !taken(&path)
+            && crate::library::paths::artifact_at(
+                data_dir,
+                &rel,
+                crate::library::paths::ArtifactSlot::Converted,
+            )
+            .is_none_or(|pdf| !taken(&pdf))
+    })
 }
 
 /// A picked file's name in the library (`entry_name`: never a dot-name,

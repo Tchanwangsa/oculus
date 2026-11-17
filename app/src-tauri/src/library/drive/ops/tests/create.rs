@@ -66,3 +66,32 @@ async fn a_creator_s_target_must_be_an_own_folder_of_its_subject() {
         Kind::ReadOnly
     );
 }
+
+#[tokio::test]
+async fn a_subject_segment_that_leaves_or_hides_is_refused() {
+    let lib = Lib::new("drive-create-subject").await;
+    for rel in [
+        "courses/../x",
+        "courses/./x",
+        "courses//x",
+        "courses/.hidden/x",
+        "courses/x",
+    ] {
+        let error = create_folder_at(&lib.dir, rel).unwrap_err();
+        assert!(
+            matches!(error.kind, Kind::InvalidName | Kind::ReadOnly),
+            "{rel}: {error:?}"
+        );
+    }
+    assert!(!lib.dir.join("x").exists(), "nothing beside courses/");
+    assert!(!lib.dir.join("courses/x").exists());
+    assert!(!lib.dir.join("courses/.hidden").exists());
+    assert_eq!(
+        create_folder_at(&lib.dir, "courses/GHOST_2026_SM2/x")
+            .unwrap_err()
+            .kind,
+        Kind::NotFound,
+        "a subject folder is never made"
+    );
+    assert!(!lib.dir.join("courses/GHOST_2026_SM2").exists());
+}

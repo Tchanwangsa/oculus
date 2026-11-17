@@ -125,3 +125,29 @@ fn a_new_document_never_lands_on_a_name_already_taken() {
     std::fs::write(dir.join("notes-2.md"), b"some text").unwrap();
     assert_eq!(step_aside(&dir, &name, |_| false), "notes-3.md");
 }
+
+/// An Office import's converted PDF (`deck.pptx.pdf`) never lands on a PDF
+/// the student already has: the import steps aside until both names are free.
+#[test]
+fn an_office_import_never_writes_over_a_pdf_of_its_name() {
+    let data = crate::test_support::Scratch::new("upload-office-pdf");
+    let src = crate::test_support::Scratch::new("upload-office-pdf-src");
+    std::fs::write(src.join("deck.pptx"), b"not really a deck").unwrap();
+    let code = "COMP10001";
+    let target = crate::library::drive::ops::guard::own_target(&data, code, None).unwrap();
+    let mine = target.path.join("deck.pptx.pdf");
+    std::fs::write(&mine, b"%PDF my own").unwrap();
+
+    let outcome = super::uploads::import_into(&data, &target, &[&src.join("deck.pptx")]);
+
+    let file = outcome[0].file.as_ref().expect("the bytes landed");
+    assert_eq!(file.relative_path, format!("courses/{code}/deck (2).pptx"));
+    assert_eq!(std::fs::read(&mine).unwrap(), b"%PDF my own");
+
+    let again = super::uploads::import_into(&data, &target, &[&src.join("deck.pptx")]);
+    assert_eq!(
+        again[0].file.as_ref().unwrap().relative_path,
+        file.relative_path,
+        "identical bytes keep their name"
+    );
+}
