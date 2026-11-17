@@ -933,8 +933,9 @@ writes it into the draft once and drops it from the route.
   its count, folding, in a `margin-top: auto` block of `SideNav`'s `fill`
   column, so it rests at the column's foot while the list is short and
   follows it when long. Under it, "Completed" with its count folds open onto
-  grey one-line rows (the subject glyph in grey, title, age; Reopen on
-  hover), ten then Show 25 more. Folds are kept with the subject groups'
+  grey one-line rows (the subject glyph in grey, title, age; on hover the
+  age gives way to a Reopen icon with a tooltip, and the title fades out
+  under it as a tab's title does under its ×), ten then Show 25 more. Folds are kept with the subject groups'
   (`oculus-chat-groups-collapsed`); the Completed folds start closed, so
   their keys there mean open (`order.ts`).
   **Subject view** (`SubjectBody`): threads grouped by subject, groups in
@@ -966,7 +967,9 @@ writes it into the draft once and drops it from the route.
   or Failed, dimmed otherwise, and always a step brighter and larger than
   the preview (`threads/rowType.ts`, [ui.md](./ui.md)). Hover shows "✓
   Complete" and a ⋯ menu (open in a new tab, Complete, with ⌘E beside it on
-  the open chat, and delete, which arms the row's inline confirm). While the column folds,
+  the open chat, and delete, which arms the row's inline confirm). They have
+  no surface of their own: the line under them fades out at its end and
+  hides its status or age while they show (`UNDER_ACTIONS`). While the column folds,
   the subject glyph stays longest with the status dot on its corner.
 - Bare `/chat` is a new thread: the composer docked at the bottom as in a
   thread, and above it the headline that names the subject (`DraftHero`) over

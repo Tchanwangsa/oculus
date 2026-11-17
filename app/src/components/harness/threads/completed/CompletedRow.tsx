@@ -2,6 +2,7 @@ import { memo } from "react";
 import { ArrowCounterClockwise, Books } from "@phosphor-icons/react";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { SIDE_NAV_FOLDS } from "@/components/ui/layout/SideNav";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Subject } from "@/lib/db";
 import { sqliteUtcToMs } from "@/lib/format/format";
 import { shortAge } from "@/lib/activity/recents";
@@ -10,7 +11,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * A completed thread as one grey line (T3): its subject's glyph in grey, its
- * title and age. Hover swaps the age for Reopen; the row itself opens the
+ * title and age. Hover swaps the age for a Reopen icon, and the title fades
+ * out under it as a tab's title does under its ×. The row itself opens the
  * chat, which stays completed until a message or Reopen.
  */
 export const CompletedRow = memo(function CompletedRow({
@@ -54,27 +56,46 @@ export const CompletedRow = memo(function CompletedRow({
             {subject ? <SubjectIcon code={subject.code} size={13} mono /> : <Books size={13} />}
           </span>
         )}
-        <span className={cn("min-w-0 flex-1 truncate", SIDE_NAV_FOLDS)}>{title}</span>
+        <span
+          className={cn(
+            "min-w-0 flex-1 overflow-hidden whitespace-nowrap [text-overflow:clip]",
+            "[mask-image:linear-gradient(to_right,#000_calc(100%_-_22px),transparent)]",
+            "group-hover/done:[mask-image:linear-gradient(to_right,#000_calc(100%_-_36px),transparent_calc(100%_-_16px))]",
+            "group-has-[[data-reopen]:focus-visible]/done:[mask-image:linear-gradient(to_right,#000_calc(100%_-_36px),transparent_calc(100%_-_16px))]",
+            SIDE_NAV_FOLDS,
+          )}
+        >
+          {title}
+        </span>
         {ms != null && (
-          <span className={cn("shrink-0 text-[11.5px] tabular-nums group-hover/done:invisible", SIDE_NAV_FOLDS)}>
+          <span
+            className={cn(
+              "shrink-0 text-[11.5px] tabular-nums group-hover/done:hidden group-has-[[data-reopen]:focus-visible]/done:hidden",
+              SIDE_NAV_FOLDS,
+            )}
+          >
             {shortAge(ms)}
           </span>
         )}
       </button>
-      <button
-        type="button"
-        title="Reopen thread"
-        aria-label={`Reopen ${title}`}
-        tabIndex={collapsed ? -1 : undefined}
-        onClick={() => onReopen(t.id)}
-        className={cn(
-          "absolute top-1/2 right-1.5 flex h-[22px] -translate-y-1/2 items-center gap-1 rounded-[5px] px-1.5 text-[11.5px] text-foreground/80 opacity-0 outline-none transition-opacity will-change-[opacity] hover:bg-sidebar-item-hover hover:text-foreground focus-visible:opacity-100 group-hover/done:opacity-100",
-          "group-data-[collapsed=true]/nav:pointer-events-none",
-        )}
-      >
-        <ArrowCounterClockwise size={12} weight="bold" className="shrink-0" />
-        Reopen
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            data-reopen
+            aria-label={`Reopen ${title}`}
+            tabIndex={collapsed ? -1 : undefined}
+            onClick={() => onReopen(t.id)}
+            className={cn(
+              "absolute top-1/2 right-1.5 flex size-[22px] -translate-y-1/2 items-center justify-center rounded-[5px] text-muted-foreground opacity-0 outline-none transition-opacity will-change-[opacity] hover:bg-sidebar-item-active hover:text-foreground focus-visible:opacity-100 group-hover/done:opacity-100",
+              "group-data-[collapsed=true]/nav:pointer-events-none",
+            )}
+          >
+            <ArrowCounterClockwise size={12} weight="bold" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">Reopen</TooltipContent>
+      </Tooltip>
     </div>
   );
 });

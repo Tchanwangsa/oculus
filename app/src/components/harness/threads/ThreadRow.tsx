@@ -12,7 +12,16 @@ import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { cn } from "@/lib/utils";
 import { ConfirmDelete } from "./parts";
 import { RowMenu } from "./RowMenu";
-import { ROW_META, ROW_PREVIEW, ROW_TITLE, TITLE_ATTENTION, TITLE_READ, TITLE_READ_ACTIVE } from "./rowType";
+import {
+  HIDDEN_UNDER_ACTIONS,
+  ROW_META,
+  ROW_PREVIEW,
+  ROW_TITLE,
+  TITLE_ATTENTION,
+  TITLE_READ,
+  TITLE_READ_ACTIVE,
+  UNDER_ACTIONS,
+} from "./rowType";
 import { ATTENTION, runStartedMs, STATUS_LOOK, StatusPill, threadRowStatus } from "./StatusPill";
 
 /**
@@ -21,7 +30,8 @@ import { ATTENTION, runStartedMs, STATUS_LOOK, StatusPill, threadRowStatus } fro
  * Subject view, whose group header names the subject, drops line one and
  * moves the right slot onto the title's line. A title is bright and medium
  * while the thread wants the student (`ATTENTION`), dimmed otherwise
- * (`rowType`). Hover shows "✓ Complete" and the ⋯ menu. While the column
+ * (`rowType`). Hover shows "✓ Complete" and the ⋯ menu on no surface of their
+ * own: the line under them fades out and hides its status. While the column
  * folds, the subject glyph stays longest, with the status dot on its corner.
  */
 export const ThreadRow = memo(function ThreadRow({
@@ -61,7 +71,11 @@ export const ThreadRow = memo(function ThreadRow({
   const title = t.title?.trim() || "Untitled";
   const status = threadRowStatus(t, running);
   const attention = status != null && ATTENTION.has(status);
-  const right = <RightSlot thread={t} status={status} />;
+  const right = (
+    <span className={cn("flex shrink-0", HIDDEN_UNDER_ACTIONS)}>
+      <RightSlot thread={t} status={status} />
+    </span>
+  );
   return (
     <div
       data-thread-row={t.id}
@@ -80,7 +94,7 @@ export const ThreadRow = memo(function ThreadRow({
         className="flex w-full min-w-0 flex-col px-2.5 pt-1.5 pb-[7px] text-left"
       >
         {showSubject && (
-          <span className={cn("flex h-[18px] w-full min-w-0 items-center gap-1.5", ROW_META)}>
+          <span className={cn("flex h-[18px] w-full min-w-0 items-center gap-1.5", ROW_META, UNDER_ACTIONS)}>
             <span
               className="relative flex shrink-0"
               title={subject ? displayName(subject.name, subject.code) : "Not scoped to a subject"}
@@ -95,7 +109,14 @@ export const ThreadRow = memo(function ThreadRow({
             <span className={cn("flex shrink-0", SIDE_NAV_FOLDS)}>{right}</span>
           </span>
         )}
-        <span className={cn("flex h-[21px] w-full min-w-0 items-center gap-1.5", ROW_TITLE, SIDE_NAV_FOLDS)}>
+        <span
+          className={cn(
+            "flex h-[21px] w-full min-w-0 items-center gap-1.5",
+            ROW_TITLE,
+            SIDE_NAV_FOLDS,
+            !showSubject && UNDER_ACTIONS,
+          )}
+        >
           <span
             className={cn(
               "min-w-0 flex-1 truncate",
@@ -146,14 +167,14 @@ export const ThreadRow = memo(function ThreadRow({
         ) : (
           <div
             data-row-actions
-            className="flex items-center gap-px rounded-md border border-border-subtle bg-popover p-px opacity-0 shadow-xs transition-opacity will-change-[opacity] group-hover/thread:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100"
+            className="flex items-center gap-px opacity-0 transition-opacity will-change-[opacity] group-hover/thread:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100"
           >
             <button
               type="button"
               title="Complete thread"
               aria-label={`Complete ${title}`}
               onClick={() => onComplete(t.id)}
-              className="flex h-[22px] items-center gap-1 rounded-[5px] px-1.5 text-[12px] text-muted-foreground outline-none transition-colors hover:bg-sidebar-item-hover hover:text-foreground focus-visible:text-foreground"
+              className="flex h-[22px] items-center gap-1 rounded-[5px] px-1.5 text-[12px] text-muted-foreground outline-none transition-colors hover:bg-sidebar-item-active hover:text-foreground focus-visible:text-foreground"
             >
               <Check size={12} weight="bold" className="shrink-0" />
               Complete

@@ -6,6 +6,7 @@ import { CompletedList } from "@/components/harness/threads/completed/CompletedL
 import { withCompletedGroups } from "@/components/harness/threads/completed/groups";
 import { completedTotal } from "@/components/harness/threads/completed/StatusCompleted";
 import { SearchResults } from "@/components/harness/threads/search/SearchResults";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const sqlite = (msAgo: number) => new Date(Date.now() - msAgo).toISOString().slice(0, 19).replace("T", " ");
 const thread = (id: number, patch: Partial<HarnessThread> = {}) =>
@@ -15,15 +16,18 @@ const bySubject = new Map([[3, subject]]);
 
 const list = (page: CompletedPage) =>
   renderToStaticMarkup(
-    <CompletedList page={page} bySubject={bySubject} showSubject activeId={null} collapsed={false} onOpen={() => {}} onReopen={() => {}} onMore={() => {}} />,
+    <TooltipProvider>
+      <CompletedList page={page} bySubject={bySubject} showSubject activeId={null} collapsed={false} onOpen={() => {}} onReopen={() => {}} onMore={() => {}} />
+    </TooltipProvider>,
   );
 
 describe("Completed rows", () => {
-  test("one grey line each with its age, Reopen on hover, and the next page's size", () => {
+  test("one grey line each with its age, a Reopen icon on hover with no label text, and the next page's size", () => {
     const html = list({ threads: [thread(1), thread(2)], total: 40, nextOffset: 2 });
     expect(html).toContain("Thread 1");
     expect(html).toContain(">4d<");
-    expect(html).toContain('title="Reopen thread"');
+    expect(html).toContain('aria-label="Reopen Thread 1"');
+    expect(html).not.toContain(">Reopen<");
     expect(html).toContain("text-muted-foreground");
     expect(html).toMatch(/Show <span class="tabular-nums">25<\/span> more/);
   });

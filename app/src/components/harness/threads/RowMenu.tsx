@@ -60,7 +60,7 @@ export function RowMenu({
           aria-label={`Actions for ${title}`}
           title="More"
           className={cn(
-            "flex h-[22px] w-6 items-center justify-center rounded-[5px] text-muted-foreground outline-none transition-colors hover:bg-sidebar-item-hover hover:text-foreground data-[state=open]:text-foreground",
+            "flex h-[22px] w-6 items-center justify-center rounded-[5px] text-muted-foreground outline-none transition-colors hover:bg-sidebar-item-active hover:text-foreground data-[state=open]:text-foreground",
             className,
           )}
         >
