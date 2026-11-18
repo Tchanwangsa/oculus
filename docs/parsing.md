@@ -120,13 +120,12 @@ was still progressing.
   so its byte total is the sum. Only the cloud uploads; the local engine
   reports `processing` alone, and an absent `phase` means `processing`.
 
-**Concurrency belongs to each engine.** `sync/phases/output.rs` spawns one detached thread
-per PDF. Cloud threads park on the batcher's condvar until their window
-closes. The local client holds one permit (`PARSE_GATE`) because `mineru-api`
-reports `max_concurrent_requests: 1` — a second request would only queue
-inside that server on a socket of ours. It is taken before the first progress
-report, so a file waiting for it still reads as queued. A gate there
-would keep cloud files out of the window they are meant to share.
+**Concurrency belongs to each engine.** `sync/phases/output.rs` spawns one
+detached thread per PDF. Cloud threads wait on the batcher's condition
+variable. The local client's `PARSE_GATE` grants one permit because
+`mineru-api` serves one request at a time. The client holds the permit from
+before its first progress report until the result ZIP is off the socket.
+Waiters stay queued in File Activity and consume no server connection.
 
 **One parse per PDF.** A sync, the sweep and "Parse now" can ask for the same
 file at once. `parse::InFlight` holds each PDF path while its parse runs; a
@@ -173,24 +172,22 @@ can and without artifacts always:
 
 ## A waiting parse can be pushed to the front
 
-`parse_prioritise(relativePath)` gives the PDF the next `parse::Priority`
-rank. Ranks are taken in press order, so several pushed files keep it, and a
-file never pushed sorts after every pushed one in arrival order. Pressing
-again moves a file behind the others pushed. Only *who goes next* changes:
+`parse_prioritise(relativePath)` resolves the same PDF key used by
+`InFlight` and `Skips` and gives it the next in-memory `Priority` rank.
+Prioritised files keep their press order. The rank is cleared when the
+parse ends. Active work continues while rank determines which waiter goes
+next.
 
-- **Cloud batcher**: a batch is chosen only once an in-flight slot is free
-  (`await_window`, then `take_batch`), so a press made while every slot is busy
-  still counts. The batch is filled best-ranked first, a pushed large file
-  leaves alone first, and the window's key is the first job's.
-- **Upload order**: `run_batch` takes the next file to upload one at a time
-  (`take_next_upload`): pushed files by rank, then smallest first. A file whose
-  upload is waiting behind another is therefore still movable.
-- **Local engine**: `PARSE_GATE` is a `Gate` that seats the best-ranked waiter
-  when the server frees.
-
-A running batch, upload or request is never interrupted. The rank is dropped
-when the file's parse ends, however it ends, and lives in memory only. It adds
-no timeout, no billed call and no engine fallback.
+- **Cloud batches** are selected when an in-flight slot frees. Files above
+  the solo-upload threshold go first, ranked within that group. For a
+  regular batch, the best-ranked job determines the compatibility key.
+  Compatible jobs fill the batch by rank, then arrival order.
+- **Cloud uploads** are picked individually as each PUT finishes. Ranked
+  files go first, followed by the smallest waiting files, so **Prioritise**
+  still affects a file waiting to upload inside a submitted batch.
+- **Local requests** get the permit in rank order, with arrival order as
+  the tie-breaker. The gate reads the ranks when it chooses the next
+  waiter.
 
 ## `.pages.json` is the only evidence a parse finished
 
