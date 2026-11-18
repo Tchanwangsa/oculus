@@ -1,6 +1,7 @@
 import { useRef, type KeyboardEvent } from "react";
 import type { WeekProgress } from "@/hooks/data/overview";
 import type { SubjectWeeks } from "@/lib/weeks";
+import { weekEdge } from "./format";
 import { WeekChip } from "./WeekChip";
 
 const STEP: Record<string, number> = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
@@ -40,6 +41,7 @@ export function WeekStrip({ strip, progress, selected, onSelect }: {
           key={week.key}
           index={i}
           week={week}
+          edge={weekEdge(i, strip.weeks.length)}
           progress={byKey.get(week.key)}
           current={i === strip.current}
           future={strip.current >= 0 && i > strip.current}

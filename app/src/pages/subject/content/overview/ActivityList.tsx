@@ -2,17 +2,19 @@ import type { ActivityItem } from "@/hooks/data/overview";
 import { Badge } from "@/components/ui/badge";
 import { ListCard } from "@/components/ui/layout/PageParts";
 import { activityGlyph } from "./glyphs";
-import { weekday } from "./format";
+import { rowDay } from "./format";
 import type { OverviewOpener } from "./open";
 import { ListRow, Quiet, RowDate, RowTitle } from "./rows";
 
 const UNTIMETABLED = "Not in your timetable: another stream, or a recording with no class";
 
 /** The selected week's new and changed material, newest first. */
-export function ActivityList({ items, opener, empty }: {
+export function ActivityList({ items, opener, empty, open }: {
   items: ActivityItem[];
   opener: OverviewOpener;
   empty: string;
+  /** An edge week spanning many, so rows carry dates, not weekdays. */
+  open: boolean;
 }) {
   if (items.length === 0) return <Quiet>{empty}</Quiet>;
   return (
@@ -41,7 +43,7 @@ export function ActivityList({ items, opener, empty }: {
             >
               {badge}
             </Badge>
-            <RowDate className="w-8 text-right">{weekday(item.date)}</RowDate>
+            <RowDate className={open ? "min-w-8 text-right" : "w-8 text-right"}>{rowDay(item.date, open)}</RowDate>
           </ListRow>
         );
       })}
