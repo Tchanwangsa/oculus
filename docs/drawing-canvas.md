@@ -27,7 +27,7 @@ page.
 | Zoom ranges | `app/src/lib/canvas/zoom.ts` |
 | Content transactions (undo steps and shared edits) and rebasing | `app/src/lib/canvas/collaboration.ts`, `app/src/lib/canvas/clientReconciliation.ts` |
 | Device-local drawing preferences (the eraser's settings) | `app/src/lib/canvas/toolPreferences.ts` |
-| Partial erasing: cutting strokes along the eraser's sweep | `app/src/lib/canvas/erase.ts` |
+| Eraser controls and cuts along the pointer sweep | `app/src/components/canvas/inspector/EraserControls.tsx`, `app/src/lib/canvas/erase.ts` |
 | What a selection box selects (release and live preview) | `app/src/lib/canvas/boxSelect.ts` |
 | Selection by a closed lasso loop | `app/src/lib/canvas/lasso.ts` |
 | Freehand pen geometry and device-local ink presets | `app/src/lib/canvas/pens.ts`, `app/src/lib/canvas/inkPresets.ts`, `app/src/components/canvas/CanvasPresetBar.tsx` |
@@ -160,25 +160,21 @@ locked so a whiteboard's cached geometry is reused.
 
 ## Freehand ink shares its pen geometry across exports
 
-A freehand element keeps its path, style and optional pen. The ball pen uses
-the regular smoothed stroke, including when the field is absent. Canvas2D and
-SVG use the same pen definitions. Fountain and brush pens fill an outline
-with varying width, while pencil and sketch use overlapping passes.
-Highlighter marks are freehand strokes with a round or flat marker pen and
-an element opacity.
+Pen and Highlighter both create freehand elements. Canvas2D and SVG use
+the same definitions in `pens.ts`. Ball and round marker draw a solid line
+with round ends. Flat marker uses square ends and bevelled corners. Dashed
+and dotted pens use the shape dash patterns, and pencil and sketch layer
+offset passes. Fountain, brush and Chinese pens fill an outline whose width
+varies with direction or distance along the path. A missing `pen` draws as
+ball. The marker's opacity is an element style, so each mark follows the
+drawing's ordinary layer order.
 
-The Pen and Highlighter tools each draw with a preset (`inkPresets.ts`): four
-pens and three highlighters, each remembering its pen, colour, width and
-opacity, with one in use per tool. The top bar shows them as dots; a tap
-switches all four fields together. Changing the look with an ink tool chosen
-and nothing selected edits the preset in use; restyling a selected stroke
-changes only that stroke, and selecting a stroke changes neither a preset nor
-the look of the next shape. The Pen tool's pen menu offers the eight pens and
-the Highlighter's the two markers, with fluorescent colour picks
-(`MARKER_PICKS`). Presets are kept on the device in localStorage; a damaged
-save falls back to the defaults. Stroke width is a number from 0.5 to 30 (60
-for a marker) in steps of 0.5, set by a slider that previews while dragged or
-typed exactly (`inspector/StrokeWidthControl.tsx`).
+The top bar shows four Pen presets or three Highlighter presets as dots
+while the tool is active and there is no selection. Each dot switches the
+pen, colour, width and opacity together. Style changes in this state update
+the active preset. Restyling a selected stroke leaves the presets intact.
+Presets and the active slot for each tool live in localStorage
+(`inkPresets.ts`), with defaults for invalid saved values.
 
 ## Pages exist only in a notebook
 
@@ -273,10 +269,11 @@ template and size, or pages from a library PDF (`CanvasImageDialog` with
 `pdfPages`); the companion has no library, so there it adds the page straight
 away. Each thumbnail's ⋯ menu adds a page before or after, duplicates,
 changes the template or size (A4 and Letter, portrait or landscape) and
-deletes. **Apply to every page** copies that page's template to the whole
-notebook as one undo step. Dragging a thumbnail reorders the pages on pointer
-events, so a mouse lifts after a few pixels and a finger or Pencil after a
-short hold, and the list scrolls near its edges (`usePageReorder`). On a
+deletes. **Apply to every page** in the **Template** submenu copies that
+page's template to the whole notebook as one undo step. Dragging a
+thumbnail reorders the pages on pointer events. A mouse lifts after a few
+pixels and a finger or Pencil after a short hold. The list scrolls near its
+edges (`usePageReorder`). On a
 narrow canvas the sidebar lies over the drawing like a drawer, behind it a dim
 scrim that closes it when pressed.
 
@@ -342,21 +339,22 @@ only those to `canvas_write_page_snapshots`. A canvas gets none of this.
 ## The pointer stays local and Rust answers geometry queries
 
 The WebView owns input and Canvas2D drawing. The scene paints gesture
-overrides on an animation frame. During freehand drawing it skips the active
-stroke. Coalesced samples and the release point append to the stroke's own
-points array. On release the scene paints the committed element and clears
-the live layer in the same frame. The committed elements array changes at a
-gesture boundary. A cached Path2D per immutable element avoids rebuilding
-its path during panning.
+overrides on an animation frame. Freehand samples paint into the live layer
+directly from the pointer handler, and the scene skips that stroke by ID
+during a repaint. If either live canvas lacks a 2D context, the scene paints
+the stroke with the other gesture overrides. On release the scene paints
+the committed element and clears the live layer in the same frame. The
+committed elements array changes at a gesture boundary. A cached Path2D per
+immutable element avoids rebuilding its path during panning.
 
-The live layer sits between the scene and the editor controls. For the ball
-pen and round marker, one canvas accumulates settled quadratic segments and
-the other redraws the tip. The layer applies the stroke's opacity once, so a
-marker can cross itself without darkening. Other nibs, dashes, multi-pass
-pens, flat markers and stroke colours with alpha use the scene's element
-renderer on the tip canvas. A notebook clips both canvases to the same page
-as the committed stroke, replaying the ink if its growing bounds change
-which page owns it. All three backing stores use the drawing canvas's measured
+The live layer sits between the scene and the editor controls. For a ball
+pen or round marker with an opaque hex colour, one canvas accumulates
+settled quadratic segments and the other redraws the tip. The layer
+applies the stroke's opacity once, so a marker can cross itself without
+darkening. Other strokes use the scene's element renderer to repaint the
+whole stroke on the tip canvas. A notebook clips both canvases to the same
+page as the committed stroke, replaying the ink if its growing bounds
+change which page owns it. All three backing stores use the drawing canvas's measured
 rectangle and device pixel ratio. A resize or camera move replays the ink
 with the new transform.
 
@@ -561,15 +559,6 @@ state.
 
 ## Tools and exports share the same geometry
 
-The editor supports selection, marquee, lasso, move and resize; rectangle,
-ellipse, diamond, line, arrow, pen, highlighter and text tools; an eraser;
-area capture; matrix and axes figures; undo/redo;
-duplicate and copy/paste; layer order; grid, pan, zoom and fit. A single
-selected line or arrow edits its points instead of resizing
-([below](#arrows-are-sharp-curved-or-elbow-paths)), so it has no dashed
-selection frame or corner handles, only its point handles (`selectionFrame`
-in `render.ts`); any other selection, including several lines, has the frame.
-
 A selection box includes an element only when its entire bounds fit inside,
 in either drag direction. While it is dragged, each element its release would
 add is outlined in a lighter selection colour; the preview and the release ask
@@ -594,8 +583,9 @@ keeps the selection Select made.
 
 Corner handles scale a selection proportionally, including every image in a
 group. The four edge handles stretch only width or height; Shift on an edge
-scales proportionally around the opposite edge's midpoint. Single lines and
-arrows keep their point-editing handles.
+scales proportionally around the opposite edge's midpoint. A single line or
+arrow has [point-editing handles](#arrows-are-sharp-curved-or-elbow-paths) in
+place of the selection frame (`selectionFrame` in `render.ts`).
 
 The canvas root scopes shortcuts and participates in native Edit menu
 routing. A visible note editor must not claim undo while a canvas owns focus.
@@ -606,9 +596,8 @@ the active pointer and suppress WebKit text selection: `installBrowserSelectionG
 on the canvas root cancels `selectstart` and `contextmenu` outside text fields and
 native touch defaults on the drawing element. In the companion these touch
 listeners attach to the page body, with a target check for this surface's canvas,
-so touch tracking covers a stable ancestor across canvas repaints. Toolbar taps
-and other surfaces keep their defaults. The desktop listeners stay on the editor
-root. The companion opts into
+so touch tracking covers a stable ancestor across canvas repaints. The
+desktop listeners stay on the editor root. The companion opts into
 `suppressNativeGestures` on `CanvasSurface`: Safari's `gesturestart`,
 `gesturechange` and `gestureend` defaults are cancelled there so native
 pinch/rotation does not compete with the Pointer Events camera. The desktop
@@ -661,17 +650,18 @@ neither cancels nor redirects a Pencil stroke.
 
 ## The eraser takes whole elements or cuts strokes
 
-With the eraser chosen, the style bar holds its settings, kept for this device
-only in localStorage (`toolPreferences.ts`; a missing or unreadable field falls
-back to its default):
+With the eraser active, `EraserControls` displays its settings in the style
+bar. `toolPreferences.ts` keeps them in localStorage and supplies defaults
+for missing or unreadable values.
 
 - **Mode.** Whole stroke (the default) removes the topmost element within 10
   screen pixels of each pointer sample. Partial cuts freedraw strokes: every
   part within the eraser's radius plus half the stroke's width of the segment
   between consecutive samples, coalesced ones included, goes, so a fast sweep
   skips nothing. A stroke is subdivided to a quarter of the radius first, so a
-  cut lands that close to the eraser's edge (`erase.ts`). Shapes, lines, arrows
-  and text the sweep touches go whole.
+  cut lands that close to the eraser's edge (`erase.ts`). In a notebook each
+  cut is clipped to the stroke's owning page, preserving samples hidden
+  outside it. Shapes, lines, arrows and text the sweep touches go whole.
 - **Size**, shown only in Partial: a radius of 6, 12 (the default) or 24 screen
   pixels. A thin ring of that size follows the pointer while erasing and while
   a mouse or Pencil hovers.
@@ -683,16 +673,15 @@ A cut stroke keeps its ID for its first remaining piece; each further piece is
 a new freedraw element directly above it in layer order (`applyElementChanges`
 with stacked additions, sent with `afterId`). A piece is normalised as a new
 stroke is, x/y at its first point and `width`/`height` to its last, and holds
-only the stroke's own points plus the two at each cut. A piece shorter than 2
-screen pixels or half the stroke's width is dropped, and a stroke with nothing
-left is deleted. Images and locked elements are never erased.
+only the stroke's own points plus cut endpoints. A piece must reach the
+larger of 2 screen pixels and half the stroke's width. If no piece survives,
+the stroke is deleted. Images and locked elements are never erased.
 
-Nothing disappears mid-gesture. What the erase will remove is painted as a
-ghost at a quarter of its opacity (`ghosts` in `paintCanvas`), a cut stroke's
-kept pieces as they will be, and hit testing passes over what is ghosted. The
-release commits the whole gesture as one undo step through `commitChanges`, so
-it reaches a shared canvas like any edit; Escape, a cancelled pointer or a
-second finger restores everything.
+During the gesture, the scene paints erased parts at a quarter of their
+opacity (`ghosts` in `paintCanvas`) and the kept pieces at full style opacity.
+The eraser passes over the ghosts. Release commits the whole gesture as one
+undo step through `commitChanges`. Escape, a cancelled pointer or a second
+finger discards the preview.
 
 ## Undo is per pane and touches only its own edits
 
@@ -854,12 +843,11 @@ textarea, Canvas2D, SVG and the width measurer use the same stacks.
 
 ## The bars are docked beside the drawing
 
-Nothing floats over the drawing but a notebook's page bar, the capture and
-crop chrome and the tool hint. `CanvasSurface` is a row: the tool rail, the
-Pages sidebar when it is open, then the editor root, a column of the top bar
-and the drawing area. The rail and the sidebar sit outside the root, so the
-canvas's keys, clipboard and focus stay the drawing's; a rail button hands
-focus back to the root.
+`CanvasSurface` docks the tool rail at the left and places the top bar
+above the drawing. The notebook's Pages sidebar opens between the rail and
+the editor root. The sidebar and rail sit outside the root, which scopes
+shortcuts and clipboard commands. Tool and figure buttons hand focus back
+to the root.
 
 - **The rail** (`CanvasToolbar`) is a 52px column (`--canvas-rail-width`) in
   five groups: Select, Lasso, Grab, Capture area; Pen, Highlighter, Eraser;
@@ -867,25 +855,23 @@ focus back to the root.
   axes. It scrolls when the pane is shorter than the column. Each entry's key
   is shown on it and in its tooltip: S L G C, P H E, T I M, R O D A N, Y Z;
   Shift+G toggles a canvas's grid. Grab is the `hand` tool. Image opens the
-  image picker; Matrix and the axes drop a figure at the centre of the view
-  (on the page in view in a notebook) and return to Select: nine squares in
-  the current shape style, or arrows in x red, y green and z blue, selected as
-  one undo step (`templates.ts`). They are ordinary rectangles and arrows.
-  Crop has no entry: it is the style bar's action for a selected image.
-  Besides the tool keys, `1` fits, `0` resets the zoom, `+` and `-` zoom, the
-  arrows nudge a selection and ⌘[ ⌘] step its layer.
-- **The rail's drawings** are the one place the app draws its own icons
-  rather than using Phosphor (`toolArt/`): an outline in the muted colour at
-  rest, flat colour with a shaded side on a brand tint while chosen.
+  image picker. Matrix inserts nine squares in the current shape style,
+  and the axes insert arrows in x red, y green and z blue. They are ordinary
+  rectangles and arrows placed at the centre of the view, shifted onto the
+  page in view if the centre falls on the notebook desk. Each insertion
+  selects the figure and returns to Select in one undo step (`templates.ts`).
+  `1` fits, `0` sets zoom to 100% within the zoom limits, and `+` and `-`
+  zoom. The arrows nudge a selection by one unit, or ten with Shift. ⌘[ and
+  ⌘] step its layer, and adding Shift moves it to the back or front.
+- **The rail's tool drawings** (`toolArt/`) show a muted outline at rest
+  and flat colour with a shaded side on a tinted background while selected.
 - **The top bar** holds the style controls on the left
   ([below](#the-inspector-shows-what-applies-to-the-selection)) and, on the
   right, undo and redo, zoom (out, the percentage, in, fit), the grid on a
-  canvas, export and the shortcuts list. Its popovers open downward.
-- **The drawing area** holds the canvas, the drop preview, the text overlay,
-  the empty state, capture and crop chrome, the hint, error notices (top
-  right) and a notebook's page bar (bottom centre). The hook sizes the canvas
-  and measures pointers from the canvas's own box, and image drops are
-  measured there too, so the bars never count as drawing space.
+  canvas, export and the shortcuts list.
+- **The drawing area** holds the scene, live ink, overlays and the
+  notebook's bottom page bar. The scene canvas's box sets the dimensions
+  and coordinates for painting, pointer events and image drops.
 - **Narrow panes give up parts of the top bar** by the editor root's width
   (`canvas.css`): the zoom percentage and fit at 1180px or less, the pen's
   name at 1100px, the sixth colour pick and the hint at 1000px, every pick but
@@ -914,25 +900,24 @@ no undo step (`patchElementStyle`, `stylePatchChanges`). A font size or family
 change re-measures standalone text and re-runs the grow rule on labelled
 shapes, and an arrow type change reshapes the arrow (`restyleElement`,
 `retypeArrow`). A patch also becomes the default for the next
-element of those kinds, and selecting an element adopts its look as the
-default. Opacity previews live while dragging and commits one undo step on
-release.
+element of those kinds. Clicking a non-ink element adopts its look as the
+default. Freehand ink uses the active tool preset. Opacity previews while
+dragging and commits one undo step on release.
 
 The inspector is `CanvasStyleBar.tsx`, the left half of the top bar
 ([above](#the-bars-are-docked-beside-the-drawing)), shown when sections apply,
 an ink tool is chosen or the eraser is. With the eraser it holds the eraser's
 settings (`inspector/EraserControls.tsx`, [above](#the-eraser-takes-whole-elements-or-cuts-strokes)).
-Left to right, divided into groups: the Pen's or Highlighter's presets
-(`CanvasPresetBar.tsx`, with an ink tool and nothing selected), the stroke
-colour, the pen menu (`inspector/PenMenu.tsx`: a sample of each pen drawn by
-the canvas's own geometry), Fill as one bucket-and-swatch button, the stroke
-width slider and field, and the font size (S, M, L, XL and an exact-size
-field). The other sections (font family and alignment, stroke style, sketch,
-edges, arrow type, arrowheads, opacity) sit in one column behind the More
-styles button (`inspector/MoreStyles.tsx`). With a selection the bar ends with
-its actions (`inspector/SelectionActions.tsx`): Crop image for a lone image,
-Layer, which opens the layer moves, and Delete. Every popover opens below the
-bar.
+The inline controls include the ink presets, stroke colour, pen menu, Fill,
+stroke width and font size. The pen menu draws samples with the canvas's
+pen geometry and offers eight writing pens or two markers according to the
+current pen. The width slider previews while dragged. It and the numeric
+field use 0.5-unit steps from 0.5 to 30, or up to 60 for a marker. Font
+family and alignment, stroke style, sketch, edges, arrow type, arrowheads
+and opacity sit behind **More styles** (`inspector/MoreStyles.tsx`). With a
+selection the bar ends with its actions (`inspector/SelectionActions.tsx`).
+**Crop image** appears for a lone image. **Layer** opens the layer moves,
+and **Delete** removes the selection. Popovers open below the bar.
 
 The page bar and the style popovers share `.canvas-chrome` in `canvas.css`: a
 translucent, blurred card that turns nearly opaque under the pointer or
