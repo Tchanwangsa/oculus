@@ -354,3 +354,25 @@ fn two_drawings_of_one_name_keep_their_own_old_paths() {
     assert_eq!(moved(&d, &s("a (2).canvas")), Some(s("a (2).whiteboard")));
     assert_eq!(moved(&d, &s("uploads/b.pdf")), Some(s("b.pdf")));
 }
+
+#[test]
+fn an_old_librarys_gone_drawing_keeps_a_rule_through_both_steps() {
+    let d = library("whiteboard-legacy-gone");
+    // Row 13 is `canvases/board.canvas`; its file is gone.
+    std::fs::remove_file(d.join(s("canvases/board.canvas"))).unwrap();
+    at_startup(&d).unwrap();
+    assert_eq!(
+        files_row(&d, 13),
+        (
+            s("board.whiteboard"),
+            "board.whiteboard".into(),
+            "whiteboard".into(),
+            "whiteboard".into()
+        )
+    );
+    assert_eq!(
+        moved(&d, &s("canvases/board.canvas")),
+        Some(s("board.whiteboard"))
+    );
+    assert_eq!(moved(&d, &s("board.canvas")), Some(s("board.whiteboard")));
+}

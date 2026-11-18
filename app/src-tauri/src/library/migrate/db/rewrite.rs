@@ -13,6 +13,7 @@ use crate::library::layout;
 use crate::library::migrate::journal::{Plan, LAYOUT};
 use crate::library::migrate::links::Linker;
 use crate::library::migrate::rules::Rules;
+use crate::library::migrate::whiteboard;
 
 /// The settings row that says the database is in the new layout.
 const LAYOUT_SETTING: &str = "library_layout";
@@ -85,15 +86,16 @@ pub async fn rewrite(
     Ok(counts)
 }
 
-/// `files.relative_path`, and the `category` its new place gives it; the
-/// `filename` too when a clash renamed the file. Returns the moved
+/// `files.relative_path`, and the `category` its new place gives it, except
+/// a drawing's `canvas`, which the whiteboard rename reads next (gone files
+/// included) and settles; the `filename` too when a clash renamed the file. Returns the moved
 /// markdown rows (id → old, new) whose saved versions hold links.
 async fn files(
     tx: &mut Tx<'_>,
     rules: &Rules,
     counts: &mut DbCounts,
 ) -> Result<HashMap<i64, (String, String)>, String> {
-    let rows = sqlx::query("SELECT id, relative_path, filename FROM files")
+    let rows = sqlx::query("SELECT id, relative_path, filename, category FROM files")
         .fetch_all(&mut **tx)
         .await
         .map_err(err("read files"))?;
@@ -104,7 +106,11 @@ async fn files(
         let Some(new) = rules.map(&old).filter(|n| *n != old) else {
             continue;
         };
-        let category = layout::split_course(&new).map(|(_, inner)| layout::category_of(inner));
+        let drawing = row.get::<Option<String>, _>("category").as_deref()
+            == Some(whiteboard::LEGACY_CATEGORY);
+        let category = layout::split_course(&new)
+            .filter(|_| !drawing)
+            .map(|(_, inner)| layout::category_of(inner));
         let old_base = old.rsplit('/').next().unwrap_or_default();
         let new_base = new.rsplit('/').next().unwrap_or_default();
         let filename = if filename == old_base {

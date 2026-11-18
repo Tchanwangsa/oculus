@@ -88,8 +88,9 @@ moving at once: the second waits, then finds the marker.
    brought up with the app's own migration list (the plugin's conversion, so
    the frontend's `Database.load` finds nothing to do). Rows are UPDATEd,
    never deleted and re-inserted, so `pages`, versions and task links stay on
-   their `files` row: `files.relative_path`, `category` (`category_of`) and a
-   renamed `filename`; `sync_run_files`, `echo_embeds`, `inbox_item_entries`,
+   their `files` row: `files.relative_path`, `category` (`category_of`; a
+   drawing's `canvas` stays for the whiteboard rename, which reads it to
+   find a drawing whose file is gone) and a renamed `filename`; `sync_run_files`, `echo_embeds`, `inbox_item_entries`,
    `revision_notes.source_ref`; every path string inside `chat_proposals`
    and `agent_changes` JSON; `lectures.folder_rel` and its media paths; the
    links in a moved note's `document_versions`. The `library_layout` setting
