@@ -1,8 +1,10 @@
-import { useMemo, type ReactNode } from "react";
-import { SIDE_NAV_FOLDS, SIDE_NAV_ROW, SIDE_NAV_ROW_IDLE, SideNavGroupLabel } from "@/components/ui/layout/SideNav";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { HarnessThread } from "@/lib/harness";
 import { sqliteUtcToMs } from "@/lib/format/format";
-import { cn } from "@/lib/utils";
+
+/** Rows drawn at first, and how many each step of the scroll adds. */
+export const RECENTS_FIRST = 5;
+export const RECENTS_STEP = 10;
 
 /** Newest first; equal times keep the list's order (`sort` is stable). */
 export function byNewest(threads: HarnessThread[]): HarnessThread[] {
@@ -10,49 +12,51 @@ export function byNewest(threads: HarnessThread[]): HarnessThread[] {
 }
 
 /**
- * The column's list: "Recents", then every thread the store has read,
- * newest first with no sections, then Show more while the database holds
- * older ones (`harnessStore.showMoreThreads`).
+ * The column's list: every thread newest first with no headings (the view
+ * tab already says Recents). It draws `RECENTS_FIRST` rows and adds more as
+ * a sentinel under the last one nears view; past the threads the store has
+ * read it asks for older ones (`harnessStore.showMoreThreads`).
  */
 export function RecentsBody({
   threads,
   more,
   onMore,
-  collapsed,
   row,
 }: {
   threads: HarnessThread[];
   /** Older threads exist beyond those read. */
   more: boolean;
   onMore: () => void;
-  collapsed: boolean;
   row: (thread: HarnessThread) => ReactNode;
 }) {
   const sorted = useMemo(() => byNewest(threads), [threads]);
+  const [shown, setShown] = useState(RECENTS_FIRST);
+  const end = useRef<HTMLDivElement>(null);
+  const hasMore = shown < sorted.length || more;
+
+  // A fresh observer per step reports at once, so the list keeps growing
+  // until the sentinel leaves view, then waits for the scroll.
+  useEffect(() => {
+    const el = end.current;
+    if (!el || !hasMore) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        observer.disconnect();
+        if (shown < sorted.length) setShown((n) => n + RECENTS_STEP);
+        else onMore();
+      },
+      { rootMargin: "0px 0px 200px 0px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [shown, sorted.length, hasMore, onMore]);
+
   if (!sorted.length) return null;
   return (
-    <section aria-label="Recents">
-      <div className={SIDE_NAV_FOLDS}>
-        <SideNavGroupLabel>Recents</SideNavGroupLabel>
-      </div>
-      <div className="flex flex-col gap-0.5">
-        {sorted.map(row)}
-        {more && (
-          <button
-            type="button"
-            tabIndex={collapsed ? -1 : undefined}
-            onClick={onMore}
-            className={cn(
-              SIDE_NAV_ROW,
-              SIDE_NAV_ROW_IDLE,
-              SIDE_NAV_FOLDS,
-              "px-2.5 text-[11.5px] group-data-[collapsed=true]/nav:pointer-events-none",
-            )}
-          >
-            Show more
-          </button>
-        )}
-      </div>
+    <section aria-label="Recents" className="flex flex-col gap-0.5">
+      {sorted.slice(0, shown).map(row)}
+      {hasMore && <div ref={end} aria-hidden className="h-px shrink-0" />}
     </section>
   );
 }

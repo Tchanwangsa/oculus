@@ -971,13 +971,14 @@ writes it into the draft once and drops it from the route.
   tab in front, since the subject column answers it too. Its resize handle
   goes with it, so it can't clash with a side panel's; the toggle or ⌘⌥B
   brings it back.
-- **Recents view** (`RecentsBody`, one section under a
-  `SideNavGroupLabel`): every thread newest first by `updated_at`, with no
-  other headings, so Working, Approval, Question and Failed stay in place
-  by time and nothing jumps to the top. The store reads the newest 100
-  (`THREAD_PAGE`) plus one, which says whether older ones exist; while they
-  do, Show more at the foot raises the limit by another 100
-  (`showMoreThreads`). A thread a view holds that is older than those read
+- **Recents view** (`RecentsBody`): every thread newest first by
+  `updated_at`, with no headings (the tab names it), so Working, Approval,
+  Question and Failed stay in place by time and nothing jumps to the top.
+  It draws 5 rows (`RECENTS_FIRST`) and adds 10 whenever a sentinel under
+  the last row nears view (an `IntersectionObserver`), so it scrolls without
+  a button. The store reads the newest 100 (`THREAD_PAGE`) plus one, which
+  says whether older ones exist; once the rows drawn reach them, the
+  sentinel raises the limit by another 100 (`showMoreThreads`). A thread a view holds that is older than those read
   is read by id and kept in the store (`loadThreads`, `getThreadsByIds`), and
   opening a search hit lists it at once (`keep`).
 - **Subject view** (`SubjectBody`): the same threads the store has read,

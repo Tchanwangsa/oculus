@@ -116,7 +116,7 @@ export const ThreadList = memo(function ThreadList({
         {found ? (
           <SearchResults found={found} activeId={activeId} onOpen={openThread} />
         ) : view === "recents" ? (
-          <RecentsBody threads={threads} more={more} onMore={showMore} collapsed={collapsed} row={row(true)} />
+          <RecentsBody threads={threads} more={more} onMore={showMore} row={row(true)} />
         ) : (
           <SubjectBody
             threads={threads}
