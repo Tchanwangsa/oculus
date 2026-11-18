@@ -55,13 +55,10 @@ export function Ring({ percent }: { percent: number }) {
 function Meter({
   label,
   note,
-  value,
   percent,
 }: {
   label: string;
   note?: string | null;
-  /** Shown instead of the percentage when there is a truer number to show. */
-  value?: string;
   percent: number;
 }) {
   const p = Math.max(0, Math.min(100, percent));
@@ -71,7 +68,7 @@ function Meter({
         <span className="shrink-0 text-foreground">{label}</span>
         {note && <span className="min-w-0 truncate text-[10.5px] text-muted-foreground">{note}</span>}
         <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
-          {value ?? `${Math.round(p)}%`}
+          {`${Math.round(p)}%`}
         </span>
       </div>
       <div className="h-1 w-full overflow-hidden rounded-full bg-secondary">
@@ -85,53 +82,38 @@ function Meter({
 }
 
 /**
- * What a thread's usage reads as. The ring and its one-line reading
- * (`headline`, `ringLabel`) are the plan window nearest its limit
- * (`nearestLimit`), the session's or the week's, else this thread's context;
- * `parts` lists every figure, and `empty` says there is nothing to show.
+ * What a thread's usage reads as. Usage is the plan's limits only: the ring
+ * and its one-line reading (`headline`, `ringLabel`) are the window nearest
+ * its limit (`nearestLimit`), the session's or the week's, and `parts` lists
+ * every window. The context window is reported beside it (`used`, `limit`,
+ * `contextPercent`) for the settings list's `ContextStrip` and the thread
+ * info card, never inside usage.
  */
 export function usageSummary(usage: ThreadUsage | null, rateLimits: RateWindow[]) {
   const used = usage?.contextTokens ?? null;
   const limit = usage?.contextWindow ?? null;
   const contextPercent = used && limit ? (used / limit) * 100 : 0;
-  const context =
-    used != null && limit
-      ? `${Math.round(contextPercent)}% of context`
-      : used != null
-        ? `${fmtTokens(used)} context tokens`
-        : null;
   const nearest = nearestLimit(rateLimits);
   const nearestPercent = nearest ? Math.round(nearest.used_percent) : 0;
-  const parts = [context, ...rateLimits.map((w) => `${w.label} ${Math.round(w.used_percent)}%`)].filter(
-    (p): p is string => p != null,
-  );
   return {
     used,
     limit,
     contextPercent,
     nearest,
     /** What the ring fills to. */
-    percent: nearest ? nearest.used_percent : contextPercent,
-    /** The ring's short reading: "Weekly 62%", else "Context 31%". */
-    headline: nearest
-      ? `${nearest.label} ${nearestPercent}%`
-      : used != null && limit
-        ? `Context ${Math.round(contextPercent)}%`
-        : context,
-    /** The ring named in full, for its title and label, with the context
-     *  window after a plan limit so both stay in view. */
-    ringLabel: nearest
-      ? [`${nearest.label} limit ${nearestPercent}% used`, context].filter(Boolean).join(" · ")
-      : context,
-    parts,
-    empty: used == null && rateLimits.length === 0,
+    percent: nearest ? nearest.used_percent : 0,
+    /** The ring's short reading: "Weekly 62%". */
+    headline: nearest ? `${nearest.label} ${nearestPercent}%` : null,
+    /** The ring named in full, for its title and label. */
+    ringLabel: nearest ? `${nearest.label} limit ${nearestPercent}% used` : null,
+    parts: rateLimits.map((w) => `${w.label} ${Math.round(w.used_percent)}%`),
   };
 }
 
 /**
  * The ring is the plan window closest to running out, so the number that
- * stops the student first is the one in view; without plan windows (opencode,
- * Antigravity) it is this thread's context. The popover lists them all. No
+ * stops the student first is the one in view; an agent without plan windows
+ * (opencode, Antigravity) shows none. The popover lists every window. No
  * spend shown: subscription CLIs report a notional price nobody is billed.
  */
 export function UsageMeter({
@@ -142,7 +124,7 @@ export function UsageMeter({
   rateLimits: RateWindow[];
 }) {
   const summary = usageSummary(usage, rateLimits);
-  if (summary.empty) return null;
+  if (!summary.nearest) return null;
 
   return (
     <Popover>
@@ -159,42 +141,20 @@ export function UsageMeter({
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" side="top" className="w-64 p-3">
-        <UsageDetails summary={summary} rateLimits={rateLimits} />
+        <UsageDetails rateLimits={rateLimits} />
       </PopoverContent>
     </Popover>
   );
 }
 
-/** The meters inside a usage popover: the context window, then each rate window. */
-export function UsageDetails({
-  summary: { used, limit, contextPercent },
-  rateLimits,
-}: {
-  summary: ReturnType<typeof usageSummary>;
-  rateLimits: RateWindow[];
-}) {
+/** The meters inside a usage popover: each plan window with its reset. */
+export function UsageDetails({ rateLimits }: { rateLimits: RateWindow[] }) {
   return (
-    <div className="flex flex-col gap-3">
-      {used != null && (
-        <Meter
-          label="Context window"
-          value={limit ? `${fmtTokens(used)} / ${fmtTokens(limit)}` : fmtTokens(used)}
-          percent={contextPercent}
-        />
-      )}
-      {rateLimits.length > 0 && (
-        <div className="flex flex-col gap-2.5">
-          <div className="text-[10.5px] text-muted-foreground">Plan usage limits</div>
-          {rateLimits.map((w) => (
-            <Meter
-              key={w.label}
-              label={w.label}
-              note={fmtResets(w.resets_at)}
-              percent={w.used_percent}
-            />
-          ))}
-        </div>
-      )}
+    <div className="flex flex-col gap-2.5">
+      <div className="text-[10.5px] text-muted-foreground">Plan usage limits</div>
+      {rateLimits.map((w) => (
+        <Meter key={w.label} label={w.label} note={fmtResets(w.resets_at)} percent={w.used_percent} />
+      ))}
     </div>
   );
 }

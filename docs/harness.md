@@ -583,9 +583,11 @@ still update the picker.
 - **Usage is a ring of the nearest limit** (`UsageMeter.tsx`): the plan
   window closest to running out, the 5-hour session's or the week's
   (`nearestLimit` in `app/src/lib/harness/usageLimit.ts`, the one
-  `usageSummary` and the usage-limit notice both read), named in its title
-  with the context after it; with no plan windows (opencode, Antigravity), the thread's context. Its
-  popover lists the context and every window with its reset. Spend is
+  `usageSummary` and the usage-limit notice both read), named in its title.
+  Usage is plan limits only: an agent without plan windows (opencode,
+  Antigravity) shows no ring, and the context window lives in the settings
+  list's strip and the thread info card. Its popover lists every window with
+  its reset. Spend is
   hidden, as subscriptions aren't billed per token. Claude context is the last
   `assistant` usage, since `result.usage` sums the turn. Codex windows are read
   on server start and page open (`harness_refresh_rate_limits`, which never
@@ -917,8 +919,8 @@ shows it.
 
 The first group has no heading: the **Work** rows, then the thread's subject
 (`SubjectIcon` and `displayCode`, opening the subject), its model and
-reasoning, and its context-window use with the bar the composer's usage ring
-reads (`usageTint`). **Work** is a registry (`threadInfo/work.ts`): a feature
+reasoning, and its context-window use as tokens ("46k / 1M", the share in
+its title) over a bar tinted like the usage ring (`usageTint`). **Work** is a registry (`threadInfo/work.ts`): a feature
 calls `registerWorkKind({ id, useRows })` at module load, and `useRows` is a
 hook that returns that kind's rows for the thread (glyph, title, status in
 words, the route it opens). No kind is registered yet; with no rows the group

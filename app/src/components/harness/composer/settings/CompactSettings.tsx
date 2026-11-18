@@ -165,7 +165,7 @@ export const CompactSettings = memo(function CompactSettings({
             <div className="w-64">
               <PageHeader title="Usage" onBack={back} />
               <div className="p-3">
-                <UsageDetails summary={meter} rateLimits={rateLimits} />
+                <UsageDetails rateLimits={rateLimits} />
               </div>
             </div>
           )}

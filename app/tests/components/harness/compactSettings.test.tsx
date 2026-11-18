@@ -47,7 +47,7 @@ describe("the settings list", () => {
     const html = list(windows);
     expect(html).toContain(">Weekly 62%<");
     expect(html).not.toContain("5-hour 27%");
-    expect(html).toContain('title="Weekly limit 62% used · 25% of context"');
+    expect(html).toContain('title="Weekly limit 62% used"');
   });
 
   test("the context window is always at the foot, with or without plan windows", () => {
@@ -94,14 +94,15 @@ describe("pages", () => {
 describe("the full composer's ring", () => {
   const ring = (rateLimits: RateWindow[]) => renderToStaticMarkup(<UsageMeter usage={usage} rateLimits={rateLimits} />);
 
-  test("is the plan window closest to running out, says which, and names the context too", () => {
+  test("is the plan window closest to running out, and says which; context is not usage", () => {
     const html = ring(windows);
-    expect(html).toContain('aria-label="Usage — Weekly limit 62% used · 25% of context"');
+    expect(html).toContain('aria-label="Usage — Weekly limit 62% used"');
+    expect(html).not.toContain("context");
     expect(usageSummary(usage, windows).percent).toBe(62);
   });
 
-  test("falls back to the context without plan windows", () => {
-    expect(ring([])).toContain('aria-label="Usage — 25% of context"');
-    expect(usageSummary(usage, []).percent).toBe(25);
+  test("is absent without plan windows", () => {
+    expect(ring([])).toBe("");
+    expect(usageSummary(usage, []).headline).toBeNull();
   });
 });
