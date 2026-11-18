@@ -20,6 +20,8 @@ source. This file is only the rules; the reasons behind them live in `docs/`.
   `.github/workflows/ci.yml`).
 - Run `cargo fmt` in `app/src-tauri` before committing Rust; CI fails on
   `cargo fmt --check`.
+- Plans, stages and team issues live in the private `oculus-app/team` repo
+  (Linear is the board); team members install its skills per its README.
 
 ## Don't re-add
 
