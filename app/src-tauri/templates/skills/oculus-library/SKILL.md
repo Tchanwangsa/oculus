@@ -40,8 +40,8 @@ From the chat's working directory a subject is `../courses/<CODE>/`:
   the page numbers are in the database, which `oculus grep` and `oculus read
   --pages` use. No `.md` beside a PDF means it has not been parsed.
 - Everything beside `Course/` is the **student's own** — uploads, notes
-  (`.md`), drawings (`.canvas`) and notebooks (`.notebook`), in any folders
-  they made.
+  (`.md`), whiteboards (`.whiteboard`) and notebooks (`.notebook`), in any
+  folders they made.
 - `.oculus/` is the app's, hidden; ripgrep skips it, and nothing to read is
   there.
 
@@ -96,8 +96,8 @@ fallback whenever `search` cannot run.
   `-c announcement`, `-c assignment`, `-c file` (the slide decks, downloads
   and module videos), `-c page`, `-c module`, `-c quiz`, `-c lessons`,
   `-c syllabus`, `-c home`, `-c image`, and for the student's own files
-  `-c upload`, `-c document` (their notes), `-c canvas`, `-c notebook`. It is
-  repeatable: `-c ed -c announcement`. This is the fix for the ordering bias
+  `-c upload`, `-c document` (their notes), `-c whiteboard`, `-c notebook`. It
+  is repeatable: `-c ed -c announcement`. This is the fix for the ordering bias
   above. A word that is **not a category is refused, naming the real ones**, so
   a typo never comes back as "not in the library"; a real category this
   subject happens not to have returns **no matches**, which is the honest
@@ -138,7 +138,7 @@ oculus files INFO30006 -m assignment
 
 Use it to *locate* before reading, when a filename is half-remembered.
 `-c/--category` is the same flag `oculus grep` takes, spelled the same way and
-repeatable: `home`, `syllabus`, `upload`, `document`, `canvas`, `notebook`,
+repeatable: `home`, `syllabus`, `upload`, `document`, `whiteboard`, `notebook`,
 `page`, `assignment`, `quiz`, `announcement`, `ed`, `lessons`, `file`,
 `module`, `image`, `other`. `--indexed` keeps only what retrieval can see.
 
@@ -185,8 +185,8 @@ the PNG with your own image tool** and read what is written. Do not open the
 `.notebook` file: it is JSON holding every stroke, and an assignment's pages
 inside it are megabytes of base64.
 
-- When the student says "my working", "my solution" or "the canvas", this is
-  what they mean. A chat message names a notebook that is open, and the page in
+- When the student says "my working" or "my solution", this is what they
+  mean. A chat message names a notebook that is open, and the page in
   view; if none is named, `oculus files -c notebook` lists them.
 - Give feedback on **their** working: say which line is right, which step
   does not follow and why, and what to try. Do not rewrite their page for them
@@ -195,8 +195,8 @@ inside it are megabytes of base64.
 - A picture older than the student's last edit is stale; if the age looks wrong
   for what they say they just wrote, say so rather than commenting on old work.
 - `oculus read` says so when a notebook has no pictures yet (never opened
-  since it was made); relay that, do not retry. A canvas (`.canvas`) is a
-  whiteboard drawing with neither pages nor text.
+  since it was made); relay that, do not retry. A whiteboard (`.whiteboard`)
+  is a drawing with neither pages nor text.
 
 ## The argument that is not where you expect
 

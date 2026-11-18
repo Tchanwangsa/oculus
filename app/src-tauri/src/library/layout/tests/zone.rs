@@ -18,7 +18,7 @@ fn every_path_shape_has_its_zone() {
         ("courses/X/a.pdf", Zone::Own),
         ("courses/X/Exam prep", Zone::Own),
         ("courses/X/Exam prep/deep/er/notes.md", Zone::Own),
-        ("courses/X/board.canvas", Zone::Own),
+        ("courses/X/board.whiteboard", Zone::Own),
         ("courses/X/.assets/p.png", Zone::Own),
         ("courses/X/.oculus/agents/INSTRUCTIONS.md", Zone::Hidden),
         ("courses/X/.oculus/agents/memories/m.md", Zone::Hidden),

@@ -36,7 +36,7 @@ fn read_image(path: &std::path::Path) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn canvas_read_dropped_image(path: String) -> Result<String, String> {
+pub async fn whiteboard_read_dropped_image(path: String) -> Result<String, String> {
     crate::runtime::blocking::run(move || read_image(std::path::Path::new(&path))).await
 }
 
@@ -46,7 +46,7 @@ mod tests {
 
     #[test]
     fn validates_raster_bytes_and_caps_reads() {
-        let dir = crate::test_support::Scratch::new("canvas-image-drop");
+        let dir = crate::test_support::Scratch::new("whiteboard-image-drop");
         let path = dir.join("image.bin");
         for (bytes, mime) in [
             (b"\x89PNG\r\n\x1a\n".as_slice(), "image/png"),

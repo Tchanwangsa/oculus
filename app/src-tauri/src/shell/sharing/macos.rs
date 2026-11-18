@@ -59,7 +59,7 @@ define_class!(
         #[unsafe(method(sharingService:sourceWindowForShareItems:sharingContentScope:))]
         fn source_window(&self, _service: &AnyObject, _items: &AnyObject, scope: *mut isize) -> *const AnyObject {
             if !scope.is_null() {
-                // NSSharingContentScopeItem: the item is a link to the canvas.
+                // NSSharingContentScopeItem: the item is a link to the whiteboard.
                 unsafe { *scope = 0; }
             }
             Retained::as_ptr(&self.ivars().window)

@@ -1,4 +1,4 @@
-//! One shared canvas: the canonical document, its revision and epoch, client
+//! One shared whiteboard: the canonical document, its revision and epoch, client
 //! receipts, the hash of the bytes last read from or written to disk, and the
 //! lifecycle. Every mutation runs under the session's one lock, so a commit is
 //! validate + apply + persist + bump with nothing interleaved.
@@ -15,7 +15,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-/// Real canvases embed up to ~64 MiB of images; this bounds one document.
+/// Real whiteboards embed up to ~64 MiB of images; this bounds one document.
 pub const MAX_DOCUMENT_BYTES: usize = 256 * 1024 * 1024;
 
 /// The document as it stands, in the exact bytes the serializer writes.
@@ -94,7 +94,7 @@ impl Session {
     pub fn open(file_id: i64, root: &Path, rel: &str, text: &str) -> Result<Self, AuthorityError> {
         let bytes = disk::read(root, rel)
             .map_err(AuthorityError::io)?
-            .ok_or_else(|| AuthorityError::io("Canvas no longer exists"))?;
+            .ok_or_else(|| AuthorityError::io("Whiteboard no longer exists"))?;
         let disk = disk::hash(&bytes);
         if disk != disk::hash(text.as_bytes()) {
             return Err(AuthorityError::external());
@@ -122,9 +122,10 @@ impl Session {
 }
 
 fn parse(text: &str) -> Result<Value, AuthorityError> {
-    let document: Value = serde_json::from_str(text)
-        .map_err(|_| AuthorityError::invalid("Canvas file contains invalid JSON."))?;
+    let mut document: Value = serde_json::from_str(text)
+        .map_err(|_| AuthorityError::invalid("Whiteboard file contains invalid JSON."))?;
     model::validate(&document).map_err(AuthorityError::invalid)?;
+    model::normalize_type(&mut document);
     Ok(document)
 }
 
@@ -194,7 +195,7 @@ impl State {
             }
             Lookup::Stale => return Err(AuthorityError::new(
                 Code::StaleOp,
-                "This change is too old to confirm. Reload the shared canvas; your draft is kept.",
+                "This change is too old to confirm. Reload the shared whiteboard; your draft is kept.",
             )),
         }
         if let Some(viewport) = &op.viewport {
@@ -220,7 +221,7 @@ impl State {
         if text.len() > MAX_DOCUMENT_BYTES {
             return Err(AuthorityError::new(
                 Code::TooLarge,
-                "This change would make the canvas too large to save.",
+                "This change would make the whiteboard too large to save.",
             ));
         }
         let size = self.persist(&text, hub)?;
@@ -261,7 +262,7 @@ impl State {
                 self.end(hub);
                 return Err(AuthorityError::new(
                     Code::SessionEnded,
-                    "The canvas file was removed.",
+                    "The whiteboard file was removed.",
                 ));
             }
             Some(bytes) if disk::hash(&bytes) != self.disk => {
@@ -305,7 +306,7 @@ impl State {
         match choice {
             Resolution::AdoptDisk => {
                 let text = std::str::from_utf8(&bytes)
-                    .map_err(|_| AuthorityError::invalid("Canvas file is not UTF-8 text."))?;
+                    .map_err(|_| AuthorityError::invalid("Whiteboard file is not UTF-8 text."))?;
                 let adopted = parse(text)?;
                 let change = transaction::diff(&self.document, &adopted);
                 self.document = adopted;
@@ -370,7 +371,7 @@ impl State {
             match saved {
                 Ok(size) => hub.rows.touched(self.file_id, size),
                 Err(error) => elog!(
-                    "[canvas-authority] viewport for file {} not saved: {error}",
+                    "[whiteboard-authority] viewport for file {} not saved: {error}",
                     self.file_id
                 ),
             }

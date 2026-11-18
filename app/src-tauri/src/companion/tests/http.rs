@@ -89,7 +89,7 @@ async fn host_and_origin_must_name_this_server() {
 }
 
 #[tokio::test]
-async fn a_large_canvas_snapshot_arrives_whole_with_its_exact_length() {
+async fn a_large_whiteboard_snapshot_arrives_whole_with_its_exact_length() {
     let h = Harness::new("snapshot");
     let rel = h.open(FILE, &image_document(10 * 1024 * 1024));
     let disk = std::fs::read(h.root.join(&rel)).unwrap();
@@ -122,9 +122,9 @@ async fn the_snapshot_names_the_file_kind_from_its_path() {
     let mut with_pages = document(vec![shape("a", 0.0)]);
     with_pages["paper"] = paper;
     h.open_at(1, "courses/TEST/Week 3.notebook", &with_pages);
-    h.open_at(2, "courses/TEST/Old notebook.canvas", &with_pages);
+    h.open_at(2, "courses/TEST/Old notebook.whiteboard", &with_pages);
     h.open(3, &document(vec![]));
-    for (file, kind) in [(1, "notebook"), (2, "canvas"), (3, "canvas")] {
+    for (file, kind) in [(1, "notebook"), (2, "whiteboard"), (3, "whiteboard")] {
         let s = h.share(file);
         let reply = get(
             s.port,
@@ -227,7 +227,8 @@ async fn an_outside_edit_pauses_commits_with_423() {
     let s = h.share(FILE);
     std::fs::write(
         h.root.join(&rel),
-        crate::library::files::canvases::authority::format::serialize(&document(vec![])).unwrap(),
+        crate::library::files::whiteboards::authority::format::serialize(&document(vec![]))
+            .unwrap(),
     )
     .unwrap();
     let reply = post(

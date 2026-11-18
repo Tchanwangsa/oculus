@@ -1,4 +1,4 @@
-//! Writes a document byte-for-byte as `serializeCanvasDocument` does:
+//! Writes a document byte-for-byte as `serializeWhiteboardDocument` does:
 //! `JSON.stringify(doc, null, 2) + "\n"`. serde_json's pretty printer already
 //! matches the indentation, escaping and (with `preserve_order`) key order;
 //! numbers are the difference, so they go through JavaScript's

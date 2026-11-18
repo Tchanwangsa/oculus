@@ -1,4 +1,4 @@
-//! A real server on loopback over a real authority and canvas file, driven
+//! A real server on loopback over a real authority and whiteboard file, driven
 //! by a raw HTTP/1.1 client and tokio-tungstenite.
 
 mod client;
@@ -13,9 +13,9 @@ use super::core::Config;
 use super::limits::Limits;
 use super::wire::{CompanionState, ShareInfo};
 use super::Companion;
-use crate::library::files::canvases::authority::rows::FileRows;
-use crate::library::files::canvases::authority::session::Op;
-use crate::library::files::canvases::authority::{format, Authority};
+use crate::library::files::whiteboards::authority::rows::FileRows;
+use crate::library::files::whiteboards::authority::session::Op;
+use crate::library::files::whiteboards::authority::{format, Authority};
 use crate::runtime::network::fake::{addr, fake, FakeNetwork};
 use crate::test_support::Scratch;
 use serde_json::{json, Value};
@@ -43,11 +43,11 @@ pub fn shape(id: &str, x: f64) -> Value {
 }
 
 pub fn document(elements: Vec<Value>) -> Value {
-    json!({"type": "oculus-canvas", "version": 1, "elements": elements,
+    json!({"type": "oculus-whiteboard", "version": 1, "elements": elements,
         "viewport": {"x": 0, "y": 0, "zoom": 1}, "background": "#ffffff"})
 }
 
-/// A canvas with one embedded PNG of about `bytes` base64 characters.
+/// A whiteboard with one embedded PNG of about `bytes` base64 characters.
 pub fn image_document(bytes: usize) -> Value {
     let mut data = String::from("iVBORw0KGgoAAAANSUhEUgAA");
     data.push_str(&"A".repeat(bytes - bytes % 4));
@@ -106,16 +106,16 @@ impl Harness {
         }
     }
 
-    /// Write a canvas for `file_id` and open its authority session.
+    /// Write a whiteboard for `file_id` and open its authority session.
     pub fn open(&self, file_id: i64, document: &Value) -> String {
         self.open_at(
             file_id,
-            &format!("courses/TEST/File{file_id}.canvas"),
+            &format!("courses/TEST/File{file_id}.whiteboard"),
             document,
         )
     }
 
-    /// Write `document` at `rel` (a canvas or a notebook) and open its authority session.
+    /// Write `document` at `rel` (a whiteboard or a notebook) and open its authority session.
     pub fn open_at(&self, file_id: i64, rel: &str, document: &Value) -> String {
         let rel = rel.to_string();
         let path = self.root.join(&rel);

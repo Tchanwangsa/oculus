@@ -112,14 +112,15 @@ async fn unauthenticated_sockets_are_capped() {
 
 #[tokio::test]
 async fn a_pause_and_resume_reach_the_sockets() {
-    use crate::library::files::canvases::authority::session::Resolution;
+    use crate::library::files::whiteboards::authority::session::Resolution;
     let h = Harness::new("state");
     let rel = h.open(FILE, &document(vec![shape("a", 0.0)]));
     let s = h.share(FILE);
     let (mut socket, _) = joined(s.port, s.id(), s.secret(), "one").await;
     std::fs::write(
         h.root.join(&rel),
-        crate::library::files::canvases::authority::format::serialize(&document(vec![])).unwrap(),
+        crate::library::files::whiteboards::authority::format::serialize(&document(vec![]))
+            .unwrap(),
     )
     .unwrap();
     let commit = json!({"clientId": "one", "seq": 1, "opId": "one-1", "epoch": s.info.epoch, "transaction": add("b")});
@@ -135,7 +136,7 @@ async fn a_pause_and_resume_reach_the_sockets() {
     );
     assert_eq!(
         h.companion.shares()[0].phase,
-        crate::library::files::canvases::authority::events::Phase::Paused
+        crate::library::files::whiteboards::authority::events::Phase::Paused
     );
     h.authority
         .resolve_external(FILE, Resolution::AdoptDisk)

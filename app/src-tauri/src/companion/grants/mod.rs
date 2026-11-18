@@ -1,4 +1,4 @@
-//! The share registry. A share grants one canvas file to whoever holds its
+//! The share registry. A share grants one whiteboard file to whoever holds its
 //! secret, for one authority epoch; at most one share per file. Each keeps
 //! its change log, its push channel to sockets, its socket count (and which
 //! of this Mac's addresses each socket came in on) and a cancellation token
@@ -10,7 +10,7 @@ pub mod log;
 pub mod secret;
 
 use crate::companion::limits::{PUSH_QUEUE, REVOKED_KEPT};
-use crate::library::files::canvases::authority::events::{Change, Phase};
+use crate::library::files::whiteboards::authority::events::{Change, Phase};
 use log::{ChangeLog, Entry};
 use secret::Secret;
 use serde::Serialize;
@@ -27,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 pub enum EndReason {
     /// The desktop stopped sharing.
     Stopped,
-    /// The canvas's authority session ended: closed, deleted or gone.
+    /// The whiteboard's authority session ended: closed, deleted or gone.
     Ended,
     /// The app is quitting.
     Shutdown,

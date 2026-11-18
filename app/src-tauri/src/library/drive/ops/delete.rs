@@ -78,7 +78,8 @@ fn remove(data_dir: &Path, entries: &[Entry], ids: &[i64]) -> DriveResult<()> {
     }
     for id in ids {
         if notebook_pages_dir(data_dir, *id).is_dir() {
-            if let Err(e) = crate::library::files::canvases::snapshots::remove_at(data_dir, *id) {
+            if let Err(e) = crate::library::files::whiteboards::snapshots::remove_at(data_dir, *id)
+            {
                 elog!("[oculus] drive: page pictures of file {id}: {e}");
             }
         }

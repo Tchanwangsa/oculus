@@ -5,3 +5,4 @@ mod library;
 mod links;
 mod resume;
 mod rules;
+mod whiteboard;

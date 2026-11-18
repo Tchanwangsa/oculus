@@ -4,7 +4,7 @@ use serde::Serialize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Code {
-    /// The canvas has no live authority session: the pane attaches first.
+    /// The whiteboard has no live authority session: the pane attaches first.
     NotLive,
     /// No port could be bound, or the server could not start.
     Server,
@@ -29,7 +29,7 @@ impl CompanionError {
     pub fn not_live() -> Self {
         Self::new(
             Code::NotLive,
-            "This canvas is not open for sharing. Open it and try again.",
+            "This whiteboard is not open for sharing. Open it and try again.",
         )
     }
 }

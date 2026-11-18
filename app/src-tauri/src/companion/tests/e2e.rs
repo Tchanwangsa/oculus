@@ -1,15 +1,15 @@
 //! The contract check between this server and the browser client: the real
 //! `ShareClient` (`app/tests/e2e/shareClientE2E.ts`, run by bun) against a
-//! real server, authority and canvas file, with this test playing the
+//! real server, authority and whiteboard file, with this test playing the
 //! desktop. Ignored by default because it needs bun:
 //! `cargo test --lib companion::tests::e2e -- --ignored --nocapture`.
 //! See docs/device-sharing.md "End-to-end check".
 
 use super::{document, shape, Harness, FILE};
 use crate::companion::limits::Limits;
-use crate::library::files::canvases::authority::events::Event;
-use crate::library::files::canvases::authority::model;
-use crate::library::files::canvases::authority::session::Op;
+use crate::library::files::whiteboards::authority::events::Event;
+use crate::library::files::whiteboards::authority::model;
+use crate::library::files::whiteboards::authority::session::Op;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -54,8 +54,8 @@ fn the_browser_client_and_the_server_agree() {
     };
     let h = Harness::with("e2e", limits, 0);
     let rel = h.open(FILE, &document(vec![shape("base", 0.0)]));
-    // A second shared canvas keeps the server on its port while the first
-    // share stops and restarts, as when another canvas stays shared.
+    // A second shared whiteboard keeps the server on its port while the first
+    // share stops and restarts, as when another whiteboard stays shared.
     h.open(FILE + 1, &document(vec![]));
     let keeper = h.share(FILE + 1);
     let share = h.share(FILE);
@@ -221,7 +221,7 @@ fn the_browser_client_and_the_server_agree() {
         );
     }
 
-    // The file on disk is a valid canvas with each stroke exactly once.
+    // The file on disk is a valid whiteboard with each stroke exactly once.
     let text = std::fs::read_to_string(h.root.join(&rel)).unwrap();
     let saved: Value = serde_json::from_str(&text).unwrap();
     model::validate(&saved).unwrap();
@@ -249,7 +249,7 @@ fn the_browser_client_and_the_server_agree() {
             sorted.sort();
             sorted
         },
-        "the saved canvas's strokes"
+        "the saved whiteboard's strokes"
     );
     assert!(counts.values().all(|&n| n == 1), "a duplicate: {counts:?}");
     let x = |id: &str| elements.iter().find(|e| e["id"] == id).unwrap()["x"].clone();

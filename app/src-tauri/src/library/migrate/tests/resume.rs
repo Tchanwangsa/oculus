@@ -8,7 +8,7 @@ use crate::library::migrate::apply::STOPPED;
 use crate::library::migrate::{run, Hooks, Outcome};
 
 /// Everything a run leaves, with the data dir's own path taken out.
-fn snapshot(d: &Path) -> Vec<String> {
+pub(super) fn snapshot(d: &Path) -> Vec<String> {
     let home = d.to_string_lossy().into_owned();
     let encoded = crate::library::paths::slash_path(d).replace('/', "%2F");
     let mut out = Vec::new();

@@ -69,7 +69,7 @@ pub(super) const TARGET: Shape = Shape {
     own_dirs: &[
         (OwnKind::Upload, ""),
         (OwnKind::Document, ""),
-        (OwnKind::Canvas, ""),
+        (OwnKind::Whiteboard, ""),
         (OwnKind::Notebook, ""),
     ],
     own_kind_by_folder: false,
@@ -103,7 +103,9 @@ pub const LEGACY: Shape = Shape {
     own_dirs: &[
         (OwnKind::Upload, "uploads"),
         (OwnKind::Document, "documents"),
-        (OwnKind::Canvas, "canvases"),
+        // A library in this layout holds whiteboards as `.canvas` files;
+        // `migrate::whiteboard` renames them after the move out of it.
+        (OwnKind::Whiteboard, "canvases"),
         (OwnKind::Notebook, "notebooks"),
     ],
     own_kind_by_folder: true,

@@ -5,7 +5,7 @@
 //! snapshot (410 `gone`).
 
 use crate::companion::limits::{LOG_BYTES, LOG_REVISIONS};
-use crate::library::files::canvases::authority::events::Change;
+use crate::library::files::whiteboards::authority::events::Change;
 use bytes::Bytes;
 use serde::Serialize;
 use std::collections::VecDeque;

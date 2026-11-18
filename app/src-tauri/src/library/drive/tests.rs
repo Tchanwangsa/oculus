@@ -312,7 +312,7 @@ fn a_notebook_cover_is_its_first_page_picture() {
     std::fs::write(dir.join("page-001.png"), &png).unwrap();
     std::fs::write(
         dir.join("pages.json"),
-        r#"{"canvas":"x","pageCount":2,"pages":[
+        r#"{"whiteboard":"x","pageCount":2,"pages":[
             {"page":2,"id":"b","image":"page-002.png","updatedAt":1},
             {"page":1,"id":"a","image":"page-001.png","updatedAt":1}]}"#,
     )

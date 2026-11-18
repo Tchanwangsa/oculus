@@ -15,7 +15,7 @@ fn extension(format: &str) -> Result<&'static str, String> {
         "png" => Ok("png"),
         "svg" => Ok("svg"),
         "pdf" => Ok("pdf"),
-        _ => Err("Canvas export supports PNG, SVG and PDF".into()),
+        _ => Err("Whiteboard export supports PNG, SVG and PDF".into()),
     }
 }
 
@@ -28,14 +28,14 @@ fn validate(format: &str, bytes: &[u8]) -> Result<(), String> {
         return Ok(());
     }
     if bytes.is_empty() || bytes.len() > MAX_EXPORT_BYTES {
-        return Err("Canvas image must be between 1 byte and 64 MB".into());
+        return Err("Whiteboard image must be between 1 byte and 64 MB".into());
     }
     if format == "png" {
         let decoder = image::codecs::png::PngDecoder::new(Cursor::new(bytes))
             .map_err(|e| format!("Invalid PNG image: {e}"))?;
         let (width, height) = decoder.dimensions();
         if width == 0 || height == 0 || width > 8192 || height > 8192 {
-            return Err("Canvas PNG dimensions must be between 1 and 8192 pixels".into());
+            return Err("Whiteboard PNG dimensions must be between 1 and 8192 pixels".into());
         }
     } else {
         let svg = std::str::from_utf8(bytes)
@@ -54,7 +54,7 @@ fn validate(format: &str, bytes: &[u8]) -> Result<(), String> {
 
 fn decode(format: &str, data: &str) -> Result<Vec<u8>, String> {
     if data.len() > MAX_EXPORT_BYTES.div_ceil(3) * 4 {
-        return Err("Canvas image exceeds 64 MB".into());
+        return Err("Whiteboard image exceeds 64 MB".into());
     }
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data)
@@ -95,7 +95,7 @@ pub(super) fn write_chosen(path: &Path, format: &str, bytes: &[u8]) -> Result<Pa
     validate(format, bytes)?;
     let path = destination(path, format)?;
     let temporary = path.with_file_name(format!(
-        ".canvas-export-{}-{}.tmp",
+        ".whiteboard-export-{}-{}.tmp",
         std::process::id(),
         crate::runtime::clock::now_nanos()
     ));
@@ -104,7 +104,7 @@ pub(super) fn write_chosen(path: &Path, format: &str, bytes: &[u8]) -> Result<Pa
 }
 
 #[tauri::command]
-pub async fn export_canvas_image(
+pub async fn export_whiteboard_image(
     app: tauri::AppHandle,
     format: String,
     data: String,
@@ -115,8 +115,8 @@ pub async fn export_canvas_image(
         let picked = app
             .dialog()
             .file()
-            .set_title("Export canvas")
-            .set_file_name(format!("Canvas.{ext}"))
+            .set_title("Export whiteboard")
+            .set_file_name(format!("Whiteboard.{ext}"))
             .add_filter(
                 if ext == "png" {
                     "PNG image"
@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn exports_validate_format_and_write_only_matching_files_atomically() {
-        let root = crate::test_support::Scratch::new("canvas-export");
+        let root = crate::test_support::Scratch::new("whiteboard-export");
         let target = root.join("drawing.svg");
         std::fs::write(&target, "old").unwrap();
         write_chosen(&target, "svg", SVG).unwrap();
@@ -177,7 +177,7 @@ mod tests {
             &base64::engine::general_purpose::STANDARD.encode(png.into_inner()),
         )
         .unwrap();
-        let root = crate::test_support::Scratch::new("canvas-export-png");
+        let root = crate::test_support::Scratch::new("whiteboard-export-png");
         write_chosen(&root.join("drawing.PNG"), "png", &bytes).unwrap();
         assert!(validate("png", b"\x89PNG\r\n\x1a\n").is_err());
     }
@@ -185,7 +185,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn export_refuses_a_symlink_destination() {
-        let root = crate::test_support::Scratch::new("canvas-export-links");
+        let root = crate::test_support::Scratch::new("whiteboard-export-links");
         let other = root.join("other.svg");
         std::fs::write(&other, "private").unwrap();
         let alias = root.join("alias.svg");

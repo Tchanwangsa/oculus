@@ -10,7 +10,7 @@ fn own_files_sit_beside_course_at_any_depth() {
         "courses/COMP30026/notes.pdf",
         "courses/COMP30026/Exam prep/deeper/scan.png",
         "courses/COMP30026_2026_SM2/Untitled-2.md",
-        "courses/X/Board.canvas",
+        "courses/X/Board.whiteboard",
         "courses/X/Week 3/Week 3.notebook",
         "courses/X/Courses/a.pdf",
         "courses/X/U\u{308}bung.pdf",
@@ -55,7 +55,10 @@ fn the_extension_decides_the_kind() {
         own_kind_of("courses/X/Exam prep/notes.md"),
         Some(OwnKind::Document)
     );
-    assert_eq!(own_kind_of("courses/X/b.canvas"), Some(OwnKind::Canvas));
+    assert_eq!(
+        own_kind_of("courses/X/b.whiteboard"),
+        Some(OwnKind::Whiteboard)
+    );
     assert_eq!(
         own_kind_of("courses/X/w/p.notebook"),
         Some(OwnKind::Notebook)
@@ -75,10 +78,10 @@ fn a_kinds_files_carry_its_extension() {
     assert!(!own_file_ok("courses/X/Course/Pages/x.md", doc));
     assert!(!own_file_ok("lectures/abc/x.md", doc));
 
-    let canvas = OwnKind::Canvas;
-    assert!(own_file_ok("courses/X/Week 3.canvas", canvas));
-    assert!(!own_file_ok("courses/X/.canvas", canvas));
-    assert!(!own_file_ok("courses/X/Week 3.notebook", canvas));
+    let whiteboard = OwnKind::Whiteboard;
+    assert!(own_file_ok("courses/X/Week 3.whiteboard", whiteboard));
+    assert!(!own_file_ok("courses/X/.whiteboard", whiteboard));
+    assert!(!own_file_ok("courses/X/Week 3.notebook", whiteboard));
     assert!(own_file_ok("courses/X/Week 3.notebook", OwnKind::Notebook));
 
     assert!(own_file_ok("courses/X/anything", OwnKind::Upload));
@@ -90,7 +93,7 @@ fn new_files_land_at_the_subjects_root() {
         own_dir_rel("COMP 30026", OwnKind::Upload),
         "courses/COMP_30026"
     );
-    for kind in [OwnKind::Document, OwnKind::Canvas, OwnKind::Notebook] {
+    for kind in [OwnKind::Document, OwnKind::Whiteboard, OwnKind::Notebook] {
         assert_eq!(own_dir_rel("X", kind), "courses/X");
     }
 }
@@ -101,7 +104,7 @@ fn the_walk_lists_own_files_only() {
     for rel in [
         "courses/X/a.md",
         "courses/X/Exam prep/b.pdf",
-        "courses/X/Exam prep/deep/c.canvas",
+        "courses/X/Exam prep/deep/c.whiteboard",
         "courses/X/Course/Files/synced.pdf",
         "courses/X/.oculus/agents/INSTRUCTIONS.md",
         "courses/X/.assets/p.png",
@@ -121,7 +124,7 @@ fn the_walk_lists_own_files_only() {
         found,
         [
             "courses/X/Exam prep/b.pdf",
-            "courses/X/Exam prep/deep/c.canvas",
+            "courses/X/Exam prep/deep/c.whiteboard",
             "courses/X/a.md",
         ]
     );
@@ -136,7 +139,7 @@ fn the_top_level_own_entries_of_every_subject_leave_out_course_and_oculus() {
         "courses/X/Course/Files/synced.pdf",
         "courses/X/.oculus/agents/INSTRUCTIONS.md",
         "courses/X/.assets/p.png",
-        "courses/Y/c.canvas",
+        "courses/Y/c.whiteboard",
     ] {
         let path = dir.join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -158,7 +161,7 @@ fn the_top_level_own_entries_of_every_subject_leave_out_course_and_oculus() {
             "courses/X/.assets",
             "courses/X/Exam prep",
             "courses/X/a.md",
-            "courses/Y/c.canvas",
+            "courses/Y/c.whiteboard",
         ]
     );
 }

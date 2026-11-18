@@ -136,7 +136,7 @@ fn library_path(root: &Path, relative: &str) -> Result<std::path::PathBuf, Strin
 }
 
 #[tauri::command]
-pub async fn canvas_open_library_pdf(
+pub async fn whiteboard_open_library_pdf(
     webview: tauri::Webview,
     relative_path: String,
 ) -> Result<OpenedImport, String> {
@@ -178,7 +178,7 @@ fn raster(pdf: &Pdf, page: u32, width: u32, height: u32) -> Result<Vec<u8>, Stri
 }
 
 #[tauri::command]
-pub async fn canvas_render_pdf_page(
+pub async fn whiteboard_render_pdf_page(
     webview: tauri::Webview,
     id: String,
     page: u32,
@@ -201,7 +201,7 @@ pub async fn canvas_render_pdf_page(
 }
 
 #[tauri::command]
-pub async fn canvas_close_pdf(webview: tauri::Webview, id: String) -> Result<(), String> {
+pub async fn whiteboard_close_pdf(webview: tauri::Webview, id: String) -> Result<(), String> {
     close(webview.label(), &id);
     Ok(())
 }

@@ -1,5 +1,5 @@
-//! Versioned drawing documents among each subject's own files: canvases
-//! (`<title>.canvas`) and notebooks (`<title>.notebook`), anywhere in the
+//! Versioned drawing documents among each subject's own files: whiteboards
+//! (`<title>.whiteboard`) and notebooks (`<title>.notebook`), anywhere in the
 //! own zone, created in the folder `layout::own_dir` gives their kind.
 pub(crate) mod authority;
 pub(crate) mod drafts;
@@ -12,36 +12,37 @@ pub(crate) mod snapshots;
 use super::ImportedFile;
 use crate::library::layout::{self, OwnKind};
 use serde::Deserialize;
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-/// The two drawing documents. Both are the same `oculus-canvas` JSON; a
+/// The two drawing documents. Both are the same `oculus-whiteboard` JSON; a
 /// notebook has its own extension and always has
-/// `paper`. Only a notebook has pages: `paper` in a canvas is kept as written
+/// `paper`. Only a notebook has pages: `paper` in a whiteboard is kept as written
 /// and means nothing, and the kind always comes from the path.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DrawingKind {
     #[default]
-    Canvas,
+    Whiteboard,
     Notebook,
 }
 
 impl DrawingKind {
     fn own(self) -> OwnKind {
         match self {
-            Self::Canvas => OwnKind::Canvas,
+            Self::Whiteboard => OwnKind::Whiteboard,
             Self::Notebook => OwnKind::Notebook,
         }
     }
 
-    fn extension(self) -> &'static str {
+    pub(crate) fn extension(self) -> &'static str {
         self.own().extension().unwrap_or_default()
     }
 
     /// The `files` row's `file_type`, the same word as its category.
     pub fn file_type(self) -> &'static str {
         match self {
-            Self::Canvas => "canvas",
+            Self::Whiteboard => "whiteboard",
             Self::Notebook => "notebook",
         }
     }
@@ -49,16 +50,16 @@ impl DrawingKind {
     /// The kind a library path names: an own file of either kind
     /// (`layout::own_file_ok`), and nothing else.
     pub fn of(rel: &str) -> Option<Self> {
-        [Self::Canvas, Self::Notebook]
+        [Self::Whiteboard, Self::Notebook]
             .into_iter()
             .find(|kind| layout::own_file_ok(rel, kind.own()))
     }
 }
 
 const EXPECTED: &str =
-    "Expected one of your canvases (<title>.canvas) or notebooks (<title>.notebook)";
+    "Expected one of your whiteboards (<title>.whiteboard) or notebooks (<title>.notebook)";
 
-pub(super) fn is_canvas_rel(rel: &str) -> bool {
+pub(super) fn is_whiteboard_rel(rel: &str) -> bool {
     DrawingKind::of(rel).is_some()
 }
 
@@ -79,7 +80,7 @@ fn name(kind: DrawingKind, title: &str) -> String {
 // Reject symlinks even when they point inside the root: a drawing must never
 // alias a different library file.
 fn checked(root: &Path, rel: &str, create_parents: bool) -> Result<PathBuf, String> {
-    if !is_canvas_rel(rel) {
+    if !is_whiteboard_rel(rel) {
         return Err(EXPECTED.into());
     }
     let root = root.canonicalize().map_err(|e| e.to_string())?;
@@ -90,18 +91,20 @@ fn checked(root: &Path, rel: &str, create_parents: bool) -> Result<PathBuf, Stri
         path.push(part);
         match std::fs::symlink_metadata(&path) {
             Ok(meta) if meta.file_type().is_symlink() => {
-                return Err("Canvas paths cannot contain symlinks".into())
+                return Err("Whiteboard paths cannot contain symlinks".into())
             }
             Ok(meta) if i < last && !meta.is_dir() => {
-                return Err("Canvas parent is not a folder".into())
+                return Err("Whiteboard parent is not a folder".into())
             }
-            Ok(meta) if i == last && !meta.is_file() => return Err("Canvas is not a file".into()),
+            Ok(meta) if i == last && !meta.is_file() => {
+                return Err("Whiteboard is not a file".into())
+            }
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && i < last && create_parents => {
                 std::fs::create_dir(&path).map_err(|e| e.to_string())?;
                 let meta = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
                 if meta.file_type().is_symlink() || !meta.is_dir() {
-                    return Err("Unsafe canvas folder".into());
+                    return Err("Unsafe whiteboard folder".into());
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && i == last => {}
@@ -113,7 +116,7 @@ fn checked(root: &Path, rel: &str, create_parents: bool) -> Result<PathBuf, Stri
                 .map_err(|e| e.to_string())?
                 .starts_with(&root)
         {
-            return Err("Canvas path is outside the library".into());
+            return Err("Whiteboard path is outside the library".into());
         }
     }
     Ok(path)
@@ -124,27 +127,31 @@ fn file(kind: DrawingKind, rel: String, size_bytes: u64) -> ImportedFile {
 }
 
 /// The envelope every drawing has; a notebook also needs valid `paper`.
-pub(super) fn validate(kind: DrawingKind, content: &str) -> Result<(), String> {
-    let value: serde_json::Value = serde_json::from_str(content).map_err(|e| e.to_string())?;
-    if value.get("type").and_then(|v| v.as_str()) != Some("oculus-canvas")
+fn validated_content(kind: DrawingKind, content: &str) -> Result<Cow<'_, str>, String> {
+    let mut value: serde_json::Value = serde_json::from_str(content).map_err(|e| e.to_string())?;
+    if !authority::model::drawing_type(&value)
         || value.get("version").and_then(|v| v.as_u64()) != Some(1)
         || !value.get("elements").is_some_and(|v| v.is_array())
         || !value.get("viewport").is_some_and(|v| v.is_object())
     {
-        return Err("Unsupported canvas document".into());
+        return Err("Unsupported whiteboard document".into());
     }
     if kind == DrawingKind::Notebook {
         let paper = value.get("paper").ok_or("A notebook needs pages")?;
         authority::model::validate_paper(paper)?;
     }
-    Ok(())
+    if authority::model::normalize_type(&mut value) {
+        Ok(Cow::Owned(authority::format::serialize(&value)?))
+    } else {
+        Ok(Cow::Borrowed(content))
+    }
 }
 
 pub(super) fn write_at(root: &Path, rel: &str, content: &str) -> Result<u64, String> {
-    validate(DrawingKind::of(rel).ok_or(EXPECTED)?, content)?;
+    let content = validated_content(DrawingKind::of(rel).ok_or(EXPECTED)?, content)?;
     let path = checked(root, rel, false)?;
     if !path.is_file() {
-        return Err("Canvas no longer exists".into());
+        return Err("Whiteboard no longer exists".into());
     }
     let tmp = super::documents::note_temp_path(&path)?;
     crate::runtime::atomic_write::write(&path, &tmp, content.as_bytes())?;
@@ -177,7 +184,7 @@ pub(super) fn create_in(
     title: &str,
     content: &str,
 ) -> Result<ImportedFile, String> {
-    validate(kind, content)?;
+    let content = validated_content(kind, content)?;
     let wanted = name(kind, title);
     let ext = kind.extension();
     for index in 1.. {
@@ -194,7 +201,10 @@ pub(super) fn create_in(
             .open(&path)
         {
             Ok(_) => {
-                if let Err(error) = write_at(root, &rel, content) {
+                let write = super::documents::note_temp_path(&path).and_then(|tmp| {
+                    crate::runtime::atomic_write::write(&path, &tmp, content.as_bytes())
+                });
+                if let Err(error) = write {
                     std::fs::remove_file(path).ok();
                     return Err(error);
                 }
@@ -207,10 +217,10 @@ pub(super) fn create_in(
     unreachable!()
 }
 
-/// A new canvas, or with `kind: "notebook"` a new notebook, in `target_dir`
+/// A new whiteboard, or with `kind: "notebook"` a new notebook, in `target_dir`
 /// (data-dir-relative, in the subject) or the subject's root.
 #[tauri::command]
-pub async fn create_canvas(
+pub async fn create_whiteboard(
     subject_code: String,
     title: String,
     content: String,
@@ -236,7 +246,7 @@ pub async fn create_canvas(
 }
 
 #[tauri::command]
-pub async fn read_canvas(relative_path: String) -> Result<String, String> {
+pub async fn read_whiteboard(relative_path: String) -> Result<String, String> {
     crate::runtime::blocking::run(move || {
         std::fs::read_to_string(checked(
             &crate::library::paths::data_dir(),
@@ -249,7 +259,7 @@ pub async fn read_canvas(relative_path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn write_canvas(relative_path: String, content: String) -> Result<u64, String> {
+pub async fn write_whiteboard(relative_path: String, content: String) -> Result<u64, String> {
     crate::runtime::blocking::run(move || {
         let root = crate::library::paths::data_dir();
         authority::global().unshared(&root, &relative_path, || {
@@ -260,7 +270,10 @@ pub async fn write_canvas(relative_path: String, content: String) -> Result<u64,
 }
 
 #[tauri::command]
-pub async fn rename_canvas(relative_path: String, title: String) -> Result<ImportedFile, String> {
+pub async fn rename_whiteboard(
+    relative_path: String,
+    title: String,
+) -> Result<ImportedFile, String> {
     crate::runtime::blocking::run(move || {
         let root = crate::library::paths::data_dir();
         authority::global().unshared(&root, &relative_path, || {
@@ -271,7 +284,7 @@ pub async fn rename_canvas(relative_path: String, title: String) -> Result<Impor
 }
 
 /// Renames within the file's own folder, keeping its extension: a rename
-/// never turns a canvas into a notebook or back.
+/// never turns a whiteboard into a notebook or back.
 pub(super) fn rename_at(root: &Path, rel: &str, title: &str) -> Result<ImportedFile, String> {
     let kind = DrawingKind::of(rel).ok_or(EXPECTED)?;
     let path = checked(root, rel, false)?;
@@ -297,7 +310,7 @@ fn kind_changed() -> String {
 }
 
 #[tauri::command]
-pub async fn delete_canvas(relative_path: String) -> Result<(), String> {
+pub async fn delete_whiteboard(relative_path: String) -> Result<(), String> {
     crate::runtime::blocking::run(move || {
         let root = crate::library::paths::data_dir();
         authority::global().unshared(&root, &relative_path, || {
@@ -307,9 +320,9 @@ pub async fn delete_canvas(relative_path: String) -> Result<(), String> {
     .await
 }
 
-/// A subject's canvases, or with `kind: "notebook"` its notebooks; never both.
+/// A subject's whiteboards, or with `kind: "notebook"` its notebooks; never both.
 #[tauri::command]
-pub async fn list_canvases(
+pub async fn list_whiteboards(
     subject_code: String,
     kind: Option<DrawingKind>,
 ) -> Result<Vec<ImportedFile>, String> {

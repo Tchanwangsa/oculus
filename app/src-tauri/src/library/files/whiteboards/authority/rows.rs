@@ -27,12 +27,12 @@ impl DbRows {
         let writer = WRITER.get_or_init(|| {
             let (tx, rx) = channel::<Op>();
             let spawned = std::thread::Builder::new()
-                .name("canvas-file-rows".into())
+                .name("whiteboard-file-rows".into())
                 .spawn(move || run(rx));
             match spawned {
                 Ok(_) => Some(tx),
                 Err(error) => {
-                    elog!("[canvas-authority] file row writer did not start: {error}");
+                    elog!("[whiteboard-authority] file row writer did not start: {error}");
                     None
                 }
             }
@@ -64,7 +64,7 @@ fn run(ops: std::sync::mpsc::Receiver<Op>) {
     {
         Ok(runtime) => runtime,
         Err(error) => {
-            elog!("[canvas-authority] file row writer has no runtime: {error}");
+            elog!("[whiteboard-authority] file row writer has no runtime: {error}");
             return;
         }
     };
@@ -74,7 +74,7 @@ fn run(ops: std::sync::mpsc::Receiver<Op>) {
             if pool.is_none() {
                 pool = crate::db::store::open_pool()
                     .await
-                    .map_err(|error| elog!("[canvas-authority] file rows: {error}"))
+                    .map_err(|error| elog!("[whiteboard-authority] file rows: {error}"))
                     .ok();
             }
             let Some(pool) = pool.as_ref() else {
@@ -92,7 +92,7 @@ fn run(ops: std::sync::mpsc::Receiver<Op>) {
                 Op::Delete(id) => (*id, crate::db::store::delete_file_row(pool, *id).await),
             };
             if let Err(error) = written {
-                elog!("[canvas-authority] file row {id}: {error}");
+                elog!("[whiteboard-authority] file row {id}: {error}");
             }
         });
     }

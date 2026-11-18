@@ -9,7 +9,7 @@ use super::error::{Code, CompanionError};
 use super::grants::EndReason;
 use super::wire::{CompanionState, Endpoints, ShareInfo};
 use super::Companion;
-use crate::library::files::canvases::authority;
+use crate::library::files::whiteboards::authority;
 use crate::shell::browser::MAIN;
 use tauri::{AppHandle, Emitter, EventTarget, Manager, State};
 

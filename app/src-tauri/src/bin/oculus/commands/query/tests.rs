@@ -226,7 +226,7 @@ mod notebook_read {
             std::fs::write(dir.join(&entry.image), b"png").unwrap();
         }
         let manifest = NotebookPages {
-            canvas: "courses/X/Work.notebook".into(),
+            whiteboard: "courses/X/Work.notebook".into(),
             page_count: pages,
             pages: entries,
         };
@@ -248,7 +248,7 @@ mod notebook_read {
             [1, 2, 3]
         );
         assert!(std::path::Path::new(&view.pages[0].image)
-            .ends_with(std::path::Path::new("canvas-pages/7/page-001.png")));
+            .ends_with(std::path::Path::new("whiteboard-pages/7/page-001.png")));
         assert_eq!(view.pages[0].age_seconds, 59);
         assert_eq!(view.pages[2].age_seconds, 57);
     }
@@ -274,11 +274,11 @@ mod notebook_read {
     }
 
     #[test]
-    fn a_canvas_is_neither_pictures_nor_text_whatever_it_holds() {
+    fn a_whiteboard_is_neither_pictures_nor_text_whatever_it_holds() {
         use super::super::notebook::reads_as_pictures;
-        assert!(!reads_as_pictures("canvas"));
+        assert!(!reads_as_pictures("whiteboard"));
         assert!(!super::super::library::is_text_file(
-            "courses/X/Work.canvas"
+            "courses/X/Work.whiteboard"
         ));
     }
 

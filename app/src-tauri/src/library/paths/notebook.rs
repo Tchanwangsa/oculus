@@ -1,12 +1,12 @@
-//! Where a notebook's page images live, for chat agents: `canvas-pages/<file id>/`
+//! Where a notebook's page images live, for chat agents: `whiteboard-pages/<file id>/`
 //! holds one PNG per page and a `pages.json` manifest naming them. The app writes
-//! them as the student writes (`library::files::canvases::snapshots`); `oculus read`
+//! them as the student writes (`library::files::whiteboards::snapshots`); `oculus read`
 //! and the agents read them. Keyed by the `files` row, so a rename moves nothing.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-pub const PAGES_DIR: &str = "canvas-pages";
+pub const PAGES_DIR: &str = "whiteboard-pages";
 pub const PAGES_MANIFEST: &str = "pages.json";
 
 /// One page's picture, as the manifest records it.
@@ -27,7 +27,7 @@ pub struct NotebookPage {
 #[serde(rename_all = "camelCase")]
 pub struct NotebookPages {
     /// The notebook's library path, `courses/<code>/…/<title>.notebook`.
-    pub canvas: String,
+    pub whiteboard: String,
     pub page_count: usize,
     pub pages: Vec<NotebookPage>,
 }

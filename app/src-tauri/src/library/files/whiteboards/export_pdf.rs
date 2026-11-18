@@ -158,7 +158,7 @@ pub fn pdf_from_pages(pages: Vec<PdfPage>) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
-pub async fn canvas_export_pdf(
+pub async fn whiteboard_export_pdf(
     app: tauri::AppHandle,
     title: String,
     pages: Vec<PdfPage>,
@@ -194,7 +194,7 @@ mod tests {
     use crate::library::pdf_render::{parse, render_rgba};
     use image::{Rgba, RgbaImage};
 
-    /// An RGBA PNG (as a canvas produces) filled with `colour`, as base64.
+    /// An RGBA PNG (as an HTML canvas produces) filled with `colour`, as base64.
     fn png(width: u32, height: u32, colour: [u8; 4]) -> String {
         let image = RgbaImage::from_pixel(width, height, Rgba(colour));
         let mut out = Vec::new();
@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn the_export_writer_takes_a_pdf_and_nothing_else_under_that_name() {
-        let root = crate::test_support::Scratch::new("canvas-pdf");
+        let root = crate::test_support::Scratch::new("whiteboard-pdf");
         let pdf =
             pdf_from_pages(vec![page(100.0, 100.0, png(4, 4, [255, 255, 255, 255]))]).unwrap();
         let path = super::super::export::write_chosen(&root.join("Work.pdf"), "pdf", &pdf).unwrap();

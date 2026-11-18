@@ -52,7 +52,11 @@ pub fn rewrite(
         None,
         rules,
     )?;
-    counts.manifests = remap_files(&data_dir.join(PAGES_DIR), Some(PAGES_MANIFEST), rules)?;
+    // The pictures' folder has its whiteboard name only once
+    // `whiteboard` runs, after this move.
+    for dir in [super::whiteboard::LEGACY_PAGES_DIR, PAGES_DIR] {
+        counts.manifests += remap_files(&data_dir.join(dir), Some(PAGES_MANIFEST), rules)?;
+    }
     for code in &plan.relink {
         crate::agents::link_course(data_dir, code)
             .map_err(|e| format!("relink {code}'s memories: {e}"))?;

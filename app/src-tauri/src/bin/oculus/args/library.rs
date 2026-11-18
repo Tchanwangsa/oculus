@@ -15,8 +15,9 @@ pub(crate) enum LibraryAction {
 /// folders flatten into the subject's root, lecture recordings move from
 /// lectures/<id>/ into Course/Recordings/<date>-<slug>/, parse records into
 /// .oculus/derived/, and the database's paths are rewritten to match. Old
-/// paths stay readable through the path_moves table. Once done, a marker in
-/// the data folder's .library-move/ makes it a no-op.
+/// paths stay readable through the path_moves table. Then each drawing saved
+/// as .canvas becomes .whiteboard, with its rows and old paths following.
+/// Once done, markers in the data folder's .library-move/ make both no-ops.
 #[derive(Args)]
 pub(crate) struct LibraryMigrateArgs {
     /// Print the plan (counts per kind and the first moves) without moving,

@@ -51,7 +51,7 @@ fn validate_link(link: &str) -> Result<(), String> {
     if valid {
         Ok(())
     } else {
-        Err("This link cannot be shared. Open the canvas sharing dialog again.".into())
+        Err("This link cannot be shared. Open the whiteboard sharing dialog again.".into())
     }
 }
 

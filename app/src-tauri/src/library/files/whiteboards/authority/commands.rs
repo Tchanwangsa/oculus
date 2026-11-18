@@ -1,6 +1,6 @@
 //! Tauri commands for desktop panes. Errors are `{code, message}`
 //! (`error.rs`). Accepted changes and lifecycle moves reach the main webview as
-//! `canvas-authority-change` and `canvas-authority-state` events.
+//! `whiteboard-authority-change` and `whiteboard-authority-state` events.
 
 use super::error::AuthorityError;
 use super::events::Event;
@@ -12,8 +12,8 @@ use serde_json::Value;
 use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, EventTarget};
 
-pub const CHANGE_EVENT: &str = "canvas-authority-change";
-pub const STATE_EVENT: &str = "canvas-authority-state";
+pub const CHANGE_EVENT: &str = "whiteboard-authority-change";
+pub const STATE_EVENT: &str = "whiteboard-authority-state";
 
 /// Forward authority events to the main webview, once per process.
 fn desktop_events(app: &AppHandle) {
@@ -28,7 +28,7 @@ fn desktop_events(app: &AppHandle) {
                 Event::State(state) => app.emit_to(EventTarget::webview(MAIN), STATE_EVENT, state),
             };
             if let Err(error) = sent {
-                elog!("[canvas-authority] event not delivered: {error}");
+                elog!("[whiteboard-authority] event not delivered: {error}");
             }
         })
     });
@@ -47,7 +47,7 @@ fn root() -> std::path::PathBuf {
 }
 
 #[tauri::command]
-pub async fn canvas_authority_open(
+pub async fn whiteboard_authority_open(
     app: AppHandle,
     file_id: i64,
     relative_path: String,
@@ -59,7 +59,7 @@ pub async fn canvas_authority_open(
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub async fn canvas_authority_commit(
+pub async fn whiteboard_authority_commit(
     file_id: i64,
     client_id: String,
     seq: u64,
@@ -80,12 +80,12 @@ pub async fn canvas_authority_commit(
 }
 
 #[tauri::command]
-pub async fn canvas_authority_snapshot(file_id: i64) -> Result<Snapshot, AuthorityError> {
+pub async fn whiteboard_authority_snapshot(file_id: i64) -> Result<Snapshot, AuthorityError> {
     blocking(move || global().snapshot(file_id)).await
 }
 
 #[tauri::command]
-pub async fn canvas_authority_resolve_external(
+pub async fn whiteboard_authority_resolve_external(
     file_id: i64,
     choice: Resolution,
 ) -> Result<Snapshot, AuthorityError> {
@@ -93,7 +93,7 @@ pub async fn canvas_authority_resolve_external(
 }
 
 #[tauri::command]
-pub async fn canvas_authority_rename(
+pub async fn whiteboard_authority_rename(
     file_id: i64,
     title: String,
 ) -> Result<ImportedFile, AuthorityError> {
@@ -101,12 +101,12 @@ pub async fn canvas_authority_rename(
 }
 
 #[tauri::command]
-pub async fn canvas_authority_delete(file_id: i64) -> Result<(), AuthorityError> {
+pub async fn whiteboard_authority_delete(file_id: i64) -> Result<(), AuthorityError> {
     blocking(move || global().delete(file_id)).await
 }
 
 #[tauri::command]
-pub async fn canvas_authority_close(file_id: i64) -> Result<(), AuthorityError> {
+pub async fn whiteboard_authority_close(file_id: i64) -> Result<(), AuthorityError> {
     blocking(move || {
         global().close(file_id);
         Ok(())

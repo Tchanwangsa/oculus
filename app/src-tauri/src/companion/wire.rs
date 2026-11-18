@@ -3,7 +3,7 @@
 //! command results carry it; none of these types implement `Debug`.
 
 use super::endpoints::Endpoint;
-use crate::library::files::canvases::authority::events::Phase;
+use crate::library::files::whiteboards::authority::events::Phase;
 use serde::Serialize;
 
 /// A live share, with a link per endpoint.

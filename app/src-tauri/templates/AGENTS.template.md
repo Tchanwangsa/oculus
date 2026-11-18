@@ -42,8 +42,8 @@ file's kind given by its extension.
                    transcript.vtt, outline.md, source1.mp4 (see the
                    lectures skill)
   <the student's own files and folders>
-                   uploads, notes (`.md`, written in the app), drawings
-                   (`.canvas`, whiteboards, not text) and notebooks
+                   uploads, notes (`.md`, written in the app), whiteboards
+                   (`.whiteboard`, drawings, not text) and notebooks
                    (`.notebook`, pages where they write their working by
                    hand — read one with `oculus read`, see the library
                    skill, never by opening the file)

@@ -1,12 +1,12 @@
 //! A notebook's pages as PNGs, for chat agents.
 //!
 //! The editor renders each page whose content changed a moment after the student
-//! stops writing and sends it here. Each lands in `canvas-pages/<file id>/` with a
+//! stops writing and sends it here. Each lands in `whiteboard-pages/<file id>/` with a
 //! manifest (`library::paths::notebook`), and `oculus read <notebook>` hands the
 //! agent those paths. Keyed by file id like the recovery drafts, so a rename moves
-//! no picture: Drive's move only points the manifest's `canvas` at the new path
+//! no picture: Drive's move only points the manifest's `whiteboard` at the new path
 //! (`retarget`). A deleted notebook's folder is removed by
-//! `canvas_delete_page_snapshots`, or by Drive's delete.
+//! `whiteboard_delete_page_snapshots`, or by Drive's delete.
 
 use crate::library::paths::{
     notebook_page_image, read_notebook_pages, NotebookPage, NotebookPages, PAGES_DIR,
@@ -35,7 +35,7 @@ fn unsafe_folder() -> String {
 /// The notebook's folder, created on demand; a symlink anywhere on the way is refused.
 fn dir_at(root: &Path, file_id: i64, create: bool) -> Result<Option<PathBuf>, String> {
     if file_id <= 0 {
-        return Err("Invalid canvas file ID".into());
+        return Err("Invalid whiteboard file ID".into());
     }
     let mut path = root.to_path_buf();
     for part in [PAGES_DIR.to_string(), file_id.to_string()] {
@@ -120,7 +120,7 @@ fn write_at(
         }
     }
     let json = serde_json::to_string_pretty(&NotebookPages {
-        canvas: relative_path.into(),
+        whiteboard: relative_path.into(),
         page_count,
         pages: manifest,
     })
@@ -134,13 +134,13 @@ pub(crate) fn retarget(root: &Path, file_id: i64, relative_path: &str) -> Result
     let Some(mut manifest) = read_notebook_pages(root, file_id) else {
         return Ok(());
     };
-    if manifest.canvas == relative_path {
+    if manifest.whiteboard == relative_path {
         return Ok(());
     }
     let Some(dir) = dir_at(root, file_id, false)? else {
         return Ok(());
     };
-    manifest.canvas = relative_path.into();
+    manifest.whiteboard = relative_path.into();
     let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
     write_file(&dir.join(PAGES_MANIFEST), json.as_bytes())
 }
@@ -159,7 +159,7 @@ fn unix_now() -> u64 {
 }
 
 #[tauri::command]
-pub async fn canvas_write_page_snapshots(
+pub async fn whiteboard_write_page_snapshots(
     file_id: i64,
     relative_path: String,
     page_count: usize,
@@ -179,7 +179,7 @@ pub async fn canvas_write_page_snapshots(
 }
 
 #[tauri::command]
-pub async fn canvas_delete_page_snapshots(file_id: i64) -> Result<(), String> {
+pub async fn whiteboard_delete_page_snapshots(file_id: i64) -> Result<(), String> {
     crate::runtime::blocking::run(move || remove_at(&crate::library::paths::data_dir(), file_id))
         .await
 }
@@ -204,7 +204,7 @@ mod tests {
         }
     }
     fn root() -> crate::test_support::Scratch {
-        crate::test_support::Scratch::new("canvas-pages")
+        crate::test_support::Scratch::new("whiteboard-pages")
     }
 
     #[test]
@@ -214,7 +214,7 @@ mod tests {
         let dir = notebook_pages_dir(&root, 7);
         assert!(dir.join("page-001.png").is_file() && dir.join("page-002.png").is_file());
         let manifest = read_notebook_pages(&root, 7).unwrap();
-        assert_eq!(manifest.canvas, REL);
+        assert_eq!(manifest.whiteboard, REL);
         assert_eq!(manifest.page_count, 2);
         assert_eq!(
             manifest
@@ -261,7 +261,7 @@ mod tests {
         let moved = "courses/MAST30027_2026_SM2/Renamed.notebook";
         write_at(&root, 7, moved, 1, vec![], 300).unwrap();
         let manifest = read_notebook_pages(&root, 7).unwrap();
-        assert_eq!(manifest.canvas, moved);
+        assert_eq!(manifest.whiteboard, moved);
         assert_eq!(manifest.pages[0].updated_at, 100);
     }
 
@@ -269,7 +269,7 @@ mod tests {
     fn only_a_notebook_takes_pictures() {
         let root = root();
         for wrong in [
-            "courses/X/Week 3.canvas",
+            "courses/X/Week 3.whiteboard",
             "courses/X/Course/Files/Week 3.notebook",
             "courses/X/.oculus/Week 3.notebook",
         ] {
@@ -292,7 +292,7 @@ mod tests {
             "index past the page count"
         );
         assert!(write_at(&root, 7, REL, 0, vec![], 1).is_err());
-        assert!(write_at(&root, 7, "../elsewhere.canvas", 1, vec![page(0)], 1).is_err());
+        assert!(write_at(&root, 7, "../elsewhere.whiteboard", 1, vec![page(0)], 1).is_err());
         assert!(write_at(&root, 0, REL, 1, vec![page(0)], 1).is_err());
         let not_base64 = PageImage {
             id: "p1".into(),
@@ -310,7 +310,7 @@ mod tests {
     #[cfg(unix)]
     fn refuses_a_symlinked_folder() {
         let root = root();
-        let elsewhere = crate::test_support::Scratch::new("canvas-pages-elsewhere");
+        let elsewhere = crate::test_support::Scratch::new("whiteboard-pages-elsewhere");
         std::os::unix::fs::symlink(&elsewhere, root.join(PAGES_DIR)).unwrap();
         assert!(write_at(&root, 7, REL, 1, vec![page(0)], 1).is_err());
         assert!(std::fs::read_dir(&elsewhere).unwrap().next().is_none());

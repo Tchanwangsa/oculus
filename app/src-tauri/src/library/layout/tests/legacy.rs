@@ -49,7 +49,7 @@ fn own_files_go_by_their_folder() {
     );
     assert!(LEGACY.own_file_ok("courses/X/documents/drafts/x.md", OwnKind::Document));
     assert!(!LEGACY.own_file_ok("courses/X/documents/assets/x.md", OwnKind::Document));
-    assert!(!LEGACY.own_file_ok("courses/X/notebooks/Week 3.canvas", OwnKind::Canvas));
+    assert!(!LEGACY.own_file_ok("courses/X/notebooks/Week 3.whiteboard", OwnKind::Whiteboard));
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn categories_follow_the_first_folder() {
         ("lessons/1-x.md", "lessons"),
         ("uploads/notes.md", "upload"),
         ("documents/week-3.md", "document"),
-        ("canvases/b.canvas", "canvas"),
+        ("canvases/b.canvas", "whiteboard"),
         ("notebooks/p.notebook", "notebook"),
         ("Uploads/odd-case.pdf", "other"),
         ("uploads", "other"),

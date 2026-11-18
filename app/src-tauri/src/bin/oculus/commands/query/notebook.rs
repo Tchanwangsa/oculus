@@ -20,7 +20,7 @@ pub(crate) struct NotebookView {
 }
 
 /// Whether `oculus read` prints page pictures for a file of `file_type`: only
-/// a notebook (`.notebook`) has pages; a `.canvas` is a whiteboard.
+/// a notebook (`.notebook`) has pages; a whiteboard (`.whiteboard`) has none.
 pub(crate) fn reads_as_pictures(file_type: &str) -> bool {
     file_type == "notebook"
 }

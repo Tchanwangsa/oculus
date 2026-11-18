@@ -1,5 +1,5 @@
 //! The authority's file access, through the same scoped path guard and
-//! atomic write as `write_canvas`. The content hash is SHA-256 of the bytes.
+//! atomic write as `write_whiteboard`. The content hash is SHA-256 of the bytes.
 
 use std::path::Path;
 
@@ -12,7 +12,7 @@ pub fn hash(bytes: &[u8]) -> Hash {
     out
 }
 
-/// The canvas's bytes, or `None` when the file is gone.
+/// The whiteboard's bytes, or `None` when the file is gone.
 pub fn read(root: &Path, rel: &str) -> Result<Option<Vec<u8>>, String> {
     let path = super::super::checked(root, rel, false)?;
     match std::fs::read(&path) {
@@ -22,12 +22,12 @@ pub fn read(root: &Path, rel: &str) -> Result<Option<Vec<u8>>, String> {
     }
 }
 
-/// Replace an existing canvas file; never creates one.
+/// Replace an existing whiteboard file; never creates one.
 pub fn write(root: &Path, rel: &str, text: &str) -> Result<u64, String> {
     super::super::write_at(root, rel, text)
 }
 
-/// Remove the canvas file; one that is already gone counts as removed.
+/// Remove the whiteboard file; one that is already gone counts as removed.
 pub fn remove(root: &Path, rel: &str) -> Result<(), String> {
     match std::fs::remove_file(super::super::checked(root, rel, false)?) {
         Ok(()) => Ok(()),

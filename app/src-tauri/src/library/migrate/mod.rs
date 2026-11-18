@@ -21,6 +21,7 @@ mod plan;
 mod resolve;
 mod rules;
 mod startup;
+pub mod whiteboard;
 
 #[cfg(test)]
 mod tests;
@@ -98,25 +99,24 @@ pub fn kind_label(kind: Kind) -> &'static str {
         Kind::AgentNotes => "agent-written notes into Agent notes",
         Kind::Partial => "cut-short lecture downloads deleted",
         Kind::Cleanup => "emptied folders, stale links and .DS_Store removed",
+        Kind::Whiteboard => "canvases renamed to whiteboards",
+        Kind::DrawingRecords => "drawing page pictures and drafts folders renamed",
     }
 }
 
-/// The launch check, in the app and the CLI: nothing once the move is done,
-/// else the whole move, logged in one line.
+/// The launch check, in the app and the CLI: the move into the Drive tree,
+/// then the whiteboard rename (`whiteboard`), each nothing once done, else
+/// run whole and logged in one line.
 pub fn at_startup(data_dir: &Path) -> Result<(), String> {
-    if journal::is_done(data_dir) {
-        return Ok(());
-    }
-    match run(data_dir, &Hooks::from_env())? {
-        Outcome::Moved(summary) => {
+    if !journal::is_done(data_dir) {
+        if let Outcome::Moved(summary) = run(data_dir, &Hooks::from_env())? {
             elog!("[oculus] {}", summary.line());
             for left in &summary.left {
                 elog!("[oculus] library move left {left}");
             }
         }
-        Outcome::AlreadyDone | Outcome::NothingToMove => {}
     }
-    Ok(())
+    whiteboard::at_startup(data_dir)
 }
 
 /// Run (or resume) the move. Blocks: it runs on a thread of its own with a
@@ -214,7 +214,8 @@ async fn run_async(data_dir: &Path, hooks: &Hooks) -> Result<Outcome, String> {
         }
     };
     if plan.phase == Phase::Moving {
-        let moved = apply::execute(data_dir, &mut plan, hooks);
+        let log = journal::DoneLog::open(data_dir)?;
+        let moved = apply::execute(data_dir, &mut plan.steps, log, hooks);
         if moved.is_err() {
             // The states so far go into the journal; the done log holds them
             // already, this only saves replaying it.

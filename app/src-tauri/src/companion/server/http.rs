@@ -66,7 +66,7 @@ pub fn session_ended() -> Reply {
     error(
         StatusCode::GONE,
         "session-ended",
-        "This canvas is no longer shared.",
+        "This whiteboard is no longer shared.",
     )
 }
 

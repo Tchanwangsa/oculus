@@ -1,4 +1,4 @@
-//! Between the transport and the canvas authority: authority events into
+//! Between the transport and the whiteboard authority: authority events into
 //! share logs and pushes (`events`), commits in (`commit`), snapshots and
 //! catch-up out (`read`). Authority calls run on blocking threads, since a
 //! commit writes the file.
@@ -7,7 +7,7 @@ pub mod commit;
 pub mod events;
 pub mod read;
 
-use crate::library::files::canvases::authority::error::{AuthorityError, Code};
+use crate::library::files::whiteboards::authority::error::{AuthorityError, Code};
 use hyper::StatusCode;
 
 /// The HTTP status for an authority error.

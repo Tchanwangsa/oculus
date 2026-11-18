@@ -18,7 +18,7 @@ async fn own_files_at_any_depth_get_rows_with_their_kind() {
     let lib = Lib::new("drive-reconcile-depth").await;
     lib.put(&own(CODE, "brief.pdf"), b"%PDF");
     lib.put(&own(CODE, "Assignment 2/notes.md"), b"# hi");
-    lib.put(&own(CODE, "Assignment 2/deep/er/board.canvas"), b"{}");
+    lib.put(&own(CODE, "Assignment 2/deep/er/board.whiteboard"), b"{}");
     lib.put(&own(OTHER, "theirs.pdf"), b"%PDF");
 
     let (subject, inserted) = reconcile_own_files_at(&lib.dir, &lib.pool, CODE)
@@ -39,7 +39,7 @@ async fn own_files_at_any_depth_get_rows_with_their_kind() {
     assert_eq!(
         got,
         [
-            ("board.canvas", "canvas", "canvas", 2),
+            ("board.whiteboard", "whiteboard", "whiteboard", 2),
             ("notes.md", "md", "document", 4),
             ("brief.pdf", "pdf", "upload", 4),
         ]
@@ -47,7 +47,7 @@ async fn own_files_at_any_depth_get_rows_with_their_kind() {
     assert_eq!(
         paths_of(&lib, 1).await,
         [
-            own(CODE, "Assignment 2/deep/er/board.canvas"),
+            own(CODE, "Assignment 2/deep/er/board.whiteboard"),
             own(CODE, "Assignment 2/notes.md"),
             own(CODE, "brief.pdf"),
         ]

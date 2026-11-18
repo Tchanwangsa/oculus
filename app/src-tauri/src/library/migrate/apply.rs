@@ -6,7 +6,7 @@
 use std::io;
 use std::path::Path;
 
-use super::journal::{DoneLog, Op, Plan};
+use super::journal::{DoneLog, Op, Step};
 use super::plan::{holds_no_file, FINDER_FILE};
 
 /// Test seams: stop after this many renames (a crash), or fail one with the
@@ -38,14 +38,19 @@ impl Hooks {
 /// What stopped a run before every step was done.
 pub const STOPPED: &str = "the library move stopped early (test hook); run again to finish it";
 
-pub fn execute(data_dir: &Path, plan: &mut Plan, hooks: &Hooks) -> Result<(), String> {
-    let mut log = DoneLog::open(data_dir)?;
+/// Every step not done yet, each recorded in `log` as it lands.
+pub fn execute(
+    data_dir: &Path,
+    steps: &mut [Step],
+    mut log: DoneLog,
+    hooks: &Hooks,
+) -> Result<(), String> {
     let mut renamed = 0;
-    for index in 0..plan.steps.len() {
-        if plan.steps[index].done {
+    for (index, step) in steps.iter_mut().enumerate() {
+        if step.done {
             continue;
         }
-        let op = plan.steps[index].op.clone();
+        let op = step.op.clone();
         if let Op::Rename { from, to } = &op {
             if hooks.stop_after == Some(renamed) {
                 return Err(STOPPED.to_string());
@@ -58,7 +63,7 @@ pub fn execute(data_dir: &Path, plan: &mut Plan, hooks: &Hooks) -> Result<(), St
             remove(data_dir, &op)?;
         }
         log.record(index)?;
-        plan.steps[index].done = true;
+        step.done = true;
     }
     Ok(())
 }
