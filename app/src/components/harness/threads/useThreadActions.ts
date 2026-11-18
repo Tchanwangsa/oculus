@@ -20,6 +20,7 @@ import {
 } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { usePickStore } from "@/stores/chat/pickStore";
+import { useNewChatMode } from "@/stores/chat/newChatMode";
 
 interface ThreadActionsOptions {
   /** The thread the actions act on, read at call time. */
@@ -54,8 +55,10 @@ export function useThreadActions(opts: ThreadActionsOptions) {
       const id = o.threadId();
       const more = await extra();
       const { provider, model, effort } = o.selection;
+      // A new chat starts under the mode its composer showed.
+      const start = id == null ? { startMode: useNewChatMode.getState().mode } : {};
       try {
-        const newId = await harnessSend(id, provider, text, { model, reasoningEffort: effort, ...more }, mode);
+        const newId = await harnessSend(id, provider, text, { model, reasoningEffort: effort, ...start, ...more }, mode);
         // The send carried the composer's pick; Rust stored it with the message.
         if (id != null) usePickStore.getState().sent(id);
         if (id == null) {

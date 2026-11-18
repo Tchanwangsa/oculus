@@ -36,18 +36,22 @@ export interface ModelMenuProps {
   onClose: () => void;
 }
 
+/** A model menu's frame: a column no taller than the room above or below
+ *  its trigger, whose model list scrolls between the tabs and the dial. */
+export const MODEL_MENU_FRAME =
+  "flex max-h-[min(var(--radix-popover-content-available-height),28rem)] w-72 flex-col overflow-hidden";
+
+/** Focus a model menu's search box, which a long catalogue has; false when
+ *  there is none. */
+export function focusModelSearch(root: HTMLElement | null): boolean {
+  const search = root?.querySelector<HTMLElement>("[data-model-search]");
+  search?.focus();
+  return !!search;
+}
+
 /**
- * The model-and-reasoning menu inside a popover: provider tabs, the active
- * provider's models, and reasoning levels. Nothing inside closes it — agent,
- * model and level are one decision. Neither row has a "default" entry: a turn
- * always names an explicit model and level. Levels come off the model, not
- * the provider. A provider whose CLI is missing shows `NotInstalled` instead
- * of its catalogue, and a `locked` one (a started chat it cannot take over)
- * is dimmed but opens a note saying so, without being picked. Each model row
- * has a star; the Starred tab, first in the strip, lists starred models
- * across agents and opens by default while the chat's model is one of them.
- * It mounts with the popover's content, so search, peek and tab start afresh
- * at every opening.
+ * The model picker's popover over `ModelMenu`, opening on the search box
+ * when there is one.
  */
 export function ModelMenuContent({
   side,
@@ -62,13 +66,10 @@ export function ModelMenuContent({
       align={align}
       sideOffset={sideOffset}
       collisionPadding={collisionPadding}
-      className="flex max-h-[min(var(--radix-popover-content-available-height),28rem)] w-72 flex-col overflow-hidden p-0"
+      className={cn(MODEL_MENU_FRAME, "p-0")}
       onOpenAutoFocus={(e) => {
         // A long catalogue opens on its search box; otherwise Radix focuses the first tab.
-        const search = (e.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>("[data-model-search]");
-        if (!search) return;
-        e.preventDefault();
-        search.focus();
+        if (focusModelSearch(e.currentTarget as HTMLElement | null)) e.preventDefault();
       }}
     >
       <ModelMenu {...menu} />
@@ -76,7 +77,21 @@ export function ModelMenuContent({
   );
 }
 
-function ModelMenu({
+/**
+ * The model-and-reasoning menu, drawn inside a `MODEL_MENU_FRAME` column (the
+ * picker's popover, or the compact composer's settings page): provider tabs,
+ * the active provider's models, and reasoning levels. Nothing inside closes
+ * it — agent, model and level are one decision. Neither row has a "default"
+ * entry: a turn always names an explicit model and level. Levels come off the
+ * model, not the provider. A provider whose CLI is missing shows
+ * `NotInstalled` instead of its catalogue, and a `locked` one (a started chat
+ * it cannot take over) is dimmed but opens a note saying so, without being
+ * picked. Each model row has a star; the Starred tab, first in the strip,
+ * lists starred models across agents and opens by default while the chat's
+ * model is one of them. It mounts with the frame, so search, peek and tab
+ * start afresh at every opening.
+ */
+export function ModelMenu({
   providers,
   provider,
   locked,

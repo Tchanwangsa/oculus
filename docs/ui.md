@@ -328,8 +328,10 @@ themes are opt-in and keep the same structure.
 - **A compact composer is one bar** (the subject Overview's ask bar): the
   hint on one line, a sliders button, the mic and send. It never reshapes on
   focus; it only grows taller as text wraps, controls pinned bottom-right.
-  The sliders button opens a menu of setting rows (icon, value, muted detail,
-  chevron) whose submenus open beside it; sent, the bar morphs into the
+  The sliders button opens a menu of setting rows (icon, setting, muted
+  value, chevron); a row turns that same popover into its page, with a back
+  control, and the popover eases to the page's size — nothing opens beside
+  it. Sent, the bar morphs into the
   thread's composer
   ([harness.md](./harness.md#the-subject-overviews-ask-bar-starts-a-thread)).
 - **The composer says a turn's state in words, not only colour**

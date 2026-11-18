@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { fmtResets, type RateWindow, type ThreadUsage } from "@/lib/harness";
+import { fmtResets, nearestLimit, type RateWindow, type ThreadUsage } from "@/lib/harness";
 import { cn } from "@/lib/utils";
 
 /** Past this, a bar stops being informational and starts being a warning. */
@@ -85,28 +85,51 @@ function Meter({
 }
 
 /**
- * What a thread's usage reads as: the context share for the ring, the
- * figures to name it by, and whether there is anything to show at all.
+ * What a thread's usage reads as. The ring and its one-line reading
+ * (`headline`, `ringLabel`) are the plan window nearest its limit
+ * (`nearestLimit`), the session's or the week's, else this thread's context;
+ * `parts` lists every figure, and `empty` says there is nothing to show.
  */
 export function usageSummary(usage: ThreadUsage | null, rateLimits: RateWindow[]) {
   const used = usage?.contextTokens ?? null;
   const limit = usage?.contextWindow ?? null;
   const contextPercent = used && limit ? (used / limit) * 100 : 0;
-  const parts = [
+  const context =
     used != null && limit
       ? `${Math.round(contextPercent)}% of context`
       : used != null
         ? `${fmtTokens(used)} context tokens`
-        : null,
-    ...rateLimits.map((w) => `${w.label} ${Math.round(w.used_percent)}%`),
-  ].filter((p): p is string => p != null);
-  return { used, limit, contextPercent, parts, empty: used == null && rateLimits.length === 0 };
+        : null;
+  const nearest = nearestLimit(rateLimits);
+  const nearestPercent = nearest ? Math.round(nearest.used_percent) : 0;
+  const parts = [context, ...rateLimits.map((w) => `${w.label} ${Math.round(w.used_percent)}%`)].filter(
+    (p): p is string => p != null,
+  );
+  return {
+    used,
+    limit,
+    contextPercent,
+    nearest,
+    /** What the ring fills to. */
+    percent: nearest ? nearest.used_percent : contextPercent,
+    /** The ring's short reading: "Weekly 62%", else "Context 31%". */
+    headline: nearest
+      ? `${nearest.label} ${nearestPercent}%`
+      : used != null && limit
+        ? `Context ${Math.round(contextPercent)}%`
+        : context,
+    /** The ring named in full, for its title and label. */
+    ringLabel: nearest ? `${nearest.label} limit ${nearestPercent}% used` : context,
+    parts,
+    empty: used == null && rateLimits.length === 0,
+  };
 }
 
 /**
- * The ring is this thread's context usage only (never the worst of several
- * numbers); the popover adds the account's rate-limit windows. No spend shown:
- * subscription CLIs report a notional price nobody is billed.
+ * The ring is the plan window closest to running out, so the number that
+ * stops the student first is the one in view; without plan windows (opencode,
+ * Antigravity) it is this thread's context. The popover lists them all. No
+ * spend shown: subscription CLIs report a notional price nobody is billed.
  */
 export function UsageMeter({
   usage,
@@ -125,11 +148,11 @@ export function UsageMeter({
           type="button"
           variant="ghost"
           size="icon-xs"
-          aria-label={`Usage — ${summary.parts.join(", ")}`}
-          title={summary.parts.join(" · ")}
+          aria-label={`Usage — ${summary.ringLabel}`}
+          title={summary.ringLabel ?? undefined}
           className="shrink-0 text-muted-foreground hover:text-foreground"
         >
-          <Ring percent={summary.contextPercent} />
+          <Ring percent={summary.percent} />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" side="top" className="w-64 p-3">

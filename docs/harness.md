@@ -30,7 +30,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
 | Provider table (`PROVIDERS`), platform capabilities, types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/availability.ts`, `app/src/lib/harness/` |
 | What an agent asks mid-turn: the request table, its live routes, the protected-path check, the `Respond` and permission-mode commands | `app/src-tauri/src/harness/requests/`, `app/src-tauri/src/harness/core/decide/respond.rs`, `app/src-tauri/src/harness/app/consumer/requests.rs`, `app/src-tauri/src/harness/app/requests.rs` |
-| …their frontend: the row, the answer bar, the question panel, the mode control, what each shows | `app/src/components/harness/timeline/request/`, `app/src/components/harness/composer/RequestBar.tsx`, `app/src/components/harness/composer/QuestionPanel.tsx`, `app/src/components/harness/composer/useQuestionComposer.ts`, `app/src/components/harness/composer/PermissionModeControl.tsx`, `app/src/components/harness/composer/usePermissionMode.ts`, `app/src/lib/harness/requests.ts`, `app/src/lib/harness/questions.ts`, `app/src/lib/harness/permissionModes.ts` |
+| …their frontend: the row, the answer bar, the question panel, the mode control, what each shows | `app/src/components/harness/timeline/request/`, `app/src/components/harness/composer/RequestBar.tsx`, `app/src/components/harness/composer/QuestionPanel.tsx`, `app/src/components/harness/composer/useQuestionComposer.ts`, `app/src/components/harness/composer/PermissionModeControl.tsx`, `app/src/components/harness/composer/usePermissionMode.ts`, `app/src/stores/chat/newChatMode.ts`, `app/src/lib/harness/requests.ts`, `app/src/lib/harness/questions.ts`, `app/src/lib/harness/permissionModes.ts` |
 | A thread's selection, what a send does to its session (`decide_transition`), and the context handoff | `app/src-tauri/src/harness/core/decide/select.rs`, `app/src-tauri/src/harness/manager/transition.rs`, `app/src-tauri/src/harness/handoff/`, `app/src-tauri/src/harness/store/bindings.rs`, `app/src-tauri/src/harness/store/switching.sql` |
 | What each bridge can do (Stop, rewind, steering, switching), declared in Rust and read by the webview | `app/src-tauri/src/harness/providers/capabilities.rs`, `app/src/lib/harness/capabilities.ts`, `app/src/hooks/agents/useCapabilities.ts` |
 | Live state and event folding | `app/src/stores/chat/harnessStore.ts`, `app/src/hooks/backend/useBackendEvents.ts` |
@@ -580,8 +580,13 @@ still update the picker.
   video's thread): an
   ordered stack of cards, each a toned glyph, a title, a muted description,
   pill actions and an optional close. Never a toast, and nothing times out.
-- **Usage is a ring of context only** (`UsageMeter.tsx`); spend is hidden, as
-  subscriptions aren't billed per token. Claude context is the last
+- **Usage is a ring of the nearest limit** (`UsageMeter.tsx`): the plan
+  window closest to running out, the 5-hour session's or the week's
+  (`nearestLimit` in `app/src/lib/harness/usageLimit.ts`, the one
+  `usageSummary` and the usage-limit notice both read), named in its title;
+  with no plan windows (opencode, Antigravity), the thread's context. Its
+  popover lists the context and every window with its reset. Spend is
+  hidden, as subscriptions aren't billed per token. Claude context is the last
   `assistant` usage, since `result.usage` sums the turn. Codex windows are read
   on server start and page open (`harness_refresh_rate_limits`, which never
   starts a server).
@@ -1992,7 +1997,12 @@ restarting the session for it. The start step
 reads it off the row (`SendOptions::permission_mode`), as does a rewind
 that respawns the session, and it is part of
 the session's reuse key ([`decide_transition`](#changing-provider-mid-chat)).
-A bridge whose `approvals` flag is false declines approvals, whatever
+A new chat starts under the mode its composer showed before it existed
+(`useNewChatMode` in `app/src/stores/chat/`, the session's, like its model
+pick): `useThreadActions`' and Studio's New video's creating sends carry it
+as `SendOptions::start_mode`, which `create` in `core/commit.rs` writes to
+the row in the transaction that makes the thread, so the first run reads it
+as every later one does. A bridge whose `approvals` flag is false declines approvals, whatever
 the mode. `questions` separately gates question support.
 
 `harness_load` returns the thread's requests (`requests`), and the webview
@@ -2126,9 +2136,9 @@ What the student sees is decided in `app/src/lib/harness/requests.ts`,
   with the words ([Steering from the composer](#steering-from-the-composer)); elsewhere it
   queues behind the request. `harnessRespond` carries no feedback: Rust
   refuses it.
-- **The mode control** (`PermissionModeControl`, after the model picker,
-  for an open thread only; its state is `usePermissionMode`, which the
-  compact composer's settings row shares) is an icon-only button showing the chat's mode
+- **The mode control** (`PermissionModeControl`, after the model picker;
+  its state is `usePermissionMode`, which the compact composer's settings
+  menu shares) is an icon-only button showing the chat's mode
   (its name in the tooltip) and opens a "Permission mode" menu of Ask, Auto
   and Don't ask, each with a one-line description. Where the bridge has no
   reviewer (`autoReview` false) Auto says it asks as Ask; on Claude,
@@ -2136,7 +2146,8 @@ What the student sees is decided in `app/src/lib/harness/requests.ts`,
   menu's header says, in its tooltip, that the agent cannot ask yet. A pick
   is saved with
   `harnessSetPermissionMode`; Rust's refusal (a request waiting) shows at
-  the top of the open menu.
+  the top of the open menu. In a composer with no thread yet it shows, and
+  a pick sets, the mode the new chat starts with (`useNewChatMode`, above).
 - **Auto's evidence**: a tool row whose meta has a `review` says "Reviewer
   approved" or "Reviewer denied" (Codex), "Approved by Claude's classifier"
   or "Refused by Claude's classifier" quietly at its right, and opened, the
@@ -2458,8 +2469,9 @@ are never restored.
 ## The model picker
 
 One control for agent, model and level (`ModelPicker.tsx`): a trigger over
-`ModelMenuContent` (`app/src/components/harness/composer/model/`), the menu
-the compact composer's settings menu opens too.
+`ModelMenuContent` (`app/src/components/harness/composer/model/`), a popover
+around `ModelMenu`, the body the compact composer's settings menu draws on
+its model page.
 `useProviderModels` names no provider — each `PROVIDERS` entry owns its
 catalogue, and marks are a `Record<Provider, …>` so a new provider won't
 compile without one.
@@ -3323,13 +3335,24 @@ level, on any of the four agents.
   the bar's own height. Without `compact`, the box is the full composer.
 - **The settings button stands in for the control row**
   (`settings/CompactSettings.tsx`). Its title names agent, model and level
-  (`modelSummary`), and it opens a menu of rows (`SettingsSubmenu`), each an
-  icon, what is set, a muted detail and a chevron opening a submenu beside
-  it: the model and level, opening the model picker's own menu
-  (`ModelMenuContent`, refusal and switch lock included); the permission
-  mode (`PermissionModeMenu`, for an open thread only); usage, when there is
-  any (`UsageDetails`). `/model` opens the menu on its model row. A new
-  setting is one more row.
+  (`modelSummary`), and it opens one popover whose pages change in place
+  (`settings/PageFrame.tsx`). The first is a list of rows (`SettingsRow`),
+  each an icon, the setting, its value muted at the right and a chevron:
+  the model with its level; the permission mode, a new chat's included
+  (the mode it starts with); usage, when there is any, valued by the plan
+  window nearest its limit ("Weekly 62%", else the context). A row turns
+  the popover into its page, headed by a back control (`PageHeader`): the
+  model picker's own `ModelMenu` (agents, models and level on one page,
+  refusal and switch lock included), the mode choices
+  (`PermissionModeChoices`; a pick closes the menu), or `UsageDetails`.
+  The frame eases between the pages' sizes, measured with
+  `offsetWidth`/`offsetHeight` (`settings/useLayoutSize.ts`), with the page
+  pinned to the corner nearest the trigger so the frame reveals it; after
+  the first page, each slides and fades in. Each page focuses its own
+  control (the search box or the chosen model, the chosen mode, the row
+  just left); Up and Down walk the rows, Right opens one, and Escape or Left
+  goes back a page before Escape closes (`settings/pages.ts`). `/model`
+  opens the menu on its model page. A new setting is one more row and page.
 - **A send is Chat's new-thread send.** `useThreadActions`' `send` with
   `chatScope` set to the subject, as `ChatPage` sends a new thread: Rust
   creates the thread under that subject and the thread list reloads. `send`

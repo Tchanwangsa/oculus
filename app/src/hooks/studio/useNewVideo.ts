@@ -8,6 +8,7 @@ import { titleFromPrompt } from "@/lib/studio/title";
 import { newVideo } from "@/lib/studio/videos";
 import { readSetupProblems, type SetupProblem } from "@/lib/studio/setup";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
+import { useNewChatMode } from "@/stores/chat/newChatMode";
 import { useVideosStore } from "@/stores/studio/videosStore";
 
 /**
@@ -44,6 +45,7 @@ export function useNewVideo(subjectId: number | null, subjectCode: string | null
         await harnessSend(null, store.provider, text, {
           model: store.model,
           reasoningEffort: store.reasoning,
+          startMode: useNewChatMode.getState().mode,
           subjectId,
           studio: { slug, lengthSecs: style.lengthSecs ?? undefined, format: style.format },
         });

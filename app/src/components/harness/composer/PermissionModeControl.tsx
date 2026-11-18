@@ -17,7 +17,7 @@ const MODE_ICON: Record<PermissionMode, Icon> = {
 /**
  * The chat's permission mode, an icon-only trigger: how it asks for what
  * the agent's sandbox blocks (Ask, Auto or Don't ask), saved per chat with `harnessSetPermissionMode` from its next
- * run on. Each mode has its line; an agent that cannot ask says so in a
+ * run on; before a chat exists, the mode it starts with. Each mode has its line; an agent that cannot ask says so in a
  * tooltip on the header's warning icon, and one with no reviewer says so
  * on Auto's line. Rust refuses a change while a request waits;
  * its sentence shows at the top of the open menu.
@@ -26,7 +26,6 @@ export function PermissionModeControl({ threadId, provider }: { threadId: number
   const permission = usePermissionMode(threadId, provider);
   const [open, setOpen] = useState(false);
   const { mode } = permission;
-  if (mode == null) return null;
   return (
     <Popover
       open={open}
@@ -79,37 +78,52 @@ export function ModeIcon({ mode }: { mode: PermissionMode }) {
 }
 
 /** The open menu's content, given its state (the WebKit checks draw it alone). */
-export function PermissionModeMenu({
-  caps,
-  mode,
-  busy,
-  refused,
-  onPick,
-}: {
+export function PermissionModeMenu(props: PermissionModeChoicesProps) {
+  const { note } = modeChoices(props.caps);
+  return (
+    <div className="flex flex-col">
+      <div className="flex items-center justify-between gap-2 border-b border-border-subtle px-3 pb-1.5 pt-2.5 text-[11px] font-medium text-muted-foreground">
+        <span>Permission mode</span>
+        <ModeNote note={note} />
+      </div>
+      <PermissionModeChoices {...props} />
+    </div>
+  );
+}
+
+/** The warning that the agent cannot ask at all, its sentence in a tooltip;
+ *  nothing when it can. */
+export function ModeNote({ note }: { note: string | null }) {
+  if (!note) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} aria-label={note} className="flex cursor-default text-warning outline-none">
+          <WarningCircle className="size-3.5" aria-hidden />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64">
+        {note}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+interface PermissionModeChoicesProps {
   caps: Pick<Capabilities, "provider" | "approvals" | "autoReview">;
   mode: PermissionMode;
   busy: boolean;
   refused: string | null;
   onPick: (mode: PermissionMode) => void;
-}) {
-  const { note, choices } = modeChoices(caps);
+}
+
+/** Rust's refusal, then a row per mode with its line; the chosen one is
+ *  `aria-pressed` (`focusPickedMode` finds it). The compact composer's
+ *  settings menu draws these under its own page header. */
+export function PermissionModeChoices({ caps, mode, busy, refused, onPick }: PermissionModeChoicesProps) {
+  const { choices } = modeChoices(caps);
   return (
-    <div className="flex flex-col">
-      <div className="flex items-center justify-between gap-2 border-b border-border-subtle px-3 pb-1.5 pt-2.5 text-[11px] font-medium text-muted-foreground">
-        <span>Permission mode</span>
-        {note && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span tabIndex={0} aria-label={note} className="flex cursor-default text-warning outline-none">
-                <WarningCircle className="size-3.5" aria-hidden />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-64">
-              {note}
-            </TooltipContent>
-          </Tooltip>
-        )}
-      </div>
+    <>
       {refused && (
         <div role="alert" className="border-b border-border-subtle px-3 py-2 text-[11px] leading-relaxed text-destructive">
           {refused}
@@ -136,6 +150,6 @@ export function PermissionModeMenu({
           </button>
         ))}
       </div>
-    </div>
+    </>
   );
 }

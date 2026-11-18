@@ -141,6 +141,7 @@ export function ModelRow({
       <button
         type="button"
         title={title ?? description}
+        aria-current={selected || undefined}
         onClick={onClick}
         className={cn(
           "flex min-w-0 flex-1 cursor-default select-none items-center gap-2 py-1.5 pl-2 text-left text-xs text-foreground outline-none",
