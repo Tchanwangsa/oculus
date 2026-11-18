@@ -699,7 +699,7 @@ remembers the layer order.
 
 The hook ignores a document it handed to `onChange` itself, including an echo
 with a fresh identity but the same content. Any other document (another pane on
-the same session, a collaborator's merged edit, a recovery copy) replaces the
+the same session, a collaborator's edit, a recovery copy) replaces the
 scene but keeps this pane's camera, the gesture in progress and its preview,
 the undo history, the text being written and the selection of shapes that still
 exist. A preview of a shape someone removed is dropped, and a point or segment
