@@ -11,6 +11,7 @@ pub mod secret;
 
 use crate::companion::limits::{PUSH_QUEUE, REVOKED_KEPT};
 use crate::library::files::whiteboards::authority::events::{Change, Phase};
+use crate::library::files::whiteboards::DrawingKind;
 use log::{ChangeLog, Entry};
 use secret::Secret;
 use serde::Serialize;
@@ -53,6 +54,8 @@ pub struct Share {
     via: Mutex<HashMap<IpAddr, usize>>,
     phase: Mutex<Phase>,
     ended: Mutex<Option<EndReason>>,
+    /// The shared file's kind, from the snapshot `establish` was given.
+    kind: Mutex<Option<DrawingKind>>,
 }
 
 impl std::fmt::Debug for Share {
@@ -83,6 +86,7 @@ impl Share {
             via: Mutex::new(HashMap::new()),
             phase: Mutex::new(Phase::Live),
             ended: Mutex::new(None),
+            kind: Mutex::new(None),
         })
     }
 
@@ -91,9 +95,16 @@ impl Share {
         format!("{}.{}", self.id, self.secret.expose())
     }
 
-    pub fn establish(&self, epoch: &str, revision: u64, phase: Phase) {
+    pub fn establish(&self, epoch: &str, revision: u64, phase: Phase, kind: Option<DrawingKind>) {
         lock(&self.log).establish(epoch, revision);
         *lock(&self.phase) = phase;
+        *lock(&self.kind) = kind;
+    }
+
+    /// The word messages use for the shared file: its kind, or "drawing"
+    /// before `establish`.
+    pub fn noun(&self) -> &'static str {
+        DrawingKind::noun_of(*lock(&self.kind))
     }
 
     pub fn epoch(&self) -> Option<String> {

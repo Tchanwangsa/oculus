@@ -112,55 +112,55 @@ const fixedSegment = (v: unknown) => record(v) && Object.keys(v).length === 1 &&
 const LEGACY_TYPE = 'oculus-canvas';
 
 function validate(value: unknown): asserts value is WhiteboardDocument {
-  if (!record(value) || value.type !== 'oculus-whiteboard') throw new Error('This file is not an Oculus whiteboard.');
-  if (value.version !== 1) throw new Error(`Unsupported whiteboard version: ${String(value.version)}.`);
-  if (!Array.isArray(value.elements)) throw new Error('Whiteboard elements must be an array.');
+  if (!record(value) || value.type !== 'oculus-whiteboard') throw new Error('This file is not an Oculus drawing.');
+  if (value.version !== 1) throw new Error(`Unsupported drawing version: ${String(value.version)}.`);
+  if (!Array.isArray(value.elements)) throw new Error('Drawing elements must be an array.');
   if (!record(value.viewport) || !finite(value.viewport.x) || !finite(value.viewport.y) || !finite(value.viewport.zoom) || value.viewport.zoom <= 0) {
-    throw new Error('Whiteboard viewport must have finite coordinates and a positive zoom.');
+    throw new Error('Drawing viewport must have finite coordinates and a positive zoom.');
   }
-  if (typeof value.background !== 'string') throw new Error('Whiteboard background must be a colour.');
+  if (typeof value.background !== 'string') throw new Error('Drawing background must be a colour.');
   if (value.paper !== undefined) {
     const problem = paperProblem(value.paper);
     if (problem) throw new Error(problem);
   }
   const ids = new Set<string>();
   for (const [i, el] of value.elements.entries()) {
-    if (!record(el) || typeof el.id !== 'string' || !el.id || ids.has(el.id)) throw new Error(`Whiteboard element ${i + 1} needs a unique ID.`);
+    if (!record(el) || typeof el.id !== 'string' || !el.id || ids.has(el.id)) throw new Error(`Drawing element ${i + 1} needs a unique ID.`);
     ids.add(el.id);
-    if (typeof el.type !== 'string' || !TYPES.has(el.type)) throw new Error(`Unsupported whiteboard element type: ${String(el.type)}.`);
+    if (typeof el.type !== 'string' || !TYPES.has(el.type)) throw new Error(`Unsupported drawing element type: ${String(el.type)}.`);
     for (const key of ['x', 'y', 'width', 'height', 'strokeWidth', 'seed']) {
-      if (!finite(el[key])) throw new Error(`Whiteboard element ${i + 1} has an invalid ${key}.`);
+      if (!finite(el[key])) throw new Error(`Drawing element ${i + 1} has an invalid ${key}.`);
     }
     if ((el.strokeWidth as number) < 0 || typeof el.stroke !== 'string' || typeof el.fill !== 'string' || (el.style !== 'sketch' && el.style !== 'clean')) {
-      throw new Error(`Whiteboard element ${i + 1} has an invalid appearance.`);
+      throw new Error(`Drawing element ${i + 1} has an invalid appearance.`);
     }
-    if (el.fontSize !== undefined && (!finite(el.fontSize) || el.fontSize <= 0)) throw new Error(`Whiteboard element ${i + 1} has an invalid font size.`);
-    if (el.text !== undefined && typeof el.text !== 'string') throw new Error(`Whiteboard element ${i + 1} has invalid text.`);
-    if ((el.type === 'image' || el.dataUrl !== undefined) && !isWhiteboardImageDataUrl(el.dataUrl)) throw new Error(`Whiteboard element ${i + 1} needs an embedded PNG, JPEG, WebP or GIF image.`);
-    if (el.sourceName !== undefined && typeof el.sourceName !== 'string') throw new Error(`Whiteboard element ${i + 1} has an invalid image source name.`);
+    if (el.fontSize !== undefined && (!finite(el.fontSize) || el.fontSize <= 0)) throw new Error(`Drawing element ${i + 1} has an invalid font size.`);
+    if (el.text !== undefined && typeof el.text !== 'string') throw new Error(`Drawing element ${i + 1} has invalid text.`);
+    if ((el.type === 'image' || el.dataUrl !== undefined) && !isWhiteboardImageDataUrl(el.dataUrl)) throw new Error(`Drawing element ${i + 1} needs an embedded PNG, JPEG, WebP or GIF image.`);
+    if (el.sourceName !== undefined && typeof el.sourceName !== 'string') throw new Error(`Drawing element ${i + 1} has an invalid image source name.`);
     for (const key of ['naturalWidth', 'naturalHeight']) {
-      if (el[key] !== undefined && (!finite(el[key]) || el[key] <= 0)) throw new Error(`Whiteboard element ${i + 1} has an invalid ${key}.`);
+      if (el[key] !== undefined && (!finite(el[key]) || el[key] <= 0)) throw new Error(`Drawing element ${i + 1} has an invalid ${key}.`);
     }
     if (el.points !== undefined && (!Array.isArray(el.points) || !el.points.every(p => record(p) && finite(p.x) && finite(p.y)))) {
-      throw new Error(`Whiteboard element ${i + 1} has invalid points.`);
+      throw new Error(`Drawing element ${i + 1} has invalid points.`);
     }
-    if (el.opacity !== undefined && !unit(el.opacity)) throw new Error(`Whiteboard element ${i + 1} has an invalid opacity.`);
-    if (el.locked !== undefined && typeof el.locked !== 'boolean') throw new Error(`Whiteboard element ${i + 1} has an invalid locked flag.`);
+    if (el.opacity !== undefined && !unit(el.opacity)) throw new Error(`Drawing element ${i + 1} has an invalid opacity.`);
+    if (el.locked !== undefined && typeof el.locked !== 'boolean') throw new Error(`Drawing element ${i + 1} has an invalid locked flag.`);
     for (const [key, values] of Object.entries(CHOICES)) {
-      if (el[key] !== undefined && !values.includes(el[key] as string)) throw new Error(`Whiteboard element ${i + 1} has an invalid ${key}.`);
+      if (el[key] !== undefined && !values.includes(el[key] as string)) throw new Error(`Drawing element ${i + 1} has an invalid ${key}.`);
     }
     for (const key of ['startBinding', 'endBinding']) {
-      if (el[key] !== undefined && !binding(el[key])) throw new Error(`Whiteboard element ${i + 1} has an invalid ${key}.`);
+      if (el[key] !== undefined && !binding(el[key])) throw new Error(`Drawing element ${i + 1} has an invalid ${key}.`);
     }
     if (el.fixedSegments !== undefined && (!Array.isArray(el.fixedSegments) || !el.fixedSegments.every(fixedSegment))) {
-      throw new Error(`Whiteboard element ${i + 1} has invalid fixed segments.`);
+      throw new Error(`Drawing element ${i + 1} has invalid fixed segments.`);
     }
   }
 }
 
 export function parseWhiteboardDocument(text: string): WhiteboardDocument {
   let value: unknown;
-  try { value = JSON.parse(text); } catch { throw new Error('Whiteboard file contains invalid JSON.'); }
+  try { value = JSON.parse(text); } catch { throw new Error('Drawing file contains invalid JSON.'); }
   if (record(value) && value.type === LEGACY_TYPE) value.type = 'oculus-whiteboard';
   validate(value);
   return value;

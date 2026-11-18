@@ -23,9 +23,9 @@ export const tauriWhiteboardPlatform: WhiteboardPlatform = {
     }
     return images;
   },
-  async saveExport(blob, format, name) {
-    if (!isTauri()) return browserWhiteboardPlatform.saveExport(blob, format, name);
-    await invoke<string | null>("export_whiteboard_image", { format, data: await blobToBase64(blob) });
+  async saveExport(blob, format, kind) {
+    if (!isTauri()) return browserWhiteboardPlatform.saveExport(blob, format, kind);
+    await invoke<string | null>("export_whiteboard_image", { format, data: await blobToBase64(blob), kind });
   },
   async searchPdfs(query) {
     if (!isTauri()) return browserWhiteboardPlatform.searchPdfs(query);

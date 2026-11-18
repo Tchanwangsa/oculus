@@ -67,7 +67,7 @@ fn transactions_match_the_reference_implementation() {
         let fixture: Value = serde_json::from_str(&text).unwrap();
         let document = &fixture["document"];
         model::validate(document).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let outcome = transaction::apply(document, &fixture["transaction"]);
+        let outcome = transaction::apply(document, &fixture["transaction"], "whiteboard");
         match (
             &fixture["expect"]["ok"],
             fixture["expect"]["error"].as_str(),
@@ -102,7 +102,7 @@ fn effective_transaction_leaves_out_what_was_already_applied() {
         {"id": "a", "before": shape("a", 0), "after": shape("a", 5)},
         {"id": "b", "before": shape("b", 0), "after": shape("b", 9)},
     ], "background": {"before": "#fff", "after": "dots"}});
-    let (_, effective) = transaction::apply(&document, &tx).unwrap();
+    let (_, effective) = transaction::apply(&document, &tx, "whiteboard").unwrap();
     assert_eq!(effective["edits"].as_array().unwrap().len(), 1);
     assert_eq!(effective["edits"][0]["id"], "b");
     assert!(effective.get("background").is_none());
@@ -148,7 +148,8 @@ fn additions_carry_their_placement_through_diff_and_the_ack() {
             ("top", None),
         ]
     );
-    let (result, effective) = transaction::apply(&doc(&["a", "d", "remote"]), &tx).unwrap();
+    let (result, effective) =
+        transaction::apply(&doc(&["a", "d", "remote"]), &tx, "whiteboard").unwrap();
     let ids: Vec<&str> = result["elements"]
         .as_array()
         .unwrap()
@@ -172,12 +173,12 @@ fn a_paper_edit_travels_through_diff_and_leaves_out_what_was_already_applied() {
     assert!(transaction::has_changes(&tx));
     assert_eq!(tx["paper"]["after"]["pages"].as_array().unwrap().len(), 2);
 
-    let (result, effective) = transaction::apply(&doc(&["p1"]), &tx).unwrap();
+    let (result, effective) = transaction::apply(&doc(&["p1"]), &tx, "whiteboard").unwrap();
     assert!(transaction::same_value(&result, &doc(&["p1", "p2"])));
     assert!(effective.get("paper").is_some());
 
     // A replay finds the pages already in place: it applies, but reports no change.
-    let (_, replayed) = transaction::apply(&doc(&["p1", "p2"]), &tx).unwrap();
+    let (_, replayed) = transaction::apply(&doc(&["p1", "p2"]), &tx, "whiteboard").unwrap();
     assert!(!transaction::has_changes(&replayed));
 
     // Documents with no paper at either end produce no paper edit.

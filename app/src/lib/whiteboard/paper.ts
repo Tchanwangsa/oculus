@@ -48,19 +48,19 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
 
 /** Why `value` is not a paper, or null. `authority/model.rs` `validate_paper` is its port. */
 export function paperProblem(value: unknown): string | null {
-  if (!record(value)) return 'Whiteboard paper must be an object.';
-  if (value.gap !== undefined && (!finite(value.gap) || value.gap < 0 || value.gap > MAX_GAP)) return 'Whiteboard paper has an invalid gap.';
+  if (!record(value)) return 'Drawing paper must be an object.';
+  if (value.gap !== undefined && (!finite(value.gap) || value.gap < 0 || value.gap > MAX_GAP)) return 'Drawing paper has an invalid gap.';
   const pages = value.pages;
-  if (!Array.isArray(pages) || pages.length === 0 || pages.length > MAX_PAGES) return `Whiteboard paper needs between 1 and ${MAX_PAGES} pages.`;
+  if (!Array.isArray(pages) || pages.length === 0 || pages.length > MAX_PAGES) return `Drawing paper needs between 1 and ${MAX_PAGES} pages.`;
   const ids = new Set<string>();
   for (const [i, page] of pages.entries()) {
-    if (!record(page) || typeof page.id !== 'string' || !page.id || ids.has(page.id)) return `Whiteboard page ${i + 1} needs a unique ID.`;
+    if (!record(page) || typeof page.id !== 'string' || !page.id || ids.has(page.id)) return `Drawing page ${i + 1} needs a unique ID.`;
     ids.add(page.id);
     for (const key of ['width', 'height']) {
       const side = page[key];
-      if (!finite(side) || side <= 0 || side > MAX_SIDE) return `Whiteboard page ${i + 1} has an invalid ${key}.`;
+      if (!finite(side) || side <= 0 || side > MAX_SIDE) return `Drawing page ${i + 1} has an invalid ${key}.`;
     }
-    if (page.template !== undefined && !PAPER_TEMPLATES.includes(page.template as PaperTemplate)) return `Whiteboard page ${i + 1} has an invalid template.`;
+    if (page.template !== undefined && !PAPER_TEMPLATES.includes(page.template as PaperTemplate)) return `Drawing page ${i + 1} has an invalid template.`;
   }
   return null;
 }

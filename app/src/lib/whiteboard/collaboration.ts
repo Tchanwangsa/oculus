@@ -50,9 +50,9 @@ function diffContent(before: WhiteboardDocument, after: WhiteboardDocument): Whi
 export const hasWhiteboardChanges = (transaction: WhiteboardTransaction) => !!(transaction.edits.length || transaction.order || transaction.background || transaction.paper);
 
 function validateTransaction(value: unknown): asserts value is WhiteboardTransaction {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid whiteboard transaction.');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid drawing transaction.');
   const tx = value as WhiteboardTransaction;
-  if (Object.keys(tx).some(key => !['edits', 'order', 'background', 'paper'].includes(key)) || !Array.isArray(tx.edits) || tx.edits.length > 10000) throw new Error('Invalid whiteboard transaction fields.');
+  if (Object.keys(tx).some(key => !['edits', 'order', 'background', 'paper'].includes(key)) || !Array.isArray(tx.edits) || tx.edits.length > 10000) throw new Error('Invalid drawing transaction fields.');
   const ids = new Set<string>();
   for (const edit of tx.edits) {
     if (!edit || typeof edit.id !== 'string' || !edit.id || ids.has(edit.id) || (edit.before === null && edit.after === null)) throw new Error('Invalid element edit.');
@@ -113,7 +113,7 @@ function applyTransaction(document: WhiteboardDocument, value: unknown): Whitebo
     paper = transaction.paper.after;
   }
   const result = { ...document, elements: ordered, background, ...(transaction.paper ? { paper } : {}) };
-  if (ordered.length !== elements.size || ordered.some(element => element === undefined)) throw new Error('Invalid whiteboard transaction.');
+  if (ordered.length !== elements.size || ordered.some(element => element === undefined)) throw new Error('Invalid drawing transaction.');
   return result;
 }
 

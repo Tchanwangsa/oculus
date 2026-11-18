@@ -18,6 +18,7 @@ use super::server::Server;
 use super::wire::{CompanionState, Endpoints, ShareInfo, ShareSummary};
 use crate::library::files::whiteboards::authority::events::Phase;
 use crate::library::files::whiteboards::authority::Authority;
+use crate::library::files::whiteboards::DrawingKind;
 use crate::runtime::network::{self, Observer, Subscription};
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -151,7 +152,12 @@ impl Companion {
                 } else {
                     Phase::Live
                 };
-                share.establish(&snapshot.epoch, snapshot.revision, phase);
+                share.establish(
+                    &snapshot.epoch,
+                    snapshot.revision,
+                    phase,
+                    DrawingKind::of(&snapshot.relative_path),
+                );
             });
             if live.is_err() || share.cancel.is_cancelled() {
                 core.grants.revoke(&share.id, EndReason::Ended);

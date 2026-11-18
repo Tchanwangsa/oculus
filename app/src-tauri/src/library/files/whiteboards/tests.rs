@@ -36,7 +36,7 @@ fn whiteboard_lifecycle_is_atomic_and_scoped() {
         "courses/X/.whiteboard",
         r"courses/X/..\x.whiteboard",
     ] {
-        assert!(!is_whiteboard_rel(rel), "{rel}");
+        assert_eq!(DrawingKind::of(rel), None, "{rel}");
         assert!(write_at(&root, rel, DOCUMENT).is_err());
     }
     assert!(write_at(&root, &second.relative_path, "{}").is_err());

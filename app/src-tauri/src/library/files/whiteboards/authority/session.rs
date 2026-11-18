@@ -9,6 +9,7 @@ use super::events::{Change, Event, Phase, State as PhaseState, Subscribers};
 use super::receipts::{Lookup, Receipt, Receipts};
 use super::rows::FileRows;
 use super::{format, model, transaction};
+use crate::library::files::whiteboards::DrawingKind;
 use crate::library::files::ImportedFile;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -92,12 +93,13 @@ pub struct State {
 impl Session {
     /// Start from `text`, which must be the bytes on disk.
     pub fn open(file_id: i64, root: &Path, rel: &str, text: &str) -> Result<Self, AuthorityError> {
+        let noun = DrawingKind::noun_of(DrawingKind::of(rel));
         let bytes = disk::read(root, rel)
             .map_err(AuthorityError::io)?
-            .ok_or_else(|| AuthorityError::io("Whiteboard no longer exists"))?;
+            .ok_or_else(|| AuthorityError::io(format!("This {noun} no longer exists.")))?;
         let disk = disk::hash(&bytes);
         if disk != disk::hash(text.as_bytes()) {
-            return Err(AuthorityError::external());
+            return Err(AuthorityError::external(noun));
         }
         let document = parse(text)?;
         Ok(Self {
@@ -123,7 +125,7 @@ impl Session {
 
 fn parse(text: &str) -> Result<Value, AuthorityError> {
     let mut document: Value = serde_json::from_str(text)
-        .map_err(|_| AuthorityError::invalid("Whiteboard file contains invalid JSON."))?;
+        .map_err(|_| AuthorityError::invalid("Drawing file contains invalid JSON."))?;
     model::validate(&document).map_err(AuthorityError::invalid)?;
     model::normalize_type(&mut document);
     Ok(document)
@@ -134,13 +136,18 @@ impl State {
         self.phase
     }
 
+    /// The word messages use for this file's kind.
+    pub fn noun(&self) -> &'static str {
+        DrawingKind::noun_of(DrawingKind::of(&self.rel))
+    }
+
     pub fn owns(&self, root: &Path, rel: &str) -> bool {
         self.phase != Phase::Ended && self.root == root && self.rel == rel
     }
 
     pub fn snapshot(&self) -> Result<Snapshot, AuthorityError> {
         if self.phase == Phase::Ended {
-            return Err(AuthorityError::ended());
+            return Err(AuthorityError::ended(self.noun()));
         }
         Ok(Snapshot {
             epoch: self.epoch.clone(),
@@ -154,8 +161,8 @@ impl State {
     fn live(&self) -> Result<(), AuthorityError> {
         match self.phase {
             Phase::Live => Ok(()),
-            Phase::Paused => Err(AuthorityError::external()),
-            Phase::Ended => Err(AuthorityError::ended()),
+            Phase::Paused => Err(AuthorityError::external(self.noun())),
+            Phase::Ended => Err(AuthorityError::ended(self.noun())),
         }
     }
 
@@ -173,7 +180,7 @@ impl State {
     pub fn commit(&mut self, op: Op, hub: Hub) -> Result<Ack, AuthorityError> {
         self.live()?;
         if op.epoch.as_ref().is_some_and(|epoch| *epoch != self.epoch) {
-            return Err(AuthorityError::ended());
+            return Err(AuthorityError::ended(self.noun()));
         }
         if op.client_id.is_empty() || op.op_id.is_empty() {
             return Err(AuthorityError::invalid(
@@ -193,15 +200,19 @@ impl State {
                     "This operation number was already used for another change.",
                 ))
             }
-            Lookup::Stale => return Err(AuthorityError::new(
-                Code::StaleOp,
-                "This change is too old to confirm. Reload the shared whiteboard; your draft is kept.",
-            )),
+            Lookup::Stale => {
+                let noun = self.noun();
+                return Err(AuthorityError::new(
+                    Code::StaleOp,
+                    format!("This change is too old to confirm. Reload the shared {noun}; your draft is kept."),
+                ));
+            }
         }
         if let Some(viewport) = &op.viewport {
             model::validate_viewport(Some(viewport)).map_err(AuthorityError::invalid)?;
         }
-        let (mut next, effective) = transaction::apply(&self.document, &op.transaction)?;
+        let (mut next, effective) =
+            transaction::apply(&self.document, &op.transaction, self.noun())?;
         let viewport = op
             .viewport
             .as_ref()
@@ -221,7 +232,10 @@ impl State {
         if text.len() > MAX_DOCUMENT_BYTES {
             return Err(AuthorityError::new(
                 Code::TooLarge,
-                "This change would make the whiteboard too large to save.",
+                format!(
+                    "This change would make the {} too large to save.",
+                    self.noun()
+                ),
             ));
         }
         let size = self.persist(&text, hub)?;
@@ -262,12 +276,12 @@ impl State {
                 self.end(hub);
                 return Err(AuthorityError::new(
                     Code::SessionEnded,
-                    "The whiteboard file was removed.",
+                    format!("The {} file was removed.", self.noun()),
                 ));
             }
             Some(bytes) if disk::hash(&bytes) != self.disk => {
                 self.set_phase(Phase::Paused, hub);
-                return Err(AuthorityError::external());
+                return Err(AuthorityError::external(self.noun()));
             }
             Some(_) => {}
         }
@@ -295,18 +309,18 @@ impl State {
 
     pub fn resolve(&mut self, choice: Resolution, hub: Hub) -> Result<Snapshot, AuthorityError> {
         match self.phase {
-            Phase::Ended => return Err(AuthorityError::ended()),
+            Phase::Ended => return Err(AuthorityError::ended(self.noun())),
             Phase::Live => return self.snapshot(),
             Phase::Paused => {}
         }
         let Some(bytes) = disk::read(&self.root, &self.rel).map_err(AuthorityError::io)? else {
             self.end(hub);
-            return Err(AuthorityError::ended());
+            return Err(AuthorityError::ended(self.noun()));
         };
         match choice {
             Resolution::AdoptDisk => {
                 let text = std::str::from_utf8(&bytes)
-                    .map_err(|_| AuthorityError::invalid("Whiteboard file is not UTF-8 text."))?;
+                    .map_err(|_| AuthorityError::invalid("Drawing file is not UTF-8 text."))?;
                 let adopted = parse(text)?;
                 let change = transaction::diff(&self.document, &adopted);
                 self.document = adopted;
@@ -339,7 +353,7 @@ impl State {
 
     pub fn rename(&mut self, title: &str, hub: Hub) -> Result<ImportedFile, AuthorityError> {
         if self.phase == Phase::Ended {
-            return Err(AuthorityError::ended());
+            return Err(AuthorityError::ended(self.noun()));
         }
         let moved =
             super::super::rename_at(&self.root, &self.rel, title).map_err(AuthorityError::io)?;
@@ -354,7 +368,7 @@ impl State {
     /// Remove the file and end the session; a later commit cannot recreate it.
     pub fn delete(&mut self, hub: Hub) -> Result<(), AuthorityError> {
         if self.phase == Phase::Ended {
-            return Err(AuthorityError::ended());
+            return Err(AuthorityError::ended(self.noun()));
         }
         disk::remove(&self.root, &self.rel).map_err(AuthorityError::io)?;
         self.end(hub);

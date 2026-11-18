@@ -21,11 +21,11 @@ describe('whiteboard document format', () => {
     expect(doc.type).toBe('oculus-whiteboard');
     expect(doc.elements).toEqual([element]);
     expect(JSON.parse(serializeWhiteboardDocument(doc)).type).toBe('oculus-whiteboard');
-    expect(() => parseWhiteboardDocument(JSON.stringify({ ...createWhiteboardDocument(), type: 'oculus-board' }))).toThrow('not an Oculus whiteboard');
+    expect(() => parseWhiteboardDocument(JSON.stringify({ ...createWhiteboardDocument(), type: 'oculus-board' }))).toThrow('not an Oculus drawing');
   });
   test('refuses unknown versions and element types instead of destroying data', () => {
-    expect(() => parseWhiteboardDocument(JSON.stringify({ ...createWhiteboardDocument(), version: 2 }))).toThrow('Unsupported whiteboard version');
-    expect(() => parseWhiteboardDocument(JSON.stringify({ ...createWhiteboardDocument(), elements: [{ ...element, type: 'plugin-widget' }] }))).toThrow('Unsupported whiteboard element type');
+    expect(() => parseWhiteboardDocument(JSON.stringify({ ...createWhiteboardDocument(), version: 2 }))).toThrow('Unsupported drawing version');
+    expect(() => parseWhiteboardDocument(JSON.stringify({ ...createWhiteboardDocument(), elements: [{ ...element, type: 'plugin-widget' }] }))).toThrow('Unsupported drawing element type');
   });
   test.each([
     { viewport: { x: 0, y: 0, zoom: 0 } },

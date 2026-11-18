@@ -46,14 +46,18 @@ impl AuthorityError {
         Self::new(Code::Io, message)
     }
 
-    pub fn ended() -> Self {
-        Self::new(Code::SessionEnded, "This whiteboard is no longer shared.")
+    /// `noun` is the drawing's kind (`DrawingKind::noun_of`).
+    pub fn ended(noun: &str) -> Self {
+        Self::new(
+            Code::SessionEnded,
+            format!("This {noun} is no longer shared."),
+        )
     }
 
-    pub fn external() -> Self {
+    pub fn external(noun: &str) -> Self {
         Self::new(
             Code::ExternalEdit,
-            "The whiteboard file changed outside Oculus. Choose which version to keep.",
+            format!("The {noun} file changed outside Oculus. Choose which version to keep."),
         )
     }
 }
