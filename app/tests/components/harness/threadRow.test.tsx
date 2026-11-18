@@ -4,7 +4,7 @@ import type { HarnessItem, HarnessThread } from "@/lib/harness";
 import type { Subject } from "@/lib/db";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { ThreadRow } from "@/components/harness/threads/ThreadRow";
-import { RecentsBody } from "@/components/harness/threads/list/RecentsBody";
+import { RECENTS_FIRST, RecentsBody } from "@/components/harness/threads/list/RecentsBody";
 import { SubjectBody } from "@/components/harness/threads/list/SubjectBody";
 import { ListHeader, readThreadView } from "@/components/harness/threads/list/Header";
 import { activityLine } from "@/lib/harness/activity";
@@ -166,26 +166,25 @@ describe("Recents", () => {
     thread({ id: 3, updated_at: sqlite(60_000), status: "error" }),
     thread({ id: 4, updated_at: sqlite(2_000) }),
   ];
-  const body = (more: boolean) =>
+  const body = (more: boolean, threads = list) =>
     renderToStaticMarkup(
-      <RecentsBody
-        threads={list}
-        more={more}
-        onMore={() => {}}
-        collapsed={false}
-        row={(t) => <div key={t.id} data-row={t.id} />}
-      />,
+      <RecentsBody threads={threads} more={more} onMore={() => {}} row={(t) => <div key={t.id} data-row={t.id} />} />,
     );
+  const rows = (html: string) => [...html.matchAll(/data-row="(\d+)"/g)].map((m) => Number(m[1]));
 
-  test("every thread newest first under one heading, working ones in place", () => {
+  test("every thread newest first with no heading, working ones in place", () => {
     const html = body(false);
-    expect(html).toContain(">Recents<");
-    expect([...html.matchAll(/data-row="(\d+)"/g)].map((m) => Number(m[1]))).toEqual([4, 2, 1, 3]);
-    expect(html).not.toContain("Show more");
+    expect(html).not.toContain(">Recents<");
+    expect(rows(html)).toEqual([4, 2, 1, 3]);
+    expect(html).not.toContain("aria-hidden");
   });
 
-  test("Show more follows the rows while older threads exist", () => {
-    expect(body(true)).toMatch(/data-row="3"><\/div><button[^>]*>Show more<\/button>/);
+  test("draws the first rows, with a scroll sentinel while more exist", () => {
+    const many = Array.from({ length: RECENTS_FIRST + 3 }, (_, i) => thread({ id: i + 1, updated_at: sqlite((i + 1) * 1000) }));
+    const html = body(false, many);
+    expect(rows(html)).toHaveLength(RECENTS_FIRST);
+    expect(html).toContain('aria-hidden="true"');
+    expect(body(true)).toContain('aria-hidden="true"');
   });
 });
 

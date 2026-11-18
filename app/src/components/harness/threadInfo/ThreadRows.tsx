@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Books } from "@phosphor-icons/react";
 import { ProviderMark } from "@/components/icons/ProviderMark";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import { usageTint } from "@/components/harness/composer/UsageMeter";
+import { fmtTokens, usageTint } from "@/components/harness/composer/UsageMeter";
 import { useProviderModels } from "@/hooks/agents/useProviderModels";
 import type { Subject } from "@/lib/db";
 import { displayCode } from "@/lib/format/format";
@@ -70,7 +70,15 @@ export function ThreadRows({
             {effort && <span className="text-muted-foreground"> {reasoningLabel(effort)}</span>}
           </>
         }
-        trailing={percent != null ? `${Math.round(percent)}% context` : undefined}
+        trailing={
+          used == null ? undefined : limit ? (
+            <span title={`${Math.round(percent ?? 0)}% of the context window`}>
+              {fmtTokens(used)} / {fmtTokens(limit)}
+            </span>
+          ) : (
+            `${fmtTokens(used)} context`
+          )
+        }
       />
       {percent != null && (
         <div

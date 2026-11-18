@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { List, SquaresFour } from "@phosphor-icons/react";
+import { Info, List, SquaresFour } from "@phosphor-icons/react";
 import { FilterChecklist } from "@/components/ui/filter/FilterChecklist";
 import { FilterChips, type FilterChip } from "@/components/ui/filter/FilterChips";
 import { FilterPopover, FilterRow } from "@/components/ui/filter/FilterPopover";
@@ -24,15 +24,18 @@ const pillLabel = <T extends string>(noun: string, picked: ReadonlySet<T>, label
 
 /**
  * Type, From and Modified pills (any of them turns the folder into a flat
- * list of everything below it), the grid/list switch, and under them the
+ * list of everything below it), the grid/list switch, the details panel's
+ * toggle where the pane is wide enough for it, and under them the
  * applied filters as chips. A fixed 40px row, so switching never moves the
  * entries.
  */
-export function DriveToolbar({ filters, onFilters, layout, onLayout }: {
+export function DriveToolbar({ filters, onFilters, layout, onLayout, details }: {
   filters: DriveFilters;
   onFilters: (next: DriveFilters) => void;
   layout: DriveLayout;
   onLayout: (layout: DriveLayout) => void;
+  /** The details panel's state; absent where the pane is too narrow for it. */
+  details?: { open: boolean; onToggle: () => void };
 }) {
   const set = (patch: Partial<DriveFilters>) => onFilters({ ...filters, ...patch });
   const chips: FilterChip[] = [
@@ -98,6 +101,23 @@ export function DriveToolbar({ filters, onFilters, layout, onLayout }: {
             <List size={14} />
           </LayoutButton>
         </div>
+        {details && (
+          <button
+            type="button"
+            aria-pressed={details.open}
+            aria-label={details.open ? "Hide details" : "Show details"}
+            title={details.open ? "Hide details" : "Show details"}
+            onClick={details.onToggle}
+            className={cn(
+              "flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition-colors",
+              details.open
+                ? "border-border-subtle bg-accent text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Info size={15} weight={details.open ? "fill" : "regular"} />
+          </button>
+        )}
       </div>
       <FilterChips chips={chips} onClear={() => onFilters({ ...NO_FILTERS, query: filters.query })} />
     </>

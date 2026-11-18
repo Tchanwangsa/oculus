@@ -117,11 +117,13 @@ before leaving a playing lecture.
   teaching weeks with a thin bar of lectures watched, wider dashed Breaks,
   then +1 to +3 after a hairline. The current week is in the brand colour
   and the selected one is filled; a click or the arrow keys pick the week
-  below, for this visit only. Under it, the week's activity (new and updated
-  files, recordings, announcements, Ed replies) as a `ListCard` with a badge,
-  the day and a brand dot for what is new since the last visit, recordings
-  outside the timetable greyed; then Coming up, the next deadlines as "Fri ·
-  4 days". A side column holds Events, past ones grey, and Yours, what the
+  below, for this visit only. Week 1 holds everything dated before the strip
+  and +3 everything after it, so their range reads "Until …" and "From …"
+  and their rows carry dates, not weekdays.
+  Under it, Coming up, the next deadlines as "Fri · 4 days"; then the week's
+  activity (new and updated files, recordings, announcements, Ed replies) as
+  a `ListCard` with a badge, the day and a brand dot for what is new since
+  the last visit, recordings outside the timetable greyed. A side column holds Events, past ones grey, and Yours, what the
   student made that week; it sits beside the lists from a 42rem pane (a
   container query, so split panes and page zoom count) and under them below
   that. Rows open as the subject's tabs open the same things: files through
@@ -177,7 +179,7 @@ section the stored order lacks is appended. A `RailItem` is a button with `data-
 through `navigateActive`, since the sidebar sits outside every pane's router,
 and it lights on its path or anything under it. Selected rail icons use
 Phosphor's filled weight; idle icons use the regular outline. Background jobs show on their
-item's corner: a spinner on Chat while an agent turn runs, on Sync while
+item's corner: a pulsing brand dot on Chat while an agent turn runs, on Sync while
 indexing, a brand dot on Subjects while any subject has never-opened files
 (`newFilesStore`), and a brand dot on Studio while any video renders
 ([studio-page.md](./studio-page.md)). ⌘B and the title bar's button collapse it to zero width.

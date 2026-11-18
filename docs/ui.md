@@ -327,10 +327,14 @@ themes are opt-in and keep the same structure.
   bubble. The ⌘S stash is a "Stash"
   pill above the box opening a popover; its eviction notice is a line inside
   that popover, not a toast ([harness.md](./harness.md#the-empty-box-earlier-messages-and-the-stash)).
-- **A compact composer rests as one pill** (the subject Overview's ask bar):
-  the hint on one line, the agent's mark with its caret, the mic and send.
-  Used, it opens into the full box in place, with no animation; sent, it
-  morphs into the thread's composer
+- **A compact composer is one bar** (the subject Overview's ask bar): the
+  hint on one line, a sliders button, the mic and send. It never reshapes on
+  focus; it only grows taller as text wraps, controls pinned bottom-right.
+  The sliders button opens a menu of setting rows (icon, setting, muted
+  value, chevron); a row turns that same popover into its page, with a back
+  control, and the popover eases to the page's size — nothing opens beside
+  it. Sent, the bar morphs into the
+  thread's composer
   ([harness.md](./harness.md#the-subject-overviews-ask-bar-starts-a-thread)).
 - **The composer says a turn's state in words, not only colour**
   (`SendControls`): Stop is an icon until pressed, then a disabled "Stopping"
@@ -421,7 +425,7 @@ themes are opt-in and keep the same structure.
   the folder search and New.
 - **View preferences use `useStoredState`**, with readers that own defaults and validation; `useStoredSet` keeps collapsed group keys. Storage failures leave the live view usable.
 - **No toasts, no bottom progress bars** — background jobs surface in the
-  sidebar, as a spinner or dot on their rail item
+  sidebar, as a dot on their rail item (brand and pulsing while work runs)
   ([shell.md](./shell.md#the-sidebar-is-an-icon-rail)); browser downloads use
   their [toolbar list and Save dialog](./viewers.md#downloads-wait-for-a-destination-while-their-bytes-arrive).
   No placeholder UI, section-header icons or filler; stat cards only where

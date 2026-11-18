@@ -4,19 +4,9 @@ import type { Icon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  harnessSetPermissionMode,
-  MODE_LABEL,
-  modeChoices,
-  threadMode,
-  type Capabilities,
-  type PermissionMode,
-  type Provider,
-} from "@/lib/harness";
-import { useCapabilities } from "@/hooks/agents/useCapabilities";
-import { useHarnessStore } from "@/stores/chat/harnessStore";
+import { MODE_LABEL, modeChoices, type Capabilities, type PermissionMode, type Provider } from "@/lib/harness";
 import { cn } from "@/lib/utils";
-import { useRunCommand } from "./useRunCommand";
+import { usePermissionMode } from "./usePermissionMode";
 
 const MODE_ICON: Record<PermissionMode, Icon> = {
   ask: ShieldCheck,
@@ -27,37 +17,21 @@ const MODE_ICON: Record<PermissionMode, Icon> = {
 /**
  * The chat's permission mode, an icon-only trigger: how it asks for what
  * the agent's sandbox blocks (Ask, Auto or Don't ask), saved per chat with `harnessSetPermissionMode` from its next
- * run on. Each mode has its line; an agent that cannot ask says so in a
+ * run on; before a chat exists, the mode it starts with. Each mode has its line; an agent that cannot ask says so in a
  * tooltip on the header's warning icon, and one with no reviewer says so
  * on Auto's line. Rust refuses a change while a request waits;
  * its sentence shows at the top of the open menu.
  */
 export function PermissionModeControl({ threadId, provider }: { threadId: number | null; provider: Provider }) {
-  const caps = useCapabilities(provider);
-  const stored = useHarnessStore((s) => (threadId == null ? undefined : s.threads.find((t) => t.id === threadId)?.permission_mode));
-  // A chat outside the thread list (Studio's) hears no `permission_mode`
-  // event, so a saved pick is kept here too.
-  const [saved, setSaved] = useState<{ thread: number; mode: PermissionMode } | null>(null);
-  const save = useRunCommand();
+  const permission = usePermissionMode(threadId, provider);
   const [open, setOpen] = useState(false);
-  if (threadId == null) return null;
-  const mode = threadMode(stored ?? (saved?.thread === threadId ? saved.mode : undefined));
-  const pick = (next: PermissionMode) => {
-    if (next === mode) return setOpen(false);
-    void save
-      .run(() => harnessSetPermissionMode(threadId, next))
-      .then((ok) => {
-        if (!ok) return;
-        setSaved({ thread: threadId, mode: next });
-        setOpen(false);
-      });
-  };
+  const { mode } = permission;
   return (
     <Popover
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) save.clear();
+        if (!next) permission.clear();
       }}
     >
       <PopoverTrigger asChild>
@@ -77,55 +51,79 @@ export function PermissionModeControl({ threadId, provider }: { threadId: number
         sideOffset={6}
         collisionPadding={8}
         className="w-72 max-w-[calc(100vw-16px)] p-0"
-        // Radix would focus the header's warning icon first and open its tooltip.
-        onOpenAutoFocus={(e) => {
-          e.preventDefault();
-          (e.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus();
-        }}
+        onOpenAutoFocus={focusPickedMode}
       >
-        <PermissionModeMenu caps={caps} mode={mode} busy={save.pending} refused={save.error} onPick={pick} />
+        <PermissionModeMenu
+          caps={permission.caps}
+          mode={mode}
+          busy={permission.busy}
+          refused={permission.refused}
+          onPick={(next) => permission.pick(next, () => setOpen(false))}
+        />
       </PopoverContent>
     </Popover>
   );
 }
 
-function ModeIcon({ mode }: { mode: PermissionMode }) {
+/** A mode menu's `onOpenAutoFocus`: the chosen mode takes focus, since Radix
+ *  would focus the header's warning icon first and open its tooltip. */
+export function focusPickedMode(e: Event) {
+  e.preventDefault();
+  (e.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus();
+}
+
+export function ModeIcon({ mode }: { mode: PermissionMode }) {
   const IconC = MODE_ICON[mode];
   return <IconC className="size-3.5 shrink-0" aria-hidden />;
 }
 
 /** The open menu's content, given its state (the WebKit checks draw it alone). */
-export function PermissionModeMenu({
-  caps,
-  mode,
-  busy,
-  refused,
-  onPick,
-}: {
+export function PermissionModeMenu(props: PermissionModeChoicesProps) {
+  const { note } = modeChoices(props.caps);
+  return (
+    <div className="flex flex-col">
+      <div className="flex items-center justify-between gap-2 border-b border-border-subtle px-3 pb-1.5 pt-2.5 text-[11px] font-medium text-muted-foreground">
+        <span>Permission mode</span>
+        <ModeNote note={note} />
+      </div>
+      <PermissionModeChoices {...props} />
+    </div>
+  );
+}
+
+/** The warning that the agent cannot ask at all, its sentence in a tooltip;
+ *  nothing when it can. */
+export function ModeNote({ note }: { note: string | null }) {
+  if (!note) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} aria-label={note} className="flex cursor-default text-warning outline-none">
+          <WarningCircle className="size-3.5" aria-hidden />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64">
+        {note}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+interface PermissionModeChoicesProps {
   caps: Pick<Capabilities, "provider" | "approvals" | "autoReview">;
   mode: PermissionMode;
   busy: boolean;
   refused: string | null;
   onPick: (mode: PermissionMode) => void;
-}) {
-  const { note, choices } = modeChoices(caps);
+}
+
+/** Rust's refusal, then a row per mode with its line; the chosen one is
+ *  `aria-pressed` (`focusPickedMode` finds it). The compact composer's
+ *  settings menu draws these under its own page header. */
+export function PermissionModeChoices({ caps, mode, busy, refused, onPick }: PermissionModeChoicesProps) {
+  const { choices } = modeChoices(caps);
   return (
-    <div className="flex flex-col">
-      <div className="flex items-center justify-between gap-2 border-b border-border-subtle px-3 pb-1.5 pt-2.5 text-[11px] font-medium text-muted-foreground">
-        <span>Permission mode</span>
-        {note && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span tabIndex={0} aria-label={note} className="flex cursor-default text-warning outline-none">
-                <WarningCircle className="size-3.5" aria-hidden />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-64">
-              {note}
-            </TooltipContent>
-          </Tooltip>
-        )}
-      </div>
+    <>
       {refused && (
         <div role="alert" className="border-b border-border-subtle px-3 py-2 text-[11px] leading-relaxed text-destructive">
           {refused}
@@ -152,6 +150,6 @@ export function PermissionModeMenu({
           </button>
         ))}
       </div>
-    </div>
+    </>
   );
 }

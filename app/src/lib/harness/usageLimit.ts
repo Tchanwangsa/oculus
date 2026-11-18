@@ -19,6 +19,14 @@ export function fmtResets(unixSeconds: number | null, now = Date.now()): string 
   return `Resets ${d.toLocaleDateString([], { weekday: "short" })} ${fmtTime(ms)}`;
 }
 
+/** The plan window closest to running out (the highest share used),
+ *  whichever it is: a 5-hour session or the week. Null with no windows. */
+export function nearestLimit(windows: RateWindow[]): RateWindow | null {
+  let nearest: RateWindow | null = null;
+  for (const w of windows) if (!nearest || w.used_percent > nearest.used_percent) nearest = w;
+  return nearest;
+}
+
 /** A run the provider stopped at its usage limit: the limited error row, and
  *  the run it ended (the notice is dismissed per run). */
 export interface UsageLimitHit {
@@ -39,7 +47,7 @@ export function usageLimitHit(items: HarnessItem[], windows: RateWindow[], now =
     const item = items[i];
     if (item.kind === "user" || item.kind === "continuation") return null;
     if (item.kind !== "error" || !parseErrorMeta(item).limit) continue;
-    const fullest = [...windows].sort((a, b) => b.used_percent - a.used_percent)[0];
+    const fullest = nearestLimit(windows);
     return {
       key: item.run_id != null ? `run:${item.run_id}` : `row:${item.id}`,
       resets: fullest ? fmtResets(fullest.resets_at, now) : null,

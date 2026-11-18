@@ -435,6 +435,33 @@ fn a_repeated_first_message_makes_one_chat() {
     assert_eq!(receipt, (made.thread_id, "send".to_string()));
 }
 
+/// A mode picked before the chat existed is the new chat's from its first
+/// run; without one a chat asks.
+#[test]
+fn a_first_message_starts_its_chat_under_the_mode_it_names() {
+    let mut bench = Bench::new("command-start-mode");
+    let mut quiet = send("hello");
+    if let Kind::Send { options, .. } = &mut quiet {
+        options.start_mode = Some(crate::harness::requests::PermissionMode::Quiet);
+    }
+    let (first, made) = command("new-quiet", None, quiet);
+    let (plain, plain_made) = command("new-plain", None, send("hi"));
+    bench.play(vec![first, plain]);
+    let (made, plain_made) = (bench.got(made).unwrap(), bench.got(plain_made).unwrap());
+    let mode = |id: i64| -> String {
+        bench
+            .runtime
+            .block_on(
+                sqlx::query_scalar("SELECT permission_mode FROM harness_threads WHERE id = ?1")
+                    .bind(id)
+                    .fetch_one(&bench.pool),
+            )
+            .unwrap()
+    };
+    assert_eq!(mode(made.thread_id), "quiet");
+    assert_eq!(mode(plain_made.thread_id), "ask");
+}
+
 /// A rewind waits on the provider with its chat held: a message sent in
 /// that window waits its turn, and is not among the rows the rewind takes.
 #[test]

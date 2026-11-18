@@ -222,20 +222,53 @@ are routed: Drive's rail section at `/drive/*` and the Files tab at
   narrowed by `filterListing` (`lib/drive/filters.ts`); a search alone keeps
   matching folders. Grid or list is remembered per root (`useStoredState`,
   grid at the Drive root, list in a subject by default). The grid draws folder
-  cards and picture cards; the list is `GridTable` with Name, Kind (Status:
-  the parse state, in a synced folder), Modified (Synced) and Size, down to
-  Name and the day in a pane under 560px. One selected file gets the details
-  panel from 900px. Widths are the browser's own (`useElementWidth`). A
-  synced folder says once, above its entries, that it is read-only.
-- **Pictures** come from what already draws each kind: a PDF's, or an Office
-  file's converted PDF's, first page through the viewer's renderer
-  (`openPdf`, `renderPage`); a notebook's first page from the pictures its
-  editor writes for chat agents (`drive_notebook_cover`, PNG bytes from
-  `whiteboard-pages/<file id>/`); a recording's frame from `lecture_thumbnail`; an
-  image itself. A whiteboard, a video file and anything else show their glyph.
+  cards (one fixed width, so nothing in them moves when the pane does) and
+  picture cards, the two runs unlabelled; the list is `GridTable` with Name,
+  Kind (Status: the parse state, in a synced folder), Modified (Synced) and
+  Size, down to Name and the day in a pane under 560px. From 900px the
+  toolbar's Info button shows or hides the details panel, remembered in
+  `oculus-drive-details` and off by default; selecting never opens it. Open,
+  it shows the one picked entry (a folder's glyph and what it holds), how
+  many are picked and their files' size, or a prompt to pick one. As it
+  takes or gives back its width, the grid's cards and group headings glide
+  to their new columns rather than snapping (`useGridGlide`:
+  layout boxes measured a frame after the cards change, played from on a
+  width jump of 48px or more, skipped under reduced motion). They only slide,
+  never scale, so no text stretches; a card that grew is revealed by a clip
+  opening from its old size. Widths are the
+  browser's own (`useElementWidth`). A synced folder says once, above its
+  entries, that it is read-only.
+- **Pictures** (`components/drive/thumbs/`) come from what already draws
+  each kind: a PDF's, or an Office file's converted PDF's, first page through
+  the viewer's renderer (`openPdf`, `renderPage`); a recording's frame from
+  `lecture_thumbnail`; an image itself. A notebook shows the first-page
+  picture its editor writes for chat agents (`drive_notebook_cover`, PNG
+  bytes from `whiteboard-pages/<file id>/`), kept per notebook and read again
+  when the kept one was read within 5 seconds of the file's last save, since
+  the editor redraws it just after. A notebook never opened has none; it and a
+  `.whiteboard` are drawn from the file by the whiteboard renderer at card size
+  (`renderPagePng` for the first page, `exportWhiteboardPng`'s `maxSize` for a
+  whiteboard fitted to its elements), one at a time, newest first. Markdown,
+  `.txt` and code files show their start on a white page (`textPreview` in
+  `lib/drive/textPreview.ts`: frontmatter dropped, headings, list items and
+  quotes marked, inline markup removed; the code font only for code; type
+  sized in `cqw` so a wider card scales the page instead of re-wrapping it),
+  read with `read_course_file`, which sends the whole file, so one over 1 MB keeps
+  its glyph. PDF pages (as PNG blob URLs), drawn pictures and text previews
+  are kept in memory by path, size and modified time (`pictureCache.ts`,
+  least recently used dropped and its blob URL revoked), so scrolling back or
+  re-entering a folder draws nothing again, and a kept picture shows in the
+  card's first frame (`Thumbnail`'s `isKept`), so the details panel never
+  flashes the glyph. Audio, archives, video files, spreadsheets and an empty
+  whiteboard show their glyph, as does any picture that fails, until the file
+  changes.
 - **Selection is Finder's** (`lib/drive/selection.ts`): a click picks one,
   ⌘-click toggles, ⇧-click takes the run from the anchor, ⌘A picks all,
-  Escape clears, a click in empty space clears. Double-click or Enter opens
+  Escape clears, a click in empty space clears. A drag from empty space draws
+  a marquee (`useMarquee`) that picks every entry it touches, in the grid or
+  the list (`boxSelect`: ⇧ adds to the selection, ⌘ toggles against it); it
+  scrolls the entries when held near their top or bottom edge, and the click
+  ending it is swallowed so it doesn't clear what it picked. Double-click or Enter opens
   (`openItem`: a folder here, a recording's lecture page, a file as
   `openFileSmart` does). Delete or ⌘⌫ on the student's own entries asks first,
   listing every file the delete removes (`delete_preview`). ⇧⌘N makes a

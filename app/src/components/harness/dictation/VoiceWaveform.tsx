@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
+import { cn } from "@/lib/utils";
 
 /** A rolling trace of actual microphone amplitude, with no React frame updates. */
-export function VoiceWaveform({ analyser }: { analyser: AnalyserNode | null }) {
+/** `className` overrides the trace's 28px height. */
+export function VoiceWaveform({ analyser, className }: { analyser: AnalyserNode | null; className?: string }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const el = canvas.current;
@@ -36,5 +38,5 @@ export function VoiceWaveform({ analyser }: { analyser: AnalyserNode | null }) {
     frame = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frame);
   }, [analyser]);
-  return <canvas ref={canvas} aria-hidden="true" className="h-7 min-w-0 flex-1 text-muted-foreground" />;
+  return <canvas ref={canvas} aria-hidden="true" className={cn("h-7 min-w-0 flex-1 text-muted-foreground", className)} />;
 }

@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { fmtResets, type RateWindow, type ThreadUsage } from "@/lib/harness";
+import { fmtResets, nearestLimit, type RateWindow, type ThreadUsage } from "@/lib/harness";
 import { cn } from "@/lib/utils";
 
 /** Past this, a bar stops being informational and starts being a warning. */
@@ -24,7 +24,7 @@ export function usageTint(percent: number) {
 }
 
 /** A 16px donut for the control row. */
-function Ring({ percent }: { percent: number }) {
+export function Ring({ percent }: { percent: number }) {
   const r = 6.5;
   const circumference = 2 * Math.PI * r;
   const p = Math.max(0, Math.min(100, percent));
@@ -55,13 +55,10 @@ function Ring({ percent }: { percent: number }) {
 function Meter({
   label,
   note,
-  value,
   percent,
 }: {
   label: string;
   note?: string | null;
-  /** Shown instead of the percentage when there is a truer number to show. */
-  value?: string;
   percent: number;
 }) {
   const p = Math.max(0, Math.min(100, percent));
@@ -71,7 +68,7 @@ function Meter({
         <span className="shrink-0 text-foreground">{label}</span>
         {note && <span className="min-w-0 truncate text-[10.5px] text-muted-foreground">{note}</span>}
         <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
-          {value ?? `${Math.round(p)}%`}
+          {`${Math.round(p)}%`}
         </span>
       </div>
       <div className="h-1 w-full overflow-hidden rounded-full bg-secondary">
@@ -85,9 +82,39 @@ function Meter({
 }
 
 /**
- * The ring is this thread's context usage only (never the worst of several
- * numbers); the popover adds the account's rate-limit windows. No spend shown:
- * subscription CLIs report a notional price nobody is billed.
+ * What a thread's usage reads as. Usage is the plan's limits only: the ring
+ * and its one-line reading (`headline`, `ringLabel`) are the window nearest
+ * its limit (`nearestLimit`), the session's or the week's, and `parts` lists
+ * every window. The context window is reported beside it (`used`, `limit`,
+ * `contextPercent`) for the settings list's `ContextStrip` and the thread
+ * info card, never inside usage.
+ */
+export function usageSummary(usage: ThreadUsage | null, rateLimits: RateWindow[]) {
+  const used = usage?.contextTokens ?? null;
+  const limit = usage?.contextWindow ?? null;
+  const contextPercent = used && limit ? (used / limit) * 100 : 0;
+  const nearest = nearestLimit(rateLimits);
+  const nearestPercent = nearest ? Math.round(nearest.used_percent) : 0;
+  return {
+    used,
+    limit,
+    contextPercent,
+    nearest,
+    /** What the ring fills to. */
+    percent: nearest ? nearest.used_percent : 0,
+    /** The ring's short reading: "Weekly 62%". */
+    headline: nearest ? `${nearest.label} ${nearestPercent}%` : null,
+    /** The ring named in full, for its title and label. */
+    ringLabel: nearest ? `${nearest.label} limit ${nearestPercent}% used` : null,
+    parts: rateLimits.map((w) => `${w.label} ${Math.round(w.used_percent)}%`),
+  };
+}
+
+/**
+ * The ring is the plan window closest to running out, so the number that
+ * stops the student first is the one in view; an agent without plan windows
+ * (opencode, Antigravity) shows none. The popover lists every window. No
+ * spend shown: subscription CLIs report a notional price nobody is billed.
  */
 export function UsageMeter({
   usage,
@@ -96,20 +123,8 @@ export function UsageMeter({
   usage: ThreadUsage | null;
   rateLimits: RateWindow[];
 }) {
-  const used = usage?.contextTokens ?? null;
-  const limit = usage?.contextWindow ?? null;
-  const contextPercent = used && limit ? (used / limit) * 100 : 0;
-
-  if (used == null && rateLimits.length === 0) return null;
-
-  const summary = [
-    used != null && limit
-      ? `${Math.round(contextPercent)}% of context`
-      : used != null
-        ? `${fmtTokens(used)} context tokens`
-        : null,
-    ...rateLimits.map((w) => `${w.label} ${Math.round(w.used_percent)}%`),
-  ].filter(Boolean);
+  const summary = usageSummary(usage, rateLimits);
+  if (!summary.nearest) return null;
 
   return (
     <Popover>
@@ -118,37 +133,28 @@ export function UsageMeter({
           type="button"
           variant="ghost"
           size="icon-xs"
-          aria-label={`Usage — ${summary.join(", ")}`}
-          title={summary.join(" · ")}
+          aria-label={`Usage — ${summary.ringLabel}`}
+          title={summary.ringLabel ?? undefined}
           className="shrink-0 text-muted-foreground hover:text-foreground"
         >
-          <Ring percent={contextPercent} />
+          <Ring percent={summary.percent} />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" side="top" className="w-64 p-3">
-        <div className="flex flex-col gap-3">
-          {used != null && (
-            <Meter
-              label="Context window"
-              value={limit ? `${fmtTokens(used)} / ${fmtTokens(limit)}` : fmtTokens(used)}
-              percent={contextPercent}
-            />
-          )}
-          {rateLimits.length > 0 && (
-            <div className="flex flex-col gap-2.5">
-              <div className="text-[10.5px] text-muted-foreground">Plan usage limits</div>
-              {rateLimits.map((w) => (
-                <Meter
-                  key={w.label}
-                  label={w.label}
-                  note={fmtResets(w.resets_at)}
-                  percent={w.used_percent}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+        <UsageDetails rateLimits={rateLimits} />
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** The meters inside a usage popover: each plan window with its reset. */
+export function UsageDetails({ rateLimits }: { rateLimits: RateWindow[] }) {
+  return (
+    <div className="flex flex-col gap-2.5">
+      <div className="text-[10.5px] text-muted-foreground">Plan usage limits</div>
+      {rateLimits.map((w) => (
+        <Meter key={w.label} label={w.label} note={fmtResets(w.resets_at)} percent={w.used_percent} />
+      ))}
+    </div>
   );
 }

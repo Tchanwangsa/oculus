@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fmtResets, parseErrorMeta, usageLimitHit, type HarnessItem, type RateWindow } from "@/lib/harness";
+import { fmtResets, nearestLimit, parseErrorMeta, usageLimitHit, type HarnessItem, type RateWindow } from "@/lib/harness";
 import { threadBannerItems } from "@/components/harness/composer/ThreadBanners";
 
 let id = 1;
@@ -48,6 +48,18 @@ describe("usage limit", () => {
   test("a reset already past says nothing", () => {
     expect(fmtResets((NOW - 60_000) / 1000, NOW)).toBeNull();
     expect(fmtResets(null, NOW)).toBeNull();
+  });
+});
+
+describe("nearestLimit", () => {
+  const named = (label: string, used: number): RateWindow => ({ label, used_percent: used, resets_at: null });
+  test("the window closest to running out, session or week", () => {
+    expect(nearestLimit([named("5-hour", 27), named("Weekly", 62)])?.label).toBe("Weekly");
+    expect(nearestLimit([named("5-hour", 91), named("Weekly", 62)])?.label).toBe("5-hour");
+  });
+  test("a tie keeps the first listed, and no windows is none", () => {
+    expect(nearestLimit([named("5-hour", 50), named("Weekly", 50)])?.label).toBe("5-hour");
+    expect(nearestLimit([])).toBeNull();
   });
 });
 

@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { compactOpen } from "@/components/harness/composer/compactOpen";
 
 // The composer's import graph reaches modules that listen on `window` and
 // `document` at load; they get inert stand-ins for the import, then the
@@ -16,8 +15,8 @@ Object.assign(globals, before);
 const noop = () => {};
 const HINT = "Ask about COMP30022. @ files, / skills";
 
-// Server rendering reads the stores' initial state and has no focus, so a
-// compact box renders at rest; `compactOpen` below is what opens it.
+// Server rendering reads the stores' initial state and has no focus; a
+// compact box has one shape whatever it holds, so the markup is all there is.
 function render(compact: boolean) {
   return renderToStaticMarkup(
     <Composer
@@ -44,32 +43,27 @@ function render(compact: boolean) {
 
 const usageRing = 'viewBox="0 0 18 18"';
 
-test("a compact box at rest is one pill: hint, the agent's mark, mic and send", () => {
+test("a compact box is one bar: hint, the settings button, mic and send", () => {
   const html = render(true);
-  expect(html).toContain('data-compact="rest"');
-  expect(html).toContain("rounded-full");
+  expect(html).toContain("rounded-[17px]");
   expect(html).toContain(`aria-placeholder="${HINT}"`);
   // The hint is cut to one line rather than wrapping the bar.
   expect(html).toMatch(/class="[^"]*truncate[^"]*">Ask about COMP30022/);
-  // The picker is its mark alone: model and level only in its title.
-  expect(html).toContain('aria-label="Model and reasoning"');
+  // The settings button stands in for the control row and still names the model.
+  expect(html).toMatch(/aria-label="Settings — Claude Code · opus"/);
+  expect(html).not.toContain('aria-label="Model and reasoning"');
   expect(html).not.toContain(">opus<");
   expect(html).not.toContain(usageRing);
   expect(html).toContain('aria-label="Dictate message"');
-});
-
-test("focus, words, a menu, dictation, a question or sign-in open a compact box", () => {
-  const rest = { focused: false, ready: false, picking: false, dictating: false, answering: false, signingIn: false };
-  expect(compactOpen(rest)).toBe(false);
-  for (const key of Object.keys(rest) as (keyof typeof rest)[]) {
-    expect(compactOpen({ ...rest, [key]: true })).toBe(true);
-  }
+  // The controls come after the text, held at the bar's bottom edge.
+  expect(html).toContain("items-end");
+  expect(html.indexOf('role="textbox"')).toBeLessThan(html.indexOf("aria-label=\"Settings"));
 });
 
 test("a box without compact is unchanged: always the full composer", () => {
   const html = render(false);
-  expect(html).not.toContain("data-compact");
-  expect(html).not.toContain("rounded-full py-1");
+  expect(html).not.toContain("rounded-[17px]");
+  expect(html).not.toContain('aria-label="Settings');
   expect(html).toContain(">opus<");
   expect(html).toContain(usageRing);
 });

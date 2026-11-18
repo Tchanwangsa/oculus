@@ -17,7 +17,7 @@ import { QuestionEditor } from "@/components/harness/composer/QuestionEditor";
 import { useQuestionComposer } from "@/components/harness/composer/useQuestionComposer";
 import { PermissionModeControl } from "@/components/harness/composer/PermissionModeControl";
 import { canSend, UNSCOPED_PLACEHOLDER } from "@/components/harness/composer/sendGate";
-import { compactOpen } from "@/components/harness/composer/compactOpen";
+import { CompactSettings } from "@/components/harness/composer/settings/CompactSettings";
 import { useRunControls } from "@/components/harness/composer/useRunControls";
 import { useSendMode } from "@/components/harness/composer/useSendMode";
 import { type Subject } from "@/lib/db";
@@ -63,9 +63,10 @@ export const COMPOSER_PLACEHOLDER = "Ask anything. @ files, / skills";
  * insert library paths (drawn as chips by `MentionInput`), never file content.
  * Unsent text lives in `draftStore` under `draftKey`, so it outlives the box;
  * so do long pastes, held as cards in the attachment strip.
- * `compact` rests as one pill-shaped bar — the hint, the agent's mark (the
- * model picker collapsed), the mic and send — and opens into the full box
- * while anything in it has focus or holds something to send.
+ * `compact` is one bar that never changes shape: the text, then a settings
+ * button (`CompactSettings`: model, level, mode, usage), the mic and send.
+ * It grows taller as the text wraps, with the controls held at its bottom
+ * right; attachments sit above it.
  */
 export function Composer({
   draftKey,
@@ -151,7 +152,8 @@ export function Composer({
   placeholder?: string;
   /** The open thread, whose notices (`ThreadBanners`) sit above the box. */
   threadId?: number | null;
-  /** One bar at rest, the full box once used (the subject Overview's ask bar). */
+  /** One bar with a settings menu in place of the control row (the subject
+   *  Overview's ask bar). */
   compact?: boolean;
 }) {
   /** The serialized message (chips as paths); emptiness checks read this. */
@@ -211,18 +213,6 @@ export function Composer({
   const question = useQuestionComposer(threadId, draftKey);
 
   const ready = text.trim().length > 0 || att.items.length > 0 || att.texts.length > 0;
-  /** Focus anywhere in the box: popups portal out, so they keep it open themselves. */
-  const [focused, setFocused] = useState(false);
-  const open =
-    !compact ||
-    compactOpen({
-      focused,
-      ready,
-      picking: tools.modelOpen,
-      dictating: dictation.busy,
-      answering: question != null,
-      signingIn: signInOpen,
-    });
   const mode = useSendMode({ threadId, running, text });
   const controls = useRunControls({
     threadId,
@@ -250,21 +240,75 @@ export function Composer({
     onSend(message, mode.modeFor(flip));
   };
 
-  return (
-    <div
-      ref={wrapRef}
-      className="flex flex-col gap-1.5"
-      data-compact={compact ? (open ? "open" : "rest") : undefined}
-      onFocus={compact ? () => setFocused(true) : undefined}
-      onBlur={
-        compact
-          ? (e) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
-            }
-          : undefined
+  const strip = (
+    <AttachmentStrip
+      items={att.items}
+      onDetach={att.detach}
+      confirming={att.confirming}
+      onConfirmDetach={att.confirmDetach}
+      onCancelDetach={att.cancelDetach}
+      texts={att.texts}
+      onEditText={att.editText}
+      onDetachText={att.detachText}
+      onPutBack={(t) => ref.current?.append(t)}
+      subjectId={subjectId}
+    />
+  );
+  const editor = question ? (
+    <QuestionEditor flow={question} inputRef={answerRef} />
+  ) : (
+    // Keyed: the editor reads its text once, at mount.
+    <MentionInput
+      key={draftKey}
+      ref={ref}
+      initialText={text}
+      skills={tools.skillNames}
+      autoFocus={autoFocus}
+      onEdit={(next, caret, masked) => {
+        setDraft(draftKey, next);
+        mentions.track(next, caret, masked);
+      }}
+      onFiles={att.attach}
+      onPasteText={att.attachText}
+      onBlur={mentions.close}
+      oneLinePlaceholder={compact}
+      onKeyDown={(e) => {
+        // The menu's claimed keys come back prevented, so a pick never sends.
+        mentions.keyDown(e);
+        if (e.defaultPrevented) return;
+        stash.keyDown(e);
+        history.keyDown(e);
+        if (e.defaultPrevented) return;
+        const action = enterKey(e, unscoped, isMac);
+        if (action) e.preventDefault();
+        if (action === "send" || action === "flip") void send(action === "flip");
+        if (action === "steer-oldest") mode.steerOldest();
+      }}
+      placeholder={
+        asking || running
+          ? busyPlaceholder({ approval: asking, plain: mode.plain, steer: mode.steer })
+          : unscoped
+            ? UNSCOPED_PLACEHOLDER
+            : (placeholder ?? COMPOSER_PLACEHOLDER)
       }
-    >
-      {open && ((!subjectLocked && onSubject) || leading || stash.menu.entries.length > 0) && (
+    />
+  );
+  const sendControls = (
+    <SendControls
+      stop={controls.stop}
+      send={question ? { kind: "send", label: question.primaryLabel, disabled: !question.ready || question.busy } : controls.send}
+      onStop={controls.stopNow}
+      onSend={question ? question.primary : (e) => void send(modClick(e, isMac))}
+      onResume={controls.resumeNow}
+    />
+  );
+  const box =
+    "flex border border-border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25";
+  const dropRing = att.dropping && !dropRef && "border-brand ring-[3px] ring-brand/25";
+
+  return (
+    <div ref={wrapRef} className="flex flex-col gap-1.5">
+      {((!subjectLocked && onSubject) || leading || stash.menu.entries.length > 0) && (
         <div className="flex items-center gap-1.5 px-0.5">
           {!subjectLocked && onSubject && (
             <SubjectPicker
@@ -334,115 +378,85 @@ export function Composer({
       <RequestBar threadId={threadId} />
       {question && <QuestionPanel flow={question} />}
 
-      {/* Opening changes classes, never the tree: a remounted editor would
-          lose the focus that opened it. */}
-      <div
-        className={cn(
-          "flex border border-border bg-card shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25",
-          open
-            ? "flex-col gap-4 rounded-xl px-3 py-3"
-            : "cursor-text flex-row items-center gap-1.5 rounded-full py-1 pr-1 pl-3.5",
-          att.dropping && !dropRef && "border-brand ring-[3px] ring-brand/25",
-        )}
-        onClick={open ? undefined : (e) => focusAtRest(e.target, e.currentTarget)}
-      >
-        <div className={cn("flex flex-col gap-2", !open && "min-w-0 flex-1")}>
-          {question ? (
-            <QuestionEditor flow={question} inputRef={answerRef} />
+      {compact && !question && strip}
+      {compact ? (
+        <div
+          className={cn(box, "cursor-text items-end gap-1.5 rounded-[17px] py-1 pr-1 pl-3.5", dropRing)}
+          onClick={(e) => focusAtEnd(e.target, e.currentTarget)}
+        >
+          {/* As tall as the controls on one line, so the first line sits level with them. */}
+          <div className="min-w-0 flex-1 py-1">{editor}</div>
+          {dictation.busy ? (
+            <DictationBar dictation={dictation} small className="w-56 max-w-[60%] shrink-0" />
           ) : (
-            <>
-              <AttachmentStrip
-                items={att.items}
-                onDetach={att.detach}
-                confirming={att.confirming}
-                onConfirmDetach={att.confirmDetach}
-                onCancelDetach={att.cancelDetach}
-                texts={att.texts}
-                onEditText={att.editText}
-                onDetachText={att.detachText}
-                onPutBack={(t) => ref.current?.append(t)}
-                subjectId={subjectId}
+            <div className="flex shrink-0 items-center gap-1">
+              <CompactSettings
+                providers={pickerProviders}
+                provider={provider}
+                locked={locked}
+                refused={refused}
+                switchFrom={switchFrom}
+                model={model}
+                reasoning={reasoning}
+                onProvider={onProvider}
+                onModel={onModel}
+                onReasoning={onReasoning}
+                modelOpen={tools.modelOpen}
+                onModelOpenChange={tools.setModelOpen}
+                threadId={threadId}
+                usage={usage}
+                rateLimits={rateLimits}
               />
-              {/* Keyed: the editor reads its text once, at mount. */}
-              <MentionInput
-                key={draftKey}
-                ref={ref}
-                initialText={text}
-                skills={tools.skillNames}
-                autoFocus={autoFocus}
-                onEdit={(next, caret, masked) => {
-                  setDraft(draftKey, next);
-                  mentions.track(next, caret, masked);
-                }}
-                onFiles={att.attach}
-                onPasteText={att.attachText}
-                onBlur={mentions.close}
-                oneLinePlaceholder={!open}
-                onKeyDown={(e) => {
-                  // The menu's claimed keys come back prevented, so a pick never sends.
-                  mentions.keyDown(e);
-                  if (e.defaultPrevented) return;
-                  stash.keyDown(e);
-                  history.keyDown(e);
-                  if (e.defaultPrevented) return;
-                  const action = enterKey(e, unscoped, isMac);
-                  if (action) e.preventDefault();
-                  if (action === "send" || action === "flip") void send(action === "flip");
-                  if (action === "steer-oldest") mode.steerOldest();
-                }}
-                placeholder={
-                  asking || running
-                    ? busyPlaceholder({ approval: asking, plain: mode.plain, steer: mode.steer })
-                    : unscoped
-                      ? UNSCOPED_PLACEHOLDER
-                      : (placeholder ?? COMPOSER_PLACEHOLDER)
-                }
-              />
-            </>
+              <DictationMic dictation={dictation} />
+              {sendControls}
+            </div>
           )}
         </div>
-        {dictation.busy ? <DictationBar dictation={dictation} /> : <div className={cn("flex items-center gap-1", !open && "shrink-0")}>
-          <ModelPicker
-            className={open ? "-ml-1.5" : "gap-1 px-1"}
-            markOnly={!open}
-            providers={pickerProviders}
-            provider={provider}
-            locked={locked}
-            refused={refused}
-            switchFrom={switchFrom}
-            model={model}
-            reasoning={reasoning}
-            onProvider={onProvider}
-            onModel={onModel}
-            onReasoning={onReasoning}
-            open={tools.modelOpen}
-            onOpenChange={tools.setModelOpen}
-          />
-          {open && (
-            <>
+      ) : (
+        <div className={cn(box, "flex-col gap-4 rounded-xl px-3 py-3", dropRing)}>
+          <div className="flex flex-col gap-2">
+            {!question && strip}
+            {editor}
+          </div>
+          {dictation.busy ? (
+            <DictationBar dictation={dictation} />
+          ) : (
+            <div className="flex items-center gap-1">
+              <ModelPicker
+                className="-ml-1.5"
+                providers={pickerProviders}
+                provider={provider}
+                locked={locked}
+                refused={refused}
+                switchFrom={switchFrom}
+                model={model}
+                reasoning={reasoning}
+                onProvider={onProvider}
+                onModel={onModel}
+                onReasoning={onReasoning}
+                open={tools.modelOpen}
+                onOpenChange={tools.setModelOpen}
+              />
               <PermissionModeControl threadId={threadId} provider={provider} />
               <div className="flex-1" />
               <UsageMeter usage={usage} rateLimits={rateLimits} />
-            </>
+              <DictationMic dictation={dictation} />
+              {sendControls}
+            </div>
           )}
-          <DictationMic dictation={dictation} />
-          <SendControls
-            stop={controls.stop}
-            send={question ? { kind: "send", label: question.primaryLabel, disabled: !question.ready || question.busy } : controls.send}
-            onStop={controls.stopNow}
-            onSend={question ? question.primary : (e) => void send(modClick(e, isMac))}
-            onResume={controls.resumeNow}
-          />
-        </div>}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
 
-/** A click on the resting bar outside its controls puts the caret at the end
- *  of the text box; WebKit would put a focused contenteditable's at its start. */
-function focusAtRest(target: EventTarget, bar: HTMLElement) {
-  if (target instanceof Element && target.closest("button, [role=\"textbox\"]")) return;
+/** A click on the compact bar outside its controls puts the caret at the end
+ *  of the text box; WebKit would put a focused contenteditable's at its start.
+ *  Clicks in the settings menu bubble here through its portal, and are left
+ *  alone: taking focus from the menu would close it. */
+function focusAtEnd(target: EventTarget, bar: HTMLElement) {
+  if (!(target instanceof Element) || !bar.contains(target)) return;
+  if (target.closest("button, [role=\"textbox\"]")) return;
   const box = bar.querySelector<HTMLElement>('[role="textbox"]');
   if (!box) return;
   box.focus();

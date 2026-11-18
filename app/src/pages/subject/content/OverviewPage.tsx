@@ -11,7 +11,7 @@ import { AskDock } from "./overview/AskDock";
 import { BehindWarning } from "./overview/BehindWarning";
 import { ComingUpList } from "./overview/ComingUpList";
 import { EmptyState } from "./overview/EmptyState";
-import { weekName, weekRange } from "./overview/format";
+import { weekEdge, weekName, weekRange } from "./overview/format";
 import { OverviewHeader } from "./overview/Header";
 import { useOverviewOpener } from "./overview/open";
 import { SectionHeading } from "./overview/rows";
@@ -20,7 +20,7 @@ import { WeekStrip } from "./overview/WeekStrip";
 
 /**
  * A subject's "this week": the behind warning, the term's week strip, the
- * selected week's activity, the next deadlines, and beside them (below them in
+ * next deadlines, the selected week's activity, and beside them (below them in
  * a narrow pane) its events and the student's own work. The ask bar docks at
  * the bottom in the same column. Data is `useSubjectOverview`.
  */
@@ -51,6 +51,8 @@ export default function SubjectOverviewPage() {
   const selected = pickedIndex >= 0 ? pickedIndex : current;
   const week = weeks[selected];
   const thisWeek = selected === current;
+  const edge = weekEdge(selected, weeks.length);
+  const openRange = week && edge ? weekRange(week, edge) : null;
   const nothingSynced = files.length === 0 && data.progress.every((p) => p.total === 0);
 
   return (
@@ -76,22 +78,26 @@ export default function SubjectOverviewPage() {
             <div className="grid gap-x-8 gap-y-7 @2xl:grid-cols-[minmax(0,1fr)_13rem]">
               <div className="min-w-0 space-y-7">
                 <section>
-                  <SectionHeading aside={week ? weekRange(week) : undefined}>
-                    {thisWeek || !week ? "This week" : weekName(week)}
+                  <SectionHeading>Coming up</SectionHeading>
+                  <ComingUpList items={data.comingUp} opener={opener} now={now} />
+                </section>
+                <section>
+                  <SectionHeading aside={week ? weekRange(week, edge) : undefined}>
+                    {thisWeek || !week ? "This week" : weekName(week, edge)}
                   </SectionHeading>
                   <ActivityList
                     items={data.activity}
                     opener={opener}
+                    open={openRange != null}
                     empty={!week ? "No weeks yet: the timetable hasn't synced."
                       : thisWeek ? "Nothing new this week yet." : "Nothing new that week."}
                   />
                 </section>
-                <section>
-                  <SectionHeading>Coming up</SectionHeading>
-                  <ComingUpList items={data.comingUp} opener={opener} now={now} />
-                </section>
               </div>
-              <SideColumn events={data.events} yours={data.yours} opener={opener} now={now} thisWeek={thisWeek} />
+              <SideColumn
+                events={data.events} yours={data.yours} opener={opener} now={now}
+                thisWeek={thisWeek} openRange={openRange}
+              />
             </div>
           </>
         )}

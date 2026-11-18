@@ -30,7 +30,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
 | Provider table (`PROVIDERS`), platform capabilities, types, commands | `app/src/lib/harness/registry.ts`, `app/src/lib/harness/availability.ts`, `app/src/lib/harness/` |
 | What an agent asks mid-turn: the request table, its live routes, the protected-path check, the `Respond` and permission-mode commands | `app/src-tauri/src/harness/requests/`, `app/src-tauri/src/harness/core/decide/respond.rs`, `app/src-tauri/src/harness/app/consumer/requests.rs`, `app/src-tauri/src/harness/app/requests.rs` |
-| …their frontend: the row, the answer bar, the question panel, the mode control, what each shows | `app/src/components/harness/timeline/request/`, `app/src/components/harness/composer/RequestBar.tsx`, `app/src/components/harness/composer/QuestionPanel.tsx`, `app/src/components/harness/composer/useQuestionComposer.ts`, `app/src/components/harness/composer/PermissionModeControl.tsx`, `app/src/lib/harness/requests.ts`, `app/src/lib/harness/questions.ts`, `app/src/lib/harness/permissionModes.ts` |
+| …their frontend: the row, the answer bar, the question panel, the mode control, what each shows | `app/src/components/harness/timeline/request/`, `app/src/components/harness/composer/RequestBar.tsx`, `app/src/components/harness/composer/QuestionPanel.tsx`, `app/src/components/harness/composer/useQuestionComposer.ts`, `app/src/components/harness/composer/PermissionModeControl.tsx`, `app/src/components/harness/composer/usePermissionMode.ts`, `app/src/stores/chat/newChatMode.ts`, `app/src/lib/harness/requests.ts`, `app/src/lib/harness/questions.ts`, `app/src/lib/harness/permissionModes.ts` |
 | A thread's selection, what a send does to its session (`decide_transition`), and the context handoff | `app/src-tauri/src/harness/core/decide/select.rs`, `app/src-tauri/src/harness/manager/transition.rs`, `app/src-tauri/src/harness/handoff/`, `app/src-tauri/src/harness/store/bindings.rs`, `app/src-tauri/src/harness/store/switching.sql` |
 | What each bridge can do (Stop, rewind, steering, switching), declared in Rust and read by the webview | `app/src-tauri/src/harness/providers/capabilities.rs`, `app/src/lib/harness/capabilities.ts`, `app/src/hooks/agents/useCapabilities.ts` |
 | Live state and event folding | `app/src/stores/chat/harnessStore.ts`, `app/src/hooks/backend/useBackendEvents.ts` |
@@ -42,7 +42,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Local OpenUI Query tools and event refresh | `app/src/components/markdown/openui/query/` |
 | Seeded simulation and maths functions | `app/src/components/markdown/openui/functions/` |
 | Interactive reply fences, study widgets and their persisted progress | `app/src/components/markdown/openui/`, `app/src/stores/chat/widgetStore.ts` |
-| Model picker and its catalogue hook | `app/src/components/harness/composer/ModelPicker.tsx`, `app/src/hooks/agents/useProviderModels.ts` |
+| Model picker and its catalogue hook | `app/src/components/harness/composer/ModelPicker.tsx`, `app/src/components/harness/composer/model/` (the menu, its rows, `modelSummary`), `app/src/hooks/agents/useProviderModels.ts` |
 | Settings → opencode: the provider and model tables, the connect flow, the offered-model gate | `app/src/pages/settings/integrations/OpencodePage.tsx`, `app/src/components/settings/agents/opencode/`, `app/src/components/settings/agents/OpencodeConnectDialog.tsx`, `app/src/lib/harness/opencodeCatalogue.ts` |
 | Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db/jobModels.ts`, `app/src/components/settings/jobs/`, `app/src/hooks/agents/useJobAudit.ts` |
 | Subagents (Studio's research and scene helpers) | `app/src-tauri/src/harness/studio_agents.rs`, `app/src-tauri/templates/STUDIO_*.template.md`, `oculus studio agents` (`app/src-tauri/src/bin/oculus/commands/studio/agents.rs`) |
@@ -52,7 +52,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Commands and skills: the catalogue, its search, the ranking, how a picked skill reaches each bridge | `app/src/lib/harness/skills.ts`, `app/src/lib/harness/composerCommands.ts`, `app/src/stores/chat/skillStore.ts`, `app/src/lib/search/ranking.ts`, `app/src-tauri/src/harness/app/skills.rs`, `app/src-tauri/src/harness/providers/*/skill.rs` |
 | Earlier messages on ArrowUp, and the ⌘S stash | `app/src/lib/harness/promptHistory.ts`, `app/src/hooks/agents/usePromptHistory.ts`, `app/src/stores/chat/stashStore.ts`, `app/src/components/harness/composer/useComposerStash.ts`, `app/src/components/harness/composer/StashMenu.tsx`, `app/src/components/harness/composer/StashBadge.tsx` |
 | Studio's thread column and New video box, which use `Composer`'s `leading` (chips after the subject's) and `placeholder` | `app/src/components/studio/thread/ThreadColumn.tsx`, `app/src/components/studio/new/NewVideo.tsx` ([studio-page.md](./studio-page.md)) |
-| The subject Overview's ask bar: `Composer`'s `compact` mode, and the warp into the thread it starts | `app/src/pages/subject/content/overview/AskBar.tsx`, `app/src/components/harness/composer/compactOpen.ts`, `app/src/lib/ui/warp.ts`, `app/src/hooks/ui/useWarpLanding.ts`, `app/src/styles/warp.css` |
+| The subject Overview's ask bar: `Composer`'s `compact` mode and its settings menu, and the warp into the thread it starts | `app/src/pages/subject/content/overview/AskBar.tsx`, `app/src/components/harness/composer/settings/`, `app/src/lib/ui/warp.ts`, `app/src/hooks/ui/useWarpLanding.ts`, `app/src/styles/warp.css` |
 | Voice dictation, microphone capture and cleanup job | `app/src/components/harness/dictation/`, `app/src/lib/dictation/recording.ts`, `app/src-tauri/src/harness/app/dictation.rs` |
 | Send, queue, stop and resume controls shared by both composers, the rule that picks them, and the held-queue notice | `app/src/components/harness/composer/SendControls.tsx`, `app/src/lib/harness/runControls.ts`, `app/src/components/harness/composer/useRunControls.ts`, `app/src/components/harness/composer/ThreadBanners.tsx` |
 | Steer or queue into a running turn: the send mode, ⌘↩ and ⌘⇧↩, "Send now", the steer row, Settings → Chat | `app/src/pages/settings/integrations/ChatPage.tsx`, `app/src/lib/harness/sendMode.ts`, `app/src/components/harness/composer/useSendMode.ts`, `app/src/hooks/agents/useSteerKind.ts`, `app/src/components/harness/timeline/SteerRow.tsx`, `app/src/stores/chat/chatPrefsStore.ts`, `app/src/components/settings/chat/FollowUpSection.tsx` |
@@ -580,8 +580,15 @@ still update the picker.
   video's thread): an
   ordered stack of cards, each a toned glyph, a title, a muted description,
   pill actions and an optional close. Never a toast, and nothing times out.
-- **Usage is a ring of context only** (`UsageMeter.tsx`); spend is hidden, as
-  subscriptions aren't billed per token. Claude context is the last
+- **Usage is a ring of the nearest limit** (`UsageMeter.tsx`): the plan
+  window closest to running out, the 5-hour session's or the week's
+  (`nearestLimit` in `app/src/lib/harness/usageLimit.ts`, the one
+  `usageSummary` and the usage-limit notice both read), named in its title.
+  Usage is plan limits only: an agent without plan windows (opencode,
+  Antigravity) shows no ring, and the context window lives in the settings
+  list's strip and the thread info card. Its popover lists every window with
+  its reset. Spend is
+  hidden, as subscriptions aren't billed per token. Claude context is the last
   `assistant` usage, since `result.usage` sums the turn. Codex windows are read
   on server start and page open (`harness_refresh_rate_limits`, which never
   starts a server).
@@ -912,8 +919,8 @@ shows it.
 
 The first group has no heading: the **Work** rows, then the thread's subject
 (`SubjectIcon` and `displayCode`, opening the subject), its model and
-reasoning, and its context-window use with the bar the composer's usage ring
-reads (`usageTint`). **Work** is a registry (`threadInfo/work.ts`): a feature
+reasoning, and its context-window use as tokens ("46k / 1M", the share in
+its title) over a bar tinted like the usage ring (`usageTint`). **Work** is a registry (`threadInfo/work.ts`): a feature
 calls `registerWorkKind({ id, useRows })` at module load, and `useRows` is a
 hook that returns that kind's rows for the thread (glyph, title, status in
 words, the route it opens). No kind is registered yet; with no rows the group
@@ -971,13 +978,14 @@ writes it into the draft once and drops it from the route.
   tab in front, since the subject column answers it too. Its resize handle
   goes with it, so it can't clash with a side panel's; the toggle or ⌘⌥B
   brings it back.
-- **Recents view** (`RecentsBody`, one section under a
-  `SideNavGroupLabel`): every thread newest first by `updated_at`, with no
-  other headings, so Working, Approval, Question and Failed stay in place
-  by time and nothing jumps to the top. The store reads the newest 100
-  (`THREAD_PAGE`) plus one, which says whether older ones exist; while they
-  do, Show more at the foot raises the limit by another 100
-  (`showMoreThreads`). A thread a view holds that is older than those read
+- **Recents view** (`RecentsBody`): every thread newest first by
+  `updated_at`, with no headings (the tab names it), so Working, Approval,
+  Question and Failed stay in place by time and nothing jumps to the top.
+  It draws 5 rows (`RECENTS_FIRST`) and adds 10 whenever a sentinel under
+  the last row nears view (an `IntersectionObserver`), so it scrolls without
+  a button. The store reads the newest 100 (`THREAD_PAGE`) plus one, which
+  says whether older ones exist; once the rows drawn reach them, the
+  sentinel raises the limit by another 100 (`showMoreThreads`). A thread a view holds that is older than those read
   is read by id and kept in the store (`loadThreads`, `getThreadsByIds`), and
   opening a search hit lists it at once (`keep`).
 - **Subject view** (`SubjectBody`): the same threads the store has read,
@@ -1991,7 +1999,12 @@ restarting the session for it. The start step
 reads it off the row (`SendOptions::permission_mode`), as does a rewind
 that respawns the session, and it is part of
 the session's reuse key ([`decide_transition`](#changing-provider-mid-chat)).
-A bridge whose `approvals` flag is false declines approvals, whatever
+A new chat starts under the mode its composer showed before it existed
+(`useNewChatMode` in `app/src/stores/chat/`, the session's, like its model
+pick): `useThreadActions`' and Studio's New video's creating sends carry it
+as `SendOptions::start_mode`, which `create` in `core/commit.rs` writes to
+the row in the transaction that makes the thread, so the first run reads it
+as every later one does. A bridge whose `approvals` flag is false declines approvals, whatever
 the mode. `questions` separately gates question support.
 
 `harness_load` returns the thread's requests (`requests`), and the webview
@@ -2125,8 +2138,9 @@ What the student sees is decided in `app/src/lib/harness/requests.ts`,
   with the words ([Steering from the composer](#steering-from-the-composer)); elsewhere it
   queues behind the request. `harnessRespond` carries no feedback: Rust
   refuses it.
-- **The mode control** (`PermissionModeControl`, after the model picker,
-  for an open thread only) is an icon-only button showing the chat's mode
+- **The mode control** (`PermissionModeControl`, after the model picker;
+  its state is `usePermissionMode`, which the compact composer's settings
+  menu shares) is an icon-only button showing the chat's mode
   (its name in the tooltip) and opens a "Permission mode" menu of Ask, Auto
   and Don't ask, each with a one-line description. Where the bridge has no
   reviewer (`autoReview` false) Auto says it asks as Ask; on Claude,
@@ -2134,7 +2148,8 @@ What the student sees is decided in `app/src/lib/harness/requests.ts`,
   menu's header says, in its tooltip, that the agent cannot ask yet. A pick
   is saved with
   `harnessSetPermissionMode`; Rust's refusal (a request waiting) shows at
-  the top of the open menu.
+  the top of the open menu. In a composer with no thread yet it shows, and
+  a pick sets, the mode the new chat starts with (`useNewChatMode`, above).
 - **Auto's evidence**: a tool row whose meta has a `review` says "Reviewer
   approved" or "Reviewer denied" (Codex), "Approved by Claude's classifier"
   or "Refused by Claude's classifier" quietly at its right, and opened, the
@@ -2455,7 +2470,10 @@ are never restored.
 
 ## The model picker
 
-One control for agent, model and level (`ModelPicker.tsx`).
+One control for agent, model and level (`ModelPicker.tsx`): a trigger over
+`ModelMenuContent` (`app/src/components/harness/composer/model/`), a popover
+around `ModelMenu`, the body the compact composer's settings menu draws on
+its model page.
 `useProviderModels` names no provider — each `PROVIDERS` entry owns its
 catalogue, and marks are a `Record<Provider, …>` so a new provider won't
 compile without one.
@@ -3308,15 +3326,37 @@ agent, model and level (`useComposerSelection(null)`), filled from the
 catalogue like any composer, so no send goes without an explicit model and
 level, on any of the four agents.
 
-- **`compact` rests as one bar.** A pill with the hint cut to one line, the
-  model picker drawn as the agent's mark and caret (`markOnly`; its title
-  still names model and level), the mic and send. Focus anywhere in it,
-  words or attachments, the picker's menu, dictation, a waiting question or
-  the sign-in dialog open it into the full box: model name, level, usage
-  ring, `@` and `/` menus (`compactOpen`). Opening swaps classes only, so
-  the editor keeps the focus that opened it. A click on the bar outside its
-  buttons puts the caret at the end. Without `compact`, the box is as it
-  always was.
+- **`compact` is one bar that never changes shape.** The text with the
+  hint cut to one line, then a settings button, the mic and send. Focus and
+  typing change nothing but its height: it grows as the text wraps, its
+  17px corners a pill on one line, and the controls hold the bottom-right
+  corner. A click on the bar outside its buttons puts the caret at the end.
+  Attachments, the stash, notices, a waiting question's panel and the
+  sign-in line sit above the bar; a question's typed answer takes the
+  text's place in it, and dictation's strip takes the controls' place at
+  the bar's own height. Without `compact`, the box is the full composer.
+- **The settings button stands in for the control row**
+  (`settings/CompactSettings.tsx`). Its title names agent, model and level
+  (`modelSummary`), and it opens one popover whose pages change in place
+  (`settings/PageFrame.tsx`). The first is a list of rows (`SettingsRow`),
+  each an icon, the setting, its value muted at the right and a chevron:
+  the model with its level; the permission mode, a new chat's included
+  (the mode it starts with); usage, when the agent reports plan limits,
+  valued by the window nearest its limit ("Weekly 62%"). Under the rows,
+  the context window is always in view as a bar and its tokens
+  (`settings/ContextStrip.tsx`, "273k / 1M"). A row turns
+  the popover into its page, headed by a back control (`PageHeader`): the
+  model picker's own `ModelMenu` (agents, models and level on one page,
+  refusal and switch lock included), the mode choices
+  (`PermissionModeChoices`; a pick closes the menu), or `UsageDetails`.
+  The frame eases between the pages' sizes, measured with
+  `offsetWidth`/`offsetHeight` (`settings/useLayoutSize.ts`), with the page
+  pinned to the corner nearest the trigger so the frame reveals it; after
+  the first page, each slides and fades in. Each page focuses its own
+  control (the search box or the chosen model, the chosen mode, the row
+  just left); Up and Down walk the rows, Right opens one, and Escape or Left
+  goes back a page before Escape closes (`settings/pages.ts`). `/model`
+  opens the menu on its model page. A new setting is one more row and page.
 - **A send is Chat's new-thread send.** `useThreadActions`' `send` with
   `chatScope` set to the subject, as `ChatPage` sends a new thread: Rust
   creates the thread under that subject and the thread list reloads. `send`

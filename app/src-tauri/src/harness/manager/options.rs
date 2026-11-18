@@ -43,6 +43,9 @@ pub struct SendOptions {
     /// row at each start, so the saved mode is what runs.
     #[serde(skip)]
     pub permission_mode: crate::harness::requests::PermissionMode,
+    /// The mode a new chat starts with, picked in the composer before it
+    /// had a thread. Read only on creation, which writes it to the row.
+    pub start_mode: Option<crate::harness::requests::PermissionMode>,
     /// Set by the app, never the webview: this send is the follow-up of
     /// that card (`app/continuation.rs`), not something the student typed.
     #[serde(skip)]
@@ -213,7 +216,7 @@ mod tests {
     /// webview sent comes back, and nothing the app resolves is stored.
     #[test]
     fn the_sendable_fields_survive_a_round_trip_and_the_resolved_ones_are_left_out() {
-        let sent = r#"{"model":"opus","reasoningEffort":"high","chatScope":"general","context":"the moment","at":42,"studio":{"slug":"limits","lengthSecs":90},"skills":["revise"]}"#;
+        let sent = r#"{"model":"opus","reasoningEffort":"high","chatScope":"general","context":"the moment","at":42,"studio":{"slug":"limits","lengthSecs":90},"skills":["revise"],"startMode":"quiet"}"#;
         let mut o = opts(sent);
         o.scope = Some("COMP1".into());
         o.continuation = Some("12.0".into());
@@ -236,6 +239,11 @@ mod tests {
         assert_eq!(back.context.as_deref(), Some("the moment"));
         assert_eq!(back.at, Some(42));
         assert_eq!(back.skills, ["revise"], "a waiting message keeps its skill");
+        assert_eq!(
+            back.start_mode,
+            Some(crate::harness::requests::PermissionMode::Quiet)
+        );
+        assert_eq!(opts("{}").start_mode, None);
         assert_eq!(back.studio.unwrap().length_secs, Some(90));
         assert_eq!(serde_json::to_value(ChatScope::Subject(3)).unwrap(), 3);
     }

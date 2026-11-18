@@ -4,7 +4,6 @@ import {
   CalendarBlank,
   ArrowsClockwise,
   BookOpen,
-  CircleNotch,
   FilmSlate,
   Folder,
   Lightbulb,
@@ -78,7 +77,7 @@ export default function Sidebar({ collapsed }: SidebarProps) {
           to="/sync"
           icon={ArrowsClockwise}
           label="Sync"
-          indicator={indexing ? <Spinner /> : null}
+          indicator={indexing ? <BusyDot /> : null}
         />
         <RailItem
           to="/settings"
@@ -117,7 +116,7 @@ function Sections() {
         to="/chat"
         icon={Chat}
         label="Chat"
-        indicator={agentBusy ? <Spinner /> : null}
+        indicator={agentBusy ? <BusyDot /> : null}
       />
     ),
     calendar: <RailItem to="/calendar" icon={CalendarBlank} label="Calendar" />,
@@ -184,8 +183,10 @@ function AppItems() {
   );
 }
 
-function Spinner() {
-  return <CircleNotch size={10} weight="bold" className="animate-spin text-brand" />;
+/** Work running behind a rail item: a brand dot that breathes, the same size
+ *  as the attention dot so the two read as one family. */
+function BusyDot() {
+  return <span className="size-1.5 rounded-full bg-brand pulse-dot" />;
 }
 
 /** The ⌘K palette's handle, at the top of the rail. */

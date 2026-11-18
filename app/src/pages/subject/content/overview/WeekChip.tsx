@@ -1,14 +1,15 @@
 import type { WeekProgress } from "@/hooks/data/overview";
 import type { Week } from "@/lib/weeks";
 import { cn } from "@/lib/utils";
-import { weekName, weekRange } from "./format";
+import { weekName, weekRange, type WeekEdge } from "./format";
 
 /** Breaks and the weeks after teaching have no lectures to fill a bar. */
 const DASHED = "bg-[repeating-linear-gradient(90deg,var(--color-border)_0_3px,transparent_3px_6px)]";
 
-export function WeekChip({ index, week, progress, current, future, selected, divided, onSelect }: {
+export function WeekChip({ index, week, edge, progress, current, future, selected, divided, onSelect }: {
   index: number;
   week: Week;
+  edge: WeekEdge;
   progress: WeekProgress | undefined;
   current: boolean;
   future: boolean;
@@ -20,8 +21,8 @@ export function WeekChip({ index, week, progress, current, future, selected, div
   const watched = progress && progress.total > 0
     ? `${progress.watched} of ${progress.total} ${progress.total === 1 ? "lecture" : "lectures"} watched`
     : null;
-  const range = weekRange(week);
-  const tip = [current ? "This week" : weekName(week), range, watched].filter(Boolean).join(" · ");
+  const range = weekRange(week, edge);
+  const tip = [current ? "This week" : weekName(week, edge), range, watched].filter(Boolean).join(" · ");
   return (
     <>
       {divided && <span aria-hidden className="mx-[3px] my-1.5 w-px shrink-0 bg-border" />}
