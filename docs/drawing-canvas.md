@@ -31,6 +31,7 @@ page.
 | What a selection box selects (release and live preview) | `app/src/lib/canvas/boxSelect.ts` |
 | Selection by a closed lasso loop | `app/src/lib/canvas/lasso.ts` |
 | Freehand pen geometry and device-local ink presets | `app/src/lib/canvas/pens.ts`, `app/src/lib/canvas/inkPresets.ts`, `app/src/components/canvas/CanvasPresetBar.tsx` |
+| The two canvases that paint a freehand stroke in progress | `app/src/lib/canvas/liveStroke.ts`, `app/src/components/canvas/CanvasSurface.tsx` |
 | Builders for matrix and coordinate axes | `app/src/lib/canvas/templates.ts` |
 | Native selection, callout and touch defaults kept off the canvas | `app/src/lib/canvas/browserSelectionGuard.ts` |
 | Canvas2D drawing and image export | `app/src/lib/canvas/render.ts`, `app/src/lib/canvas/renderSvg.ts` |
@@ -340,10 +341,24 @@ only those to `canvas_write_page_snapshots`. A canvas gets none of this.
 
 ## The pointer stays local and Rust answers geometry queries
 
-The WebView owns input and Canvas2D drawing. Gesture previews live in refs
-and an overrides map; a requestAnimationFrame coalesces repaint requests.
-The committed elements array changes at a gesture boundary. A cached Path2D
-per immutable element avoids rebuilding its path during panning.
+The WebView owns input and Canvas2D drawing. The scene paints gesture
+overrides on an animation frame. During freehand drawing it skips the active
+stroke. Coalesced samples and the release point append to the stroke's own
+points array. On release the scene paints the committed element and clears
+the live layer in the same frame. The committed elements array changes at a
+gesture boundary. A cached Path2D per immutable element avoids rebuilding
+its path during panning.
+
+The live layer sits between the scene and the editor controls. For the ball
+pen and round marker, one canvas accumulates settled quadratic segments and
+the other redraws the tip. The layer applies the stroke's opacity once, so a
+marker can cross itself without darkening. Other nibs, dashes, multi-pass
+pens, flat markers and stroke colours with alpha use the scene's element
+renderer on the tip canvas. A notebook clips both canvases to the same page
+as the committed stroke, replaying the ink if its growing bounds change
+which page owns it. All three backing stores use the drawing canvas's measured
+rectangle and device pixel ratio. A resize or camera move replays the ink
+with the new transform.
 
 The Rust core is compiled to WebAssembly and loaded with the editor. A
 retained BVH indexes the scene for hit testing and viewport culling. Geometry
@@ -634,6 +649,9 @@ neither cancels nor redirects a Pencil stroke.
   between still draws, and a freedraw tap commits a dot. Coalesced pen samples
   stay in the committed stroke. Committing keeps the preview’s points unchanged,
   so lifting the pointer preserves the curve already drawn.
+- A pointer cancellation, tool switch or Undo during a freehand stroke
+  discards the preview. The held Pencil can start drawing again on its next
+  contact. Undo during the stroke keeps earlier committed edits.
 - A pen move with its contact button down and no gesture starts the stroke
   that WebKit's lost pointerdown should have; hover never inks. A fresh pen down
   while a pen stroke is open commits that stroke's ink as its own stroke rather

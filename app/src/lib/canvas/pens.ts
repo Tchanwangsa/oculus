@@ -36,7 +36,8 @@ export function penLine(element: CanvasElement): PenLine | null {
 /** A pen whose live stroke can be painted piece by piece: one solid pass with round ends. */
 export const paintsIncrementally = (element: CanvasElement) => {
   const pen = penOf(element);
-  return pen === 'ball' || pen === 'roundMarker';
+  // A colour with its own alpha would darken where separately painted pieces overlap.
+  return (pen === 'ball' || pen === 'roundMarker') && /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(element.stroke);
 };
 
 const NIB_ANGLE = Math.PI / 4;

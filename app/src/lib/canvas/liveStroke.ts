@@ -1,4 +1,6 @@
 import { type CanvasElement, type CanvasViewport, type Point } from './model';
+import type { Paper, PageRect } from './paper';
+import { clipToPage, elementPage } from './renderPaper';
 
 /**
  * The freehand stroke being drawn, painted on two canvases above the scene so a pen sample never repaints the scene.
@@ -9,7 +11,7 @@ import { type CanvasElement, type CanvasViewport, type Point } from './model';
  * host passes, which is the scene's own drawing of the element.
  */
 export type LiveStrokeContext = Pick<CanvasRenderingContext2D,
-  'setTransform' | 'clearRect' | 'beginPath' | 'moveTo' | 'lineTo' | 'quadraticCurveTo' | 'stroke' | 'strokeStyle' | 'lineWidth' | 'lineCap' | 'lineJoin'
+  'setTransform' | 'clearRect' | 'beginPath' | 'moveTo' | 'lineTo' | 'quadraticCurveTo' | 'stroke' | 'strokeStyle' | 'lineWidth' | 'lineCap' | 'lineJoin' | 'save' | 'restore' | 'rect' | 'clip'
 > & { canvas: { width: number; height: number } };
 export type LiveStrokePaint = (context: CanvasRenderingContext2D, element: CanvasElement) => void;
 
@@ -25,10 +27,11 @@ export class LiveStroke {
   private settled = 1;
   /** What the tail canvas holds, in canvas pixels. */
   private tailBox: Box | null = null;
-  /** A whole-painted stroke's points seen so far, and their bounds. */
+  /** Running bounds for the notebook page owner and the whole-painted tail's dirty rectangle. */
   private seen = 0;
   private bounds = { left: 0, top: 0, right: 0, bottom: 0 };
   private painted = false;
+  private page?: PageRect;
 
   constructor(private ink: LiveStrokeContext, private tail: LiveStrokeContext) {}
 
@@ -39,12 +42,6 @@ export class LiveStroke {
     this.placement = paint
       ? { element, scale, dx: pixelRatio * viewport.x, dy: pixelRatio * viewport.y, paint }
       : { element, scale, dx: pixelRatio * (viewport.x + viewport.zoom * element.x), dy: pixelRatio * (viewport.y + viewport.zoom * element.y) };
-    this.prepare();
-  }
-
-  /** Resizing a canvas wipes its pixels and state; the next `draw` paints the whole stroke again. */
-  resized() {
-    this.settled = 1; this.tailBox = null; this.seen = 0; this.painted = false;
     this.prepare();
   }
 
@@ -62,11 +59,28 @@ export class LiveStroke {
   }
 
   /** Paints what `element.points` (element-local, only ever appended to) has gained since the last call. */
-  draw(element: CanvasElement) {
+  draw(element: CanvasElement, paper?: Paper) {
     const placement = this.placement, points = element.points;
     if (!placement || !points || points.length < 2) return;
-    if (placement.paint) this.drawWhole(placement, element, points);
+    if (paper || placement.paint) this.extendBounds(points);
+    const { left, top, right, bottom } = this.bounds;
+    const page = paper && elementPage(paper, element, { x: element.x + left, y: element.y + top, width: right - left, height: bottom - top });
+    if (page !== this.page) {
+      // The centre of a growing stroke can cross onto another page. Replay the settled ink inside its new clip.
+      this.clearPixels();
+      this.prepare();
+      this.page = page;
+    }
+    this.eraseTail();
+    if (page) {
+      for (const context of [this.ink, this.tail]) {
+        context.save();
+        clipToPage(context, page, placement.paint ? undefined : element);
+      }
+    }
+    if (placement.paint) this.drawWhole(placement, element);
     else this.drawPieces(placement, points);
+    if (page) { this.ink.restore(); this.tail.restore(); }
     this.painted = true;
   }
 
@@ -82,7 +96,6 @@ export class LiveStroke {
       }
       ink.stroke();
     }
-    this.eraseTail();
     const from = last > 1 ? mid(points[last - 1], points[last]) : points[0], to = points[last];
     tail.beginPath(); tail.moveTo(from.x, from.y); tail.lineTo(to.x, to.y); tail.stroke();
     const { scale, dx, dy } = placement, pad = placement.element.strokeWidth * scale / 2 + 2;
@@ -90,7 +103,7 @@ export class LiveStroke {
     this.tailBox = [x, y, Math.abs(to.x - from.x) * scale + pad * 2, Math.abs(to.y - from.y) * scale + pad * 2];
   }
 
-  private drawWhole(placement: Placement, element: CanvasElement, points: readonly Point[]) {
+  private extendBounds(points: readonly Point[]) {
     const bounds = this.bounds;
     for (; this.seen < points.length; this.seen++) {
       const { x, y } = points[this.seen];
@@ -98,9 +111,12 @@ export class LiveStroke {
       bounds.left = Math.min(bounds.left, x); bounds.right = Math.max(bounds.right, x);
       bounds.top = Math.min(bounds.top, y); bounds.bottom = Math.max(bounds.bottom, y);
     }
-    this.eraseTail();
+  }
+
+  private drawWhole(placement: Placement, element: CanvasElement) {
+    const bounds = this.bounds;
     placement.paint!(this.tail as CanvasRenderingContext2D, element);
-    const { scale, dx, dy } = placement, pad = element.strokeWidth * REACH * scale + 4;
+    const { scale, dx, dy } = placement, pad = Math.max(element.strokeWidth * REACH, 2) * scale + 4;
     this.tailBox = [
       (element.x + bounds.left) * scale + dx - pad, (element.y + bounds.top) * scale + dy - pad,
       (bounds.right - bounds.left) * scale + pad * 2, (bounds.bottom - bounds.top) * scale + pad * 2,
@@ -116,12 +132,17 @@ export class LiveStroke {
     this.tailBox = null;
   }
 
-  /** Ends the stroke and empties both canvases. */
-  clear() {
+  private clearPixels() {
     if (this.painted) for (const context of [this.ink, this.tail]) {
       context.setTransform(1, 0, 0, 1, 0, 0);
       context.clearRect(0, 0, context.canvas.width, context.canvas.height);
     }
-    this.placement = null; this.settled = 1; this.tailBox = null; this.seen = 0; this.painted = false;
+    this.settled = 1; this.tailBox = null; this.painted = false;
+  }
+
+  /** Ends the stroke and empties both canvases. */
+  clear() {
+    this.clearPixels();
+    this.placement = null; this.seen = 0; this.page = undefined;
   }
 }

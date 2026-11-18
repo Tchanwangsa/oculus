@@ -80,11 +80,12 @@ describe('live stroke', () => {
     expect(ink.named('moveTo').at(-1)).toEqual(['moveTo', 0, 0]);
   });
 
-  test('a resized canvas gets the whole stroke again', () => {
+  test('replaying at a new pixel ratio places the entire stroke on the resized canvas', () => {
     const { ink, stroke } = setup();
     stroke.draw(at(points));
-    stroke.resized();
+    stroke.begin(element, viewport, 1);
     stroke.draw(at(points));
+    expect(ink.named('setTransform').at(-1)).toEqual(['setTransform', 2, 0, 0, 2, 210, 120]);
     expect(ink.named('quadraticCurveTo')).toHaveLength(referenceCurves(points).length * 2);
     expect(ink.named('moveTo').at(-1)).toEqual(['moveTo', 0, 0]);
   });

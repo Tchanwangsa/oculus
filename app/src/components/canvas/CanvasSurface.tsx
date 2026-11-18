@@ -194,6 +194,10 @@ export function CanvasSurface({ document, onChange, onViewportChange, onPageChan
         <canvas ref={editor.canvas} draggable={false} aria-label="Drawing canvas" className="absolute inset-0 block h-full w-full" style={{ cursor: editor.cursor }}
           onDragEnter={media.dragOver} onDragOver={media.dragOver} onDragLeave={media.dragLeave} onDrop={media.drop}
           onPointerDown={editor.pointerDown} onPointerMove={editor.pointerMove} onPointerUp={editor.pointerUp} onPointerCancel={editor.pointerCancel} onPointerLeave={editor.pointerLeave} onDoubleClick={editor.doubleClick} onContextMenu={event => event.preventDefault()} />
+        <div ref={editor.inkLayer} aria-hidden="true" className="pointer-events-none absolute inset-0">
+          <canvas ref={editor.inkCanvas} className="absolute inset-0 block h-full w-full" />
+          <canvas ref={editor.tailCanvas} className="absolute inset-0 block h-full w-full" />
+        </div>
         {media.preview ? <div className="pointer-events-none absolute inset-0 z-20" aria-label="Image drop preview">
           {media.boxes.length ? media.boxes.map((box, index) => <div key={index} className="absolute border-2 border-dashed border-brand bg-brand/10" style={{ left: box.x * current.viewport.zoom + current.viewport.x, top: box.y * current.viewport.zoom + current.viewport.y, width: box.width * current.viewport.zoom, height: box.height * current.viewport.zoom }}><img src={box.dataUrl} alt="" className="h-full w-full opacity-50" /></div>)
             : <div className="absolute flex h-28 w-44 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-xl border-2 border-dashed border-brand bg-card/90 text-xs text-brand shadow-sm" style={{ left: media.preview.at.x, top: media.preview.at.y }}>Drop images here</div>}

@@ -1,7 +1,7 @@
 import { CANVAS_DEFAULTS, hasLabel, LABELLED_TYPES, roundnessOf, type CanvasDocument, type CanvasElement, type Point } from './model';
 import { diamondCorners, diamondVertices, elementArrowheads, elementBounds, rectangleRadius, selectionBounds, strokeDash, type Bounds } from './geometry';
 import { notebookPaper, pageRects, type PageRect, type Paper } from './paper';
-import { PAGE_COLOR, elementPage, exportBounds, paintPaper, paintTemplate } from './renderPaper';
+import { PAGE_COLOR, clipToPage, elementPage, exportBounds, paintPaper, paintTemplate } from './renderPaper';
 import { linePath } from './arrow/path';
 import { pointHandles } from './arrow/handles';
 import { canvasFont, LINE_HEIGHT, layoutShapeLabel, layoutTextElement, lineBaseline, type TextLayout } from './renderText';
@@ -26,6 +26,8 @@ export interface CanvasPaintOptions {
   captureGhost?: { snapshot: CanvasDocument; from: Bounds; to: Bounds };
   /** Text being edited is hidden; a shape being labelled draws without its label, which the overlay replaces. */
   editingId?: string;
+  /** The freehand override currently painted on the ink layer. */
+  inkId?: string;
   overrides?: Map<string, CanvasElement | null>;
   /** The shape an arrow end would bind to while one is drawn or dragged; never exported. */
   bindingHint?: BindingSnap | null;
@@ -177,7 +179,7 @@ export function drawElementsOnPages(context: CanvasRenderingContext2D, elements:
     const owner = elementPage(paper, element);
     if (owner !== page) {
       if (page) context.restore();
-      context.save(); context.beginPath(); context.rect(owner.x, owner.y, owner.width, owner.height); context.clip();
+      context.save(); clipToPage(context, owner);
       page = owner;
     }
     draw(element);
@@ -288,7 +290,7 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
   const scene = visibleElements(document.elements, viewport);
   drawElementsOnPages(context, options.overrides?.size ? scene.filter(element => !options.overrides!.has(element.id)) : scene, paper, draw);
   if (options.ghosts?.length) drawElementsOnPages(context, options.ghosts, paper, element => drawElement(context, element, true, GHOST_ALPHA));
-  if (options.overrides) drawElementsOnPages(context, [...options.overrides.values()].filter(element => element !== null), paper, draw);
+  if (options.overrides) drawElementsOnPages(context, [...options.overrides.values()].filter((element): element is CanvasElement => !!element && element.id !== options.inkId), paper, draw);
   if (options.bindingHint) paintBindingHint(context, options.bindingHint, selectionColor, document.background, zoom);
   context.strokeStyle = selectionColor;
   context.lineWidth = 1 / zoom;
@@ -426,7 +428,7 @@ export async function renderPagePng(document: CanvasDocument, pageId: string, sc
   context.translate(-rect.x, -rect.y);
   context.fillStyle = PAGE_COLOR; context.fillRect(rect.x, rect.y, rect.width, rect.height);
   paintTemplate(context, rect, ratio);
-  context.beginPath(); context.rect(rect.x, rect.y, rect.width, rect.height); context.clip();
+  clipToPage(context, rect);
   for (const element of elements) drawElement(context, element);
   return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
 }

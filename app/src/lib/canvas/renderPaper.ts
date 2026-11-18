@@ -156,13 +156,20 @@ export function exportBounds(document: CanvasDocument, paper: Paper | undefined)
 const owners = new WeakMap<Paper, { locate: ReturnType<typeof pageLocator>; pages: WeakMap<CanvasElement, PageRect> }>();
 
 /** The page a notebook clips `element` to: the one holding the centre of its drawn bounds (`pageAt`). Cached per paper and element. */
-export function elementPage(paper: Paper, element: CanvasElement): PageRect {
+export function elementPage(paper: Paper, element: CanvasElement, bounds?: Bounds): PageRect {
   let entry = owners.get(paper);
   if (!entry) owners.set(paper, entry = { locate: pageLocator(paper), pages: new WeakMap() });
   let page = entry.pages.get(element);
   if (!page) {
-    const b = elementBounds(element);
+    const b = bounds ?? elementBounds(element);
     entry.pages.set(element, page = entry.locate({ x: b.x + b.width / 2, y: b.y + b.height / 2 }));
   }
   return page;
+}
+
+/** Clips in world coordinates, or in element-local coordinates when the painter has translated to its origin. */
+export function clipToPage(context: Pick<CanvasRenderingContext2D, 'beginPath' | 'rect' | 'clip'>, page: PageRect, origin?: { x: number; y: number }) {
+  context.beginPath();
+  context.rect(page.x - (origin?.x ?? 0), page.y - (origin?.y ?? 0), page.width, page.height);
+  context.clip();
 }
