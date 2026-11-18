@@ -23,8 +23,8 @@ pub const OKTA: &[&str] = &[OKTA_USERNAME, OKTA_PASSWORD, OKTA_TOTP_SECRET];
 pub const SESSIONS: &[&str] = &[SESSION_CANVAS, SESSION_SSO, SESSION_ED];
 
 /// WebKit's WebCrypto master keys, one per WebKit application. They are
-/// written and read only by `webcrypto_key`, never by `store`, `delete` or
-/// `get`, so a key that wraps saved logins cannot be replaced or crossed.
+/// written and read only by `webcrypto_key`, never by `store` or `delete`,
+/// so a key that wraps saved logins cannot be replaced or crossed.
 pub const WEBCRYPTO_NAMES: &[&str] = &[WEBCRYPTO_DEV, WEBCRYPTO_BUNDLED];
 
 /// Every name the vault accepts; anything else is refused before it is stored.
@@ -38,15 +38,11 @@ pub const KNOWN: &[&str] = &[
     SESSION_CANVAS,
     SESSION_SSO,
     SESSION_ED,
+    // Known only so the app can delete an old install's Spotify login.
     MUSIC_SPOTIFY,
     WEBCRYPTO_DEV,
     WEBCRYPTO_BUNDLED,
 ];
-
-/// The names `get` reads back, to the app alone: Spotify's stored
-/// credentials, which librespot must hold to log in and which no keyd route
-/// could attach for it. Never a cloud key, an Okta value or a session.
-pub const READABLE: &[&str] = &[MUSIC_SPOTIFY];
 
 pub fn is_known(name: &str) -> bool {
     KNOWN.contains(&name)
@@ -177,17 +173,6 @@ mod tests {
     }
 
     #[test]
-    fn get_reads_back_only_the_spotify_credentials() {
-        assert_eq!(READABLE, [MUSIC_SPOTIFY]);
-        for name in READABLE {
-            assert!(is_known(name));
-            assert!(!OKTA.contains(name) && !SESSIONS.contains(name));
-            assert!(!WEBCRYPTO_NAMES.contains(name));
-            assert!(LEGACY.iter().all(|l| l.secret != *name));
-        }
-    }
-
-    #[test]
     fn each_webkit_application_has_its_own_item_and_entry() {
         let secrets: Vec<&str> = WEBCRYPTO.iter().map(|w| w.secret).collect();
         assert_eq!(secrets, WEBCRYPTO_NAMES);
@@ -200,7 +185,6 @@ mod tests {
             assert_eq!(w.account, format!("{WEBKIT_ACCOUNT_PREFIX}{}", w.app));
             assert_eq!(w.secret, format!("webkit.webcrypto.{}", w.app));
             assert!(is_known(w.secret));
-            assert!(!READABLE.contains(&w.secret));
             assert!(LEGACY.iter().all(|l| l.secret != w.secret));
         }
         assert_eq!(webcrypto(""), None);

@@ -26,7 +26,6 @@ pub struct Build {
 }
 
 mod forward;
-mod get;
 mod legacy;
 mod okta;
 #[cfg(test)]
@@ -242,9 +241,9 @@ impl State {
     }
 
     /// One request. `body` is the raw bytes after the header line; only
-    /// `forward` takes any. No reply carries a secret value but `get`'s, for
-    /// the one name in `names::READABLE`, `session_get`'s cookies and
-    /// `webcrypto_key`'s key, all to the app only. `caller` is who asked: the peer check admits any
+    /// `forward` takes any. No reply carries a secret value but
+    /// `session_get`'s cookies and `webcrypto_key`'s key, both to the app
+    /// only. `caller` is who asked: the peer check admits any
     /// executable in the install (ffmpeg ships in it), so every op but `ping`
     /// also needs the app or the CLI.
     pub fn dispatch(
@@ -301,7 +300,6 @@ impl State {
                     ..json!({"existed": existed, "legacy": legacy.as_str()}).into()
                 })
             }
-            "get" => self.get(req),
             "webcrypto_key" => self.webcrypto_key(caller, req),
             "forward" => self.forward(caller, req, body),
             "okta_save" => self.okta_save(req),
@@ -366,13 +364,13 @@ impl State {
 /// The one place an op's caller is judged, so a new op cannot forget it.
 /// `ping` answers whoever the peer check admitted, for diagnostics; the rest
 /// are for the app and the CLI, except `okta_resume`, which lifts a lockout
-/// pause, `session_get`, the one reply that carries a cookie, and `get` and
-/// `webcrypto_key`, which carry a stored value, so those four are for the app
-/// alone.
+/// pause, `session_get`, the one reply that carries a cookie, and
+/// `webcrypto_key`, which carries a stored key, so those three are for the
+/// app alone.
 fn require_role(op: &str, role: Role) -> Result<(), OpError> {
     let (allowed, who) = match op {
         "ping" => return Ok(()),
-        "okta_resume" | "session_get" | "get" | "webcrypto_key" => (role == Role::App, "app"),
+        "okta_resume" | "session_get" | "webcrypto_key" => (role == Role::App, "app"),
         _ => (matches!(role, Role::App | Role::Cli), "app and CLI"),
     };
     if allowed {

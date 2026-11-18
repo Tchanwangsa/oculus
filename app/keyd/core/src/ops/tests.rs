@@ -4,7 +4,6 @@ use crate::test_support::{Answer, FakeOrigin, OldItems, Reads, Scratch, BUILD};
 use crate::vault::{NoLegacy, StaticKey};
 
 mod forward_op;
-mod get_op;
 mod import_on_first_use;
 mod webcrypto_op;
 
@@ -113,7 +112,6 @@ fn every_op() -> Vec<(&'static str, Value)> {
         ("has", json!({"secret": "voyage"})),
         ("store", json!({"secret": "voyage", "value": "pa-x"})),
         ("delete", json!({"secret": "voyage"})),
-        ("get", json!({"secret": "music.spotify"})),
         ("webcrypto_key", json!({"app": "app"})),
         (
             "forward",
@@ -193,8 +191,7 @@ fn the_app_and_the_cli_get_past_the_role_gate_for_every_op() {
             );
             assert_eq!(
                 refused,
-                role == Role::Cli
-                    && matches!(op, "okta_resume" | "session_get" | "get" | "webcrypto_key"),
+                role == Role::Cli && matches!(op, "okta_resume" | "session_get" | "webcrypto_key"),
                 "{role:?} {op}"
             );
         }

@@ -162,7 +162,10 @@ before leaving a playing lecture.
   Synced changes are left out, since a sync rewrites too many rows. A Drive
   tab is titled by its folder (a subject's by its code and icon).
 
-Saved tabs and Recent entries with an unknown route return to Home; the Files
+Saved tabs and Recent entries with an unknown route return to Home, and an
+unknown Settings page opens Settings. A path in `app/src/lib/shell/goneRoutes.ts`
+is dropped on load instead: the tab (with its side panel), side panel item,
+closed tab or Recent row on it is not restored. The Files
 tab's older paths are redirected (above), and ones on a file
 or folder that moved follow it
 ([frontend.md](./frontend.md#path-keyed-state-follows-drive)).
@@ -172,8 +175,7 @@ or folder that moved follow it
 `app/src/components/sidebar/Sidebar.tsx` is a 52px column of icon buttons,
 each named by a tooltip on its right: Search (opens ⌘K), then Home, Chat,
 Calendar, Tasks, Subjects, Drive (a folder), Studio and Revision, and Sync and
-Settings pinned to the foot under a short hairline. Spotify's tile, while music is on, sits under a rule after the
-sections; it opens a popover player rather than navigating ([music.md](./music.md#the-player-is-a-rail-tile-and-a-side-panel-item)). The eight sections drag into any order on `useStripReorder`'s
+Settings pinned to the foot under a short hairline. The eight sections drag into any order on `useStripReorder`'s
 vertical axis, and the order is kept in `localStorage` (`railOrderStore`); a
 section the stored order lacks is appended. A `RailItem` is a button with `data-tab-href` that goes
 through `navigateActive`, since the sidebar sits outside every pane's router,
@@ -374,8 +376,7 @@ panel with no items opens one on `/new`; a hidden panel reopens its existing
 items with the same front item and width.
 
 - **`openBeside` is what file rows, citations and lecture rows call**
-  (`openFileSmart`, `openCitation`, `LecturesPage`, Home's `RecentRow`, the
-  rail's music popover for `/music`): it
+  (`openFileSmart`, `openCitation`, `LecturesPage`, Home's `RecentRow`): it
   pushes onto the front tab's stack and focuses the panel. A plain `Link`
   navigates its own pane; ⌘-click is still a new tab.
 - **A push names a thing, not a path**: an item with the same `recentKey` comes

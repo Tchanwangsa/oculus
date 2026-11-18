@@ -111,33 +111,8 @@ lopdf = { version = "0.34", default-features = false, features = ["nom_parser"] 
 # Spreadsheets (xlsx/xlsm/xls/ods) become markdown text in-process
 # (`src/pages/sheets/`); no LibreOffice, no parse service, no embedding.
 calamine = "0.36"
-# Spotify Connect playback (`src/music/`, docs/music.md). librespot's dev
-# branch by rev, not crates.io 0.8.0: Spotify's endpoint changes land there
-# first. Bump the rev by hand; never `cargo update` them. librespot-connect
-# is patched to a vendored copy (`[patch]` below).
-librespot-core = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
-librespot-connect = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
-librespot-metadata = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
-librespot-playback = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
-# `AuthenticationType`, which librespot-core keeps private, and the playlist4
-# and Connect messages `src/music/` reads.
-librespot-protocol = { git = "https://github.com/librespot-org/librespot", rev = "4a005903e078d512456fb008aaa9ba6246881bd9" }
-# Decodes those messages (`src/music/library/rootlist.rs`); the version
-# librespot-protocol is generated for.
-protobuf = "3.7"
-# The Spotify login: the same oauth2 librespot-oauth builds on, used directly
-# because librespot's client opens the browser itself and hides the URL.
-oauth2 = { version = "5", default-features = false, features = ["reqwest", "reqwest-blocking"] }
-# librespot reports a track it cannot decrypt only as a log line
-# (`src/music/logs.rs`).
-log = { version = "0.4", features = ["std"] }
-# The music output picker and its sink (`src/music/audio/`): the same cpal
-# and rodio librespot-playback's rodio backend builds on, at its versions.
-cpal = "0.16"
-rodio = { version = "0.21", default-features = false, features = ["playback"] }
-# Reads librespot's dealer stream of Connect cluster updates
-# (`src/music/devices.rs`) and fetches playlist headers four at a time
-# (`src/music/library/mod.rs`); `sink` sends the companion's WebSocket frames.
+# Streams the network observer's address changes (`src/runtime/network/`);
+# `sink` sends the companion's WebSocket frames.
 futures-util = { version = "0.3", default-features = false, features = ["alloc", "sink"] }
 # ONNX Runtime for Studio's narration aligner (`src/runtime/onnx/`,
 # `src/studio/timing/`). Links ORT 1.28 statically on macOS arm64, fetched by
@@ -154,8 +129,8 @@ sha2 = "0.10"
 # The G2P guesser's NFKD and combining-mark stripping (`src/studio/voice/g2p/guess/`).
 # Already in the lock tree.
 unicode-normalization = "0.1.25"
-# The process's one address observer (`src/runtime/network/`), which music's
-# reconnects and device sharing's links follow: if-watch over netwatcher because on macOS it
+# The process's one address observer (`src/runtime/network/`), which device
+# sharing's links follow: if-watch over netwatcher because on macOS it
 # builds on the system-configuration already in the lock (SCDynamicStore),
 # with the same address-change stream on Windows and Linux.
 if-watch = { version = "3.2.2", features = ["tokio"] }
@@ -208,12 +183,6 @@ debug = 1
 # incremental rebuilds stay quick.
 opt-level = 3
 debug = false
-
-# librespot-connect with Spirc::skip_to and Spirc::remove_next, which act on
-# the Spirc's own queue (`vendor/librespot-connect`, docs/music-library.md).
-# Bump it with the other librespot crates' rev.
-[patch."https://github.com/librespot-org/librespot"]
-librespot-connect = { path = "vendor/librespot-connect" }
 
 # wry as published (`vendor/wry`, its changes listed in `vendor/wry/VENDORED.md`).
 # The version must equal the one tauri-runtime-wry resolves, or cargo ignores

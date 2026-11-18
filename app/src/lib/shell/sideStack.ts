@@ -1,5 +1,6 @@
 import type { PaneSide, PaneState } from "@/stores/shell/tabStore";
 import { recentKey } from "@/stores/shell/recentTabsStore";
+import { isGoneRoute } from "./goneRoutes";
 
 /**
  * A tab's side panel as plain data: the stack of panes on the tab's right
@@ -215,7 +216,8 @@ function storedPane(p: unknown): p is { id: number; path: string } {
 /**
  * A stored tab's side panel. Reads `side` (`StoredSide`), else a lone `split`
  * pane as a one-item panel. Anything malformed — a bad item, an id used
- * twice or equal to the main pane's `mainId` — is no side panel.
+ * twice or equal to the main pane's `mainId` — is no side panel. Items on a
+ * gone route (`./goneRoutes.ts`) are left out.
  */
 export function restoreSide(stored: unknown, split: unknown, mainId: number): SidePanel | null {
   let panes: { id: number; path: string }[];
@@ -232,6 +234,7 @@ export function restoreSide(stored: unknown, split: unknown, mainId: number): Si
   } else {
     return null;
   }
+  panes = panes.filter((p) => !isGoneRoute(p.path));
   if (panes.length === 0) return null;
   const ids = new Set([mainId, ...panes.map((p) => p.id)]);
   if (ids.size !== panes.length + 1) return null;
@@ -250,8 +253,8 @@ export function restoreFocus(focus: unknown, side: SidePanel | null): PaneSide {
 /** A closed tab's side panel paths: `side`, else a lone `split` path. */
 export function restoreClosedSide(side: unknown, split: unknown): string[] | null {
   if (Array.isArray(side)) {
-    const paths = side.filter((p): p is string => typeof p === "string");
+    const paths = side.filter((p): p is string => typeof p === "string" && !isGoneRoute(p));
     return paths.length > 0 ? paths.slice(0, SIDE_CAP) : null;
   }
-  return typeof split === "string" ? [split] : null;
+  return typeof split === "string" && !isGoneRoute(split) ? [split] : null;
 }

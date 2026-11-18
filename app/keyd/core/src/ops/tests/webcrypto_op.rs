@@ -297,11 +297,6 @@ fn the_generic_ops_never_read_or_write_webkits_keys() {
             assert_eq!(err.kind, "request", "{op} {name}");
             assert!(err.detail.contains("webcrypto_key"));
         }
-        let err = state
-            .dispatch(&app_named("app"), "get", &json!({"secret": name}), b"")
-            .unwrap_err();
-        assert_eq!(err.kind, "request", "get {name}");
-        assert!(!err.detail.contains(&key));
     }
     assert_eq!(
         call(&state, "has", json!({"secret": names::WEBCRYPTO_DEV})).unwrap()["has"],

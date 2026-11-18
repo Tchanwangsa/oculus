@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { browseId } from "@/lib/browser";
+import { isGoneRoute } from "@/lib/shell/goneRoutes";
 import type { FollowedRoute } from "@/lib/shell/pathFollow";
 
 /**
@@ -29,6 +30,7 @@ export function recentKey(path: string): string | null {
   // A browser tab's id dies with its page; `/new` lists this very trail;
   // `/subjects` only redirects to a subject, which records itself.
   if (
+    isGoneRoute(pathname) ||
     browseId(pathname) != null ||
     pathname === "/" ||
     pathname === "/new" ||
@@ -56,8 +58,6 @@ export function recentKey(path: string): string | null {
   if (pathname.startsWith("/settings")) return "settings";
   // Drive's folders and Recent are one place, as a subject's tabs are.
   if (pathname === "/drive" || pathname.startsWith("/drive/")) return "drive";
-  // One player, so one side panel item however it was opened.
-  if (pathname === "/music") return "music";
   return pathname;
 }
 

@@ -115,8 +115,6 @@ export const routes: RouteObject[] = [
           { path: "themes/:name", lazy: page(() => import("@/pages/studio/ThemesPage")) },
         ],
       },
-      // Spotify's full player, opened beside the page from the rail (docs/music.md).
-      { path: "music", lazy: page(() => import("@/pages/tools/MusicPage")) },
       { path: "sync", lazy: page(() => import("@/pages/tools/SyncPage")) },
       // The id names a native WebView Rust places under this content area.
       { path: "browse/:id", lazy: page(() => import("@/pages/tools/BrowserPage")) },
@@ -128,7 +126,6 @@ export const routes: RouteObject[] = [
           { path: "canvas", lazy: page(() => import("@/pages/settings/integrations/CanvasPage")) },
           { path: "appearance", lazy: page(() => import("@/pages/settings/AppearancePage")) },
           { path: "browser", lazy: page(() => import("@/pages/settings/integrations/BrowserPage")) },
-          { path: "music", lazy: page(() => import("@/pages/settings/integrations/MusicPage")) },
           { path: "device-sharing", lazy: page(() => import("@/pages/settings/integrations/DeviceSharingPage")) },
           { path: "storage", lazy: page(() => import("@/pages/settings/library/StoragePage")) },
           { path: "agents", lazy: page(() => import("@/pages/settings/integrations/AgentsPage")) },
@@ -146,6 +143,8 @@ export const routes: RouteObject[] = [
           { path: "ai", element: <Navigate to="../agents" replace /> },
           { path: "library", element: <Navigate to="../parsing" replace /> },
           { path: "providers", element: <Navigate to="../opencode" replace /> },
+          // Any other page one names opens Settings rather than Home.
+          { path: "*", element: <Navigate to="/settings" replace /> },
         ],
       },
       // Legacy path with no subject.

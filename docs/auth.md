@@ -1,10 +1,9 @@
 # Auth & sessions
 
 Three services, three credentials — all derived from one Canvas session
-cookie, at whichever university the institution profile names. Two secrets
-keyd keeps are not: Spotify's login, for the music player
-([below](#spotifys-credentials-are-read-back-with-get)), and WebKit's
-WebCrypto master key ([below](#webkits-webcrypto-master-key-comes-from-keyd-per-build)).
+cookie, at whichever university the institution profile names. One secret
+keyd keeps is not: WebKit's WebCrypto master key
+([below](#webkits-webcrypto-master-key-comes-from-keyd-per-build)).
 
 ## Where
 
@@ -27,7 +26,6 @@ WebCrypto master key ([below](#webkits-webcrypto-master-key-comes-from-keyd-per-
 | The `canvas` and `ed` routes of `forward` (cookie and `x-token` attached by keyd), its path rules and streaming; the Canvas route's sign-in on a rejected request | `app/keyd/core/src/forward/`, `app/keyd/core/src/ops/forward.rs` ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)) |
 | The `oculus-keyd` client, which the Voyage, MinerU and Groq keys and the Okta credentials and sign-in go through when keyd is installed | `app/keyd/core/src/client.rs` (`credentials::Credentialed`), `app/src-tauri/src/providers/credentials/mod.rs` (`CloudKey`) |
 | Credential entry UI (Settings → Canvas, and onboarding's *Never sign in again*) | `app/src/components/settings/web/AutoSignIn.tsx`, `app/src/components/onboarding/canvas/NeverSignInAgain.tsx` |
-| Spotify's stored credentials: the `music.spotify` vault entry, keyd's app-only `get`, and the music module that writes and reads it | `app/keyd/core/src/names.rs` (`READABLE`), `app/keyd/core/src/ops/get.rs`, `app/src-tauri/src/music/credentials.rs` ([music.md](./music.md)) |
 | WebKit's WebCrypto master key: the per-build names and items, the key's text form, keyd's `webcrypto_key` and its import, the client call | `app/keyd/core/src/names.rs` (`WEBCRYPTO`), `app/keyd/core/src/webcrypto.rs`, `app/keyd/core/src/ops/webcrypto.rs`, `app/keyd/core/src/client/webcrypto.rs`, the app's reader `app/src-tauri/src/shell/webcrypto/mod.rs` (`fetch`) |
 | Handing the key to WebKit: the data-store delegate, its once-per-process cache, where it is installed | `app/src-tauri/src/shell/webcrypto/delegate.rs`, `app/src-tauri/src/shell/webcrypto/cache.rs`, `install_default` in `app/src-tauri/src/shell/webcrypto/mod.rs` (called first in `app/src-tauri/src/lib.rs`'s setup) |
 | Institution profile: the Canvas address, sign-in detection, the UniMelb migration, telling keyd | `app/src-tauri/src/sources/institution/` |
@@ -358,9 +356,8 @@ every sign-in a client starts (Settings, the startup probe, the browser,
 `oculus auth auto`) are requests to `oculus-keyd` through
 `credentials::Credentialed` (ops `okta_save`, `okta_forget`, `okta_status`,
 `ensure_signed_in`, and `okta_resume` for the guard). Neither process reads the password or the seed back: no
-op returns one (keyd's read-backs are `get`, which serves only Spotify's
-credentials, [below](#spotifys-credentials-are-read-back-with-get), and
-`webcrypto_key`, which serves only WebKit's master key),
+keyd op reads a stored secret back (the one key it hands out is WebKit's
+master key, from `webcrypto_key`),
 and `oculus auth setup` prints the code from the seed just typed.
 
 - **Only `KeydError::Absent` takes the old route, and only for the
@@ -472,24 +469,6 @@ rotation, and read by `forward`, `session_get` and `session_status`.
   (`keyd.imported.session.<kind>` records it). `session_clear` and `sign_out`
   import first, so a cleared session is never brought back from an old file.
 
-## Spotify's credentials are read back with `get`
-
-librespot logs in to Spotify with a stored-credentials blob it must hold
-itself; there is no HTTP request keyd could attach it to, as `forward` does
-for a key or a cookie. So the vault's `music.spotify` entry (username, blob,
-Connect device id, as JSON) has a read-back of its own.
-
-- **`get {secret}` returns `{"value": string|null}`, to the app only.** Every
-  other role gets `caller`, from `require_role`, before the vault is opened.
-- **Only the names in `names::READABLE` can be read**, and that list is
-  `music.spotify` alone. Any other name, a cloud key, an Okta value or a
-  session included, is `request`; a test pins the list.
-- **The generic `store` and `delete` write it** (app or CLI), with no old
-  keychain item to import. Okta's `okta_forget`, `sign_out` and `session_clear`
-  leave it alone, so signing out of Canvas keeps Spotify signed in.
-- With keyd absent there is no keychain fallback for it: the music module
-  reports the error and keeps nothing ([music.md](./music.md#the-credentials-live-in-keyd-read-back-by-an-app-only-get)).
-
 ## WebKit's WebCrypto master key comes from keyd, per build
 
 WebKit wraps every `CryptoKey` a page saves to IndexedDB with one 16-byte
@@ -525,7 +504,7 @@ its item.
   read (the import lock) and get the same key; the vault keeps whichever key
   it held first.
 - **The generic ops never touch it.** `store` and `delete` refuse the two
-  names, `get` does not read them back, and `sign_out` leaves them. `has`
+  names, and `sign_out` leaves them. `has`
   reports presence.
 - **Any error leaves the key to WebKit.** Whatever `Client::webcrypto_key`
   returns other than a key (`Absent`, `Keychain`, `Caller`, …), the caller

@@ -17,7 +17,7 @@ test("frontend and docs changes avoid native compilation", () => {
 test("native source, shared dependencies and build inputs select both platform jobs", () => {
   for (const file of [
     "app/src-tauri/src/lib.rs",
-    "app/src-tauri/vendor/librespot-connect/src/spirc.rs",
+    "app/src-tauri/vendor/wry/src/lib.rs",
     "app/src-tauri/tauri.windows.conf.json",
     "app/keyd/core/src/platform/windows.rs",
     "app/studio-core/src/lib.rs",

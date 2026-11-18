@@ -20,7 +20,6 @@ import {
   Kanban,
   Lightbulb,
   ListChecks,
-  MusicNotes,
   Palette,
   Notebook,
   Scribble,
@@ -164,8 +163,6 @@ export function tabInfo(
     }
     return { title: parts[parts.length - 1], icon: <FolderSimple size={size} /> };
   }
-  if (pathname === "/music")
-    return { title: "Music", icon: <MusicNotes size={size} /> };
   if (pathname.startsWith("/sync"))
     return { title: "Sync", icon: <ArrowsClockwise size={size} /> };
   if (pathname.startsWith("/settings")) {

@@ -43,7 +43,6 @@ library files; the rest of the frontend has its own pages:
 | Scraped document metadata loaders | `app/src/hooks/data/useCourseFileData.ts`, `app/src/hooks/data/useModuleTocs.ts` |
 | Subject Overview data, section derivations and public item types | `app/src/hooks/data/overview/` |
 | Pure file titles and routes, shared with file opening | `app/src/lib/files/labels.ts` |
-| Spotify ([music.md](./music.md)): the `music-state` snapshot type and the command wrappers; the snapshot mirror and Settings → Music's switch; the listener mounted in `AppLayout` | `app/src/lib/music/index.ts`, `app/src/stores/music/musicStore.ts`, `app/src/stores/music/musicPrefsStore.ts`, `app/src/hooks/music/useMusicState.ts` |
 | Module videos and page embeds downloaded on demand; YouTube/Vimeo metadata | `app/src/pages/subject/content/ModulesPage.tsx`, `app/src/stores/lectures/videoDownloadStore.ts`, `app/src/stores/lectures/embedDownloadStore.ts`, `app/src/stores/lectures/webVideoStore.ts`, `app/src/lib/files/scrapedRow.ts` |
 
 ## Windows transcription settings expose Groq only

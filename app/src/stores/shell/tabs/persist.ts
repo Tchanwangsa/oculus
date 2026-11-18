@@ -7,6 +7,7 @@ import {
   storeSide,
   type StoredSide,
 } from "@/lib/shell/sideStack";
+import { isGoneRoute } from "@/lib/shell/goneRoutes";
 import { pane, type AppTab } from "./panes";
 
 /** Where a first-run strip opens. */
@@ -58,16 +59,16 @@ interface StoredStrip {
 }
 
 /** Generic so filtering a `StoredTab[]` does not narrow its elements down to
- *  the pane fields they share. */
+ *  the pane fields they share. A tab on a gone route goes with its side panel. */
 function validPane<T extends StoredPane>(p: T | null | undefined): p is T {
-  return !!p && Number.isInteger(p.id) && typeof p.path === "string";
+  return !!p && Number.isInteger(p.id) && typeof p.path === "string" && !isGoneRoute(p.path);
 }
 
 function validClosed(e: StoredClosed | null | undefined): boolean {
   return (
     !!e &&
     Number.isInteger(e.index) &&
-    (typeof e.path === "string" || typeof e.url === "string")
+    (typeof e.path === "string" ? !isGoneRoute(e.path) : typeof e.url === "string")
   );
 }
 

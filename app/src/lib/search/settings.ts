@@ -6,7 +6,6 @@ import {
   Graph,
   HardDrives,
   Lightning,
-  MusicNotes,
   PaintBrush,
   ShareNetwork,
   Robot,
@@ -32,7 +31,6 @@ export type SettingsPageId =
   | "canvas"
   | "appearance"
   | "browser"
-  | "music"
   | "device-sharing"
   | "storage"
   | "agents"
@@ -64,7 +62,6 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "canvas", label: "Canvas", icon: GraduationCap, group: "General" },
   { id: "appearance", label: "Appearance", icon: PaintBrush, group: "General" },
   { id: "browser", label: "Browser", icon: Globe, group: "General" },
-  { id: "music", label: "Music", icon: MusicNotes, group: "General" },
   { id: "device-sharing", label: "Device sharing", icon: ShareNetwork, group: "General" },
   { id: "storage", label: "Storage", icon: HardDrives, group: "General" },
   { id: "agents", label: "Agents", icon: Robot, group: "AI" },
@@ -149,14 +146,6 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     ["Open links in", ["default browser"]],
   ]),
   ...section("browser", "History", ["clear history", "visited"]),
-
-  page("music", ["spotify", "librespot", "premium", "player"]),
-  ...rows("music", "Music", [
-    ["Play Spotify in Oculus", ["enable", "turn on", "spotify connect"]],
-    ["Log in with Spotify", ["account", "status", "connected as", "login", "connect", "disconnect"]],
-    ["Sign out", ["log out", "forget login"]],
-    ["Device", ["device name", "spotify connect"]],
-  ]),
 
   page("device-sharing", ["share", "ipad", "phone", "tablet", "pencil", "qr code", "link", "network", "lan", "vpn", "companion"]),
   ...section("device-sharing", "Active shares", ["shared whiteboards", "shared notebooks", "devices", "connected", "addresses"], [

@@ -26,7 +26,7 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Credential broker `oculus-keyd`: its `main`, its core (vault, wire format, ops, server loop, client), its OS adapters, and its installer | `app/keyd/src/main.rs`, `app/keyd/core/src/`, `app/keyd/core/src/platform/`; `app/src-tauri/src/auth/keyd/` |
 | Credential storage (keychain, and `CloudKey` for the three cloud keys keyd holds), the keyd client; provider probes; the Okta calls, which keyd answers or the keychain does when it is absent | `app/src-tauri/src/providers/credentials/`, `app/keyd/core/src/client.rs`; `app/src-tauri/src/providers/mineru.rs`, `app/src-tauri/src/providers/voyage.rs`, `app/src-tauri/src/providers/groq.rs`, `app/src-tauri/src/auth/okta/` |
 | Lecture video server | `app/src-tauri/src/lectures/media.rs` |
-| This machine's addresses, observed once for the process (music and device sharing subscribe) | `app/src-tauri/src/runtime/network/` |
+| This machine's addresses, observed once for the process (device sharing subscribes) | `app/src-tauri/src/runtime/network/` |
 | Device-sharing server, on the LAN only while a drawing is shared ([device-sharing.md](./device-sharing.md)) | `app/src-tauri/src/companion/` |
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
 | Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/runtime/bundled.rs` |
@@ -36,7 +36,6 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Studio's Kokoro engine: the model pack, the voices, the reader, chunking, synthesis, the `Speaker` ([studio.md](./studio.md#kokoro-narrates-inside-the-app)) | `app/src-tauri/src/studio/tts/kokoro/` |
 | PDF viewer's render, text and links | `app/src-tauri/src/library/pdf_view/` |
 | In-app browser | `app/src-tauri/src/shell/browser/`, `app/src-tauri/capabilities/default.json` |
-| Spotify playback ([music.md](./music.md)) | `app/src-tauri/src/music/`, `app/src/lib/music/index.ts` |
 | CLI-agent harness | `app/src-tauri/src/harness/mod.rs` |
 | Headless DB writes | `app/src-tauri/src/db/store/`, `app/src-tauri/src/db/projects/` |
 | App-usage ticker and its pinger | `app/src-tauri/src/shell/usage/`, `app/src/hooks/backend/useActivityPing.ts`, `app/src/lib/activity/usageContext.ts` |
@@ -49,9 +48,9 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 - Rust loose files sit in group directories under `app/src-tauri/src/`:
   `auth/`, `sources/`, `sync/`, `pages/`, `library/`, `db/`, `lectures/`,
   `agents/`, `shell/`, `runtime/`, `providers/`; `harness/`, `parse/`,
-  `embed/`, `transcribe/` and `music/` are their own groups.
+  `embed/` and `transcribe/` are their own groups.
 - The frontend groups the same way: `app/src/lib/` (`activity`, `citations`,
-  `db`, `files`, `format`, `harness`, `lectures`, `music`, `notes`, `pipeline`,
+  `db`, `files`, `format`, `harness`, `lectures`, `notes`, `pipeline`,
   `planning`, `search`, `shell`, …), `app/src/hooks/` (`agents`, `backend`,
   `data`, `lectures`, `shell`, `sync`, `ui`, …) and `app/src/stores/` (`chat`,
   `documents`, `lectures`, `planning`, `shell`, `sync`).
@@ -87,8 +86,6 @@ its failure rules are in [parsing.md](./parsing.md).
 - Credentials go keychain → in-process client, except the Voyage, MinerU and
   Groq keys and the Okta sign-in credentials while keyd is installed
   ([below](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
-  Spotify's stored login lives only in keyd and comes back through its
-  app-only `get` ([music.md](./music.md)).
   No key enters SQLite, the WebView, a health response or a progress event.
   The local engines need none.
   A read the keychain refuses (a denied prompt, or `oculus` inside Claude's
@@ -138,16 +135,14 @@ with the app's icon.
 - **The wire format** is one JSON line, then `body_len` raw bytes if the
   header names them; replies have the same shape. One module writes and reads
   it for keyd and every client (`app/keyd/core/src/framing.rs`). Ops: `ping` (version, source
-  hash, pid), `has`, `store`, `get`, `delete`, `forward`, `webcrypto_key`, the Okta ops `okta_save`,
+  hash, pid), `has`, `store`, `delete`, `forward`, `webcrypto_key`, the Okta ops `okta_save`,
   `okta_forget`, `okta_status`, `ensure_signed_in` and `okta_resume`, and the
   session ops `session_get`, `session_put`, `session_clear`, `session_status`,
   `session_mark` and `sign_out` ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-login-sessions)),
   and `site_set` ([auth.md](./auth.md#keyd-sends-the-session-only-to-the-profiles-university)).
-  No op returns a key, a password, a seed or a token, with two exceptions,
-  both to the app only: `get` returns the stored value of a name in
-  `names::READABLE`, which is only `music.spotify`, Spotify's credentials
-  ([auth.md](./auth.md#spotifys-credentials-are-read-back-with-get)), and
-  `webcrypto_key` returns WebKit's WebCrypto master key for the build that asks
+  No op reads a stored secret back: none returns a key, a password, a seed or
+  a token, with one exception, to the app only: `webcrypto_key` returns
+  WebKit's WebCrypto master key for the build that asks
   ([auth.md](./auth.md#webkits-webcrypto-master-key-comes-from-keyd-per-build)).
   The one reply that carries a cookie is `session_get`, to the app. Only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
   `request`, `caller`, `keychain` (the master key, an old item or WebKit's
@@ -239,7 +234,7 @@ with the app's icon.
   never a path, and in one place
   (`State::dispatch`): every op but `ping` needs `app` or `cli`, because every
   executable in the install (ffmpeg ships in it) passes the caller check;
-  `okta_resume`, `session_get`, `get` and `webcrypto_key` need `app`. `ping` answers whoever was
+  `okta_resume`, `session_get` and `webcrypto_key` need `app`. `ping` answers whoever was
   admitted, for diagnostics.
 - **keyd holds the Okta credentials and runs the sign-in.** The username,
   password and TOTP seed are vault entries, written together by `okta_save`
@@ -296,8 +291,7 @@ interface) is re-read, and a list that moved gets the next `generation`
 and a `Changed`. `refresh()` re-reads at once: on window focus
 (`lib.rs`), when the Share dialog asks for endpoints, and on a Host the
 list does not hold. A stream error is logged once and ends the stream; the
-list then moves only on `refresh()`. Music
-([music.md](./music.md)) nudges a reconnect on `Up`; device sharing
+list then moves only on `refresh()`. Device sharing
 ([device-sharing.md](./device-sharing.md#network-changes)) rebuilds its
 links and Host allow-list on `Changed`. Nothing polls an OS command.
 
@@ -655,6 +649,6 @@ overlay inside `#root`, suspends every hole. `adopt_page`
 - A background on `html` or `body` paints the whole canvas and hides every native page — keep it on `#root`.
 - A strip or menu drawn over a native page from inside `#root` is hidden by the page — portal it ([above](#native-pages-show-through-holes-the-app-opens)).
 - Reaching the data dir any way but `library::paths::data_dir()` (itself `keyd_core::paths::data_dir`) lets the CLI, the app and keyd diverge.
-- A keyd op that echoes a value, or runs before the caller check, hands a secret to any same-user process; `get` is app-only and limited to `names::READABLE` for that reason, and `webcrypto_key` is app-only and serves each build only its own key.
+- A keyd op that echoes a value, or runs before the caller check, hands a secret to any same-user process; `webcrypto_key` is app-only and serves each build only its own key for that reason.
 - Comparing vectors without filtering on `embed_model`/`embed_dim` returns confident garbage.
 - A `subject_id` that cascades on user-owned tables deletes the student's work with a course.

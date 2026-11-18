@@ -61,6 +61,20 @@ where
     .map_err(|e| e.to_string())
 }
 
+/// Delete settings rows by key; a key with no row is skipped.
+pub async fn delete_settings<'e, E>(executor: E, keys: &[&str]) -> Result<(), String>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    let keys = serde_json::to_string(keys).map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM settings WHERE key IN (SELECT value FROM json_each(?1))")
+        .bind(keys)
+        .execute(executor)
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// Edit an object settings row, retaining unknown keys. Missing or malformed
 /// objects use the same empty default as the parse and embed config readers.
 pub async fn edit_setting(
@@ -148,6 +162,40 @@ pub fn set_setting_blocking(key: &str, value: &str) -> Result<(), String> {
     })
     .join()
     .map_err(|_| "the settings write panicked".to_string())?
+}
+
+/// Delete settings rows from a **synchronous** caller, from any context, the
+/// way `set_setting_blocking` writes one. Blocks until the delete lands or
+/// fails.
+pub fn delete_settings_blocking(keys: &[&str]) -> Result<(), String> {
+    let database = db_path();
+    if !database.is_file() {
+        return Err(format!("no database at {}", database.display()));
+    }
+    let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?;
+        runtime.block_on(async move {
+            use sqlx::Connection;
+            let options = SqliteConnectOptions::new()
+                .filename(&database)
+                .create_if_missing(false)
+                .busy_timeout(Duration::from_secs(15));
+            let mut connection = sqlx::SqliteConnection::connect_with(&options)
+                .await
+                .map_err(|e| e.to_string())?;
+            let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+            let deleted = delete_settings(&mut connection, &keys).await;
+            connection.close().await.ok();
+            deleted
+        })
+    })
+    .join()
+    .map_err(|_| "the settings delete panicked".to_string())?
 }
 
 pub async fn open(data_dir: &Path) -> Result<SqlitePool, String> {

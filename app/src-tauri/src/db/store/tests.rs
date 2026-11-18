@@ -16,6 +16,24 @@ async fn migrated_pool() -> SqlitePool {
 }
 
 #[tokio::test]
+async fn delete_settings_removes_only_the_named_rows() {
+    let pool = migrated_pool().await;
+    for key in ["first", "second", "embed"] {
+        set_setting(&pool, key, "{}").await.unwrap();
+    }
+    delete_settings(&pool, &["first", "second", "absent"])
+        .await
+        .unwrap();
+    assert_eq!(setting(&pool, "first").await.unwrap(), None);
+    assert_eq!(setting(&pool, "second").await.unwrap(), None);
+    assert_eq!(
+        setting(&pool, "embed").await.unwrap().as_deref(),
+        Some("{}")
+    );
+    delete_settings(&pool, &[]).await.unwrap();
+}
+
+#[tokio::test]
 async fn setting_edits_keep_unknown_keys_and_transactions_can_roll_back() {
     let pool = migrated_pool().await;
     set_setting(
