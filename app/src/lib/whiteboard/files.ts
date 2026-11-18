@@ -5,6 +5,7 @@ import type { ImportedFile } from "@/lib/files/uploads";
 import { authorityCode, toAuthorityError, type WhiteboardAuthorityAck, type WhiteboardAuthorityEvent, type WhiteboardAuthorityIO, type WhiteboardAuthoritySnapshot } from "./authority";
 import type { WhiteboardTransaction } from "./collaboration";
 import { DRAWING_KINDS, drawingKindOf, planDrawingRows, type DrawingKind } from "./drawingKinds";
+import { kindNoun } from "./kindWords";
 import { createWhiteboardDocument, serializeWhiteboardDocument } from "./model";
 import { forgetPageSnapshots } from "./snapshots";
 
@@ -62,8 +63,9 @@ export async function deleteWhiteboardFile(file: DbFile): Promise<void> {
 /** Keeps a draft the shared drawing refused as a new file of the same kind beside the original. */
 export async function saveWhiteboardCopy(file: DbFile, title: string, content: string): Promise<DbFile> {
   const subject = (await getSubjects()).find((s) => s.id === file.subject_id);
-  if (!subject) throw new Error("This whiteboard's subject is no longer in the library.");
-  return createDrawing(drawingKindOf(file) ?? "whiteboard", subject, title, content);
+  const kind = drawingKindOf(file) ?? "whiteboard";
+  if (!subject) throw new Error(`This ${kindNoun(kind)}'s subject is no longer in the library.`);
+  return createDrawing(kind, subject, title, content);
 }
 
 const CHANGE_EVENT = "whiteboard-authority-change";

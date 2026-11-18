@@ -5,6 +5,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useScrollFade } from '@/hooks/ui/useScrollFade';
 import { assertWhiteboardImportSize, WHITEBOARD_IMAGE_ACCEPT, MAX_WHITEBOARD_IMPORT_IMAGES, readWhiteboardImages, type WhiteboardImportedImage, type WhiteboardImportPdf } from '@/lib/whiteboard/importMedia';
 import { useWhiteboardPlatform, type WhiteboardLibraryPdf } from '@/lib/whiteboard/platform';
+import type { DrawingKind } from '@/lib/whiteboard/drawingKinds';
+import { kindNoun } from '@/lib/whiteboard/kindWords';
 import { WhiteboardPdfPages } from './WhiteboardPdfPages';
 import { WhiteboardLibraryPdfs } from './WhiteboardLibraryPdfs';
 
@@ -18,14 +20,17 @@ export interface PdfPagesTarget {
   onInsert: (sizes: { width: number; height: number }[], images: WhiteboardImportedImage[]) => void | Promise<void>;
 }
 
-/** Add image: local images or library PDF pages as images. With `pdfPages`, it picks PDF pages to become notebook pages. */
-export function WhiteboardImageDialog({ open, onOpenChange, onImport, pdfPages }: {
+/** Add image: local images or library PDF pages as images. With `pdfPages`, it picks PDF pages to become notebook pages.
+ *  `kind` names the drawing in the text. */
+export function WhiteboardImageDialog({ open, onOpenChange, onImport, pdfPages, kind }: {
   open: boolean;
+  kind: DrawingKind;
   onOpenChange: (open: boolean) => void;
   onImport?: (images: WhiteboardImportedImage[]) => void | Promise<void>;
   pdfPages?: PdfPagesTarget;
 }) {
   const platform = useWhiteboardPlatform();
+  const noun = kindNoun(kind);
   const pagesOnly = !!pdfPages;
   const [browsingPdfs, setBrowsingPdfs] = useState(pagesOnly);
   const [images, setImages] = useState<WhiteboardImportedImage[]>([]);
@@ -120,7 +125,7 @@ export function WhiteboardImageDialog({ open, onOpenChange, onImport, pdfPages }
         setProgress('Adding pages…');
         await pdfPages.onInsert(pages.map(page => pdf.pages[page - 1]), imported);
       } else {
-        setProgress('Adding to whiteboard…');
+        setProgress(`Adding to ${noun}…`);
         await onImport?.(imported);
       }
       if (token === generation.current) changeOpen(false);
@@ -165,12 +170,12 @@ export function WhiteboardImageDialog({ open, onOpenChange, onImport, pdfPages }
       </div> : null}
       {(selectionError || error) && <p className="text-[13px] text-destructive" data-selectable role="alert">{selectionError ?? error}</p>}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-3">
-        <p className="text-xs text-muted-foreground" role="status" aria-live="polite">{busy === 'import' ? progress : count ? `${count} ${pdf ? (count === 1 ? 'page' : 'pages') : (count === 1 ? 'image' : 'images')} selected` : pdf ? 'Click pages to select them.' : pagesOnly ? 'Pages are copied into your notebook.' : 'Images are embedded in your whiteboard.'}</p>
+        <p className="text-xs text-muted-foreground" role="status" aria-live="polite">{busy === 'import' ? progress : count ? `${count} ${pdf ? (count === 1 ? 'page' : 'pages') : (count === 1 ? 'image' : 'images')} selected` : pdf ? 'Click pages to select them.' : pagesOnly ? `Pages are copied into your ${noun}.` : `Images are embedded in your ${noun}.`}</p>
         <DialogFooter className="flex-row">
           <Button variant="outline" onClick={() => changeOpen(false)}>Cancel</Button>
           <Button disabled={busy !== null || count === 0 || selectionError !== null} onClick={() => void importImages()}>
             {busy === 'import' && <SpinnerGapIcon className="animate-spin" aria-hidden />}
-            {pdfPages ? 'Insert pages' : pdf ? 'Import selected' : 'Add to whiteboard'}
+            {pdfPages ? 'Insert pages' : pdf ? 'Import selected' : `Add to ${noun}`}
           </Button>
         </DialogFooter>
       </div>

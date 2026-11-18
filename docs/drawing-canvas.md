@@ -95,6 +95,12 @@ reads it from the snapshot's `x-oculus-kind` header
 ([device-sharing.md](./device-sharing.md)), and below the editor it is one
 boolean, `notebook`.
 
+Text the student reads names the drawing by its kind: "notebook" on a
+notebook, "whiteboard" on a whiteboard (`kindNoun` and `kindTitle` in
+`app/src/lib/whiteboard/kindWords.ts`; save sessions take it from the file's
+extension). Where no file is in view, as in Settings → Device sharing, it says
+"a whiteboard or notebook".
+
 - **Commands.** `create_canvas` and `list_canvases` take an optional
   `kind` (`"canvas"` by default; `createDrawing`, `createCanvas`,
   `createNotebook` in `files.ts`). Read, write, rename and delete take a path

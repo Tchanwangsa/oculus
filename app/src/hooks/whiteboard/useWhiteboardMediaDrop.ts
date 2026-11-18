@@ -3,6 +3,7 @@ import { readWhiteboardImages, type WhiteboardImportedImage } from '@/lib/whiteb
 import { placeImagesIn } from '@/lib/whiteboard/mediaPlacement';
 import { screenToWorld } from '@/lib/whiteboard/geometry';
 import type { WhiteboardDocument, Point } from '@/lib/whiteboard/model';
+import { kindNoun } from '@/lib/whiteboard/kindWords';
 import { useWhiteboardPlatform } from '@/lib/whiteboard/platform';
 
 const imageFiles = (data: DataTransfer) => Array.from(data.files).filter(file => file.type.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(file.name));
@@ -94,7 +95,7 @@ export function useWhiteboardMediaDrop(root: RefObject<HTMLDivElement | null>, a
       if (!response.ok) throw new Error('This image could not be read');
       const blob = await response.blob();
       return read([new File([blob], 'Dropped image', { type: blob.type })], signal);
-    }) : Promise.reject(new Error('Drop PNG, JPEG, WebP or GIF images onto the whiteboard'));
+    }) : Promise.reject(new Error(`Drop PNG, JPEG, WebP or GIF images onto the ${kindNoun(notebook ? 'notebook' : 'whiteboard')}`));
     void finish(promise, world(position(event)));
   };
   const paste = (event: ClipboardEvent<HTMLDivElement>) => {

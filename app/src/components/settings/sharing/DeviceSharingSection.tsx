@@ -31,7 +31,7 @@ export function DeviceSharingSection() {
 
   const shares = (state?.shares ?? []).filter((s) => s.phase !== "ended").map((share) => {
     const file = sharedFile(share.fileId);
-    return { share, title: file ? fileTitle(file) : `Whiteboard ${share.fileId}` };
+    return { share, title: file ? fileTitle(file) : `Drawing ${share.fileId}` };
   });
 
   const stop = async (fileId: number) => {

@@ -1,6 +1,7 @@
 import { measureWhiteboard, traceWhiteboard } from '@/lib/whiteboard/diagnostics';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type MouseEvent, type ClipboardEvent } from 'react';
 import { WHITEBOARD_DEFAULTS, LABELLED_TYPES, type WhiteboardDocument, type WhiteboardElement, type WhiteboardTool, type WhiteboardViewport, type Point } from '@/lib/whiteboard/model';
+import { kindTitle } from '@/lib/whiteboard/kindWords';
 import { elementBounds, pointInBounds, screenToWorld, selectionBounds, zoomAt, type Bounds } from '@/lib/whiteboard/geometry';
 import { hitTest, visibleElements } from '@/lib/whiteboard/engine';
 import { drawElement, paintWhiteboard, pointEditTarget, elementResizeHandles, selectedBounds } from '@/lib/whiteboard/render';
@@ -681,7 +682,7 @@ export function useWhiteboardInteraction(document: WhiteboardDocument, onChange:
     setRegionCopyState('duplicating'); setRegionError(null);
     try {
       const result = await rasterizeRegion({ ...expected, snapshot: documentRef.current }, paintOptions.current.notebook);
-      completeRegion(expected, { dataUrl: await asDataUrl(result.blob), width: result.width, height: result.height, name: 'Whiteboard capture.png' }, at);
+      completeRegion(expected, { dataUrl: await asDataUrl(result.blob), width: result.width, height: result.height, name: `${kindTitle(options.kind ?? 'whiteboard')} capture.png` }, at);
     } catch (error) {
       if (regionRef.current === expected) setRegionError(error instanceof Error ? error.message : String(error));
     } finally { if (regionRef.current === expected) setRegionCopyState('idle'); }

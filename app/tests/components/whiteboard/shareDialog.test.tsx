@@ -18,8 +18,8 @@ const view = (patch: Partial<ShareView> = {}): ShareView => ({
   preferred: null, error: null, refreshError: null, ...patch,
 });
 const noop = () => {};
-const render = (v: ShareView, confirmingStop = false, authority: "off" | "live" | "paused" = "off") => renderToStaticMarkup(
-  <ShareDialogBody view={v} authority={authority} confirmingStop={confirmingStop}
+const render = (v: ShareView, confirmingStop = false, authority: "off" | "live" | "paused" = "off", kind: "whiteboard" | "notebook" = "whiteboard") => renderToStaticMarkup(
+  <ShareDialogBody view={v} authority={authority} confirmingStop={confirmingStop} kind={kind}
     onStart={noop} onStop={noop} onSelect={noop} onRetry={noop} onDismissError={noop} onConfirmStop={noop} />,
 );
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
@@ -32,6 +32,17 @@ describe("share dialog", () => {
     expect(text(html)).toContain("guest Wi‑Fi");
     expect(html).not.toContain("<svg");
     expect(html).not.toContain(KEY);
+  });
+
+  test("the text names the drawing's kind", () => {
+    const board = text(render(view()));
+    expect(board).toContain("Open this whiteboard in a browser");
+    expect(board).toContain("can edit this whiteboard until");
+    const notebook = text(render(view(), false, "off", "notebook"));
+    expect(notebook).toContain("Open this notebook in a browser");
+    expect(notebook).toContain("can edit this notebook until");
+    expect(notebook).not.toContain("whiteboard");
+    expect(text(render(view({ status: "sharing", share: share({ phase: "paused" }) }), false, "paused", "notebook"))).toContain("choose a version in the notebook");
   });
 
   test("sharing with nobody connected says so; the code and link use the first address", () => {

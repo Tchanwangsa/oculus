@@ -2,9 +2,12 @@ import { CopyIcon, SelectionPlusIcon, SpinnerGapIcon } from '@phosphor-icons/rea
 import { Button } from '@/components/ui/button';
 import type { WhiteboardViewport } from '@/lib/whiteboard/model';
 import { type WhiteboardRegion } from '@/lib/whiteboard/region';
+import type { DrawingKind } from '@/lib/whiteboard/drawingKinds';
+import { kindNoun } from '@/lib/whiteboard/kindWords';
 
-export function WhiteboardRegionActions({ region, viewport, onCopy, onDuplicate, copyState, copyError }: {
+export function WhiteboardRegionActions({ region, viewport, kind, onCopy, onDuplicate, copyState, copyError }: {
   region: WhiteboardRegion;
+  kind: DrawingKind;
   viewport: WhiteboardViewport;
   onCopy: () => void;
   onDuplicate: () => void;
@@ -18,7 +21,7 @@ export function WhiteboardRegionActions({ region, viewport, onCopy, onDuplicate,
       <div className="inline-flex items-center rounded-full border border-border/80 bg-card/95 p-0.5 text-foreground shadow-md backdrop-blur-md">
         <Button variant="ghost" size="sm" className="gap-2 disabled:opacity-100" disabled={copying} onClick={onCopy} aria-label="Copy capture">{copyState === 'copying' ? <SpinnerGapIcon className="animate-spin" /> : <CopyIcon size={16} />}{copyState === 'copied' ? 'Copied' : 'Copy'}</Button>
         <span className="h-4 border-l border-border/80" aria-hidden="true" />
-        <Button variant="ghost" size="sm" className="gap-2 disabled:opacity-100" disabled={copying} onClick={onDuplicate} aria-label="Duplicate capture" title="Duplicate on the whiteboard; or hold inside the selection to lift a copy">{copyState === 'duplicating' ? <SpinnerGapIcon className="animate-spin" /> : <SelectionPlusIcon size={16} />}Duplicate</Button>
+        <Button variant="ghost" size="sm" className="gap-2 disabled:opacity-100" disabled={copying} onClick={onDuplicate} aria-label="Duplicate capture" title={`Duplicate on the ${kindNoun(kind)}; or hold inside the selection to lift a copy`}>{copyState === 'duplicating' ? <SpinnerGapIcon className="animate-spin" /> : <SelectionPlusIcon size={16} />}Duplicate</Button>
       </div>
       {copyError ? <p role="alert" className="mt-1 max-w-64 rounded-md border border-border-subtle bg-card p-2 text-xs text-destructive">{copyError}</p> : null}
     </div>;

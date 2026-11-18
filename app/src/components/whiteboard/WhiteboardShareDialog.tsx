@@ -3,12 +3,15 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import type { DbFile } from "@/lib/db";
 import type { WhiteboardSession } from "@/lib/whiteboard/sessions";
 import { shareControllerFor } from "@/lib/sharing/registry";
+import type { DrawingKind } from "@/lib/whiteboard/drawingKinds";
+import { kindNoun } from "@/lib/whiteboard/kindWords";
 import { ShareDialogBody } from "./share/ShareDialogBody";
 
 /** Share to a device: start, the link and QR per address, stop. Sharing goes on
- * after the dialog closes; the whiteboard header says so (docs/device-sharing.md). */
-export function WhiteboardShareDialog({ session, open, onOpenChange }: {
+ * after the dialog closes; the drawing's header says so (docs/device-sharing.md). */
+export function WhiteboardShareDialog({ session, kind, open, onOpenChange }: {
   session: WhiteboardSession<DbFile>;
+  kind: DrawingKind;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -37,10 +40,10 @@ export function WhiteboardShareDialog({ session, open, onOpenChange }: {
       >
         <DialogHeader>
           <DialogTitle>Share to a device</DialogTitle>
-          <DialogDescription>Draw on this whiteboard from an iPad or phone on your network.</DialogDescription>
+          <DialogDescription>Draw on this {kindNoun(kind)} from an iPad or phone on your network.</DialogDescription>
         </DialogHeader>
         <ShareDialogBody
-          view={view} authority={authority} confirmingStop={confirmingStop}
+          view={view} authority={authority} confirmingStop={confirmingStop} kind={kind}
           onStart={() => void controller.start()}
           onStop={() => { setConfirmingStop(false); void controller.stop(); }}
           onSelect={controller.select}
