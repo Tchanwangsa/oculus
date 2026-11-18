@@ -1,8 +1,8 @@
 /** Rows for the student's own files that arrived without one — written by a
  *  chat agent, Finder or another app straight into a subject's folder — so
- *  they are parsed and searchable like an upload. Rust inserts the rows
- *  (`reconcile_own_files`, `app/src-tauri/src/library/drive/ops/reconcile.rs`,
- *  insert only); this kicks each new file's parse as `recordUploads` does,
+ *  they are parsed and searchable like an upload. Rust renames a `.canvas`
+ *  drawing to `.whiteboard` and inserts the rows (`reconcile_own_files`,
+ *  `app/src-tauri/src/library/drive/ops/reconcile/`, never deletes); this kicks each new file's parse as `recordUploads` does,
  *  then runs the note and drawing reconcilers, which also drop rows whose
  *  file is gone. docs/frontend.md has when it runs. */
 import { invoke } from "@tauri-apps/api/core";

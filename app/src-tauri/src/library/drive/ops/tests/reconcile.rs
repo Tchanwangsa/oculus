@@ -21,7 +21,7 @@ async fn own_files_at_any_depth_get_rows_with_their_kind() {
     lib.put(&own(CODE, "Assignment 2/deep/er/board.whiteboard"), b"{}");
     lib.put(&own(OTHER, "theirs.pdf"), b"%PDF");
 
-    let (subject, inserted) = reconcile_own_files_at(&lib.dir, &lib.pool, CODE)
+    let (subject, inserted, _) = reconcile_own_files_at(&lib.dir, &lib.pool, CODE)
         .await
         .unwrap();
     assert_eq!(subject, 1);
@@ -73,7 +73,7 @@ async fn synced_hidden_dot_and_linked_files_get_no_row() {
     )
     .unwrap();
 
-    let (_, inserted) = reconcile_own_files_at(&lib.dir, &lib.pool, CODE)
+    let (_, inserted, _) = reconcile_own_files_at(&lib.dir, &lib.pool, CODE)
         .await
         .unwrap();
     assert!(
@@ -97,7 +97,7 @@ async fn parse_artifacts_and_converted_pdfs_get_no_row() {
     lib.put(&own(CODE, "draft.pdf"), b"%PDF");
     lib.put(&own(CODE, "draft.md"), b"mine");
 
-    let (_, inserted) = reconcile_own_files_at(&lib.dir, &lib.pool, CODE)
+    let (_, inserted, _) = reconcile_own_files_at(&lib.dir, &lib.pool, CODE)
         .await
         .unwrap();
     let mut got: Vec<&str> = inserted.iter().map(|f| f.relative_path.as_str()).collect();
@@ -122,7 +122,7 @@ async fn markdown_a_running_parse_is_writing_waits_for_its_record() {
     let key = crate::sync::parse_key(&lib.dir, &pdf);
 
     let claim = InFlight::shared().claim(&key);
-    let (_, inserted) = reconcile_own_files_at(&lib.dir, &lib.pool, CODE)
+    let (_, inserted, _) = reconcile_own_files_at(&lib.dir, &lib.pool, CODE)
         .await
         .unwrap();
     drop(claim);
@@ -144,12 +144,12 @@ async fn existing_rows_are_kept_and_a_second_run_adds_nothing() {
     let gone = lib.row(&own(CODE, "gone.pdf")).await;
     lib.put(&own(CODE, "new.pdf"), b"%PDF");
 
-    let (_, first) = reconcile_own_files_at(&lib.dir, &lib.pool, CODE)
+    let (_, first, _) = reconcile_own_files_at(&lib.dir, &lib.pool, CODE)
         .await
         .unwrap();
     assert_eq!(first.len(), 1);
     assert_eq!(first[0].relative_path, own(CODE, "new.pdf"));
-    let (_, second) = reconcile_own_files_at(&lib.dir, &lib.pool, CODE)
+    let (_, second, _) = reconcile_own_files_at(&lib.dir, &lib.pool, CODE)
         .await
         .unwrap();
     assert!(second.is_empty());

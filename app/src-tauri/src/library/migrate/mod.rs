@@ -17,7 +17,7 @@ mod contents;
 mod db;
 mod journal;
 mod links;
-mod plan;
+pub(crate) mod plan;
 mod resolve;
 mod rules;
 mod startup;

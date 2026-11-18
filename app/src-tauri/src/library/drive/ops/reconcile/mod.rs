@@ -1,19 +1,25 @@
 //! Rows for the student's own files that arrived without one: written by a
 //! chat agent, Finder or another app straight into a subject's folder. Such a
 //! file lists in Drive (the listing reads the disk) but, with no `files` row,
-//! is never parsed or searched. `reconcile_own_files` inserts a row for each
-//! own file that has none; it never updates or deletes a row. The frontend
-//! kicks the parse of what it returns (`app/src/lib/drive/reconcile.ts`).
+//! is never parsed or searched. `reconcile_own_files` first renames a
+//! drawing still named `.canvas` to `.whiteboard` (`drawings`), its row
+//! following by id, then inserts a row for each own file that has none; it
+//! never deletes a row. The frontend kicks the parse of what it returns
+//! (`app/src/lib/drive/reconcile.ts`).
 
-use std::collections::HashSet;
+mod drawings;
+
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use tauri::AppHandle;
 
 use super::error::{DriveError, DriveResult};
-use super::events::{emit, DriveChange};
-use super::rows::{file_type, name_of, subject_id};
+use super::events::{emit, DriveChange, Moved};
+use super::journal::Journal;
+use super::moves::blocking;
+use super::rows::{apply_moves, file_type, name_of, subject_id, RowMove};
 use crate::library::files::uploads::ImportedFile;
 use crate::library::layout::{self, DerivedKind};
 use crate::library::paths::{artifact_at, doc_pdf_rel, parse_artifacts, safe_dir, ArtifactSlot};
@@ -75,26 +81,30 @@ fn parsing(data_dir: &Path, rel: &str) -> bool {
             .is_err()
 }
 
-/// Insert the rows `unrowed_own_files` finds for `code`; returns the
-/// subject's id and the rows inserted. A row another writer added meanwhile
-/// wins (`INSERT OR IGNORE` on the subject and path).
+/// Rename `code`'s `.canvas` drawings (`drawings`), then insert the rows
+/// `unrowed_own_files` finds; returns the subject's id, the rows inserted and
+/// the drawings whose rows were renamed with them. A row another writer added
+/// meanwhile wins (`INSERT OR IGNORE` on the subject and path).
 pub async fn reconcile_own_files_at(
     data_dir: &Path,
     pool: &SqlitePool,
     code: &str,
-) -> DriveResult<(i64, Vec<ImportedFile>)> {
+) -> DriveResult<(i64, Vec<ImportedFile>, Vec<Moved>)> {
     let db = |e: sqlx::Error| DriveError::io(format!("the database refused it — {e}"));
     let Some(subject) = subject_id(pool, &safe_dir(code)).await? else {
         return Err(DriveError::io(format!("no subject {code}")));
     };
-    let known: HashSet<String> =
-        sqlx::query_scalar::<_, String>("SELECT relative_path FROM files WHERE subject_id = ?1")
-            .bind(subject)
-            .fetch_all(pool)
-            .await
-            .map_err(db)?
-            .into_iter()
-            .collect();
+    let rows: HashMap<String, i64> = sqlx::query_as::<_, (i64, String)>(
+        "SELECT id, relative_path FROM files WHERE subject_id = ?1",
+    )
+    .bind(subject)
+    .fetch_all(pool)
+    .await
+    .map_err(db)?
+    .into_iter()
+    .map(|(id, rel)| (rel, id))
+    .collect();
+    let (moved, known) = convert_drawings(data_dir, pool, code, rows).await;
     let (dir, owned) = (data_dir.to_path_buf(), code.to_string());
     let found = crate::runtime::blocking::run(move || {
         Ok::<_, String>(unrowed_own_files(&dir, &owned, &known))
@@ -124,12 +134,104 @@ pub async fn reconcile_own_files_at(
         }
     }
     tx.commit().await.map_err(db)?;
-    Ok((subject, inserted))
+    Ok((subject, inserted, moved))
+}
+
+/// `drawings::convert` for `code`, then the rows that had a `.canvas` follow
+/// by id, and `path_moves` keeps each old path. If the rows cannot follow,
+/// every rename goes back. Returns the renamed rows' moves and the paths the
+/// row scan is to skip: the subject's rows after the renames, and the files
+/// still landing. Never fails the reconcile: a failure is logged.
+async fn convert_drawings(
+    data_dir: &Path,
+    pool: &SqlitePool,
+    code: &str,
+    rows: HashMap<String, i64>,
+) -> (Vec<Moved>, HashSet<String>) {
+    let (dir, owned) = (data_dir.to_path_buf(), code.to_string());
+    let disk = blocking(move || {
+        let mut journal = Journal::default();
+        let pass = drawings::convert(&dir, &owned, &rows, &mut journal);
+        Ok((journal, pass, rows))
+    })
+    .await;
+    let (journal, pass, rows) = match disk {
+        Ok(done) => done,
+        Err(e) => {
+            elog!(
+                "[oculus] reconcile {code}: drawings left as they are: {}",
+                e.message
+            );
+            return (Vec::new(), HashSet::new());
+        }
+    };
+    let row_moves: Vec<RowMove> = pass
+        .converted
+        .iter()
+        .filter(|c| c.row.is_some())
+        .map(|c| RowMove {
+            from: c.from.clone(),
+            to: c.to.clone(),
+            dir: false,
+            relink: None,
+            drop_parse: false,
+        })
+        .collect();
+    let mut known: HashSet<String> = rows.into_keys().collect();
+    if !row_moves.is_empty() {
+        if let Err(e) = apply_moves(pool, &row_moves, None).await {
+            elog!(
+                "[oculus] reconcile {code}: drawings put back as .canvas, their rows could not follow: {}",
+                e.message
+            );
+            blocking(move || {
+                journal.undo();
+                Ok(())
+            })
+            .await
+            .ok();
+            known.extend(pass.converted.into_iter().map(|c| c.from));
+            known.extend(pass.waiting);
+            return (Vec::new(), known);
+        }
+    }
+    let mut moved = Vec::new();
+    for c in &pass.converted {
+        // A rule already there for a rowless path is an earlier drawing's
+        // (the launch rename's), which old citations meant.
+        let sql = if c.row.is_some() {
+            "INSERT OR REPLACE INTO path_moves (old_prefix, new_prefix) VALUES (?1, ?2)"
+        } else {
+            "INSERT OR IGNORE INTO path_moves (old_prefix, new_prefix) VALUES (?1, ?2)"
+        };
+        if let Err(e) = sqlx::query(sql)
+            .bind(&c.from)
+            .bind(&c.to)
+            .execute(pool)
+            .await
+        {
+            elog!(
+                "[oculus] reconcile {code}: no old-path rule for {}: {e}",
+                c.from
+            );
+        }
+        if c.row.is_some() {
+            known.remove(&c.from);
+            known.insert(c.to.clone());
+            moved.push(Moved {
+                from: c.from.clone(),
+                to: c.to.clone(),
+            });
+        }
+    }
+    known.extend(pass.waiting);
+    (moved, known)
 }
 
 /// Rows for the subject's own files that have none, announced on
-/// `drive-changed` (`added`) when there were any; a run that inserts nothing
-/// announces nothing, so a listing reloading on the event settles.
+/// `drive-changed` (`added`, and `moved` for a renamed drawing's row) when
+/// there were any; a run that changes nothing announces nothing, so a
+/// listing reloading on the event settles.
 #[tauri::command]
 pub async fn reconcile_own_files(
     app: AppHandle,
@@ -141,15 +243,16 @@ pub async fn reconcile_own_files(
     let data_dir = crate::library::paths::data_dir();
     let result = reconcile_own_files_at(&data_dir, &pool, &subject_code).await;
     pool.close().await;
-    let (subject, inserted) = result.inspect_err(|e| {
+    let (subject, inserted, moved) = result.inspect_err(|e| {
         elog!("[oculus] reconcile_own_files {subject_code}: {}", e.message);
     })?;
-    if !inserted.is_empty() {
+    if !inserted.is_empty() || !moved.is_empty() {
         emit(
             &app,
             &DriveChange {
                 subject_ids: vec![subject],
                 added: inserted.iter().map(|f| f.relative_path.clone()).collect(),
+                moved,
                 ..DriveChange::default()
             },
         );

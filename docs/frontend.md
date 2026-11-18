@@ -23,7 +23,7 @@ library files; the rest of the frontend has its own pages:
 | The companion's transport: share-link credentials, HTTP and socket client, stored drafts | `app/src/lib/companion/` |
 | The first-run gate: onboarding or the shell ([onboarding.md](./onboarding.md)) | `app/src/App.tsx`, `app/src/hooks/shell/useOnboardingGate.ts` |
 | Backend events → SQLite and stores | `app/src/hooks/backend/useBackendEvents.ts`, `app/src/hooks/backend/useEvents.ts`, `app/src/lib/pipeline/parseStatusWriter.ts`, `app/src/lib/db/connection.ts` |
-| Own files: uploads, notes and drawings, their rows and reconcilers | `app/src/lib/files/uploads.ts`, `app/src/lib/notes/documents.ts`, `app/src/lib/canvas/files.ts`, `app/src/lib/drive/reconcile.ts`, `app/src-tauri/src/library/files/commands.rs`, `app/src-tauri/src/library/drive/ops/reconcile.rs` |
+| Own files: uploads, notes and drawings, their rows and reconcilers | `app/src/lib/files/uploads.ts`, `app/src/lib/notes/documents.ts`, `app/src/lib/canvas/files.ts`, `app/src/lib/drive/reconcile.ts`, `app/src-tauri/src/library/files/commands.rs`, `app/src-tauri/src/library/drive/ops/reconcile/` |
 | File category icons and recency marks | `app/src/lib/files/fileTypes.ts`, `app/src/components/files/FileRecency.tsx` |
 | Path-keyed state following Drive's moves ([below](#path-keyed-state-follows-drive)) | `app/src/lib/shell/pathFollow.ts`, `app/src/lib/shell/followLibrary.ts`, `app/src/stores/shell/tabs/follow.ts` |
 | Drive's folder browser and folder tree ([below](#drive-is-one-folder-browser-over-the-disk)); `list_folder` | `app/src/components/drive/`, `app/src/hooks/drive/`, `app/src/lib/drive/`, `app/src-tauri/src/library/drive/` |
@@ -312,7 +312,7 @@ target folder is a subject's root or an existing folder of the student's:
   is refused the same way.
 - **`drive-changed`.** Each command but `delete_preview` emits
   `{ subjectIds, moved: [{ from, to }], removed, added }`, and so does
-  `reconcile_own_files` when it adds rows; `useDriveEvents` turns it into
+  `reconcile_own_files` when it adds rows or renames a drawing's; `useDriveEvents` turns it into
   `DRIVE_CHANGED_EVENT` for each subject and hands the moves and deletes to
   the path followers (below).
 
@@ -326,12 +326,23 @@ read-only" and shows any other message, or the raw text when it isn't one.
 A chat agent, Finder or another app can write straight into a subject's own
 files. Such a file lists in Drive (the listing reads the disk) but has no
 `files` row until `reconcile_own_files`
-(`app/src-tauri/src/library/drive/ops/reconcile.rs`) gives it one. It walks
+(`app/src-tauri/src/library/drive/ops/reconcile/`) gives it one. It walks
 the subject's own zone (`layout::own_files`) and inserts a row for each file
 with none, with `category_of`'s category, leaving out what Drive hides:
 parse artifacts, converted PDFs, and the markdown of a parse still running
-(checked by claiming the PDF for a moment). It never updates or deletes a
-row, and announces what it added on `drive-changed`. `reconcileOwnFiles`
+(checked by claiming the PDF for a moment). It never deletes a row, and
+announces what it added on `drive-changed`.
+
+Before that it renames each Oculus drawing still named `.canvas` (its JSON
+`type` is a drawing type, `whiteboards/legacy.rs`; another app's `.canvas`
+stays an upload) to `<stem>.whiteboard`, or `<stem> (2).whiteboard`… when
+the folder or a row holds the name, compared as the volume compares names
+(`reconcile/drawings.rs`). A row the `.canvas` had follows by id
+(`apply_moves`), announced as `moved`; `path_moves` keeps the old path, never
+replacing a rule a rowless `.canvas` path already has. A file that does not
+read as whole JSON (still being copied) gets no row and waits for a later
+pass; a failed rename is logged and left. `import_uploads` gives a picked
+`.canvas` drawing the `.whiteboard` name as it lands. `reconcileOwnFiles`
 (`app/src/lib/drive/reconcile.ts`) kicks each new file's parse as an
 upload's is kicked, then brings notes and drawings in line
 (`reconcileDocuments`, `reconcileDrawings`, which also drop rows whose file

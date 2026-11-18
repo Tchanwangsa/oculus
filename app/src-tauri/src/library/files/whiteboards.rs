@@ -7,6 +7,7 @@ pub(crate) mod export;
 pub(crate) mod export_pdf;
 pub(crate) mod images;
 pub(crate) mod imports;
+pub(crate) mod legacy;
 pub(crate) mod snapshots;
 
 use super::ImportedFile;

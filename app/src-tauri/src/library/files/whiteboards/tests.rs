@@ -240,3 +240,26 @@ fn read_dir_names(root: &std::path::Path, rel: &str) -> Vec<String> {
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect()
 }
+
+#[test]
+fn a_legacy_canvas_is_a_drawing_only_by_its_type_and_only_when_whole() {
+    use legacy::{of_bytes, whiteboard_name, Contents};
+    let legacy_type = DOCUMENT.replace("oculus-whiteboard", "oculus-canvas");
+    assert_eq!(of_bytes(legacy_type.as_bytes()), Contents::Drawing);
+    assert_eq!(of_bytes(DOCUMENT.as_bytes()), Contents::Drawing);
+    assert_eq!(of_bytes(br#"{"nodes":[],"edges":[]}"#), Contents::Other);
+    assert_eq!(of_bytes(b"[1, 2]"), Contents::Other);
+    assert!(matches!(
+        of_bytes(&DOCUMENT.as_bytes()[..20]),
+        Contents::Unreadable(_)
+    ));
+    assert!(matches!(of_bytes(b""), Contents::Unreadable(_)));
+    assert_eq!(
+        whiteboard_name("Board.canvas", |_| false),
+        "Board.whiteboard"
+    );
+    assert_eq!(
+        whiteboard_name("Board.canvas", |n| n == "Board.whiteboard"),
+        "Board (2).whiteboard"
+    );
+}

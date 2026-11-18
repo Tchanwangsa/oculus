@@ -6,6 +6,7 @@ mod copy;
 mod create;
 mod delete;
 mod imports;
+mod legacy_drawings;
 mod moves;
 mod names;
 mod pictures;

@@ -187,7 +187,7 @@ pub(super) fn base(rel: &str) -> &str {
 
 /// How the volumes Oculus runs on compare names: one Unicode form (an NFC
 /// `café` and an NFD one are the same file on APFS) and no case.
-pub(super) fn name_key(name: &str) -> String {
+pub(crate) fn name_key(name: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
     name.nfc().collect::<String>().to_lowercase()
 }

@@ -176,8 +176,9 @@ fn store_upload(
         .and_then(|s| s.to_str())
         .ok_or_else(|| "that file has no name".to_string())?;
     let bytes = std::fs::read(src).map_err(|e| format!("could not read it — {e}"))?;
+    let picked = legacy_drawing_name(picked, &bytes);
 
-    let name = upload_free_name(data_dir, target, &upload_name(target, picked), &bytes);
+    let name = upload_free_name(data_dir, target, &upload_name(target, &picked), &bytes);
     let rel = target.child_rel(&name);
     let path = target.path.join(&name);
     let unchanged = std::fs::read(&path).is_ok_and(|b| b == bytes);
@@ -212,6 +213,17 @@ fn store_upload(
         ImportedFile::new(rel, &file_type, bytes.len() as u64),
         warning,
     ))
+}
+
+/// A drawing picked under its old `.canvas` name lands as a whiteboard
+/// (`whiteboards::legacy`); any other file keeps the name it was picked by.
+fn legacy_drawing_name<'a>(picked: &'a str, bytes: &[u8]) -> std::borrow::Cow<'a, str> {
+    use crate::library::files::whiteboards::legacy::{self, Contents};
+    if legacy::is_legacy_name(picked) && legacy::of_bytes(bytes) == Contents::Drawing {
+        legacy::whiteboard_name(picked, |_| false).into()
+    } else {
+        picked.into()
+    }
 }
 
 /// A name in `target` for these bytes: free, or holding these very bytes

@@ -134,6 +134,18 @@ is the Rust reader; `app/src/lib/files/pathMoves.ts` the frontend's, used by
 `agents/threads/`), undo snapshots and saved tabs keep their old text and are
 resolved when read.
 
+## Drawings named `.canvas`
+
+Right after the Drive move and under its lock,
+`library::migrate::whiteboard` renames every `.canvas` drawing among the
+student's own files to `.whiteboard`, `canvas-pages/` and
+`recovery/canvases/` to their new names, and the rows and `path_moves` with
+them, with its own journal and marker (`.library-move/whiteboard`). A
+`.canvas` drawing that reaches the library later (a backup, another Mac, an
+agent) is renamed by Drive's reconcile and imports
+([frontend.md](./frontend.md#own-files-written-outside-the-app-get-rows)), with
+the same test and naming (`library/files/whiteboards/legacy.rs`).
+
 ## Running it by hand
 
 `oculus library migrate --dry-run` prints the plan, or the journal a cut-short

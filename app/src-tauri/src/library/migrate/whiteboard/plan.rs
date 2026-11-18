@@ -4,18 +4,16 @@
 //! as the volume compares names (`name_key`), so nothing is ever overwritten.
 
 use std::collections::{HashMap, HashSet};
-use std::io::BufReader;
 use std::path::Path;
-
-use serde::Deserialize;
 
 use super::db::Rows;
 use super::journal::Plan;
 use super::{LEGACY_CATEGORY, LEGACY_DRAFTS_DIR, LEGACY_EXTENSION, LEGACY_PAGES_DIR};
-use crate::library::files::whiteboards::{self, DrawingKind};
+use crate::library::files::whiteboards;
+use crate::library::files::whiteboards::legacy::{self, Contents};
 use crate::library::layout;
 use crate::library::migrate::journal::{Kind, Op, Step};
-use crate::library::migrate::plan::{base, join, list, name_key, parent, suffixed};
+use crate::library::migrate::plan::{base, join, list, name_key, parent};
 use crate::library::migrate::rules::Rule;
 use crate::library::paths::PAGES_DIR;
 
@@ -34,7 +32,7 @@ pub fn build(data_dir: &Path, rows: &Rows) -> Plan {
             if !rel.ends_with(LEGACY_EXTENSION) {
                 continue;
             }
-            if !is_drawing(&data_dir.join(&rel)) {
+            if legacy::read(&data_dir.join(&rel)) != Contents::Drawing {
                 plan.left
                     .push(format!("{rel}: not an Oculus drawing, so kept as it is"));
                 continue;
@@ -127,24 +125,6 @@ fn records(data_dir: &Path, plan: &mut Plan, old: &str, new: &str) {
     );
 }
 
-/// True for a file holding an Oculus drawing (its JSON `type` says so); a
-/// `.canvas` from another app (Obsidian's, say) stays as it is. Only the
-/// type is kept as the JSON is read.
-fn is_drawing(path: &Path) -> bool {
-    #[derive(Deserialize)]
-    struct Head {
-        #[serde(rename = "type")]
-        kind: Option<String>,
-    }
-    let Ok(file) = std::fs::File::open(path) else {
-        return false;
-    };
-    serde_json::from_reader::<_, Head>(BufReader::new(file))
-        .ok()
-        .and_then(|head| head.kind)
-        .is_some_and(|kind| whiteboards::authority::model::is_drawing_type(&kind))
-}
-
 /// A row for a drawing that is not on disk any more keeps a rule, so its row
 /// and old citations follow the rename as the others do.
 fn stale_rows(data_dir: &Path, plan: &mut Plan, names: &mut Names, rows: &Rows) {
@@ -186,8 +166,6 @@ impl<'a> Names<'a> {
     /// now on.
     fn renamed(&mut self, rel: &str) -> String {
         let dir = parent(rel).to_string();
-        let stem = &base(rel)[..base(rel).len() - LEGACY_EXTENSION.len()];
-        let wanted = format!("{stem}{}", DrawingKind::Whiteboard.extension());
         let data_dir = self.data_dir;
         let held = self.folders.entry(name_key(&dir)).or_insert_with(|| {
             list(&data_dir.join(&dir))
@@ -195,12 +173,10 @@ impl<'a> Names<'a> {
                 .map(|(n, _)| name_key(&n))
                 .collect()
         });
-        let chosen = (1..)
-            .map(|n| suffixed(&wanted, n, false))
-            .find(|name| {
-                !held.contains(&name_key(name)) && !self.rows.contains(&name_key(&join(&dir, name)))
-            })
-            .expect("an unbounded range has a free name");
+        let rows = &self.rows;
+        let chosen = legacy::whiteboard_name(base(rel), |name| {
+            held.contains(&name_key(name)) || rows.contains(&name_key(&join(&dir, name)))
+        });
         held.insert(name_key(&chosen));
         join(&dir, &chosen)
     }
