@@ -147,7 +147,8 @@ to the drawing's old path, mapped straight to its new one, since a lookup
 takes one step. An old path is derived only when the kept rules really send
 it there, so a file renamed on a clash (`uploads/a.canvas` → `a (2).canvas`)
 keeps its own rule rather than taking its folder's (`uploads` → the subject
-root) to another drawing named `a`. A
+root) to another drawing named `a`. Drive's reconcile records its renames
+the same way. A
 `.canvas` drawing that reaches the library later (a backup, another Mac, an
 agent) is renamed by Drive's reconcile and imports
 ([frontend.md](./frontend.md#own-files-written-outside-the-app-get-rows)), with

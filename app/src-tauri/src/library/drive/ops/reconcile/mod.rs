@@ -22,6 +22,7 @@ use super::moves::blocking;
 use super::rows::{apply_moves, file_type, name_of, subject_id, RowMove};
 use crate::library::files::uploads::ImportedFile;
 use crate::library::layout::{self, DerivedKind};
+use crate::library::migrate::{record_moves, OwnRule, Rule};
 use crate::library::paths::{artifact_at, doc_pdf_rel, parse_artifacts, safe_dir, ArtifactSlot};
 use crate::parse::InFlight;
 
@@ -138,7 +139,8 @@ pub async fn reconcile_own_files_at(
 }
 
 /// `drawings::convert` for `code`, then the rows that had a `.canvas` follow
-/// by id, and `path_moves` keeps each old path. If the rows cannot follow,
+/// by id, and `path_moves` keeps each old path and every older one that led
+/// to it (`record_moves`). If the rows cannot follow,
 /// every rename goes back. Returns the renamed rows' moves and the paths the
 /// row scan is to skip: the subject's rows after the renames, and the files
 /// still landing. Never fails the reconcile: a failure is logged.
@@ -195,26 +197,30 @@ async fn convert_drawings(
             return (Vec::new(), known);
         }
     }
+    // A rule already there for a rowless path is an earlier drawing's (the
+    // launch rename's), which old citations meant.
+    let renames: Vec<(Rule, OwnRule)> = pass
+        .converted
+        .iter()
+        .map(|c| {
+            let rule = Rule {
+                old: c.from.clone(),
+                new: c.to.clone(),
+            };
+            let own = match c.row {
+                Some(_) => OwnRule::Replace,
+                None => OwnRule::KeepOlder,
+            };
+            (rule, own)
+        })
+        .collect();
+    if !renames.is_empty() {
+        if let Err(e) = old_path_rules(pool, &renames).await {
+            elog!("[oculus] reconcile {code}: no old-path rules for its drawings: {e}");
+        }
+    }
     let mut moved = Vec::new();
     for c in &pass.converted {
-        // A rule already there for a rowless path is an earlier drawing's
-        // (the launch rename's), which old citations meant.
-        let sql = if c.row.is_some() {
-            "INSERT OR REPLACE INTO path_moves (old_prefix, new_prefix) VALUES (?1, ?2)"
-        } else {
-            "INSERT OR IGNORE INTO path_moves (old_prefix, new_prefix) VALUES (?1, ?2)"
-        };
-        if let Err(e) = sqlx::query(sql)
-            .bind(&c.from)
-            .bind(&c.to)
-            .execute(pool)
-            .await
-        {
-            elog!(
-                "[oculus] reconcile {code}: no old-path rule for {}: {e}",
-                c.from
-            );
-        }
         if c.row.is_some() {
             known.remove(&c.from);
             known.insert(c.to.clone());
@@ -226,6 +232,13 @@ async fn convert_drawings(
     }
     known.extend(pass.waiting);
     (moved, known)
+}
+
+/// `record_moves` for the pass's renames, in one transaction.
+async fn old_path_rules(pool: &SqlitePool, renames: &[(Rule, OwnRule)]) -> Result<(), String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    record_moves(&mut tx, renames).await?;
+    tx.commit().await.map_err(|e| e.to_string())
 }
 
 /// Rows for the subject's own files that have none, announced on

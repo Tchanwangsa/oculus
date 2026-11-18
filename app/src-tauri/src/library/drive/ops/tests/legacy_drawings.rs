@@ -228,3 +228,41 @@ async fn an_imported_canvas_drawing_lands_as_a_whiteboard() {
     assert_eq!(lib.read(&own(CODE, "Sketch (2).whiteboard")), DRAWING);
     assert_eq!(lib.read(&own(CODE, "Sketch.whiteboard")), "another");
 }
+
+#[tokio::test]
+async fn an_old_path_through_the_drive_moves_folder_rule_reaches_the_renamed_drawing() {
+    let lib = renamed_library("drive-legacy-chain").await;
+    for (old, new) in [
+        (own(CODE, "canvases"), course_rel(CODE)),
+        (own(CODE, "uploads/b.canvas"), own(CODE, "b (2).canvas")),
+    ] {
+        sqlx::query("INSERT INTO path_moves (old_prefix, new_prefix) VALUES (?1, ?2)")
+            .bind(old)
+            .bind(new)
+            .execute(&lib.pool)
+            .await
+            .unwrap();
+    }
+    lib.file(&own(CODE, "a.canvas"), DRAWING.as_bytes()).await;
+    lib.put(&own(CODE, "b.canvas"), DRAWING.as_bytes());
+
+    reconcile(&lib).await;
+    assert!(lib.exists(&own(CODE, "a.whiteboard")));
+    assert_eq!(
+        moved_to(&lib, &own(CODE, "canvases/a.canvas#x")).await,
+        Some(own(CODE, "a.whiteboard#x"))
+    );
+    assert_eq!(
+        moved_to(&lib, &own(CODE, "canvases/b.canvas")).await,
+        Some(own(CODE, "b.whiteboard"))
+    );
+    // A file renamed on a clash keeps its own rule.
+    assert_eq!(
+        moved_to(&lib, &own(CODE, "uploads/b.canvas")).await,
+        Some(own(CODE, "b (2).canvas"))
+    );
+    assert_eq!(
+        moved_to(&lib, &own(CODE, "canvases/c.pdf")).await,
+        Some(own(CODE, "c.pdf"))
+    );
+}

@@ -338,8 +338,10 @@ Before that it renames each Oculus drawing still named `.canvas` (its JSON
 stays an upload) to `<stem>.whiteboard`, or `<stem> (2).whiteboard`… when
 the folder or a row holds the name, compared as the volume compares names
 (`reconcile/drawings.rs`). A row the `.canvas` had follows by id
-(`apply_moves`), announced as `moved`; `path_moves` keeps the old path, never
-replacing a rule a rowless `.canvas` path already has. A file that does not
+(`apply_moves`), announced as `moved`; `path_moves` keeps the old path, and
+every older path that led to it (`record_moves`,
+[library-move.md](./library-move.md#drawings-named-canvas)), never replacing
+a rule a rowless `.canvas` path already has. A file that does not
 read as whole JSON (still being copied) gets no row and waits for a later
 pass; a failed rename is logged and left. `import_uploads` gives a picked
 `.canvas` drawing the `.whiteboard` name as it lands. `reconcileOwnFiles`
@@ -380,6 +382,9 @@ prefix wins.
   render, `followSavedPaths` checks each saved tab, side item, closed tab
   and Recent row on a file with no row and no file on disk against
   `path_moves` (`resolveMoved`) and applies what it finds as one move.
+  `resolveMoved` reads the table once and again after any `drive-changed`
+  move (`forgetPathMoves`), since a reconcile renaming a `.canvas` adds
+  rules.
 - **Left as written.** Chat drafts, pastes, scopes, shelves, attachment
   names and question drafts (`app/src/stores/chat/draftStore.ts`,
   `app/src/stores/chat/stashStore.ts`, `app/src/stores/chat/attachmentNames.ts`,

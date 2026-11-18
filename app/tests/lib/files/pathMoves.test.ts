@@ -1,5 +1,7 @@
-import { describe, expect, test } from "bun:test";
-import { movedPath } from "@/lib/files/pathMoves";
+import { describe, expect, spyOn, test } from "bun:test";
+import type Database from "@tauri-apps/plugin-sql";
+import * as connection from "@/lib/db/connection";
+import { forgetPathMoves, movedPath, resolveMoved, type PathMove } from "@/lib/files/pathMoves";
 
 const moves = [
   { old_prefix: "courses/X/uploads", new_prefix: "courses/X" },
@@ -22,5 +24,24 @@ describe("old library paths", () => {
     expect(movedPath("courses/X/filesystem.md", moves)).toBeNull();
     expect(movedPath("courses/X/Course/Files/a.pdf", moves)).toBeNull();
     expect(movedPath("lectures/L10/source1.mp4", moves)).toBeNull();
+  });
+});
+
+describe("rules a Drive move adds", () => {
+  // `followLibraryChange` forgets the rules on every `drive-changed` move.
+  test("are read on the next lookup after a move", async () => {
+    const rows: PathMove[] = [{ old_prefix: "courses/X/canvases", new_prefix: "courses/X" }];
+    const db = spyOn(connection, "getDb").mockResolvedValue({
+      select: async (sql: string) => (sql.includes("path_moves") ? [...rows] : []),
+    } as unknown as Database);
+    try {
+      expect(await resolveMoved("courses/X/canvases/a.canvas")).toBe("courses/X/a.canvas");
+      // Drive's reconcile renames the drawing and chains its rule.
+      rows.push({ old_prefix: "courses/X/canvases/a.canvas", new_prefix: "courses/X/a.whiteboard" });
+      forgetPathMoves();
+      expect(await resolveMoved("courses/X/canvases/a.canvas")).toBe("courses/X/a.whiteboard");
+    } finally {
+      db.mockRestore();
+    }
   });
 });
