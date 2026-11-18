@@ -583,8 +583,8 @@ still update the picker.
 - **Usage is a ring of the nearest limit** (`UsageMeter.tsx`): the plan
   window closest to running out, the 5-hour session's or the week's
   (`nearestLimit` in `app/src/lib/harness/usageLimit.ts`, the one
-  `usageSummary` and the usage-limit notice both read), named in its title;
-  with no plan windows (opencode, Antigravity), the thread's context. Its
+  `usageSummary` and the usage-limit notice both read), named in its title
+  with the context after it; with no plan windows (opencode, Antigravity), the thread's context. Its
   popover lists the context and every window with its reset. Spend is
   hidden, as subscriptions aren't billed per token. Claude context is the last
   `assistant` usage, since `result.usage` sums the turn. Codex windows are read
@@ -3339,8 +3339,10 @@ level, on any of the four agents.
   (`settings/PageFrame.tsx`). The first is a list of rows (`SettingsRow`),
   each an icon, the setting, its value muted at the right and a chevron:
   the model with its level; the permission mode, a new chat's included
-  (the mode it starts with); usage, when there is any, valued by the plan
-  window nearest its limit ("Weekly 62%", else the context). A row turns
+  (the mode it starts with); usage, when the agent reports plan limits,
+  valued by the window nearest its limit ("Weekly 62%"). Under the rows,
+  the context window is always in view as a bar and its tokens
+  (`settings/ContextStrip.tsx`, "273k / 1M"). A row turns
   the popover into its page, headed by a back control (`PageHeader`): the
   model picker's own `ModelMenu` (agents, models and level on one page,
   refusal and switch lock included), the mode choices

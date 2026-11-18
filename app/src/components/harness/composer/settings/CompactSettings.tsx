@@ -10,6 +10,7 @@ import { modelSummary } from "../model/modelSummary";
 import { ModeIcon, ModeNote, PermissionModeChoices } from "../PermissionModeControl";
 import { usePermissionMode } from "../usePermissionMode";
 import { Ring, UsageDetails, usageSummary } from "../UsageMeter";
+import { ContextStrip } from "./ContextStrip";
 import { PageFrame } from "./PageFrame";
 import type { SettingsPage } from "./pages";
 import { PageHeader, SettingsRow } from "./SettingsRow";
@@ -176,8 +177,9 @@ export const CompactSettings = memo(function CompactSettings({
 
 /**
  * The settings list, the menu's first page: model and level, the permission
- * mode, and usage when there is any, its value the plan window nearest its
- * limit (`usageSummary`'s `headline`). A new setting is one more row.
+ * mode, usage when the agent reports plan limits (its value the window
+ * nearest its limit, `usageSummary`'s `headline`), and the context window at
+ * the foot (`ContextStrip`). A new setting is one more row.
  */
 export function SettingsList({
   model,
@@ -212,7 +214,7 @@ export function SettingsList({
         title={`Permission mode: ${MODE_LABEL[mode]}`}
         onOpen={onOpen}
       />
-      {!usage.empty && (
+      {usage.nearest && (
         <SettingsRow
           page="usage"
           icon={<Ring percent={usage.percent} />}
@@ -221,6 +223,11 @@ export function SettingsList({
           title={usage.ringLabel ?? undefined}
           onOpen={onOpen}
         />
+      )}
+      {usage.used != null && (
+        <div className="-mx-1 mt-1 border-t border-border pt-1">
+          <ContextStrip used={usage.used} limit={usage.limit} percent={usage.contextPercent} />
+        </div>
       )}
     </div>
   );

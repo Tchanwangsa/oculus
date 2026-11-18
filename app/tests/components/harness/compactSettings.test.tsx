@@ -47,12 +47,18 @@ describe("the settings list", () => {
     const html = list(windows);
     expect(html).toContain(">Weekly 62%<");
     expect(html).not.toContain("5-hour 27%");
-    expect(html).toContain('title="Weekly limit 62% used"');
+    expect(html).toContain('title="Weekly limit 62% used · 25% of context"');
   });
 
-  test("without plan windows usage is the context; with nothing at all there is no row", () => {
-    expect(list([])).toContain(">Context 25%<");
-    expect(list([], null)).not.toContain('data-settings-row="usage"');
+  test("the context window is always at the foot, with or without plan windows", () => {
+    expect(list(windows)).toContain(">50k / 200k<");
+    expect(list([])).toContain(">50k / 200k<");
+    expect(list([])).toContain('title="Context: 25% used"');
+  });
+
+  test("without plan windows there is no usage row; with nothing at all no context either", () => {
+    expect(list([])).not.toContain('data-settings-row="usage"');
+    expect(list([], null)).not.toContain(">Context<");
   });
 });
 
@@ -88,9 +94,9 @@ describe("pages", () => {
 describe("the full composer's ring", () => {
   const ring = (rateLimits: RateWindow[]) => renderToStaticMarkup(<UsageMeter usage={usage} rateLimits={rateLimits} />);
 
-  test("is the plan window closest to running out, and says which", () => {
+  test("is the plan window closest to running out, says which, and names the context too", () => {
     const html = ring(windows);
-    expect(html).toContain('aria-label="Usage — Weekly limit 62% used"');
+    expect(html).toContain('aria-label="Usage — Weekly limit 62% used · 25% of context"');
     expect(usageSummary(usage, windows).percent).toBe(62);
   });
 

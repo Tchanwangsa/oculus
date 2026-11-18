@@ -118,8 +118,11 @@ export function usageSummary(usage: ThreadUsage | null, rateLimits: RateWindow[]
       : used != null && limit
         ? `Context ${Math.round(contextPercent)}%`
         : context,
-    /** The ring named in full, for its title and label. */
-    ringLabel: nearest ? `${nearest.label} limit ${nearestPercent}% used` : context,
+    /** The ring named in full, for its title and label, with the context
+     *  window after a plan limit so both stay in view. */
+    ringLabel: nearest
+      ? [`${nearest.label} limit ${nearestPercent}% used`, context].filter(Boolean).join(" · ")
+      : context,
     parts,
     empty: used == null && rateLimits.length === 0,
   };
