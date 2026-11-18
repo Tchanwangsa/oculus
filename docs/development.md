@@ -16,6 +16,7 @@ and stable Rust, plus the MSVC toolchain, Windows SDK and WebView2.
 | Vendored browser engine bindings | `app/src-tauri/vendor/wry/`, `app/src-tauri/vendor/wry/VENDORED.md`, `app/src-tauri/Cargo.toml` |
 | The app and CLI dev profile | `[profile.dev]` in `app/src-tauri/Cargo.toml` |
 | Keeps the dev CLI current through a session | `app/scripts/watch-cli.mjs` |
+| Warms a new worktree from the main checkout's build | `app/scripts/warm-worktree.mjs` |
 | Native binary fetcher (ffmpeg) | `app/scripts/fetch-ffmpeg.mjs` |
 | Builds and smoke-tests the Windows and macOS LGPL ffmpeg, and stages their release | `app/scripts/ffmpeg/`, `.github/workflows/ffmpeg.yml` |
 | Builds the editor core's wasm for dev shadow mode | `app/scripts/build-editor-wasm.mjs` |
@@ -59,6 +60,7 @@ bun run stage-keyd    # build and sign the release oculus-keyd the bundle ships,
 bun run math          # build the maths wasm into app/math-core/pkg/
 bun run whiteboard    # build the drawing geometry wasm into app/whiteboard-core/pkg/
 bun run widget-kit    # build the chat widgets' kit into app/dist/widget-kit/ (docs/widgets.md)
+bun run worktree:warm # in a new worktree: link node_modules/binaries, clone the main Rust build
 ```
 
 ## wry is vendored at the version Tauri resolves
@@ -129,6 +131,27 @@ The app library emits only an `rlib` for the desktop app and CLI.
 To reclaim this checkout's build cache, run `cargo clean` from
 `app/src-tauri`; Cargo coordinates deletion with its build locks. The next
 build recreates those artifacts.
+
+## A new worktree starts from the main build
+
+A worktree has its own `target/`, so its first build compiles all ~900
+crates. `bun run worktree:warm` (`app/scripts/warm-worktree.mjs`), run in
+the worktree's `app/`, links `node_modules` and `src-tauri/binaries` from the
+main checkout and APFS-clones the main checkout's `target/debug` into it in
+about ten seconds. Cargo then recompiles only the crates whose source path
+differs (vendored wry, the Tauri crates above it, our path crates and the
+app): about 25 s for the first `cargo check` and under a minute for the
+first `cargo test --no-run`. It skips the `.o` files in `deps/`, the app
+crate's leftover debug objects (hundreds of thousands of them, minutes to
+clone), and leaves a worktree that already has `target/debug` alone. It
+clones only on macOS. The T3 Code project runs it on every new worktree.
+
+The app crate is about 200k lines in one crate, so even an incremental
+build recompiles all of it: about 15 s for `cargo check` and 35 s for
+`cargo test --no-run`, which builds the library twice (rlib and test
+harness) and both binaries' test harnesses. While iterating, use
+`cargo check`; to run tests, use `cargo test --lib <filter>` (only the
+`oculus` binary has its own tests); run `cargo clippy` once at the end.
 
 ## The speech helper is compiled, not fetched
 
@@ -612,7 +635,7 @@ The OpenUI skill signatures can be regenerated with `bun run docs:widgets` after
 
 ## Gotchas
 
-- A Rust build sitting at 0% CPU is macOS scanning each new build script and proc-macro (`syspolicyd`). Add every app that starts builds (terminal, editor) under System Settings → Privacy & Security → Developer Tools, then relaunch it. Claude Code runs its agents under its own bundle, not Claude.app: add `~/Library/Application Support/Claude/claude-code/<version>/<hash>/claude.app` (⌘⇧G in the picker). A build with no `GK evaluateScanResult` line for its `build_script_build` in `/usr/bin/log show --predicate 'process == "syspolicyd"'` is exempt. Every compile runs under one shared sccache server, which belongs to whichever app started it, so restart it (`sccache --stop-server`) after adding one.
+- A Rust build sitting at 0% CPU is macOS scanning each new build script, proc-macro and test binary (`syspolicyd`, one at a time, seconds each; cloned files are scanned again). Add every app that starts builds (terminal, editor, T3 Code) under System Settings → Privacy & Security → Developer Tools, then relaunch it. Claude Code runs its agents under its own bundle, not Claude.app: add `~/Library/Application Support/Claude/claude-code/<version>/<hash>/claude.app` (⌘⇧G in the picker). A build with no `GK evaluateScanResult` line for its `build_script_build` in `/usr/bin/log show --predicate 'process == "syspolicyd"'` is exempt. Every compile runs under one shared sccache server, which belongs to whichever app started it, so restart it (`sccache --stop-server`) after adding one.
 - Any build of the crate copies the `binaries/` sidecar to `target/<profile>/oculus` — a stale sidecar means a stale CLI.
 - `tauri dev` alone never builds `oculus` — use `predev` or `bun run cli:dev`, or agents run an old CLI.
 - rust-analyzer sharing `app/src-tauri/target/` takes cargo's build lock and stalls the preflight's builds. The repo's `.zed/settings.json` sets rust-analyzer's `cargo.targetDir` to `true`, which moves it to `target/rust-analyzer`; other editors need the same setting.

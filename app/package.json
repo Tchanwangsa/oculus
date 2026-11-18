@@ -21,6 +21,7 @@
     "math": "node scripts/build-math.mjs",
     "icons:windows": "node scripts/windows-icons.mjs",
     "tauri": "tauri",
+    "worktree:warm": "node scripts/warm-worktree.mjs",
     "cli": "bun scripts/build-cli.mjs",
     "cli:dev": "bun scripts/build-cli.mjs --debug",
     "cli:install": "bun run cli && mkdir -p \"$HOME/.local/bin\" && ln -sf \"$PWD/src-tauri/target/release/oculus\" \"$HOME/.local/bin/oculus\" && \"$PWD/src-tauri/target/release/oculus\" docs",
