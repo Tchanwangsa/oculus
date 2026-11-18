@@ -5,6 +5,8 @@ import type { Subject } from "@/lib/db";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { ThreadRow } from "@/components/harness/threads/ThreadRow";
 import { RecentsBody } from "@/components/harness/threads/list/RecentsBody";
+import { SubjectBody } from "@/components/harness/threads/list/SubjectBody";
+import { ListHeader, readThreadView } from "@/components/harness/threads/list/Header";
 import { activityLine } from "@/lib/harness/activity";
 
 // A server render reads a zustand store's initial state, so live rows go there.
@@ -38,6 +40,7 @@ const render = (patch: Partial<HarnessThread>, props: Partial<Parameters<typeof 
     <ThreadRow
       thread={thread(patch)}
       subject={subject}
+      showSubject
       preview="So P(D | +) is about 0.09"
       question={undefined}
       active={false}
@@ -118,6 +121,12 @@ describe("ThreadRow", () => {
     }
   });
 
+  test("the Subject view drops the subject line and keeps the status on the title's line", () => {
+    const html = render({ settled_at: sqlite(60_000) }, { showSubject: false });
+    expect(html).not.toContain("COMP30024");
+    expect(html).toMatch(/Alpha-beta pruning walkthrough<\/span>.*Done/);
+  });
+
   test("a general thread reads General", () => {
     expect(render({ subject_id: null }, { subject: undefined })).toContain("General");
   });
@@ -177,5 +186,76 @@ describe("Recents", () => {
 
   test("Show more follows the rows while older threads exist", () => {
     expect(body(true)).toMatch(/data-row="3"><\/div><button[^>]*>Show more<\/button>/);
+  });
+});
+
+describe("Subject view", () => {
+  const other = { id: 4, code: "COMP30026_2026_SM1", name: "Models of Computation" } as Subject;
+  const list = [
+    thread({ id: 1, subject_id: 3, updated_at: sqlite(30_000) }),
+    thread({ id: 2, subject_id: 4, updated_at: sqlite(20_000) }),
+    thread({ id: 3, subject_id: null, updated_at: sqlite(60_000) }),
+    thread({ id: 4, subject_id: 3, updated_at: sqlite(2_000) }),
+  ];
+  const body = (more: boolean, threads = list) =>
+    renderToStaticMarkup(
+      <SubjectBody
+        threads={threads}
+        subjects={[subject, other]}
+        activeId={null}
+        runningIds={new Set()}
+        folded={new Set()}
+        onGroupOpen={() => {}}
+        collapsed={false}
+        onNew={() => {}}
+        more={more}
+        onMore={() => {}}
+        row={(t) => <div key={t.id} data-row={t.id} />}
+      />,
+    );
+
+  test("groups by subject, newest group first, rows newest first", () => {
+    const html = body(false);
+    expect([...html.matchAll(/title="New thread in ([^"]+)"/g)].map((m) => m[1])).toEqual([
+      "COMP30024",
+      "COMP30026",
+      "General",
+    ]);
+    expect([...html.matchAll(/data-row="(\d+)"/g)].map((m) => Number(m[1]))).toEqual([4, 1, 2, 3]);
+    expect(html).not.toContain("more");
+  });
+
+  test("a group pages by five, then offers older threads while the database has them", () => {
+    const many = Array.from({ length: 7 }, (_, i) => thread({ id: i + 1, updated_at: sqlite(i * 1000) }));
+    expect(body(false, many)).toMatch(/Show <span class="tabular-nums">2<\/span> more/);
+    expect(body(false, list)).not.toContain("Show more");
+    expect(body(true, list).match(/>Show more</g)?.length).toBe(3);
+  });
+});
+
+describe("view switch", () => {
+  const header = (view: "recents" | "subject") =>
+    renderToStaticMarkup(
+      <ListHeader
+        view={view}
+        onView={() => {}}
+        query=""
+        onQuery={() => {}}
+        onSearchEnter={() => {}}
+        fresh={false}
+        onNew={() => {}}
+        collapsed={false}
+      />,
+    );
+
+  test("Recents and Subject tabs, the stored one selected", () => {
+    expect(header("recents")).toMatch(/aria-selected="true"[^>]*>.*?Recents/);
+    expect(header("subject")).toMatch(/aria-selected="true"[^>]*>.*?Subject/);
+  });
+
+  test("anything but subject opens on Recents, status included", () => {
+    expect(readThreadView("subject")).toBe("subject");
+    expect(readThreadView("status")).toBe("recents");
+    expect(readThreadView(null)).toBe("recents");
   });
 });

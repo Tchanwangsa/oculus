@@ -131,7 +131,7 @@ export default function ChatPage() {
 
   const paneId = useTabId();
 
-  // An entry point's `?s=` seeds the new thread's scope once;
+  // An entry point's `?s=` (a Subject group's "+") seeds the new thread's scope once;
   // the route effect below then drops it, so a re-render cannot seed again.
   const seed = activeId == null ? chatScope(here.search) : null;
   useEffect(() => {
@@ -204,8 +204,15 @@ export default function ChatPage() {
   );
   const [choosing, setChoosing] = useState(false);
   const onChoose = useCallback(() => setChoosing(true), []);
-  // New thread asks for a scope, and leaves the open thread only once it is chosen.
-  const onNew = useCallback(() => setChoosing(true), []);
+  const onNew = useCallback(
+    (subject?: ChatScope) => {
+      // A Subject group's `+` names its scope; plain New thread asks for one,
+      // and leaves the open thread only once it is chosen.
+      if (subject !== undefined) navigate(chatHref(null, null, { subject }), { replace: activeRef.current == null });
+      else setChoosing(true);
+    },
+    [navigate],
+  );
   const onChosen = useCallback(
     (next: ChatScope) => {
       useDraftStore.getState().setScope(newKey, next);

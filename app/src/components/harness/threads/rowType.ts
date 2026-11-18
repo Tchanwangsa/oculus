@@ -12,6 +12,8 @@ export const TITLE_ATTENTION = "font-medium text-foreground";
 export const TITLE_READ = "text-foreground/80";
 export const TITLE_READ_ACTIVE = "text-foreground/90";
 export const ROW_PREVIEW = "text-[12.5px] text-muted-foreground/85";
+/** A Subject group's heading over rows: more room above than below. */
+export const SECTION_HEAD = "pt-4 pb-1";
 /* Both below apply while the hover action (⋯) shows: the row is hovered, the
  * action holds focus, or its menu is open. Not the row's own focus, which
  * stays on the open chat's row after a click. Written out in full so

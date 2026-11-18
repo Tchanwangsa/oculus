@@ -3,13 +3,18 @@ import { ResizeHandle } from "@/components/ui/layout/ResizeHandle";
 import { SideNav } from "@/components/ui/layout/SideNav";
 import { chatHref, type HarnessThread } from "@/lib/harness";
 import type { Subject } from "@/lib/db";
+import type { ChatScope } from "@/lib/harness/scope";
+import { useCollapsedGroups } from "@/hooks/shell/useCollapsedGroups";
 import type { useResizablePanel } from "@/hooks/gestures/useResizablePanel";
+import { useStoredState } from "@/hooks/ui/useStoredState";
 import { useTabStore } from "@/stores/shell/tabStore";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { ThreadRow } from "./ThreadRow";
 import { useThreadPreviews } from "./useThreadPreviews";
-import { ListHeader } from "./list/Header";
+import { COLLAPSED_KEY, VIEW_KEY } from "./order";
+import { ListHeader, readThreadView } from "./list/Header";
 import { RecentsBody } from "./list/RecentsBody";
+import { SubjectBody } from "./list/SubjectBody";
 import { SearchResults } from "./search/SearchResults";
 import { useThreadSearch } from "./search/useThreadSearch";
 
@@ -17,8 +22,9 @@ export { THREAD_LIST_PANEL } from "./order";
 
 /**
  * Chat's nav column on `SideNav`, the subject page's column: search and new
- * chat on top, then every thread newest first under "Recents"; typing a
- * search swaps the list for results. It takes its width and fold from
+ * chat on top, the view switch under them, then the threads as Recents
+ * (newest first) or by Subject, remembered per device; typing a search
+ * swaps the view for results. It takes its width and fold from
  * `panel` (`ChatPage` owns it); ⌘⌥B or the page header's toggle folds it
  * away completely. Titles come from `Harness::name_thread`.
  */
@@ -43,14 +49,19 @@ export const ThreadList = memo(function ThreadList({
   /** Ids, not the store's live map, which changes on every streamed token. */
   runningIds: Set<number>;
   onOpen: (id: number) => void;
-  onNew: () => void;
+  /** No argument: the new chat asks for its scope; otherwise that group's. */
+  onNew: (scope?: ChatScope) => void;
   onDelete: (id: number) => void;
 }) {
   const { collapsed } = panel;
+  const [view, setView] = useStoredState(VIEW_KEY, readThreadView);
   const [confirming, setConfirming] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const found = useThreadSearch(query);
   const more = useHarnessStore((s) => s.moreThreads);
+  // The Subject view's folded groups — not the column's own `collapsed`.
+  const { folded, setOpen } = useCollapsedGroups(COLLAPSED_KEY);
+  const newChat = useCallback(() => onNew(), [onNew]);
   const lines = useThreadPreviews(threads);
   const bySubject = useMemo(() => new Map(subjects.map((s) => [s.id, s])), [subjects]);
 
@@ -64,11 +75,12 @@ export const ThreadList = memo(function ThreadList({
     [onOpen],
   );
 
-  const row = (t: HarnessThread) => (
+  const row = (showSubject: boolean) => (t: HarnessThread) => (
     <ThreadRow
       key={t.id}
       thread={t}
       subject={t.subject_id == null ? undefined : bySubject.get(t.subject_id)}
+      showSubject={showSubject}
       preview={lines.messages.get(t.id)}
       question={lines.questions.get(t.id)}
       active={t.id === activeId}
@@ -90,18 +102,35 @@ export const ThreadList = memo(function ThreadList({
         animate={!panel.dragging}
         header={
           <ListHeader
+            view={view}
+            onView={setView}
             query={query}
             onQuery={setQuery}
             onSearchEnter={() => found?.results[0] && openThread(found.results[0])}
             fresh={activeId == null}
-            onNew={onNew}
+            onNew={newChat}
+            collapsed={collapsed}
           />
         }
       >
         {found ? (
           <SearchResults found={found} activeId={activeId} onOpen={openThread} />
+        ) : view === "recents" ? (
+          <RecentsBody threads={threads} more={more} onMore={showMore} collapsed={collapsed} row={row(true)} />
         ) : (
-          <RecentsBody threads={threads} more={more} onMore={showMore} collapsed={collapsed} row={row} />
+          <SubjectBody
+            threads={threads}
+            subjects={subjects}
+            activeId={activeId}
+            runningIds={runningIds}
+            folded={folded}
+            onGroupOpen={setOpen}
+            collapsed={collapsed}
+            onNew={onNew}
+            more={more}
+            onMore={showMore}
+            row={row(false)}
+          />
         )}
       </SideNav>
       {/* On the seam: negative margins cost no layout width. Folded away the

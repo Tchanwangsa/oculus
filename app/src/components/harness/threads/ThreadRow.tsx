@@ -26,8 +26,9 @@ import { ATTENTION, runStartedMs, STATUS_LOOK, StatusPill, threadRowStatus } fro
 
 /**
  * A thread as three lines (T3's sidebar row): its subject and, at the right,
- * its status or age; its title; its newest message and provider mark. A
- * title is bright and medium while the thread wants the student
+ * its status or age; its title; its newest message and provider mark. The
+ * Subject view, whose group header names the subject, drops line one and
+ * moves the right slot onto the title's line. A title is bright and medium while the thread wants the student
  * (`ATTENTION`), dimmed otherwise (`rowType`). Hover shows the ⋯ menu on no
  * surface of its own: the line under it fades out and hides its status.
  * While the column folds, the subject glyph stays longest, with the status
@@ -36,6 +37,7 @@ import { ATTENTION, runStartedMs, STATUS_LOOK, StatusPill, threadRowStatus } fro
 export const ThreadRow = memo(function ThreadRow({
   thread: t,
   subject,
+  showSubject,
   preview,
   question,
   active,
@@ -49,6 +51,8 @@ export const ThreadRow = memo(function ThreadRow({
   thread: HarnessThread;
   /** Undefined for a general thread, or one whose subject is gone. */
   subject: Subject | undefined;
+  /** Line one, the subject; off where a group header already names it. */
+  showSubject: boolean;
   /** The newest message, either side's. */
   preview: string | undefined;
   /** The question it waits on, line three while it does. */
@@ -65,6 +69,11 @@ export const ThreadRow = memo(function ThreadRow({
   const title = t.title?.trim() || "Untitled";
   const status = threadRowStatus(t, running);
   const attention = status != null && ATTENTION.has(status);
+  const right = (
+    <span className={cn("flex shrink-0", HIDDEN_UNDER_ACTIONS)}>
+      <RightSlot thread={t} status={status} />
+    </span>
+  );
   return (
     <div
       data-thread-row={t.id}
@@ -82,25 +91,30 @@ export const ThreadRow = memo(function ThreadRow({
         onClick={() => onOpen(t.id)}
         className="flex w-full min-w-0 flex-col px-2.5 pt-1.5 pb-[7px] text-left"
       >
-        <span className={cn("flex h-[18px] w-full min-w-0 items-center gap-1.5", ROW_META, UNDER_ACTIONS)}>
-          <span
-            className="relative flex shrink-0"
-            title={subject ? displayName(subject.name, subject.code) : "Not scoped to a subject"}
-          >
-            {subject ? <SubjectIcon code={subject.code} size={13} /> : <Books size={13} />}
-            {status && <FoldDot status={status} className="-top-0.5 -right-0.5" />}
-          </span>
-          <span className={cn("min-w-0 truncate font-medium", SIDE_NAV_FOLDS)}>
-            {subject ? displayCode(subject.code) : "General"}
-          </span>
-          <span className="flex-1" />
-          <span className={cn("flex shrink-0", SIDE_NAV_FOLDS)}>
-            <span className={cn("flex shrink-0", HIDDEN_UNDER_ACTIONS)}>
-              <RightSlot thread={t} status={status} />
+        {showSubject && (
+          <span className={cn("flex h-[18px] w-full min-w-0 items-center gap-1.5", ROW_META, UNDER_ACTIONS)}>
+            <span
+              className="relative flex shrink-0"
+              title={subject ? displayName(subject.name, subject.code) : "Not scoped to a subject"}
+            >
+              {subject ? <SubjectIcon code={subject.code} size={13} /> : <Books size={13} />}
+              {status && <FoldDot status={status} className="-top-0.5 -right-0.5" />}
             </span>
+            <span className={cn("min-w-0 truncate font-medium", SIDE_NAV_FOLDS)}>
+              {subject ? displayCode(subject.code) : "General"}
+            </span>
+            <span className="flex-1" />
+            <span className={cn("flex shrink-0", SIDE_NAV_FOLDS)}>{right}</span>
           </span>
-        </span>
-        <span className={cn("flex h-[21px] w-full min-w-0 items-center gap-1.5", ROW_TITLE, SIDE_NAV_FOLDS)}>
+        )}
+        <span
+          className={cn(
+            "flex h-[21px] w-full min-w-0 items-center gap-1.5",
+            ROW_TITLE,
+            SIDE_NAV_FOLDS,
+            !showSubject && UNDER_ACTIONS,
+          )}
+        >
           <span
             className={cn(
               "min-w-0 flex-1 truncate",
@@ -112,6 +126,7 @@ export const ThreadRow = memo(function ThreadRow({
           {t.lecture_id && (
             <VideoCamera size={12} className="shrink-0 text-muted-foreground opacity-70" aria-label="Lecture thread" />
           )}
+          {!showSubject && right}
         </span>
         <span className={cn("flex h-[18px] w-full min-w-0 items-center gap-1.5", ROW_PREVIEW, SIDE_NAV_FOLDS)}>
           <span className="min-w-0 flex-1 truncate">
@@ -127,6 +142,7 @@ export const ThreadRow = memo(function ThreadRow({
             <ProviderMark provider={t.provider} className="size-[13px]" />
           </span>
         </span>
+        {!showSubject && status && <FoldDot status={status} className="top-3 left-1" />}
       </button>
       <div
         className={cn(

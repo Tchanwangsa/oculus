@@ -408,7 +408,8 @@ themes are opt-in and keep the same structure.
   when it wants attention, `text-foreground/80` when read), and a 12.5px
   preview in `text-muted-foreground/85`, so a read title stays a clear step
   above the preview in every theme. Rows are tight inside (6px top, 7px
-  bottom, no line gap) and 2px apart.
+  bottom, no line gap) and 2px apart; a Subject group's heading has 16px
+  above and 4px below.
 - **Subject tabs share `SubjectPage` for width and gutters** under
   `SubjectLayout`'s header row (the toggle, the subject crumb, the tab's
   name) and beside the subject's nav column, `SubjectLoading` for skeleton

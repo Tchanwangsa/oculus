@@ -962,13 +962,16 @@ writes it into the draft once and drops it from the route.
 - The conversations column (`ThreadList`, its bodies in `threads/list/`) is
   a `SideNav`, the subject page's column ([ui.md](./ui.md)), 284px by
   default. Its header is the search field (`SideNavSearch`) with the
-  new-chat button at its right, lit while no thread is open. It resizes,
-  and ⌘⌥B or the toggle in the page header beside the title (`ChatPage`
-  owns the panel state) folds it away entirely. The chord acts only in the
+  new-chat button at its right, lit while no thread is open, and under them
+  the view switch, two tabs with icons (Recents, a clock; Subject, a book)
+  remembered per device (`oculus-chat-list-view`; any stored value but
+  `subject` opens on Recents, `readThreadView`). It resizes, and ⌘⌥B or the
+  toggle in the page header beside the title (`ChatPage` owns the panel
+  state) folds it away entirely. The chord acts only in the
   tab in front, since the subject column answers it too. Its resize handle
   goes with it, so it can't clash with a side panel's; the toggle or ⌘⌥B
   brings it back.
-- **The list is one section, "Recents"** (`RecentsBody`, its label a
+- **Recents view** (`RecentsBody`, one section under a
   `SideNavGroupLabel`): every thread newest first by `updated_at`, with no
   other headings, so Working, Approval, Question and Failed stay in place
   by time and nothing jumps to the top. The store reads the newest 100
@@ -977,8 +980,21 @@ writes it into the draft once and drops it from the route.
   (`showMoreThreads`). A thread a view holds that is older than those read
   is read by id and kept in the store (`loadThreads`, `getThreadsByIds`), and
   opening a search hit lists it at once (`keep`).
-- **Search** replaces the list while the field holds text: debounced
-  150 ms (`debouncedSearch`, a stale answer never lands), Esc or × clears,
+- **Subject view** (`SubjectBody`): the same threads the store has read,
+  grouped by subject (`groupBySubject`, General for none or a deleted
+  subject), groups in dragged order (`oculus-chat-groups-order`; a group
+  never placed sorts above, by recency), each folding
+  (`oculus-chat-groups-collapsed`), five rows then Show n more. A group
+  header is the subject's glyph and short code, so its rows drop their
+  subject line; its right slot is the count, a working ring while folded
+  over a running thread, and `+` on hover, a new chat in that group's scope
+  (`chatHref`'s `?s=`). Once a group shows every thread read, its Show more
+  calls `showMoreThreads` while older threads exist, so a subject's older
+  chats arrive a hundred threads at a time; a subject whose threads are all
+  older than those read has no group until then.
+- **Search** replaces the view while the field holds text: debounced
+  150 ms (`debouncedSearch`, a stale answer never lands), the view switch
+  steps aside, Esc or × clears,
   Enter opens the first result. No ⌘ key: ⌘K is the app's Search. A
   result is a row's three lines: subject and age, title, and the snippet. FTS
   wraps hits in private-use markers (`HIT_OPEN`/`HIT_CLOSE`), so a
@@ -989,7 +1005,8 @@ writes it into the draft once and drops it from the route.
   `displayCode` (General for none) with the status or the age at the right
   ("25m", `shortAge`); the title, with the lecture glyph; and the newest
   message from either side, flattened, with the provider mark at the
-  right. Line three is the thread's question while it asks one (`getPendingQuestions`),
+  right. The Subject view moves the right slot onto the title's line. Line
+  three is the thread's question while it asks one (`getPendingQuestions`),
   and while it works, what the run is doing if a view holds its rows
   (`activityLine`: "Reading week-7.pdf", "Thinking"). Previews are one read
   for the list (`useThreadPreviews`), redone when a listed thread's
@@ -998,10 +1015,11 @@ writes it into the draft once and drops it from the route.
   or Failed, dimmed otherwise, and always a step brighter and larger than
   the preview (`threads/rowType.ts`, [ui.md](./ui.md)). Hover shows a ⋯
   menu (open in a new tab, and delete, which arms the row's inline
-  confirm). It has no surface of its own: the subject line under it fades
-  out at its end and hides its status or age while it shows
-  (`UNDER_ACTIONS`). While the column folds, the subject glyph stays
-  longest with the status dot on its corner.
+  confirm). It has no surface of its own: the line under it (the subject's,
+  or the title's in the Subject view) fades out at its end and hides its
+  status or age while it shows (`UNDER_ACTIONS`). While the column folds,
+  the subject glyph stays longest with the status dot on its corner; in the
+  Subject view the dot sits by the title.
 - Bare `/chat` is a new thread: the composer docked at the bottom as in a
   thread, and above it the headline that names the subject (`DraftHero`) over
   the three latest threads (`RecentThreads`) — provider mark, title, a chip
