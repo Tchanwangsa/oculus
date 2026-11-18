@@ -55,7 +55,7 @@ export async function rasterizeRegion(region: WhiteboardRegion, notebook = false
 
 /** Supply the PNG promise during the click so Safari keeps clipboard user activation while pixels decode. */
 export function copyRegionImage(region: WhiteboardRegion, notebook = false): Promise<void> {
-  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error(globalThis.isSecureContext === false ? 'Copying to other apps requires an HTTPS connection. Use Duplicate to copy within the drawing.' : 'Image copying is unavailable here. Use Duplicate to copy within the canvas.');
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error(globalThis.isSecureContext === false ? 'Copying to other apps requires an HTTPS connection. Use Duplicate to copy within the drawing.' : 'Image copying is unavailable here. Use Duplicate to copy within the drawing.');
   return navigator.clipboard.write([new ClipboardItem({ 'image/png': rasterizeRegion(region, notebook).then(result => result.blob) })]);
 }
 
