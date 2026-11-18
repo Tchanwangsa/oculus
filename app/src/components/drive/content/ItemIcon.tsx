@@ -12,7 +12,7 @@ const KIND_TONE: Partial<Record<DriveKind, string>> = {
   slides: "text-reference-document",
   sheet: "text-reference-lesson",
   note: "text-reference-page",
-  canvas: "text-reference-page",
+  whiteboard: "text-reference-page",
   notebook: "text-reference-page",
   video: "text-reference-lecture",
 };

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { parseCanvasDocument, serializeCanvasDocument } from '../../../src/lib/canvas/model';
-import { boardFromPages } from '../../../src/lib/canvas/pdfCopy';
-import { selectableElements } from '../../../src/lib/canvas/paper';
+import { parseWhiteboardDocument, serializeWhiteboardDocument } from '../../../src/lib/whiteboard/model';
+import { boardFromPages } from '../../../src/lib/whiteboard/pdfCopy';
+import { selectableElements } from '../../../src/lib/whiteboard/paper';
 
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const image = (name: string) => ({ dataUrl: PNG, width: 1200, height: 1600, name });
@@ -10,7 +10,7 @@ describe('boardFromPages', () => {
   const sizes = [{ width: 595.28, height: 841.89 }, { width: 612, height: 792 }, { width: 842, height: 595 }];
   const doc = boardFromPages(sizes, [image('a — page 1'), image('a — page 2'), image('a — page 3')]);
 
-  test('is a canvas: no paper, the default white board', () => {
+  test('is a whiteboard: no paper, the default white board', () => {
     expect(doc.paper).toBeUndefined();
     expect(doc.background).toBe('#ffffff');
   });
@@ -31,8 +31,8 @@ describe('boardFromPages', () => {
     expect(doc.elements[0].x).toBeGreaterThanOrEqual(0);
     expect(doc.elements[0].y).toBeGreaterThanOrEqual(0);
   });
-  test('serialises as a valid canvas and round-trips', () => {
-    const again = parseCanvasDocument(serializeCanvasDocument(doc));
+  test('serialises as a valid whiteboard and round-trips', () => {
+    const again = parseWhiteboardDocument(serializeWhiteboardDocument(doc));
     expect(again.paper).toBeUndefined();
     expect(again.elements).toHaveLength(3);
   });

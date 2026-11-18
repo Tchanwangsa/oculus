@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { blobToBase64 } from '@/lib/encoding/base64';
 import { drawingKindOfPath } from './drawingKinds';
-import type { CanvasDocument } from './model';
+import type { WhiteboardDocument } from './model';
 import { pageFingerprints } from './pageFingerprints';
 import { pageRects } from './paper';
 import { renderPagePng } from './render';
@@ -13,14 +13,14 @@ export const SNAPSHOT_DELAY_MS = 1500;
 
 export interface SnapshotRequest { fileId: number; relativePath: string; pageCount: number; pages: { id: string; index: number; png: string }[] }
 export interface SnapshotDeps {
-  render: (document: CanvasDocument, pageId: string) => Promise<Blob | null>;
+  render: (document: WhiteboardDocument, pageId: string) => Promise<Blob | null>;
   encode: (blob: Blob) => Promise<string>;
   send: (request: SnapshotRequest) => Promise<void>;
 }
 export const nativeSnapshotDeps: SnapshotDeps = {
   render: (document, pageId) => renderPagePng(document, pageId, SNAPSHOT_SCALE),
   encode: blobToBase64,
-  send: ({ fileId, relativePath, pageCount, pages }) => invoke('canvas_write_page_snapshots', { fileId, relativePath, pageCount, pages }),
+  send: ({ fileId, relativePath, pageCount, pages }) => invoke('whiteboard_write_page_snapshots', { fileId, relativePath, pageCount, pages }),
 };
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -35,7 +35,7 @@ export class NotebookSnapshots {
   private path = '';
   private count = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private latest: { document: CanvasDocument; path: string } | undefined;
+  private latest: { document: WhiteboardDocument; path: string } | undefined;
   private queue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -45,8 +45,8 @@ export class NotebookSnapshots {
     private readonly delay = SNAPSHOT_DELAY_MS,
   ) {}
 
-  /** Only a `.notebook` has pages to picture; any other path (a `.canvas`, whatever it holds) is ignored. */
-  schedule(document: CanvasDocument, path: string): void {
+  /** Only a `.notebook` has pages to picture; any other path (a `.whiteboard`, whatever it holds) is ignored. */
+  schedule(document: WhiteboardDocument, path: string): void {
     if (drawingKindOfPath(path) !== 'notebook' || !document.paper) return;
     this.latest = { document, path };
     clearTimeout(this.timer);
@@ -93,5 +93,5 @@ export class NotebookSnapshots {
 
 /** Drops a deleted notebook's page pictures. */
 export function forgetPageSnapshots(fileId: number): void {
-  invoke('canvas_delete_page_snapshots', { fileId }).catch(error => console.error('[canvas] page pictures were not removed', error));
+  invoke('whiteboard_delete_page_snapshots', { fileId }).catch(error => console.error('[whiteboard] page pictures were not removed', error));
 }

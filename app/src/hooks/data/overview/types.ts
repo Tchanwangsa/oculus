@@ -34,7 +34,7 @@ export interface EventItem {
 
 export interface YoursItem {
   id: string;
-  kind: "chat" | "document" | "canvas" | "notebook" | "upload";
+  kind: "chat" | "document" | "whiteboard" | "notebook" | "upload";
   title: string;
   date: Date;
   href: string;

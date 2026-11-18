@@ -3,16 +3,16 @@ import type { ImportedFile } from "@/lib/files/uploads";
 import { isOwnPath } from "@/lib/files/libraryLayout";
 
 /**
- * The two drawing documents: a canvas (an infinite board, `<title>.canvas`) and a notebook
+ * The two drawing documents: a whiteboard (an infinite board, `<title>.whiteboard`) and a notebook
  * (pages, `<title>.notebook`), anywhere among a subject's own files. The same JSON and the same
  * editor; the kind is the file's extension, matching `DrawingKind` in
- * `app/src-tauri/src/library/files/canvases.rs`, and
- * never what the document holds: `paper` in a `.canvas` is kept and ignored (`notebookPaper`).
+ * `app/src-tauri/src/library/files/whiteboards.rs`, and
+ * never what the document holds: `paper` in a `.whiteboard` is kept and ignored (`notebookPaper`).
  */
-export type DrawingKind = "canvas" | "notebook";
+export type DrawingKind = "whiteboard" | "notebook";
 
 export const DRAWING_KINDS: Record<DrawingKind, { extension: string; category: string }> = {
-  canvas: { extension: ".canvas", category: "canvas" },
+  whiteboard: { extension: ".whiteboard", category: "whiteboard" },
   notebook: { extension: ".notebook", category: "notebook" },
 };
 
@@ -30,7 +30,7 @@ export function drawingKindOfPath(path: string): DrawingKind | null {
 
 /** A files row's drawing kind, by its category; null for anything that is not a drawing. */
 export function drawingKindOf(file: Pick<DbFile, "category">): DrawingKind | null {
-  return file.category === "canvas" || file.category === "notebook" ? file.category : null;
+  return file.category === "whiteboard" || file.category === "notebook" ? file.category : null;
 }
 
 export interface DrawingRowPlan {
@@ -41,7 +41,7 @@ export interface DrawingRowPlan {
 
 /**
  * What to change so `kind`'s rows match its files on disk. Only rows of that kind's category are
- * ever touched or removed: a notebook listing never removes a canvas row, nor the reverse.
+ * ever touched or removed: a notebook listing never removes a whiteboard row, nor the reverse.
  */
 export function planDrawingRows(kind: DrawingKind, onDisk: readonly ImportedFile[], rows: readonly DbFile[]): DrawingRowPlan {
   const { category } = DRAWING_KINDS[kind];

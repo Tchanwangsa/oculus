@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { arrowheadShape, elementArrowheads, elementBounds, elementHitTest, selectionBounds, screenToWorld, strokeDash, worldToScreen, zoomAt, simplifyPolyline } from '../../../src/lib/canvas/geometry';
-import type { CanvasElement } from '../../../src/lib/canvas/model';
+import { arrowheadShape, elementArrowheads, elementBounds, elementHitTest, selectionBounds, screenToWorld, strokeDash, worldToScreen, zoomAt, simplifyPolyline } from '../../../src/lib/whiteboard/geometry';
+import type { WhiteboardElement } from '../../../src/lib/whiteboard/model';
 
-const rect: CanvasElement = { id: 'a', type: 'rectangle', x: 100, y: 50, width: -80, height: 40, stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean', seed: 1 };
+const rect: WhiteboardElement = { id: 'a', type: 'rectangle', x: 100, y: 50, width: -80, height: 40, stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean', seed: 1 };
 
-describe('canvas geometry', () => {
+describe('whiteboard geometry', () => {
   test('normalizes dimensions and local stroke coordinates in selection bounds', () => {
     expect(elementBounds(rect)).toEqual({ x: 20, y: 50, width: 80, height: 40 });
     const stroke = { ...rect, type: 'freedraw' as const, points: [{ x: -20, y: -10 }, { x: 120, y: 100 }] };
@@ -43,7 +43,7 @@ describe('canvas geometry', () => {
     }
   });
   test('arrowheads hit at the ends that have one', () => {
-    const arrow: CanvasElement = { ...rect, type: 'arrow', x: 0, y: 0, points: [{ x: 0, y: 0 }, { x: 100, y: 0 }] };
+    const arrow: WhiteboardElement = { ...rect, type: 'arrow', x: 0, y: 0, points: [{ x: 0, y: 0 }, { x: 100, y: 0 }] };
     const nearEnd = { x: 88, y: 6 }, nearStart = { x: 12, y: 6 };
     expect(elementHitTest(arrow, nearEnd, 1)).toBeTrue();
     expect(elementHitTest(arrow, nearStart, 1)).toBeFalse();
@@ -72,7 +72,7 @@ describe('arrowhead descriptors', () => {
   });
   test('start heads point backwards along the first segment; defaults are a plain end arrow', () => {
     expect(round(arrowheadShape(line, 'start', 'arrow'))).toMatchObject({ tip: { x: 0, y: 0 }, wings: [{ x: 13.856, y: -8 }, { x: 13.856, y: 8 }] });
-    const arrow: CanvasElement = { ...rect, type: 'arrow', points: line };
+    const arrow: WhiteboardElement = { ...rect, type: 'arrow', points: line };
     expect(elementArrowheads(arrow).map(head => [head.type, head.tip.x])).toEqual([['arrow', 100]]);
     expect(elementArrowheads({ ...arrow, startArrowhead: 'dot', endArrowhead: 'none' }).map(head => [head.type, head.tip.x])).toEqual([['dot', 0]]);
     expect(elementArrowheads({ ...arrow, type: 'line', startArrowhead: 'dot' })).toEqual([]);

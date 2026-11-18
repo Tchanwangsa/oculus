@@ -17,7 +17,7 @@ export type KindId =
   | "page"
   | "note"
   | "upload"
-  | "canvas"
+  | "whiteboard"
   | "notebook"
   | "lecture"
   | "project"
@@ -51,7 +51,7 @@ const KINDS: Kind[] = [
   { id: "page", label: "Page", plural: "pages", description: "Canvas pages", icon: categoryIcon("page"), category: "page" },
   { id: "note", label: "Note", plural: "notes", description: "Your own documents", icon: categoryIcon("document"), category: "document", aliases: ["document"] },
   { id: "upload", label: "Upload", plural: "uploads", description: "Files you added", icon: UploadSimple, category: "upload" },
-  { id: "canvas", label: "Canvas", plural: "canvases", description: "Your drawing canvases", icon: categoryIcon("canvas"), category: "canvas", aliases: ["drawing"] },
+  { id: "whiteboard", label: "Whiteboard", plural: "whiteboards", description: "Your whiteboards", icon: categoryIcon("whiteboard"), category: "whiteboard", aliases: ["drawing"] },
   { id: "notebook", label: "Notebook", plural: "notebooks", description: "Your notebooks", icon: categoryIcon("notebook"), category: "notebook" },
   { id: "lecture", label: "Lecture", plural: "lectures", description: "Lecture recordings", icon: VideoCamera },
   { id: "project", label: "Project", plural: "projects", description: "Your projects", icon: Kanban },

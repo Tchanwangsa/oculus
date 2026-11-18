@@ -1,25 +1,25 @@
 import { polylineLength, polylinePoints } from './arrow/path';
-import { CANVAS_DEFAULTS, type CanvasElement, type CanvasPen, type Point } from './model';
+import { WHITEBOARD_DEFAULTS, type WhiteboardElement, type WhiteboardPen, type Point } from './model';
 
 /**
  * How each pen lays ink along a freehand stroke. A line pen strokes the stroke's smoothed path, once or in a few
  * passes; a nib pen fills an outline whose width changes along the stroke. `render.ts` and `renderSvg.ts` both draw
  * from here, so the screen, the PNG and the SVG agree.
  */
-export const PENS: readonly CanvasPen[] = ['ball', 'fountain', 'pencil', 'brush', 'sketch', 'chinese', 'dashed', 'dotted'];
-export const MARKERS: readonly CanvasPen[] = ['roundMarker', 'flatMarker'];
-export const PEN_LABELS: Record<CanvasPen, string> = {
+export const PENS: readonly WhiteboardPen[] = ['ball', 'fountain', 'pencil', 'brush', 'sketch', 'chinese', 'dashed', 'dotted'];
+export const MARKERS: readonly WhiteboardPen[] = ['roundMarker', 'flatMarker'];
+export const PEN_LABELS: Record<WhiteboardPen, string> = {
   ball: 'Ball pen', fountain: 'Fountain pen', pencil: 'Pencil', brush: 'Brush', sketch: 'Sketch', chinese: 'Chinese brush',
   dashed: 'Dashed pen', dotted: 'Dotted pen', roundMarker: 'Rounded marker', flatMarker: 'Rectangular marker',
 };
-export const penOf = (element: Pick<CanvasElement, 'pen'>): CanvasPen => element.pen ?? CANVAS_DEFAULTS.pen;
-export const isMarker = (pen: CanvasPen) => MARKERS.includes(pen);
+export const penOf = (element: Pick<WhiteboardElement, 'pen'>): WhiteboardPen => element.pen ?? WHITEBOARD_DEFAULTS.pen;
+export const isMarker = (pen: WhiteboardPen) => MARKERS.includes(pen);
 
 export interface PenPass { dx: number; dy: number; width: number; alpha: number }
 export interface PenLine { dash: number[]; cap: 'round' | 'butt'; join: 'round' | 'bevel'; passes: PenPass[] }
 
 /** How a line pen strokes the path, or null for a nib pen, which fills `nibOutline` instead. */
-export function penLine(element: CanvasElement): PenLine | null {
+export function penLine(element: WhiteboardElement): PenLine | null {
   const pen = penOf(element), width = element.strokeWidth, seed = element.seed;
   const line = (passes: PenPass[], dash: number[] = [], flat = false): PenLine => ({ dash, cap: flat ? 'butt' : 'round', join: flat ? 'bevel' : 'round', passes });
   const whole: PenPass = { dx: 0, dy: 0, width, alpha: 1 };
@@ -34,7 +34,7 @@ export function penLine(element: CanvasElement): PenLine | null {
 }
 
 /** A pen whose live stroke can be painted piece by piece: one solid pass with round ends. */
-export const paintsIncrementally = (element: CanvasElement) => {
+export const paintsIncrementally = (element: WhiteboardElement) => {
   const pen = penOf(element);
   // A colour with its own alpha would darken where separately painted pieces overlap.
   return (pen === 'ball' || pen === 'roundMarker') && /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(element.stroke);
@@ -44,7 +44,7 @@ const NIB_ANGLE = Math.PI / 4;
 const ramp = (value: number, from: number, to: number) => Math.min(1, Math.max(0, (value - from) / (to - from)));
 
 /** A nib pen's width at `along` of `length` world units into the stroke, heading at `angle`. */
-function nibWidth(pen: CanvasPen, base: number, along: number, length: number, angle: number): number {
+function nibWidth(pen: WhiteboardPen, base: number, along: number, length: number, angle: number): number {
   // A broad nib held at 45°: full width across it, a hairline along it.
   if (pen === 'fountain') return base * (0.3 + 0.9 * Math.abs(Math.sin(angle - NIB_ANGLE)));
   const fromEnd = length - along;
@@ -90,7 +90,7 @@ const n = (value: number) => Math.round(value * 100) / 100;
  * A nib pen's ink as SVG path data, local to the element: a disc at every sample and a quad joining each pair, all
  * wound the same way so a nonzero fill is their union. Empty for a line pen.
  */
-export function nibOutline(element: CanvasElement): string {
+export function nibOutline(element: WhiteboardElement): string {
   if (penLine(element)) return '';
   const pen = penOf(element), base = element.strokeWidth, points = polylinePoints(element);
   if (points.length === 1) return disc(points[0], base / 2);

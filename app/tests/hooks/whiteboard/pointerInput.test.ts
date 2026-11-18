@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { createCanvasDocument, type CanvasElement } from '@/lib/canvas/model';
+import { createWhiteboardDocument, type WhiteboardElement } from '@/lib/whiteboard/model';
 import { createHarness, key, pointer, type Editor, type Harness } from './harness';
 
 // Pencil and touch behaviour confirmed on an iPad with Apple Pencil; these keep it from regressing.
@@ -16,13 +16,13 @@ function setup(eraserAutoReturn = false) { h = createHarness({ localViewport: tr
 beforeEach(() => setup());
 
 describe('erasing beside imported pages', () => {
-  const image: CanvasElement = {
+  const image: WhiteboardElement = {
     id: 'page', type: 'image', x: 0, y: 0, width: 200, height: 200,
     stroke: '#000', fill: 'transparent', strokeWidth: 1, style: 'clean', seed: 1,
     dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=', naturalWidth: 200, naturalHeight: 200,
   };
   test('eraser taps and drags leave an image untouched without adding undo steps', () => {
-    h.render({ ...createCanvasDocument(), elements: [image] });
+    h.render({ ...createWhiteboardDocument(), elements: [image] });
     select('eraser');
     stroke(1, 'mouse'); h.render();
     editor().pointerDown(pointer(2, 'mouse', 100, 100)); editor().pointerUp(pointer(2, 'mouse', 100, 100)); h.render();
@@ -31,10 +31,10 @@ describe('erasing beside imported pages', () => {
     expect(editor().canUndo).toBe(false);
   });
   test('eraser deletes ink over or under an image and undo restores only the ink', () => {
-    const ink: CanvasElement = { ...image, id: 'ink', type: 'freedraw', x: 10, y: 10, width: 30, height: 20, points: [{ x: 0, y: 0 }, { x: 30, y: 20 }] };
+    const ink: WhiteboardElement = { ...image, id: 'ink', type: 'freedraw', x: 10, y: 10, width: 30, height: 20, points: [{ x: 0, y: 0 }, { x: 30, y: 20 }] };
     for (const elements of [[image, ink], [ink, image]]) {
       h = createHarness();
-      h.render({ ...createCanvasDocument(), elements });
+      h.render({ ...createWhiteboardDocument(), elements });
       select('eraser'); stroke(1, 'mouse'); h.render();
       expect(editor().documentRef.current.elements).toEqual([image]);
       editor().history(); h.render();
@@ -42,7 +42,7 @@ describe('erasing beside imported pages', () => {
     }
   });
   test('selecting an image then using the trash handler deletes it and remains undoable', () => {
-    h.render({ ...createCanvasDocument(), elements: [image] });
+    h.render({ ...createWhiteboardDocument(), elements: [image] });
     select('select');
     editor().pointerDown(pointer(1, 'mouse', 100, 100)); editor().pointerUp(pointer(1, 'mouse', 100, 100)); h.render();
     expect(editor().selection).toEqual(['page']);
@@ -231,6 +231,6 @@ describe('Return after erasing', () => {
     editor().pointerDown(pointer(2, 'touch')); editor().pointerDown(pointer(3, 'touch', 100, 100));
     editor().pointerUp(pointer(3, 'touch', 100, 100)); editor().pointerUp(pointer(2, 'touch')); h.render();
     expect(editor().tool).toBe('eraser');
-    expect(editor().documentRef.current).toMatchObject({ elements: createCanvasDocument().elements });
+    expect(editor().documentRef.current).toMatchObject({ elements: createWhiteboardDocument().elements });
   });
 });

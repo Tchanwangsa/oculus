@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
-import { isMarker } from '@/lib/canvas/pens';
-import type { StylePatch } from '@/lib/canvas/style';
+import { isMarker } from '@/lib/whiteboard/pens';
+import type { StylePatch } from '@/lib/whiteboard/style';
 import type { SectionProps } from './InspectorSection';
 
 const MIN = 0.5, STEP = 0.5;

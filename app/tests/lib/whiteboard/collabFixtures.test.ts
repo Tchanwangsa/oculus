@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseCanvasDocument, serializeCanvasDocument } from '../../../src/lib/canvas/model';
-import { applyCanvasTransaction, sameValue } from '../../../src/lib/canvas/collaboration';
+import { parseWhiteboardDocument, serializeWhiteboardDocument } from '../../../src/lib/whiteboard/model';
+import { applyWhiteboardTransaction, sameValue } from '../../../src/lib/whiteboard/collaboration';
 
-// The same files drive the Rust authority's tests (`canvases/authority/tests/`),
+// The same files drive the Rust authority's tests (`whiteboards/authority/tests/`),
 // so the reference implementation and the native port cannot drift apart.
 const FIXTURES = join(import.meta.dir, '../../fixtures');
-const MODEL = join(FIXTURES, 'canvas-model');
-const COLLAB = join(FIXTURES, 'canvas-collab');
+const MODEL = join(FIXTURES, 'whiteboard-model');
+const COLLAB = join(FIXTURES, 'whiteboard-collab');
 const files = (dir: string) => readdirSync(dir).filter(name => name.endsWith('.json')).sort();
 
 /** The error codes the authority reports, from the reference implementation's messages. */
@@ -20,28 +20,28 @@ function errorCode(error: unknown): string {
   return 'invalid';
 }
 
-describe('canvas model fixtures', () => {
+describe('whiteboard model fixtures', () => {
   for (const name of files(join(MODEL, 'valid'))) {
     test(`accepts ${name} and serializes it canonically`, () => {
       const text = readFileSync(join(MODEL, 'valid', name), 'utf8');
       const canonical = join(MODEL, 'serialized', name);
-      expect(serializeCanvasDocument(parseCanvasDocument(text))).toBe(existsSync(canonical) ? readFileSync(canonical, 'utf8') : text);
+      expect(serializeWhiteboardDocument(parseWhiteboardDocument(text))).toBe(existsSync(canonical) ? readFileSync(canonical, 'utf8') : text);
     });
   }
   for (const name of files(join(MODEL, 'invalid'))) {
     test(`rejects ${name}`, () => {
-      expect(() => parseCanvasDocument(readFileSync(join(MODEL, 'invalid', name), 'utf8'))).toThrow();
+      expect(() => parseWhiteboardDocument(readFileSync(join(MODEL, 'invalid', name), 'utf8'))).toThrow();
     });
   }
 });
 
-describe('canvas transaction fixtures', () => {
+describe('whiteboard transaction fixtures', () => {
   for (const name of files(COLLAB)) {
     const fixture = JSON.parse(readFileSync(join(COLLAB, name), 'utf8'));
     test(`${name}: ${fixture.name}`, () => {
-      const document = parseCanvasDocument(JSON.stringify(fixture.document));
+      const document = parseWhiteboardDocument(JSON.stringify(fixture.document));
       let outcome: { ok: unknown } | { error: string };
-      try { outcome = { ok: applyCanvasTransaction(document, fixture.transaction) }; } catch (error) { outcome = { error: errorCode(error) }; }
+      try { outcome = { ok: applyWhiteboardTransaction(document, fixture.transaction) }; } catch (error) { outcome = { error: errorCode(error) }; }
       if ('error' in fixture.expect) {
         expect(outcome).toEqual({ error: fixture.expect.error });
       } else {

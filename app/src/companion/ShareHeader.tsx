@@ -38,7 +38,7 @@ export function ShareHeader({ state, onDownloadDraft, onRetry }: { state: ShareC
         <span className="truncate">{LABEL[status]}</span>
         {status === "saving" && state.pendingOps > 1 ? <span className="text-muted-foreground tabular-nums">{state.pendingOps} changes</span> : null}
       </span>
-      {state.clients > 0 && status !== "ended" ? <span className="hidden shrink-0 items-center gap-1.5 text-xs min-[600px]:inline-flex text-muted-foreground tabular-nums" title="Devices on this canvas">
+      {state.clients > 0 && status !== "ended" ? <span className="hidden shrink-0 items-center gap-1.5 text-xs min-[600px]:inline-flex text-muted-foreground tabular-nums" title="Devices on this whiteboard">
         <UsersIcon size={14} aria-hidden />{state.clients} {state.clients === 1 ? "device" : "devices"}
       </span> : null}
     </div>

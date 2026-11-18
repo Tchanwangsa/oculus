@@ -1,39 +1,39 @@
 import { beforeAll, describe, expect, test } from 'bun:test';
-import { initSync } from '../../../canvas-core/pkg/oculus_canvas_core';
-import { getCanvasEngineStatus, hitTest, loadCanvasEngine, simplifyPoints, visibleElements } from '../../../src/lib/canvas/engine';
-import { boundsIntersect, elementBounds, elementHitTest, simplifyPolyline } from '../../../src/lib/canvas/geometry';
-import { arrowPath } from '../../../src/lib/canvas/arrow/path';
-import type { CanvasArrowhead, CanvasArrowType, CanvasElement } from '../../../src/lib/canvas/model';
+import { initSync } from '../../../whiteboard-core/pkg/oculus_whiteboard_core';
+import { getWhiteboardEngineStatus, hitTest, loadWhiteboardEngine, simplifyPoints, visibleElements } from '../../../src/lib/whiteboard/engine';
+import { boundsIntersect, elementBounds, elementHitTest, simplifyPolyline } from '../../../src/lib/whiteboard/geometry';
+import { arrowPath } from '../../../src/lib/whiteboard/arrow/path';
+import type { WhiteboardArrowhead, WhiteboardArrowType, WhiteboardElement } from '../../../src/lib/whiteboard/model';
 
 beforeAll(async () => {
-  initSync({ module: await Bun.file(new URL('../../../canvas-core/pkg/oculus_canvas_core_bg.wasm', import.meta.url)).arrayBuffer() });
-  await loadCanvasEngine();
+  initSync({ module: await Bun.file(new URL('../../../whiteboard-core/pkg/oculus_whiteboard_core_bg.wasm', import.meta.url)).arrayBuffer() });
+  await loadWhiteboardEngine();
 });
 
-const arrowheads: CanvasArrowhead[] = ['none', 'arrow', 'triangle', 'dot', 'bar', 'diamond'];
-const arrowTypes: CanvasArrowType[] = ['sharp', 'curved', 'elbow'];
+const arrowheads: WhiteboardArrowhead[] = ['none', 'arrow', 'triangle', 'dot', 'bar', 'diamond'];
+const arrowTypes: WhiteboardArrowType[] = ['sharp', 'curved', 'elbow'];
 function heads(i: number) { return { startArrowhead: arrowheads[i % 6], endArrowhead: arrowheads[(i * 5 + 1) % 6] }; }
-const types: CanvasElement['type'][] = ['rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text'];
-const elements: CanvasElement[] = Array.from({ length: 280 }, (_, i) => ({
+const types: WhiteboardElement['type'][] = ['rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text'];
+const elements: WhiteboardElement[] = Array.from({ length: 280 }, (_, i) => ({
   id: String(i), type: types[i % types.length], x: (i % 20) * 200 - 1000, y: Math.floor(i / 20) * 160 - 400,
   width: i % 3 ? 100 : -100, height: 90, stroke: '#111111', fill: i % 2 ? 'transparent' : '#dddddd', strokeWidth: 1 + i % 4,
   style: 'clean', seed: i, ...(i % 7 >= 3 && i % 7 <= 5 ? { points: [{ x: 0, y: 0 }, { x: 30, y: 70 }, { x: 100, y: 90 }] } : {}),
   ...(i % 7 === 4 ? { ...heads(i), arrowType: arrowTypes[i % 3] } : {}), ...(i % 7 <= 2 && i % 5 === 1 ? { text: 'Label' } : {}),
 }));
-const arrows: CanvasElement[] = arrowheads.flatMap((start, i) => (['none', 'arrow'] as const).map((end, j) => ({
+const arrows: WhiteboardElement[] = arrowheads.flatMap((start, i) => (['none', 'arrow'] as const).map((end, j) => ({
   id: `arrow-${i}-${j}`, type: 'arrow' as const, x: i * 300, y: j * 300, width: 120, height: -60, stroke: '#111111', fill: 'transparent', strokeWidth: 1 + i % 3,
   style: 'clean' as const, seed: i, startArrowhead: start, endArrowhead: end, ...(i % 2 ? { points: [{ x: 0, y: 0 }, { x: 40, y: 10 }, { x: 120, y: -60 }] } : {}),
 })));
 /** Curves end on a tangent that no flattened segment shares; an elbow's last segment is shorter than its head. */
-const shaped: CanvasElement[] = arrowheads.flatMap((start, i) => arrowTypes.map((arrowType, j) => ({
+const shaped: WhiteboardElement[] = arrowheads.flatMap((start, i) => arrowTypes.map((arrowType, j) => ({
   id: `shaped-${i}-${j}`, type: 'arrow' as const, x: i * 300, y: 1000 + j * 300, width: 120, height: -6, stroke: '#111111', fill: 'transparent', strokeWidth: 1 + j,
   style: 'clean' as const, seed: i, arrowType, startArrowhead: start, endArrowhead: arrowheads[(i + 1) % 6],
   points: arrowType === 'elbow' ? [{ x: 0, y: 0 }, { x: 0, y: 40 }, { x: 120, y: 40 }, { x: 120, y: -6 }] : [{ x: 0, y: 0 }, { x: 30, y: 60 }, { x: 90, y: -50 }, { x: 120, y: -6 }],
 })));
 
-describe('retained Rust canvas engine', () => {
+describe('retained Rust whiteboard engine', () => {
   test('actually loads WebAssembly and matches reference hit tests across the scene', () => {
-    expect(getCanvasEngineStatus()).toBe('rust');
+    expect(getWhiteboardEngineStatus()).toBe('rust');
     for (let y = -420; y < 1800; y += 47) for (let x = -1020; x < 2900; x += 53) {
       const point = { x, y };
       const expected = [...elements].reverse().find(el => elementHitTest(el, point, 4))?.id ?? null;
@@ -59,12 +59,12 @@ describe('retained Rust canvas engine', () => {
     expect(hitTest(arrows, { x: 612, y: 1 }, 0)).toBe('arrow-2-0');
   });
   test('a labelled hollow shape is hit inside, as in the reference', () => {
-    const hollow: CanvasElement = { ...elements[0], id: 'hollow', type: 'rectangle', x: 0, y: 0, width: 100, height: 100, fill: 'transparent' };
+    const hollow: WhiteboardElement = { ...elements[0], id: 'hollow', type: 'rectangle', x: 0, y: 0, width: 100, height: 100, fill: 'transparent' };
     expect(hitTest([hollow], { x: 50, y: 50 }, 0)).toBeNull();
     for (const type of ['rectangle', 'ellipse', 'diamond'] as const) expect(hitTest([{ ...hollow, type, text: 'Label' }], { x: 50, y: 50 }, 0)).toBe('hollow');
   });
   test('images match reference hits and culling throughout their normalized bounds', () => {
-    const images: CanvasElement[] = Array.from({ length: 12 }, (_, i) => ({ ...elements[0], id: `image-${i}`, type: 'image', x: i * 80 - 200, y: i % 2 ? -30 : 50, width: i % 3 ? 100 : -100, height: i % 2 ? -60 : 60, fill: 'transparent', strokeWidth: 0 }));
+    const images: WhiteboardElement[] = Array.from({ length: 12 }, (_, i) => ({ ...elements[0], id: `image-${i}`, type: 'image', x: i * 80 - 200, y: i % 2 ? -30 : 50, width: i % 3 ? 100 : -100, height: i % 2 ? -60 : 60, fill: 'transparent', strokeWidth: 0 }));
     for (let y = -100; y <= 150; y += 7) for (let x = -320; x <= 800; x += 13) {
       const point = { x, y };
       expect(hitTest(images, point, 0)).toBe([...images].reverse().find(el => elementHitTest(el, point, 0))?.id ?? null);

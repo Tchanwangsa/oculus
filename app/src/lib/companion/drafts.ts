@@ -1,13 +1,13 @@
-import { measureCanvas, measureCanvasAsync } from "@/lib/canvas/diagnostics";
-import type { CanvasTransaction } from "@/lib/canvas/collaboration";
+import { measureWhiteboard, measureWhiteboardAsync } from "@/lib/whiteboard/diagnostics";
+import type { WhiteboardTransaction } from "@/lib/whiteboard/collaboration";
 import type { DraftStorage } from "./env";
 import type { ShareOp } from "./protocol";
 
 /**
- * What survives a reload of a shared-canvas tab, per origin and share id: the
+ * What survives a reload of a shared-whiteboard tab, per origin and share id: the
  * client's identity and seq counter, the op in flight (resent unchanged, so the
  * server can answer a replay), the unconfirmed edits as a transaction against
- * the shared canvas, and the draft drawing for download. Within the same epoch
+ * the shared whiteboard, and the draft drawing for download. Within the same epoch
  * the pending edits are rebased onto the fresh snapshot; from another epoch the
  * draft is only offered for download, never replayed.
  */
@@ -18,9 +18,9 @@ export interface ShareDraftRecord {
   /** The lowest seq this client may still use: past the op in flight, whose fate may be unknown. */
   seqFloor: number;
   inflight: ShareOp | null;
-  pending: CanvasTransaction | null;
+  pending: WhiteboardTransaction | null;
   /** Edits relative to the sent operation's result; null includes an unchanged result. */
-  afterInflight?: CanvasTransaction | null;
+  afterInflight?: WhiteboardTransaction | null;
   /** A revision that already contains the sent op, even if its HTTP reply is pending. */
   inflightRevision?: number;
   /** A kept conflict stays an explicit choice across reloads. */
@@ -69,7 +69,7 @@ export async function readDraft(storage: DraftStorage | null, shareId: string): 
 /** Stores only operations; complete drawings have their own key. */
 export async function writeDraft(storage: DraftStorage | null, shareId: string, record: ShareOpRecord): Promise<boolean> {
   if (!storage) return false;
-  try { await measureCanvasAsync("storage.operations", () => storage.setItem(draftKey(shareId), measureCanvas("storage.serialize-operations", () => JSON.stringify(record)))); return true; }
+  try { await measureWhiteboardAsync("storage.operations", () => storage.setItem(draftKey(shareId), measureWhiteboard("storage.serialize-operations", () => JSON.stringify(record)))); return true; }
   catch { return false; }
 }
 
@@ -77,7 +77,7 @@ export async function writeDraft(storage: DraftStorage | null, shareId: string, 
 export async function writeDrawingDraft(storage: DraftStorage | null, shareId: string, record: ShareRecovery | null): Promise<boolean> {
   if (!storage) return false;
   try {
-    if (record) await measureCanvasAsync("storage.drawing", () => storage.setItem(drawingDraftKey(shareId), `{"epoch":${JSON.stringify(record.epoch)},"savedAt":${record.savedAt},"draft":${record.draft}}`));
+    if (record) await measureWhiteboardAsync("storage.drawing", () => storage.setItem(drawingDraftKey(shareId), `{"epoch":${JSON.stringify(record.epoch)},"savedAt":${record.savedAt},"draft":${record.draft}}`));
     else await storage.removeItem(drawingDraftKey(shareId));
     return true;
   } catch { return false; }

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { CanvasDocument, CanvasElement } from '@/lib/canvas/model';
+import type { WhiteboardDocument, WhiteboardElement } from '@/lib/whiteboard/model';
 import { createHarness, key, pointer, type Editor, type Harness } from './harness';
 
 let h: Harness;
 const editor = () => h.editor;
 const last = () => h.published[h.published.length - 1];
-const ids = (document: CanvasDocument = editor().documentRef.current) => document.elements.map(element => element.id);
+const ids = (document: WhiteboardDocument = editor().documentRef.current) => document.elements.map(element => element.id);
 function select(tool: Parameters<Editor['setTool']>[0]) { editor().setTool(tool); h.render(); }
 function drag(from: [number, number], to: [number, number], id = 1) {
   editor().pointerDown(pointer(id, 'mouse', ...from));
@@ -16,8 +16,8 @@ function drag(from: [number, number], to: [number, number], id = 1) {
 const undo = () => { editor().history(); h.render(); };
 const redo = () => { editor().history(true); h.render(); };
 /** Another device's stroke, as a host would merge it: a fresh document object. */
-function collaboratorStroke(base: CanvasDocument, id = 'theirs'): CanvasDocument {
-  const element: CanvasElement = { id, type: 'freedraw', x: 300, y: 300, width: 10, height: 10, points: [{ x: 0, y: 0 }, { x: 10, y: 10 }], stroke: '#000', fill: 'transparent', strokeWidth: 2, style: 'clean', seed: 1 };
+function collaboratorStroke(base: WhiteboardDocument, id = 'theirs'): WhiteboardDocument {
+  const element: WhiteboardElement = { id, type: 'freedraw', x: 300, y: 300, width: 10, height: 10, points: [{ x: 0, y: 0 }, { x: 10, y: 10 }], stroke: '#000', fill: 'transparent', strokeWidth: 2, style: 'clean', seed: 1 };
   return { ...structuredClone(base), elements: [...structuredClone(base.elements), element] };
 }
 beforeEach(() => { h = createHarness(); select('rectangle'); });

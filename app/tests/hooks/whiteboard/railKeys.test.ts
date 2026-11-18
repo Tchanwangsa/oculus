@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import type { CanvasTool } from '@/lib/canvas/model';
+import type { WhiteboardTool } from '@/lib/whiteboard/model';
 import { createHarness, key } from './harness';
 
 describe('the rail shortcuts are each tool\'s letter', () => {
-  const tools: [string, CanvasTool][] = [
+  const tools: [string, WhiteboardTool][] = [
     ['s', 'select'], ['l', 'lasso'], ['g', 'hand'], ['c', 'capture'], ['p', 'freedraw'], ['h', 'highlighter'], ['e', 'eraser'], ['t', 'text'],
     ['r', 'rectangle'], ['o', 'ellipse'], ['d', 'diamond'], ['a', 'arrow'], ['n', 'line'],
   ];

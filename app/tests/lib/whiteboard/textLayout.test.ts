@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { canvasFont, labelBox, layoutShapeLabel, layoutTextElement, wrapLines, type TextMeasure } from '../../../src/lib/canvas/renderText';
-import type { CanvasElement } from '../../../src/lib/canvas/model';
+import { canvasFont, labelBox, layoutShapeLabel, layoutTextElement, wrapLines, type TextMeasure } from '../../../src/lib/whiteboard/renderText';
+import type { WhiteboardElement } from '../../../src/lib/whiteboard/model';
 
 const tenPerChar = (line: string) => line.length * 10;
 const measure: TextMeasure = line => tenPerChar(line);
-const shape: CanvasElement = { id: 's', type: 'rectangle', x: 10, y: 20, width: 200, height: 100, stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean', seed: 1, text: 'one two', fontSize: 20 };
+const shape: WhiteboardElement = { id: 's', type: 'rectangle', x: 10, y: 20, width: 200, height: 100, stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean', seed: 1, text: 'one two', fontSize: 20 };
 
-describe('canvas text wrapping', () => {
+describe('whiteboard text wrapping', () => {
   test('wraps greedily by words and keeps explicit and empty lines', () => {
     expect(wrapLines('alpha beta gamma', 100, tenPerChar)).toEqual(['alpha beta', 'gamma']);
     expect(wrapLines('a\n\nb', 100, tenPerChar)).toEqual(['a', '', 'b']);
@@ -19,7 +19,7 @@ describe('canvas text wrapping', () => {
   });
 });
 
-describe('canvas label layout', () => {
+describe('whiteboard label layout', () => {
   test('label boxes lose the padding; ellipses and diamonds use their inscribed box', () => {
     expect(labelBox(shape)).toEqual({ x: 8, y: 8, width: 184, height: 84 });
     expect(labelBox({ ...shape, width: -200 })).toEqual({ x: -192, y: 8, width: 184, height: 84 });
@@ -30,7 +30,7 @@ describe('canvas label layout', () => {
     expect(labelBox({ ...shape, width: 10, height: 4 })).toEqual({ x: 5, y: 2, width: 0, height: 0 });
   });
   test('places lines per horizontal and vertical alignment, centred by default', () => {
-    const at = (patch: Partial<CanvasElement>) => layoutShapeLabel({ ...shape, ...patch }, measure).lines.map(({ x, y }) => ({ x, y }));
+    const at = (patch: Partial<WhiteboardElement>) => layoutShapeLabel({ ...shape, ...patch }, measure).lines.map(({ x, y }) => ({ x, y }));
     expect(at({})).toEqual([{ x: 100, y: 40 }]);
     expect(at({ textAlign: 'left', verticalAlign: 'top' })).toEqual([{ x: 8, y: 12 }]);
     expect(at({ textAlign: 'right', verticalAlign: 'bottom' })).toEqual([{ x: 192, y: 68 }]);
@@ -44,7 +44,7 @@ describe('canvas label layout', () => {
     expect(new Set(fonts)).toEqual(new Set(['20 mono']));
   });
   test('standalone text aligns its explicit lines within its own width', () => {
-    const text: CanvasElement = { ...shape, type: 'text', width: 120, height: 67.2, text: 'ab\ncd', fontSize: 24 };
+    const text: WhiteboardElement = { ...shape, type: 'text', width: 120, height: 67.2, text: 'ab\ncd', fontSize: 24 };
     expect(layoutTextElement(text).lines.map(line => line.x)).toEqual([0, 0]);
     expect(layoutTextElement({ ...text, textAlign: 'center' }).lines.map(line => line.x)).toEqual([60, 60]);
     expect(layoutTextElement({ ...text, textAlign: 'right' }).lines.map(line => line.x)).toEqual([120, 120]);

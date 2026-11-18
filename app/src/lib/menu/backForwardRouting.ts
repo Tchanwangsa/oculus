@@ -1,7 +1,7 @@
 /**
  * What the View menu's Back and Forward (⌘[ and ⌘]) do. The menu takes those
  * keys before the app's webview sees them, so a focused control that gives
- * them another meaning (a drawing canvas's layer order) registers here; else
+ * them another meaning (a whiteboard's layer order) registers here; else
  * the pane's history steps (`components/tabs/strip/useTabMenuEvents.ts`).
  */
 

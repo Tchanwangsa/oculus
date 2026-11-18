@@ -1,4 +1,4 @@
-import type { TraceFields } from '@/lib/canvas/diagnostics';
+import type { TraceFields } from '@/lib/whiteboard/diagnostics';
 
 /** Positive liveness records distinguish a quiet page from a page losing input. */
 export class InputHealth {

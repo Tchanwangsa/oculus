@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { createCanvasDocument, type CanvasDocument, type CanvasPen } from '@/lib/canvas/model';
-import { worldToScreen } from '@/lib/canvas/geometry';
-import { PENS, isMarker } from '@/lib/canvas/pens';
-import { drawElement } from '@/lib/canvas/render';
+import { createWhiteboardDocument, type WhiteboardDocument, type WhiteboardPen } from '@/lib/whiteboard/model';
+import { worldToScreen } from '@/lib/whiteboard/geometry';
+import { PENS, isMarker } from '@/lib/whiteboard/pens';
+import { drawElement } from '@/lib/whiteboard/render';
 import { createHarness, key, pointer, type Harness } from './harness';
 
 type Call = [string, ...unknown[]];
@@ -95,8 +95,8 @@ describe('freehand ink on the live layer', () => {
     expectCleared(ink); expectCleared(tail);
   });
 
-  test.each<CanvasPen>(['ball', 'flatMarker'])('%s follows the same notebook page clip as the committed stroke', pen => {
-    const document = { ...createCanvasDocument(), paper: { gap: 10, pages: [{ id: 'one', width: 100, height: 100 }, { id: 'two', width: 160, height: 100 }] } };
+  test.each<WhiteboardPen>(['ball', 'flatMarker'])('%s follows the same notebook page clip as the committed stroke', pen => {
+    const document = { ...createWhiteboardDocument(), paper: { gap: 10, pages: [{ id: 'one', width: 100, height: 100 }, { id: 'two', width: 160, height: 100 }] } };
     const h = createHarness({ kind: 'notebook', size: { width: 208, height: 300 } }, document), { scene, ink, tail } = layers(h);
     const onPage = (x: number, y: number) => {
       const screen = worldToScreen({ x, y }, h.editor.documentRef.current.viewport);
@@ -145,8 +145,8 @@ describe('freehand ink on the live layer', () => {
   });
 
   test('a shared stroke arrives during a local annotation on a locked PDF page', () => {
-    const doc = createCanvasDocument(), backdrop = { id: 'pdf', type: 'image' as const, locked: true, x: 0, y: 0, width: 500, height: 700, stroke: '#111', strokeWidth: 1, fill: 'transparent', style: 'clean' as const, seed: 1 };
-    const initial: CanvasDocument = { ...doc, elements: [backdrop] };
+    const doc = createWhiteboardDocument(), backdrop = { id: 'pdf', type: 'image' as const, locked: true, x: 0, y: 0, width: 500, height: 700, stroke: '#111', strokeWidth: 1, fill: 'transparent', style: 'clean' as const, seed: 1 };
+    const initial: WhiteboardDocument = { ...doc, elements: [backdrop] };
     const h = createHarness({ localViewport: true, size: { width: 400, height: 300 } }, initial), { ink, tail, scene } = layers(h);
     h.editor.pointerDown(pointer(1)); h.editor.pointerMove(pointer(1, 'pen', 80, 40));
     h.editor.pointerDown(pointer(2, 'touch')); h.editor.pointerCancel(pointer(2, 'touch'));
@@ -162,7 +162,7 @@ describe('freehand ink on the live layer', () => {
     expectCleared(ink); expectCleared(tail);
   });
 
-  test.each([...PENS.filter(pen => pen !== 'ball'), 'flatMarker'] as CanvasPen[])('%s uses the committed pen passes on the tail', pen => {
+  test.each([...PENS.filter(pen => pen !== 'ball'), 'flatMarker'] as WhiteboardPen[])('%s uses the committed pen passes on the tail', pen => {
     const h = createHarness(), { tail, layer } = layers(h);
     if (isMarker(pen)) { h.editor.setTool('highlighter'); h.render(); }
     h.editor.changeStyle({ pen, opacity: 0.37, strokeWidth: 7 }); h.render();

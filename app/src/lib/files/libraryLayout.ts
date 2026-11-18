@@ -54,7 +54,7 @@ const SYNCED_FILES = new Map([
 /** The student's own kinds, by extension; anything else is an upload. */
 const OWN_EXTENSIONS: [extension: string, category: string][] = [
   [".md", "document"],
-  [".canvas", "canvas"],
+  [".whiteboard", "whiteboard"],
   [".notebook", "notebook"],
 ];
 

@@ -4,7 +4,7 @@ import { loadSubjectThreads } from "@/hooks/data/overview/rows";
 import { date, file, first, second, sqlite, strip, thread } from "./fixtures";
 
 test("Yours includes creation and edits in their own weeks using UTC local-row stamps", () => {
-  const files = ["document", "canvas", "notebook", "upload", "file"].map((category, id) => file({ id, category, content_changed_at: sqlite(20) }));
+  const files = ["document", "whiteboard", "notebook", "upload", "file"].map((category, id) => file({ id, category, content_changed_at: sqlite(20) }));
   expect(deriveYours(1, strip, first, files, [], [])).toHaveLength(4);
   expect(deriveYours(1, strip, second, files, [], []).every((item) => item.date.getTime() === date(20).getTime())).toBe(true);
   const items = deriveYours(1, strip, first, files, [thread({ updated_at: sqlite(20) })], [thread(), thread({ id: 2, subject_id: 2 })]);

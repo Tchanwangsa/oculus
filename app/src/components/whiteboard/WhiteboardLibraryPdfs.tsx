@@ -2,20 +2,20 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { FilePdfIcon, MagnifyingGlassIcon, SpinnerGapIcon } from '@phosphor-icons/react';
 import { Input } from '@/components/ui/input';
 import { useScrollFade } from '@/hooks/ui/useScrollFade';
-import { useCanvasPlatform, type CanvasLibraryPdf } from '@/lib/canvas/platform';
+import { useWhiteboardPlatform, type WhiteboardLibraryPdf } from '@/lib/whiteboard/platform';
 import { displayCode } from '@/lib/format/format';
 import { cn } from '@/lib/utils';
 
-/** The host supplies the library, so the shared canvas never imports desktop SQL. */
-export function CanvasLibraryPdfs({ disabled, onChoose }: {
+/** The host supplies the library, so the shared whiteboard never imports desktop SQL. */
+export function WhiteboardLibraryPdfs({ disabled, onChoose }: {
   disabled: boolean;
-  onChoose: (file: CanvasLibraryPdf) => void;
+  onChoose: (file: WhiteboardLibraryPdf) => void;
 }) {
-  const platform = useCanvasPlatform();
+  const platform = useWhiteboardPlatform();
   const listId = useId();
   const list = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
-  const [answer, setAnswer] = useState<{ query: string; files: CanvasLibraryPdf[] } | null>(null);
+  const [answer, setAnswer] = useState<{ query: string; files: WhiteboardLibraryPdf[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const pending = answer?.query !== query;

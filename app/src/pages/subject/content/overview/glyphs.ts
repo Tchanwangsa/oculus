@@ -37,7 +37,7 @@ export function eventGlyph(item: EventItem): Glyph {
 const YOURS: Record<YoursItem["kind"], Glyph> = {
   chat: { Icon: ChatCircle, tone: MUTED },
   document: { Icon: NotePencil, tone: "text-reference-page" },
-  canvas: { Icon: Scribble, tone: "text-reference-page" },
+  whiteboard: { Icon: Scribble, tone: "text-reference-page" },
   notebook: { Icon: Notebook, tone: "text-reference-page" },
   upload: { Icon: UploadSimple, tone: MUTED },
 };

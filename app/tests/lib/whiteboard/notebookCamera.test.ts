@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   A4, clampCamera, keepOnPage, pageAt, pageContaining, pageInView, pageLocator, pageView, visiblePageCentre, zoomLimits, type Paper,
-} from '../../../src/lib/canvas/paper';
+} from '../../../src/lib/whiteboard/paper';
 
 // Two A4 pages, 24 apart: page one spans y 0..842, page two 866..1708, both x -297.5..297.5.
 const paper: Paper = { pages: [{ id: 'p1', ...A4 }, { id: 'p2', ...A4 }] };

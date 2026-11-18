@@ -1,7 +1,7 @@
 {
   "name": "paper null is no change",
   "document": {
-    "type": "oculus-canvas",
+    "type": "oculus-whiteboard",
     "version": 1,
     "elements": [],
     "viewport": {
@@ -27,7 +27,7 @@
   },
   "expect": {
     "ok": {
-      "type": "oculus-canvas",
+      "type": "oculus-whiteboard",
       "version": 1,
       "elements": [],
       "viewport": {

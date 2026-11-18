@@ -1,55 +1,55 @@
-import { measureCanvas, traceCanvas } from '@/lib/canvas/diagnostics';
+import { measureWhiteboard, traceWhiteboard } from '@/lib/whiteboard/diagnostics';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type MouseEvent, type ClipboardEvent } from 'react';
-import { CANVAS_DEFAULTS, LABELLED_TYPES, type CanvasDocument, type CanvasElement, type CanvasTool, type CanvasViewport, type Point } from '@/lib/canvas/model';
-import { elementBounds, pointInBounds, screenToWorld, selectionBounds, zoomAt, type Bounds } from '@/lib/canvas/geometry';
-import { hitTest, visibleElements } from '@/lib/canvas/engine';
-import { drawElement, paintCanvas, pointEditTarget, elementResizeHandles, selectedBounds } from '@/lib/canvas/render';
-import { LiveStroke } from '@/lib/canvas/liveStroke';
-import { paintsIncrementally } from '@/lib/canvas/pens';
-import { pointDrag, pointHandleAt } from '@/lib/canvas/arrow/handles';
-import { endAt, movePoint, removePoint } from '@/lib/canvas/arrow/points';
+import { WHITEBOARD_DEFAULTS, LABELLED_TYPES, type WhiteboardDocument, type WhiteboardElement, type WhiteboardTool, type WhiteboardViewport, type Point } from '@/lib/whiteboard/model';
+import { elementBounds, pointInBounds, screenToWorld, selectionBounds, zoomAt, type Bounds } from '@/lib/whiteboard/geometry';
+import { hitTest, visibleElements } from '@/lib/whiteboard/engine';
+import { drawElement, paintWhiteboard, pointEditTarget, elementResizeHandles, selectedBounds } from '@/lib/whiteboard/render';
+import { LiveStroke } from '@/lib/whiteboard/liveStroke';
+import { paintsIncrementally } from '@/lib/whiteboard/pens';
+import { pointDrag, pointHandleAt } from '@/lib/whiteboard/arrow/handles';
+import { endAt, movePoint, removePoint } from '@/lib/whiteboard/arrow/points';
 import { EDITABLE, onEdit } from '@/lib/menu/editRouting';
 import { onBackForward } from '@/lib/menu/backForwardRouting';
-import { CANVAS_CLIPBOARD_MIME, serializeCanvasClipboard, parseCanvasClipboard, cloneCanvasElements } from '@/lib/canvas/renderClipboard';
-import { applyElementChanges, type ElementChanges, type StackedAdditions } from '@/lib/canvas/changes';
-import { cutAlong, cutPieces, ERASER_SIZES, startCut, sweepTouches, type EraserMode, type EraserSize, type StrokeCut } from '@/lib/canvas/erase';
-import { boxBounds, boxSelection } from '@/lib/canvas/boxSelect';
-import { lassoSelection } from '@/lib/canvas/lasso';
-import { activePreset, loadInkPresets, patchPreset, saveInkPresets, selectPreset, toolPresets, type InkPresets, type InkTool } from '@/lib/canvas/inkPresets';
-import { buildTemplate, type CanvasTemplate } from '@/lib/canvas/templates';
-import { elementPage } from '@/lib/canvas/renderPaper';
-import { canReorder, reorderElements, type LayerMove } from '@/lib/canvas/layers';
-import { bindArrowEnd, findBindingSnap, followBindings, moveElements, sameSnap, sceneLookup, type BindingSnap } from '@/lib/canvas/bindings';
-import { moveSegment, releaseSegment } from '@/lib/canvas/elbow/segments';
-import { commitTextEdit, labelTargetAt, stylePatchChanges } from '@/lib/canvas/labels';
-import { resizeBounds, resizeElements } from '@/lib/canvas/resize';
-import { placeImagesIn, type CanvasImageSource } from '@/lib/canvas/mediaPlacement';
-import { TouchViewportGesture } from '@/lib/canvas/touchViewport';
-import { VelocityTracker, eventTime, glide, gliding } from '@/lib/canvas/momentum';
-import { loadCamera, loadToolState, saveCamera, saveToolState } from '@/lib/canvas/viewState';
-import { applyCanvasTransaction, diffCanvasContent, hasCanvasChanges, sameValue, type CanvasTransaction } from '@/lib/canvas/collaboration';
-import { CAPTURE_LIFT_DELAY_MS, type CaptureHoldIndicator, copyRegionImage, rasterizeRegion, regionHandleAt, moveRegion, regionBounds, resizeRegion, type CanvasRegion } from '@/lib/canvas/region';
-import { asDataUrl } from '@/lib/canvas/importMedia';
-import { secureId } from '@/lib/canvas/ids';
+import { WHITEBOARD_CLIPBOARD_MIME, serializeWhiteboardClipboard, parseWhiteboardClipboard, cloneWhiteboardElements } from '@/lib/whiteboard/renderClipboard';
+import { applyElementChanges, type ElementChanges, type StackedAdditions } from '@/lib/whiteboard/changes';
+import { cutAlong, cutPieces, ERASER_SIZES, startCut, sweepTouches, type EraserMode, type EraserSize, type StrokeCut } from '@/lib/whiteboard/erase';
+import { boxBounds, boxSelection } from '@/lib/whiteboard/boxSelect';
+import { lassoSelection } from '@/lib/whiteboard/lasso';
+import { activePreset, loadInkPresets, patchPreset, saveInkPresets, selectPreset, toolPresets, type InkPresets, type InkTool } from '@/lib/whiteboard/inkPresets';
+import { buildTemplate, type WhiteboardTemplate } from '@/lib/whiteboard/templates';
+import { elementPage } from '@/lib/whiteboard/renderPaper';
+import { canReorder, reorderElements, type LayerMove } from '@/lib/whiteboard/layers';
+import { bindArrowEnd, findBindingSnap, followBindings, moveElements, sameSnap, sceneLookup, type BindingSnap } from '@/lib/whiteboard/bindings';
+import { moveSegment, releaseSegment } from '@/lib/whiteboard/elbow/segments';
+import { commitTextEdit, labelTargetAt, stylePatchChanges } from '@/lib/whiteboard/labels';
+import { resizeBounds, resizeElements } from '@/lib/whiteboard/resize';
+import { placeImagesIn, type WhiteboardImageSource } from '@/lib/whiteboard/mediaPlacement';
+import { TouchViewportGesture } from '@/lib/whiteboard/touchViewport';
+import { VelocityTracker, eventTime, glide, gliding } from '@/lib/whiteboard/momentum';
+import { loadCamera, loadToolState, saveCamera, saveToolState } from '@/lib/whiteboard/viewState';
+import { applyWhiteboardTransaction, diffWhiteboardContent, hasWhiteboardChanges, sameValue, type WhiteboardTransaction } from '@/lib/whiteboard/collaboration';
+import { CAPTURE_LIFT_DELAY_MS, type CaptureHoldIndicator, copyRegionImage, rasterizeRegion, regionHandleAt, moveRegion, regionBounds, resizeRegion, type WhiteboardRegion } from '@/lib/whiteboard/region';
+import { asDataUrl } from '@/lib/whiteboard/importMedia';
+import { secureId } from '@/lib/whiteboard/ids';
 import {
-  clampCamera, isLocked, keepOnPage, notebookPaper, pageContaining, pageInView, pageView, selectableElements, templateOf, visiblePageCentre, zoomLimits, type CanvasKind, type PaperTemplate,
-} from '@/lib/canvas/paper';
-import { CANVAS_ZOOM_LIMITS } from '@/lib/canvas/zoom';
+  clampCamera, isLocked, keepOnPage, notebookPaper, pageContaining, pageInView, pageView, selectableElements, templateOf, visiblePageCentre, zoomLimits, type WhiteboardKind, type PaperTemplate,
+} from '@/lib/whiteboard/paper';
+import { WHITEBOARD_ZOOM_LIMITS } from '@/lib/whiteboard/zoom';
 import {
   addPage as addNotebookPage, duplicatePage, insertPage, insertPdfPages, movePage, removePage as removeNotebookPage, setAllPageTemplates, setPageSize, setPageTemplate, type PageSize,
-} from '@/lib/canvas/pages';
-import { elementsAtPage } from '@/lib/canvas/pageHits';
-import type { CanvasImportedImage } from '@/lib/canvas/importMedia';
+} from '@/lib/whiteboard/pages';
+import { elementsAtPage } from '@/lib/whiteboard/pageHits';
+import type { WhiteboardImportedImage } from '@/lib/whiteboard/importMedia';
 import {
   adoptElementStyle, colorLabel, inspectorSections, inspectorTarget, inspectorValues, newElementStyle, patchDrawingStyle,
   patchElementStyle, type DrawingStyle, type InspectorTarget, type StylePatch,
-} from '@/lib/canvas/style';
+} from '@/lib/whiteboard/style';
 
 /** `text` writes standalone text (`element` is the existing one or a template for a new one); `label` writes into a shape. */
-export interface TextDraft { kind: 'text' | 'label'; element: CanvasElement; text: string; existing: boolean }
-export interface CanvasInteractionOptions {
+export interface TextDraft { kind: 'text' | 'label'; element: WhiteboardElement; text: string; existing: boolean }
+export interface WhiteboardInteractionOptions {
   /** When given, pan and zoom go only here and never through `onChange`, so the host keeps its camera local. */
-  onViewportChange?: (viewport: CanvasViewport) => void;
+  onViewportChange?: (viewport: WhiteboardViewport) => void;
   /** Lifting the eraser after a completed erase returns to the tool chosen before it. */
   eraserAutoReturn?: boolean;
   /** Names the drawing for this device's saved camera (`viewState.ts`): it opens where it was left. */
@@ -60,9 +60,9 @@ export interface CanvasInteractionOptions {
   eraserSize?: EraserSize;
   /**
    * `notebook` binds the document to its pages: they are drawn, the camera stays on them, ink starts only on a page, stays
-   * on one and is clipped to it. `canvas` (the default) is a whiteboard; any `paper` it holds is kept and never used.
+   * on one and is clipped to it. `whiteboard` (the default) is an infinite board; any `paper` it holds is kept and never used.
    */
-  kind?: CanvasKind;
+  kind?: WhiteboardKind;
   /** Opens the host's image picker, which the I key asks for. */
   onInsertImage?: () => void;
 }
@@ -71,7 +71,7 @@ type Gesture = {
   mode: 'pan' | 'draw' | 'move' | 'resize' | 'point' | 'segment' | 'marquee' | 'lasso' | 'erase' | 'write' | 'capture' | 'crop' | 'capture-copy' | 'crop-confirm';
   start: Point;
   screen: Point;
-  original: CanvasDocument;
+  original: WhiteboardDocument;
   moved: boolean;
   pointerId: number;
   pointerType: string;
@@ -79,7 +79,7 @@ type Gesture = {
   ink?: LiveStroke;
   handle?: number;
   /** A point drag: the line or arrow being edited (with a midpoint's new point in it) and the point that follows the pointer; a segment drag: the elbow arrow and the segment's index. */
-  base?: CanvasElement;
+  base?: WhiteboardElement;
   index?: number;
   bounds?: Bounds;
   shift?: boolean;
@@ -96,41 +96,41 @@ type EraseState = {
   cuts: Map<string, StrokeCut>;
   /** A cut stroke's ID → its other pieces' IDs, which commit directly above it. */
   pieces: Map<string, string[]>;
-  ghosts: Map<string, CanvasElement[]>;
-  ghostList: CanvasElement[];
+  ghosts: Map<string, WhiteboardElement[]>;
+  ghostList: WhiteboardElement[];
 };
-const erasable = (element: CanvasElement) => element.type !== 'image' && !isLocked(element);
+const erasable = (element: WhiteboardElement) => element.type !== 'image' && !isLocked(element);
 /** The whole-stroke eraser's hit tolerance in screen pixels. */
 const STROKE_ERASER_TOLERANCE = 10;
 /** A partial cut drops pieces shorter than this many screen pixels (or half the stroke's width). */
 const SHORTEST_PIECE = 2;
 /** One undo step: the transactions each way, plus the layer order to put back elements the step re-adds (a transaction appends them). */
-type HistoryEntry = { undo: CanvasTransaction; redo: CanvasTransaction; undoOrder?: string[]; redoOrder?: string[] };
+type HistoryEntry = { undo: WhiteboardTransaction; redo: WhiteboardTransaction; undoOrder?: string[]; redoOrder?: string[] };
 const normalize = (a: Point, b: Point): Bounds => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y) });
 const newId = secureId;
 const newSeed = () => Math.floor(Math.random() * 100000);
-const NON_DRAWING = new Set<CanvasTool>(['select', 'lasso', 'hand', 'eraser', 'capture', 'crop']);
+const NON_DRAWING = new Set<WhiteboardTool>(['select', 'lasso', 'hand', 'eraser', 'capture', 'crop']);
 /** Tools that stay chosen after a stroke, rather than selecting what they drew. */
-const INK_TOOLS = new Set<CanvasTool>(['freedraw', 'highlighter']);
+const INK_TOOLS = new Set<WhiteboardTool>(['freedraw', 'highlighter']);
 /** The element type a drawing tool makes: the highlighter draws freehand strokes with a marker pen. */
-const toolType = (tool: CanvasTool) => (tool === 'highlighter' ? 'freedraw' : tool) as CanvasElement['type'];
-const inkTool = (tool: CanvasTool): InkTool | null => tool === 'freedraw' || tool === 'highlighter' ? tool : null;
-/** Rail keys, each its tool's first letter (`CanvasToolbar`); Shift+G is the grid, since G is Grab. */
-const TOOL_KEYS: Record<string, CanvasTool> = {
+const toolType = (tool: WhiteboardTool) => (tool === 'highlighter' ? 'freedraw' : tool) as WhiteboardElement['type'];
+const inkTool = (tool: WhiteboardTool): InkTool | null => tool === 'freedraw' || tool === 'highlighter' ? tool : null;
+/** Rail keys, each its tool's first letter (`WhiteboardToolbar`); Shift+G is the grid, since G is Grab. */
+const TOOL_KEYS: Record<string, WhiteboardTool> = {
   s: 'select', l: 'lasso', g: 'hand', c: 'capture', p: 'freedraw', h: 'highlighter', e: 'eraser', t: 'text',
   r: 'rectangle', o: 'ellipse', d: 'diamond', a: 'arrow', n: 'line',
 };
-const TEMPLATE_KEYS: Record<string, CanvasTemplate> = { m: 'matrix', y: 'axes2', z: 'axes3' };
-const sameContent = (a: CanvasDocument, b: CanvasDocument) => sameValue({ ...a, viewport: null }, { ...b, viewport: null });
-const removes = (transaction: CanvasTransaction) => transaction.edits.some(edit => edit.after === null);
+const TEMPLATE_KEYS: Record<string, WhiteboardTemplate> = { m: 'matrix', y: 'axes2', z: 'axes3' };
+const sameContent = (a: WhiteboardDocument, b: WhiteboardDocument) => sameValue({ ...a, viewport: null }, { ...b, viewport: null });
+const removes = (transaction: WhiteboardTransaction) => transaction.edits.some(edit => edit.after === null);
 
 /** Puts each element `transaction` added back after the element it followed in `order`, rather than on top. */
-function restoreLayerOrder(document: CanvasDocument, transaction: CanvasTransaction, order?: string[]): CanvasDocument {
+function restoreLayerOrder(document: WhiteboardDocument, transaction: WhiteboardTransaction, order?: string[]): WhiteboardDocument {
   const added = new Set(transaction.edits.filter(edit => edit.before === null).map(edit => edit.id));
   if (!order || !added.size) return document;
   const byId = new Map(document.elements.map(element => [element.id, element]));
   const rest = document.elements.filter(element => !added.has(element.id)), present = new Set(rest.map(element => element.id));
-  const after = new Map<string | null, CanvasElement[]>();
+  const after = new Map<string | null, WhiteboardElement[]>();
   let anchor: string | null = null;
   for (const id of order) {
     const element = added.has(id) ? byId.get(id) : undefined;
@@ -145,13 +145,13 @@ function restoreLayerOrder(document: CanvasDocument, transaction: CanvasTransact
 /** What moved the camera, for the companion's diagnostics. */
 type CameraCause = 'restore' | 'pan' | 'two-finger' | 'glide' | 'wheel' | 'page' | 'fit' | 'zoom' | 'first-fit' | 'resize' | 'external' | 'cancel' | 'publish' | 'other';
 /** A single camera write of 150 screen pixels or a quarter's zoom is logged with its cause; pans and glides move in small steps. */
-function traceJump(from: CanvasViewport, to: CanvasViewport, cause: CameraCause, clamped: boolean) {
+function traceJump(from: WhiteboardViewport, to: WhiteboardViewport, cause: CameraCause, clamped: boolean) {
   const dx = to.x - from.x, dy = to.y - from.y, zoom = to.zoom / from.zoom;
   if (Math.hypot(dx, dy) < 150 && zoom < 1.25 && zoom > 0.8) return;
-  traceCanvas('camera.jump', { cause, clamped, dx: Math.round(dx), dy: Math.round(dy), fromZoom: Math.round(from.zoom * 1000) / 1000, toZoom: Math.round(to.zoom * 1000) / 1000 });
+  traceWhiteboard('camera.jump', { cause, clamped, dx: Math.round(dx), dy: Math.round(dy), fromZoom: Math.round(from.zoom * 1000) / 1000, toZoom: Math.round(to.zoom * 1000) / 1000 });
 }
 
-export function useCanvasInteraction(document: CanvasDocument, onChange: (document: CanvasDocument) => void, options: CanvasInteractionOptions = {}) {
+export function useWhiteboardInteraction(document: WhiteboardDocument, onChange: (document: WhiteboardDocument) => void, options: WhiteboardInteractionOptions = {}) {
   const root = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const inkLayer = useRef<HTMLDivElement>(null);
@@ -163,10 +163,10 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   const optionsRef = useRef(options);
   optionsRef.current = options;
   /** Documents this pane handed to `onChange`; one coming back is an echo, never a remote change. */
-  const published = useRef(new WeakSet<CanvasDocument>());
+  const published = useRef(new WeakSet<WhiteboardDocument>());
   const [resumed] = useState(loadToolState);
-  const [tool, setTool] = useState<CanvasTool>(resumed.tool);
-  const previousTool = useRef<CanvasTool>('freedraw');
+  const [tool, setTool] = useState<WhiteboardTool>(resumed.tool);
+  const previousTool = useRef<WhiteboardTool>('freedraw');
   // Safari cannot say whether a Pencil is paired; its first pen contact turns one finger into navigation.
   const penSeen = useRef(false);
   const [style, setStyle] = useState<DrawingStyle>(resumed.style);
@@ -179,19 +179,19 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     return next;
   });
   /** What a tool's next element is drawn with: an ink tool's preset in use over the shared defaults. */
-  const toolStyle = (of: CanvasTool): DrawingStyle => { const ink = inkTool(of); return ink ? { ...style, ...activePreset(presets, ink) } : style; };
+  const toolStyle = (of: WhiteboardTool): DrawingStyle => { const ink = inkTool(of); return ink ? { ...style, ...activePreset(presets, ink) } : style; };
   const [grid, setGrid] = useState(true);
   const [selection, setSelection] = useState<string[]>([]);
   const [revision, setRevision] = useState(0);
   const [space, setSpace] = useState(false);
   const [resizeCursor, setResizeCursor] = useState<string | null>(null);
-  const [region, setRegion] = useState<CanvasRegion | null>(null);
-  const regionRef = useRef<CanvasRegion | null>(null);
+  const [region, setRegion] = useState<WhiteboardRegion | null>(null);
+  const regionRef = useRef<WhiteboardRegion | null>(null);
   const [regionCopyState, setRegionCopyState] = useState<'idle' | 'copying' | 'copied' | 'duplicating'>('idle');
   const [regionError, setRegionError] = useState<string | null>(null);
   const [captureHold, setCaptureHold] = useState<CaptureHoldIndicator | null>(null);
   const captureHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const captureGhost = useRef<{ snapshot: CanvasDocument; from: Bounds; to: Bounds } | undefined>(undefined);
+  const captureGhost = useRef<{ snapshot: WhiteboardDocument; from: Bounds; to: Bounds } | undefined>(undefined);
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
   /** The open draft and its latest text, read synchronously so a style change can commit it first and a later blur is a no-op. */
   const draftRef = useRef<TextDraft | null>(null);
@@ -217,13 +217,13 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   /** Two-finger navigation applies once a frame (`TouchViewportGesture.view`); the pending frame and its latest event's time. */
   const navFrame = useRef(0), navTime = useRef(0);
   /** Where and when the running glide started, for its diagnostics trace. */
-  const glideStats = useRef<{ start: number; from: CanvasViewport; source: string } | null>(null);
+  const glideStats = useRef<{ start: number; from: WhiteboardViewport; source: string } | null>(null);
   const traceGlideEnd = (reason: string) => {
     const stats = glideStats.current, to = documentRef.current.viewport;
     glideStats.current = null;
-    if (stats) traceCanvas('camera.glide-end', { reason, source: stats.source, durationMs: Math.round(performance.now() - stats.start), dx: Math.round(to.x - stats.from.x), dy: Math.round(to.y - stats.from.y) });
+    if (stats) traceWhiteboard('camera.glide-end', { reason, source: stats.source, durationMs: Math.round(performance.now() - stats.start), dx: Math.round(to.x - stats.from.x), dy: Math.round(to.y - stats.from.y) });
   };
-  const overrides = useRef(new Map<string, CanvasElement | null>());
+  const overrides = useRef(new Map<string, WhiteboardElement | null>());
   const marquee = useRef<Bounds | undefined>(undefined);
   /** What releasing the selection box now would select, and the bounds painted for the elements it would add. */
   const marqueePreview = useRef<{ ids: Set<string>; boxes: Bounds[] } | null>(null);
@@ -231,7 +231,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   const lasso = useRef<Point[] | undefined>(undefined);
   const erasing = useRef<EraseState | null>(null);
   /** The whole-stroke eraser's targets: what a point can reach minus what this erase already took; rebuilt only when either changes. */
-  const eraseTargets = useRef<{ owner: EraseState; source: readonly CanvasElement[]; taken: number; targets: CanvasElement[] } | null>(null);
+  const eraseTargets = useRef<{ owner: EraseState; source: readonly WhiteboardElement[]; taken: number; targets: WhiteboardElement[] } | null>(null);
   /** Where a hovering mouse or pen is, for the partial eraser's ring. */
   const eraserHover = useRef<Point | null>(null);
   const bindHint = useRef<BindingSnap | null>(null);
@@ -250,14 +250,14 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   const notebook = options.kind === 'notebook';
   const paintOptions = useRef({ grid, editingId: textDraft?.element.id, notebook });
   paintOptions.current = { grid, editingId: textDraft?.element.id, notebook };
-  /** A notebook's pages, or nothing on a canvas. */
+  /** A notebook's pages, or nothing on a whiteboard. */
   const boundPaper = () => notebookPaper(documentRef.current, paintOptions.current.notebook);
   const activeStroke = () => {
     const active = gesture.current;
     const element = active?.mode === 'draw' && active.id ? overrides.current.get(active.id) : null;
     return element?.type === 'freedraw' ? element : null;
   };
-  const beginInk = (element: CanvasElement) => {
+  const beginInk = (element: WhiteboardElement) => {
     const layer = inkLayer.current;
     if (!layer) return;
     if (!live.current) {
@@ -267,7 +267,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     }
     const paint = paintsIncrementally(element) ? undefined : drawElement;
     // Apply opacity once to the joined pieces. A whole-painted pen uses drawElement's own alpha passes.
-    layer.style.opacity = String(paint ? 1 : element.opacity ?? CANVAS_DEFAULTS.opacity);
+    layer.style.opacity = String(paint ? 1 : element.opacity ?? WHITEBOARD_DEFAULTS.opacity);
     live.current.begin(element, documentRef.current.viewport, size.current.pixelRatio, paint);
     live.current.draw(element, boundPaper());
     return live.current;
@@ -278,10 +278,10 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   };
   const zoomRange = () => {
     const paper = boundPaper();
-    return paper && size.current.width > 0 ? zoomLimits(paper, size.current) : CANVAS_ZOOM_LIMITS;
+    return paper && size.current.width > 0 ? zoomLimits(paper, size.current) : WHITEBOARD_ZOOM_LIMITS;
   };
   /** `viewport` kept on a notebook's pages (`clampCamera`); unchanged, the same object, anywhere else. */
-  const clampView = (viewport: CanvasViewport) => {
+  const clampView = (viewport: WhiteboardViewport) => {
     const paper = boundPaper();
     return paper ? clampCamera(paper, size.current, viewport) : viewport;
   };
@@ -291,17 +291,17 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     return !!paper && !pageContaining(paper, point);
   };
   /** What the pointer at `point` can reach: in a notebook only elements whose own page holds it, since the rest is clipped. */
-  const reachable = (elements: readonly CanvasElement[], point: Point) => {
+  const reachable = (elements: readonly WhiteboardElement[], point: Point) => {
     const paper = boundPaper();
     return paper ? elementsAtPage(paper, elements, point) : elements;
   };
   /** The selection's centre, which a notebook keeps on a page. */
-  const selectionCentre = (elements: readonly CanvasElement[]) => {
+  const selectionCentre = (elements: readonly WhiteboardElement[]) => {
     const bounds = selectionBounds(elements.filter(element => selected.current.has(element.id)));
     return bounds && { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
   };
   /** A move of the selection by `dx`, `dy`, shortened in a notebook so the selection's centre stays on a page. */
-  const moveDelta = (elements: readonly CanvasElement[], dx: number, dy: number) => {
+  const moveDelta = (elements: readonly WhiteboardElement[], dx: number, dy: number) => {
     const paper = boundPaper(), centre = paper && selectionCentre(elements);
     return paper && centre ? keepOnPage(paper, centre, { x: dx, y: dy }) : { x: dx, y: dy };
   };
@@ -309,7 +309,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
    * New elements moved as one so their centre is on a page in a notebook: to the nearest page edge, or with `toView` to
    * the middle of the page in view (for a paste from elsewhere).
    */
-  const placeOnPage = (elements: CanvasElement[], toView = false): CanvasElement[] => {
+  const placeOnPage = (elements: WhiteboardElement[], toView = false): WhiteboardElement[] => {
     const paper = boundPaper(), bounds = paper && selectionBounds(elements);
     if (!paper || !bounds) return elements;
     const centre = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
@@ -324,7 +324,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
 
   const redraw = useCallback(() => {
     if (frame.current) return;
-    frame.current = requestAnimationFrame(() => measureCanvas('canvas.paint', () => {
+    frame.current = requestAnimationFrame(() => measureWhiteboard('whiteboard.paint', () => {
       frame.current = 0;
       const context = canvas.current?.getContext('2d');
       // Hand the finished stroke to the scene in one frame, including when a new contact precedes this repaint.
@@ -334,7 +334,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       const erase = erasing.current, zoom = documentRef.current.viewport.zoom;
       const eraser = erase?.partial ? { center: erase.last, radius: erase.radius }
         : !erase && eraserHover.current && optionsRef.current.eraserMode === 'partial' ? { center: eraserHover.current, radius: ERASER_SIZES[optionsRef.current.eraserSize ?? 'medium'] / zoom } : undefined;
-      paintCanvas(context, documentRef.current, {
+      paintWhiteboard(context, documentRef.current, {
         ...size.current, ...paintOptions.current, inkId, selected: selected.current, ghosts: erase?.ghostList, eraser, pendingSelection: marqueePreview.current?.boxes,
         selectionColor: getComputedStyle(root.current!).getPropertyValue('--color-brand').trim() || '#5e6ad2',
         marquee: marquee.current ?? regionRef.current?.bounds, lasso: lasso.current, captureSelection: regionRef.current?.kind === 'capture' || gesture.current?.mode === 'capture', captureGhost: captureGhost.current, cropSource: regionRef.current?.source ? elementBounds(regionRef.current.source) : undefined, overrides: overrides.current, bindingHint: bindHint.current,
@@ -348,14 +348,14 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     redraw();
   }, [redraw]);
 
-  const emit = useCallback((next: CanvasDocument) => { published.current.add(next); onChangeRef.current(next); }, []);
+  const emit = useCallback((next: WhiteboardDocument) => { published.current.add(next); onChangeRef.current(next); }, []);
 
   /** `record` makes the change one undo step: the transaction from the current scene to `next`, so undo touches only this pane's edits. */
-  const publish = useCallback((next: CanvasDocument, record = false) => {
+  const publish = useCallback((next: WhiteboardDocument, record = false) => {
     if (record) {
-      const before = documentRef.current, redo = diffCanvasContent(before, next);
-      if (hasCanvasChanges(redo)) {
-        const undo = diffCanvasContent(next, before);
+      const before = documentRef.current, redo = diffWhiteboardContent(before, next);
+      if (hasWhiteboardChanges(redo)) {
+        const undo = diffWhiteboardContent(next, before);
         const entry: HistoryEntry = { undo, redo };
         if (removes(redo)) entry.undoOrder = before.elements.map(element => element.id);
         if (removes(undo)) entry.redoOrder = next.elements.map(element => element.id);
@@ -399,8 +399,8 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     const entry = (redo ? future : past).current.pop();
     if (!entry) return;
     const transaction = redo ? entry.redo : entry.undo;
-    let next: CanvasDocument;
-    try { next = restoreLayerOrder(applyCanvasTransaction(documentRef.current, transaction), transaction, redo ? entry.redoOrder : entry.undoOrder); }
+    let next: WhiteboardDocument;
+    try { next = restoreLayerOrder(applyWhiteboardTransaction(documentRef.current, transaction), transaction, redo ? entry.redoOrder : entry.undoOrder); }
     catch {
       setHistoryError(`${redo ? 'Redo' : 'Undo'} skipped: someone else has changed what it would restore, and their edit was kept.`);
       setRevision(value => value + 1);
@@ -413,7 +413,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   }, [choose, publish]);
 
   /** Moves the camera without a render, for every pointer sample of a pan. The one writer: a notebook's camera is clamped here. */
-  const setView = useCallback((requested: CanvasViewport, cause: CameraCause = 'other') => {
+  const setView = useCallback((requested: WhiteboardViewport, cause: CameraCause = 'other') => {
     const viewport = clampView(requested);
     traceJump(documentRef.current.viewport, viewport, cause, viewport !== requested);
     documentRef.current = { ...documentRef.current, viewport };
@@ -429,7 +429,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     return true;
   }, []);
   /** Every other camera move ends a glide; this one saves or re-renders the camera itself. */
-  const updateViewport = useCallback((viewport: CanvasViewport, save = true, cause: CameraCause = 'other') => {
+  const updateViewport = useCallback((viewport: WhiteboardViewport, save = true, cause: CameraCause = 'other') => {
     haltGlide(cause);
     setView(viewport, cause);
     redraw();
@@ -453,7 +453,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   const endPan = (glides: boolean, time: number, source: string) => {
     const measured = panVelocity.current.release(time), released = glides ? measured : null;
     const trace = panVelocity.current.lastRelease;
-    traceCanvas('camera.pan', {
+    traceWhiteboard('camera.pan', {
       source, glides, verdict: glides ? trace?.verdict ?? 'none' : 'not-allowed', travel: trace?.travel ?? 0, spanMs: trace?.spanMs ?? 0,
       vx: released ? Math.round(released.x * 100) / 100 : 0, vy: released ? Math.round(released.y * 100) / 100 : 0,
       handlingLagMs: Math.round(performance.now() - time), samples: trace?.samples ?? '',
@@ -479,7 +479,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
    * A document from outside this pane (another pane, a collaborator, a recovery copy) becomes the new base. The camera,
    * the gesture in progress, undo history, the text being written and the selection of shapes that still exist stay.
    */
-  const adoptExternal = (incoming: CanvasDocument) => {
+  const adoptExternal = (incoming: WhiteboardDocument) => {
     const local = documentRef.current;
     if (sameContent(local, incoming)) return;
     const base = { ...incoming, viewport: local.viewport };
@@ -523,7 +523,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       const rect = element.getBoundingClientRect();
       const pixelRatio = window.devicePixelRatio || 1;
       if (Math.round(rect.width) !== Math.round(size.current.width) || Math.round(rect.height) !== Math.round(size.current.height)) {
-        traceCanvas('canvas.resize', { fromWidth: Math.round(size.current.width), fromHeight: Math.round(size.current.height), width: Math.round(rect.width), height: Math.round(rect.height) });
+        traceWhiteboard('whiteboard.resize', { fromWidth: Math.round(size.current.width), fromHeight: Math.round(size.current.height), width: Math.round(rect.width), height: Math.round(rect.height) });
       }
       size.current = { width: rect.width, height: rect.height, pixelRatio };
       const width = Math.round(rect.width * pixelRatio), height = Math.round(rect.height * pixelRatio);
@@ -608,13 +608,13 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     return { screen, point: screenToWorld(screen, documentRef.current.viewport) };
   };
   const openDraft = (draft: TextDraft) => { draftRef.current = draft; draftValue.current = draft.text; setTextDraft(draft); };
-  const startText = (point: Point, element?: CanvasElement) => {
+  const startText = (point: Point, element?: WhiteboardElement) => {
     choose([]);
-    const template: CanvasElement = element ?? { id: newId(), type: 'text', x: point.x, y: point.y, width: 0, height: 0, seed: newSeed(), ...newElementStyle('text', style) };
+    const template: WhiteboardElement = element ?? { id: newId(), type: 'text', x: point.x, y: point.y, width: 0, height: 0, seed: newSeed(), ...newElementStyle('text', style) };
     openDraft({ kind: 'text', element: template, text: element?.text ?? '', existing: Boolean(element) });
   };
   /** The shape keeps its selection while its label is written, so the inspector shows its text options. */
-  const startLabel = (shape: CanvasElement) => {
+  const startLabel = (shape: WhiteboardElement) => {
     choose([shape.id]);
     openDraft({ kind: 'label', element: shape, text: shape.text ?? '', existing: true });
   };
@@ -626,24 +626,24 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if (hit && (hit.type === 'text' || LABELLED_TYPES.has(hit.type))) return hit;
     return labelTargetAt(elements, point, tolerance);
   };
-  const startWriting = (point: Point, element: CanvasElement) => element.type === 'text' ? startText(point, element) : startLabel(element);
+  const startWriting = (point: Point, element: WhiteboardElement) => element.type === 'text' ? startText(point, element) : startLabel(element);
   const clearCaptureHold = () => {
     if (captureHoldTimer.current !== null) clearTimeout(captureHoldTimer.current);
     captureHoldTimer.current = null; setCaptureHold(null);
   };
   useEffect(() => () => { if (captureHoldTimer.current !== null) clearTimeout(captureHoldTimer.current); }, []);
-  const updateRegion = (next: CanvasRegion | null) => {
+  const updateRegion = (next: WhiteboardRegion | null) => {
     clearCaptureHold();
     regionRef.current = next; setRegion(next); setRegionCopyState('idle'); setRegionError(null); marquee.current = next?.bounds; redraw();
   };
   const cancelRegion = () => { cancelGesture(); updateRegion(null); setTool('select'); root.current?.focus({ preventScroll: true }); };
-  const startCrop = (element?: CanvasElement) => {
+  const startCrop = (element?: WhiteboardElement) => {
     const source = element ?? documentRef.current.elements.find(item => selected.current.size === 1 && selected.current.has(item.id));
     if (!source || source.type !== 'image' || isLocked(source) || gesture.current) return;
     choose([]); setTool('crop'); root.current?.focus({ preventScroll: true });
     updateRegion({ kind: 'crop', source, snapshot: documentRef.current, bounds: elementBounds(source) });
   };
-  const completeRegion = (expected: CanvasRegion, image: CanvasImageSource, at?: Point) => {
+  const completeRegion = (expected: WhiteboardRegion, image: WhiteboardImageSource, at?: Point) => {
     if (!expected || regionRef.current !== expected || gesture.current) return false;
     const { bounds, source } = expected;
     if (source && !sameValue(documentRef.current.elements.find(item => item.id === source.id), source)) throw new Error('This image changed while cropping. Cancel and crop it again.');
@@ -677,11 +677,11 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       if (regionRef.current === expected) { setRegionCopyState('idle'); setRegionError(error instanceof Error ? error.message : String(error)); }
     }
   };
-  const duplicateCapture = async (expected: CanvasRegion, at: Point) => {
+  const duplicateCapture = async (expected: WhiteboardRegion, at: Point) => {
     setRegionCopyState('duplicating'); setRegionError(null);
     try {
       const result = await rasterizeRegion({ ...expected, snapshot: documentRef.current }, paintOptions.current.notebook);
-      completeRegion(expected, { dataUrl: await asDataUrl(result.blob), width: result.width, height: result.height, name: 'Canvas capture.png' }, at);
+      completeRegion(expected, { dataUrl: await asDataUrl(result.blob), width: result.width, height: result.height, name: 'Whiteboard capture.png' }, at);
     } catch (error) {
       if (regionRef.current === expected) setRegionError(error instanceof Error ? error.message : String(error));
     } finally { if (regionRef.current === expected) setRegionCopyState('idle'); }
@@ -704,9 +704,9 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       setCaptureHold({ point: active.start, phase: 'lifted' }); setResizeCursor('grabbing'); redraw();
     }, CAPTURE_LIFT_DELAY_MS);
   };
-  useEffect(() => { traceCanvas('tool.committed', { tool }); }, [tool]);
-  const chooseTool = (next: CanvasTool) => {
-    traceCanvas('tool.request', { previous: tool, next, gesture: gesture.current?.mode ?? 'none' });
+  useEffect(() => { traceWhiteboard('tool.committed', { tool }); }, [tool]);
+  const chooseTool = (next: WhiteboardTool) => {
+    traceWhiteboard('tool.request', { previous: tool, next, gesture: gesture.current?.mode ?? 'none' });
     if (next !== tool && activeStroke()) cancelGesture();
     if (next === 'crop') { startCrop(); return; }
     if (regionRef.current) { cancelGesture(); updateRegion(null); }
@@ -715,7 +715,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     setTool(next); bindHint.current = null; if (next !== 'select' && next !== 'lasso') choose([]);
   };
   /** Binds an arrow end at the pointer (⌘/Ctrl places it freely) and shows the target it binds to. */
-  const bindEnd = (arrow: CanvasElement, end: 'start' | 'end', point: Point, event: { metaKey: boolean; ctrlKey: boolean }) => {
+  const bindEnd = (arrow: WhiteboardElement, end: 'start' | 'end', point: Point, event: { metaKey: boolean; ctrlKey: boolean }) => {
     const bound = bindArrowEnd(arrow, end, point, documentRef.current.elements, documentRef.current.viewport.zoom, { live: overrides.current, free: event.metaKey || event.ctrlKey });
     bindHint.current = bound.snap;
     return bound.arrow;
@@ -729,7 +729,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   };
   /** Drops the gesture's preview without committing it; the scene was never changed during the gesture. */
   const dropGesture = () => {
-    traceCanvas('gesture.drop', { gesture: gesture.current?.mode ?? 'none' });
+    traceWhiteboard('gesture.drop', { gesture: gesture.current?.mode ?? 'none' });
     if (activeStroke()) setRevision(value => value + 1);
     live.current?.clear();
     clearCaptureHold(); captureGhost.current = undefined; gesture.current = null; overrides.current.clear(); marquee.current = undefined; lasso.current = undefined; bindHint.current = null;
@@ -744,7 +744,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     erase.ghostList = [...erase.ghosts.values()].flat();
   };
   /** The whole-stroke eraser at `point`: the topmost element it reaches that this erase has not already taken. */
-  const eraseWhole = (erase: EraseState, elements: readonly CanvasElement[], point: Point) => {
+  const eraseWhole = (erase: EraseState, elements: readonly WhiteboardElement[], point: Point) => {
     const source = reachable(elements, point);
     let cached = eraseTargets.current;
     if (cached?.owner !== erase || cached.source !== source || cached.taken !== erase.ghosts.size) {
@@ -757,10 +757,10 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     return true;
   };
   /** The partial eraser swept from `from` to `to`: strokes are cut where it passes, anything else it touches goes whole. */
-  const erasePartial = (erase: EraseState, elements: readonly CanvasElement[], from: Point, to: Point) => {
+  const erasePartial = (erase: EraseState, elements: readonly WhiteboardElement[], from: Point, to: Point) => {
     const r = erase.radius, paper = boundPaper(), zoom = documentRef.current.viewport.zoom;
     const area = { x: Math.min(from.x, to.x) - r, y: Math.min(from.y, to.y) - r, width: Math.abs(to.x - from.x) + r * 2, height: Math.abs(to.y - from.y) + r * 2 };
-    const changes = new Map<string, CanvasElement | null>();
+    const changes = new Map<string, WhiteboardElement | null>();
     for (const element of visibleElements(reachable(elements, to), area)) {
       if (!erasable(element)) continue;
       if (element.type !== 'freedraw') {
@@ -781,7 +781,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     return changes.size > 0;
   };
   /** Carries the erase through each pointer sample in turn, so a fast sweep between samples is still covered. */
-  const eraseThrough = (elements: readonly CanvasElement[], points: readonly Point[]) => {
+  const eraseThrough = (elements: readonly WhiteboardElement[], points: readonly Point[]) => {
     const erase = erasing.current;
     if (!erase) return;
     let changed = false;
@@ -791,7 +791,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     }
     if (changed) erase.ghostList = [...erase.ghosts.values()].flat();
   };
-  const startErase = (elements: readonly CanvasElement[], point: Point) => {
+  const startErase = (elements: readonly WhiteboardElement[], point: Point) => {
     const partial = optionsRef.current.eraserMode === 'partial', zoom = documentRef.current.viewport.zoom;
     const radius = (partial ? ERASER_SIZES[optionsRef.current.eraserSize ?? 'medium'] : STROKE_ERASER_TOLERANCE) / zoom;
     erasing.current = { partial, radius, last: point, cuts: new Map(), pieces: new Map(), ghosts: new Map(), ghostList: [] };
@@ -810,7 +810,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     marqueePreview.current = { ids, boxes };
   };
   const pointerDown = (event: PointerEvent<HTMLCanvasElement>, recoveringContact = false) => {
-    traceCanvas('gesture.down', { tool, pointerId: event.pointerId, pointerType: event.pointerType, contactWidth: Math.round(event.width || 0), contactHeight: Math.round(event.height || 0), recoveringContact, gesture: gesture.current?.mode ?? 'none', penSeen: penSeen.current, touches: touchViewport.current.count });
+    traceWhiteboard('gesture.down', { tool, pointerId: event.pointerId, pointerType: event.pointerType, contactWidth: Math.round(event.width || 0), contactHeight: Math.round(event.height || 0), recoveringContact, gesture: gesture.current?.mode ?? 'none', penSeen: penSeen.current, touches: touchViewport.current.count });
     if (!recoveringContact && event.button !== 0 && event.button !== 1) return;
     if (!recoveringContact && refusedPointer.current === event.pointerId) refusedPointer.current = null;
     // A contact during a glide stops it; a finger then holds the page, so lifting it does nothing and dragging scrolls on.
@@ -840,7 +840,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
         dropGesture(); redraw(); return;
       }
     } else if (touchViewport.current.active) { event.preventDefault(); return; }
-    if (gesture.current || textDraft) { traceCanvas('input.ignored', { reason: textDraft ? 'text-draft' : 'active-gesture', gesture: gesture.current?.mode ?? 'none' }); return; }
+    if (gesture.current || textDraft) { traceWhiteboard('input.ignored', { reason: textDraft ? 'text-draft' : 'active-gesture', gesture: gesture.current?.mode ?? 'none' }); return; }
     event.preventDefault();
     // WebKit can paste at a contenteditable's retained caret despite the canvas having DOM focus.
     globalThis.window?.getSelection()?.removeAllRanges();
@@ -916,7 +916,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     } else {
       if (offPage(point)) { refusedPointer.current = event.pointerId; releasePointer(event); return; }
       const type = toolType(tool);
-      let element: CanvasElement = {
+      let element: WhiteboardElement = {
         id: newId(), type, x: point.x, y: point.y, width: 0, height: 0,
         ...newElementStyle(type, toolStyle(tool)), seed: newSeed(),
         ...(['freedraw', 'line', 'arrow'].includes(type) ? { points: [{ x: 0, y: 0 }, { x: 0, y: 0 }] } : {}),
@@ -1084,7 +1084,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     return true;
   };
   const pointerUp = (event: PointerEvent<HTMLCanvasElement>) => {
-    traceCanvas('gesture.up', { tool, pointerId: event.pointerId, gesture: gesture.current?.mode ?? 'none', gesturePointerId: gesture.current?.pointerId ?? -1 });
+    traceWhiteboard('gesture.up', { tool, pointerId: event.pointerId, gesture: gesture.current?.mode ?? 'none', gesturePointerId: gesture.current?.pointerId ?? -1 });
     if (refusedPointer.current === event.pointerId) refusedPointer.current = null;
     if (endTouch(event)) return;
     const active = gesture.current;
@@ -1104,7 +1104,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if (active.mode === 'capture' || active.mode === 'crop') {
       const bounds = marquee.current;
       if (active.moved && bounds && bounds.width > 0 && bounds.height > 0) {
-        const next: CanvasRegion = { kind: active.mode, snapshot: active.mode === 'crop' ? regionRef.current!.snapshot : documentRef.current, source: active.mode === 'crop' ? regionRef.current?.source : undefined, bounds };
+        const next: WhiteboardRegion = { kind: active.mode, snapshot: active.mode === 'crop' ? regionRef.current!.snapshot : documentRef.current, source: active.mode === 'crop' ? regionRef.current?.source : undefined, bounds };
         updateRegion(next);
         if (active.mode === 'crop' && active.pointerType !== 'mouse') void applyCrop(next);
       } else marquee.current = regionRef.current?.bounds;
@@ -1140,7 +1140,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     dropGesture(); marquee.current = regionRef.current?.bounds; redraw();
   };
   const pointerCancel = (event: PointerEvent<HTMLCanvasElement>) => {
-    traceCanvas('gesture.cancel', { tool, pointerId: event.pointerId, gesture: gesture.current?.mode ?? 'none' });
+    traceWhiteboard('gesture.cancel', { tool, pointerId: event.pointerId, gesture: gesture.current?.mode ?? 'none' });
     // Only the contact that owns the gesture cancels it; a palm's cancel leaves the pen's stroke alone.
     if (!endTouch(event, true) && gesture.current?.pointerId === event.pointerId) cancelGesture();
     if (refusedPointer.current === event.pointerId) refusedPointer.current = null;
@@ -1163,7 +1163,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     requestAnimationFrame(() => root.current?.focus({ preventScroll: true }));
   };
   const flushDraft = () => { if (draftRef.current) commitText(draftValue.current); };
-  const insertImages = (images: readonly CanvasImageSource[], at?: Point) => {
+  const insertImages = (images: readonly WhiteboardImageSource[], at?: Point) => {
     if (gesture.current || !images.length) return;
     flushDraft();
     if (regionRef.current) cancelRegion();
@@ -1173,7 +1173,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     setTool('select');
   };
   /** Drops a ready-made figure (`templates.ts`) at the centre of the view, on a page in a notebook, and selects it. */
-  const insertTemplate = (kind: CanvasTemplate) => {
+  const insertTemplate = (kind: WhiteboardTemplate) => {
     if (gesture.current || touchViewport.current.active) return;
     flushDraft();
     if (regionRef.current) cancelRegion();
@@ -1227,7 +1227,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
    * then the view moves to page `focus` (of the result). Selected elements the operation removed leave the selection,
    * and a capture or crop in progress ends, since it holds the old layout.
    */
-  const editPages = (change: (document: CanvasDocument) => CanvasDocument, focus: (next: CanvasDocument) => number) => {
+  const editPages = (change: (document: WhiteboardDocument) => WhiteboardDocument, focus: (next: WhiteboardDocument) => number) => {
     if (gesture.current || touchViewport.current.active || !boundPaper()) return;
     flushDraft();
     const current = documentRef.current, next = change(current);
@@ -1238,7 +1238,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     publish(next, true);
     goToPage(focus(next));
   };
-  const pageCount = (document: CanvasDocument) => document.paper!.pages.length;
+  const pageCount = (document: WhiteboardDocument) => document.paper!.pages.length;
   const addPage = () => editPages(addNotebookPage, next => pageCount(next) - 1);
   const removePage = (index: number) => {
     const page = boundPaper()?.pages[index];
@@ -1260,7 +1260,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     }, () => index),
     setSize: (index: number, size: PageSize) => editPages(current => setPageSize(current, index, size), () => index),
     /** PDF pages, each on a new page of its own size, after page `index`. */
-    insertPdfPages: (index: number, sizes: readonly PageSize[], images: readonly CanvasImportedImage[]) =>
+    insertPdfPages: (index: number, sizes: readonly PageSize[], images: readonly WhiteboardImportedImage[]) =>
       editPages(current => insertPdfPages(current, index + 1, sizes, images), () => index + 1),
   };
   const fit = () => {
@@ -1268,7 +1268,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if (paper) { updateViewport(pageView(paper, size.current, currentPageIndex()), true, 'fit'); return; }
     const bounds = selectionBounds(documentRef.current.elements);
     if (!bounds) { updateViewport({ x: 0, y: 0, zoom: 1 }, true, 'fit'); return; }
-    const zoom = Math.min(2, Math.max(CANVAS_ZOOM_LIMITS.min, Math.min((size.current.width - 160) / Math.max(bounds.width, 1), (size.current.height - 180) / Math.max(bounds.height, 1))));
+    const zoom = Math.min(2, Math.max(WHITEBOARD_ZOOM_LIMITS.min, Math.min((size.current.width - 160) / Math.max(bounds.width, 1), (size.current.height - 180) / Math.max(bounds.height, 1))));
     updateViewport({ x: (size.current.width - bounds.width * zoom) / 2 - bounds.x * zoom, y: (size.current.height - bounds.height * zoom) / 2 - bounds.y * zoom, zoom }, true, 'fit');
   };
   const zoomTo = (zoom: number) => updateViewport(zoomAt(documentRef.current.viewport, { x: size.current.width / 2, y: size.current.height / 2 }, zoom, zoomRange()), true, 'zoom');
@@ -1288,7 +1288,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       event.preventDefault();
       const source = documentRef.current.elements.filter(element => selected.current.has(element.id));
       if (!source.length) return;
-      const elements = placeOnPage(cloneCanvasElements(source));
+      const elements = placeOnPage(cloneWhiteboardElements(source));
       commitChanges(new Map(elements.map(element => [element.id, element])));
       choose(elements.map(element => element.id));
     } else if (key === 'delete' || key === 'backspace') { event.preventDefault(); deleteSelected(); }
@@ -1325,22 +1325,22 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     }
     const elements = documentRef.current.elements.filter(element => selected.current.has(element.id));
     if (!elements.length) return;
-    const text = serializeCanvasClipboard(elements);
+    const text = serializeWhiteboardClipboard(elements);
     event.clipboardData.setData('text/plain', text);
-    try { event.clipboardData.setData(CANVAS_CLIPBOARD_MIME, text); } catch { /* Plain text remains portable where custom MIME is unavailable. */ }
+    try { event.clipboardData.setData(WHITEBOARD_CLIPBOARD_MIME, text); } catch { /* Plain text remains portable where custom MIME is unavailable. */ }
     event.preventDefault(); event.stopPropagation();
     lastPaste.current = { text, count: 0 };
     if (cut) deleteSelected();
   };
   const paste = (event: ClipboardEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest(EDITABLE) || gesture.current) return;
-    const text = event.clipboardData.getData(CANVAS_CLIPBOARD_MIME) || event.clipboardData.getData('text/plain');
-    const source = parseCanvasClipboard(text);
+    const text = event.clipboardData.getData(WHITEBOARD_CLIPBOARD_MIME) || event.clipboardData.getData('text/plain');
+    const source = parseWhiteboardClipboard(text);
     if (!source?.length) return;
     event.preventDefault(); event.stopPropagation();
     const count = lastPaste.current.text === text ? lastPaste.current.count + 1 : 1;
     lastPaste.current = { text, count };
-    const elements = placeOnPage(cloneCanvasElements(source, { x: 24 * count, y: 24 * count }), true);
+    const elements = placeOnPage(cloneWhiteboardElements(source, { x: 24 * count, y: 24 * count }), true);
     commitChanges(new Map(elements.map(element => [element.id, element])));
     choose(elements.map(element => element.id));
     setTool('select');
@@ -1372,9 +1372,9 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     region, startCrop, cancelRegion, completeRegion, copyRegion, duplicateRegion, captureHold, regionCopyState, regionError,
     canCrop: selection.length === 1 && documentRef.current.elements.some(item => selected.current.has(item.id) && item.type === 'image' && !isLocked(item)),
     textDraft, commitText, editText: (text: string) => { draftValue.current = text; },
-    pointerDown: (event: PointerEvent<HTMLCanvasElement>) => measureCanvas('handler.pointerdown', () => pointerDown(event)),
-    pointerMove: (event: PointerEvent<HTMLCanvasElement>) => measureCanvas('handler.pointermove', () => pointerMove(event), { tool, gesture: gesture.current?.mode ?? 'none' }),
-    pointerUp: (event: PointerEvent<HTMLCanvasElement>) => measureCanvas('handler.pointerup', () => pointerUp(event)), pointerCancel, cancelGesture,
+    pointerDown: (event: PointerEvent<HTMLCanvasElement>) => measureWhiteboard('handler.pointerdown', () => pointerDown(event)),
+    pointerMove: (event: PointerEvent<HTMLCanvasElement>) => measureWhiteboard('handler.pointermove', () => pointerMove(event), { tool, gesture: gesture.current?.mode ?? 'none' }),
+    pointerUp: (event: PointerEvent<HTMLCanvasElement>) => measureWhiteboard('handler.pointerup', () => pointerUp(event)), pointerCancel, cancelGesture,
     pointerLeave: () => {
       setResizeCursor(null);
       if (!gesture.current && (bindHint.current || eraserHover.current)) { bindHint.current = null; eraserHover.current = null; redraw(); }
@@ -1388,7 +1388,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     /** The pen's or highlighter's presets while it is chosen with nothing selected or being written; otherwise null. */
     inkPresets: ink && !selection.length && !textDraft ? { ...toolPresets(presets, ink), select: (at: number) => changePresets(current => selectPreset(current, ink, at)) } : null,
     zoomPercent, canZoomOut: zoomPercent > Math.round(range.min * 100), canZoomIn: zoomPercent < Math.round(range.max * 100), notebook,
-    /** A notebook's page controls and the page at the centre of the view; null on a canvas. */
+    /** A notebook's page controls and the page at the centre of the view; null on a whiteboard. */
     pages: paper ? {
       paper, count: paper.pages.length, index: currentPageIndex(), go: goToPage, add: addPage, remove: removePage, ...pageControls,
     } : null,

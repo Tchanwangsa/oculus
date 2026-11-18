@@ -1,7 +1,7 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { swatchBackground } from '@/components/ui/color/ColorPalette';
-import type { InkPreset } from '@/lib/canvas/inkPresets';
-import { PEN_LABELS, isMarker } from '@/lib/canvas/pens';
+import type { InkPreset } from '@/lib/whiteboard/inkPresets';
+import { PEN_LABELS, isMarker } from '@/lib/whiteboard/pens';
 import { cn } from '@/lib/utils';
 
 /** A preset as a dot of its ink: its colour and opacity, and its width as the dot's size (a marker's as a bar). */
@@ -12,7 +12,7 @@ function PresetDot({ preset }: { preset: InkPreset }) {
 }
 
 /** The ink tool's presets: one tap switches pen, colour, width and opacity together. Changing the look edits the one in use. */
-export function CanvasPresetBar({ items, active, onSelect, label }: { items: InkPreset[]; active: number; onSelect: (at: number) => void; label: string }) {
+export function WhiteboardPresetBar({ items, active, onSelect, label }: { items: InkPreset[]; active: number; onSelect: (at: number) => void; label: string }) {
   return <div role="group" aria-label={`${label} presets`} className="flex shrink-0 items-center gap-0.5 rounded-[10px] bg-muted p-0.5">
     {items.map((preset, i) => <Tooltip key={i}>
       <TooltipTrigger asChild>

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { createCanvasDocument, parseCanvasDocument, type CanvasDocument, type CanvasElement } from "@/lib/canvas/model";
+import { createWhiteboardDocument, parseWhiteboardDocument, type WhiteboardDocument, type WhiteboardElement } from "@/lib/whiteboard/model";
 import { ShareApi } from "@/lib/companion/api";
 import { BACKOFF_MAX_MS, backoffDelay, type DraftStorage } from "@/lib/companion/env";
 import { draftKey, drawingDraftKey, readDraft } from "@/lib/companion/drafts";
@@ -7,10 +7,10 @@ import { parseShareFragment, takeShareCredentials } from "@/lib/companion/link";
 import { ShareClient, type ShareClientOptions } from "@/lib/companion/shareClient";
 import { FakeClock, FakeShareServer, flush, MemoryStorage, throwingStorage } from "./fakeShareServer";
 
-const rect = (id: string, x = 0): CanvasElement => ({ id, type: "rectangle", x, y: 0, width: 10, height: 10, stroke: "#000000", fill: "transparent", strokeWidth: 1, style: "clean", seed: 1 });
-const ids = (document: CanvasDocument | null | undefined) => document?.elements.map((el) => el.id) ?? [];
-const withElements = (document: CanvasDocument, ...elements: CanvasElement[]) => ({ ...document, elements: [...document.elements, ...elements] });
-const moved = (document: CanvasDocument, id: string, x: number) => ({ ...document, elements: document.elements.map((el) => el.id === id ? { ...el, x } : el) });
+const rect = (id: string, x = 0): WhiteboardElement => ({ id, type: "rectangle", x, y: 0, width: 10, height: 10, stroke: "#000000", fill: "transparent", strokeWidth: 1, style: "clean", seed: 1 });
+const ids = (document: WhiteboardDocument | null | undefined) => document?.elements.map((el) => el.id) ?? [];
+const withElements = (document: WhiteboardDocument, ...elements: WhiteboardElement[]) => ({ ...document, elements: [...document.elements, ...elements] });
+const moved = (document: WhiteboardDocument, id: string, x: number) => ({ ...document, elements: document.elements.map((el) => el.id === id ? { ...el, x } : el) });
 
 /** A PNG data URL just over `bytes` long: the PNG signature, then padding. */
 function bigPng(bytes: number): string {
@@ -47,8 +47,8 @@ afterEach(() => { for (const shared of clients) shared.dispose(); });
 describe("ShareClient", () => {
   for (const delivery of ["socket", "ack", "changes", "snapshot"] as const) {
     test(`a delete immediately undone survives its own ${delivery} confirmation`, async () => {
-      const image: CanvasElement = { ...rect("page"), type: "image", dataUrl: bigPng(100), naturalWidth: 1, naturalHeight: 1 };
-      server.doc = withElements(createCanvasDocument(), image, rect("annotation"));
+      const image: WhiteboardElement = { ...rect("page"), type: "image", dataUrl: bigPng(100), naturalWidth: 1, naturalHeight: 1 };
+      server.doc = withElements(createWhiteboardDocument(), image, rect("annotation"));
       const { client: a } = await connected();
       const original = a.getState().document!;
       const socket = server.allSockets[0];
@@ -85,19 +85,19 @@ describe("ShareClient", () => {
   }
 
   test("the shared file's kind comes from the snapshot, never from whether it has pages", async () => {
-    const paged = { ...createCanvasDocument(), paper: { pages: [{ id: "p1", width: 595, height: 842 }] } };
+    const paged = { ...createWhiteboardDocument(), paper: { pages: [{ id: "p1", width: 595, height: 842 }] } };
     server.doc = paged;
-    expect((await connected()).client.getState().kind).toBe("canvas");
+    expect((await connected()).client.getState().kind).toBe("whiteboard");
     server.kind = "notebook";
     expect((await connected()).client.getState().kind).toBe("notebook");
-    server.kind = "canvas";
-    expect((await connected()).client.getState().kind).toBe("canvas");
+    server.kind = "whiteboard";
+    expect((await connected()).client.getState().kind).toBe("whiteboard");
     server.kind = "something-new";
-    expect((await connected()).client.getState().kind).toBe("canvas");
+    expect((await connected()).client.getState().kind).toBe("whiteboard");
   });
 
   test("successive edits to the same shape do not conflict with our own echo", async () => {
-    server.doc = withElements(createCanvasDocument(), rect("x"));
+    server.doc = withElements(createWhiteboardDocument(), rect("x"));
     const { client: a } = await connected();
     let send!: () => void;
     const gate = new Promise<void>(resolve => { send = resolve; });
@@ -120,7 +120,7 @@ describe("ShareClient", () => {
   });
 
   test("a quick undo survives a lost reply, recovery reload and operation replay", async () => {
-    server.doc = withElements(createCanvasDocument(), rect("x"));
+    server.doc = withElements(createWhiteboardDocument(), rect("x"));
     const storage = new MemoryStorage();
     const { client: a } = await connected(storage);
     let send!: () => void;
@@ -221,7 +221,7 @@ describe("ShareClient", () => {
     await clock.advance(BACKOFF_MAX_MS);
     expect(a.getState().status).toBe("ended");
     expect(a.getState().hasDraft).toBe(true);
-    expect(ids(parseCanvasDocument(a.draftText()!))).toEqual(["draft"]);
+    expect(ids(parseWhiteboardDocument(a.draftText()!))).toEqual(["draft"]);
     expect(ids(server.doc)).toEqual([]);
     expect(server.commits().every((op) => op.epoch !== server.epoch)).toBe(true);
   });
@@ -235,7 +235,7 @@ describe("ShareClient", () => {
     await flush();
     expect(a.getState().status).toBe("ended");
     expect(a.getState().lastError).toContain("Sharing was stopped");
-    expect(ids(parseCanvasDocument(a.draftText()!))).toEqual(["mine"]);
+    expect(ids(parseWhiteboardDocument(a.draftText()!))).toEqual(["mine"]);
   });
 
   test("a dropped socket backs off 0.5 s to 8 s and retries at once on online, visible and pageshow", async () => {
@@ -291,8 +291,8 @@ describe("ShareClient", () => {
     expect(ids(a.getState().document)).toEqual(ids(server.doc));
   });
 
-  test("a conflict keeps the draft until the person chooses the shared canvas", async () => {
-    server.doc = withElements(createCanvasDocument(), rect("x"));
+  test("a conflict keeps the draft until the person chooses the shared whiteboard", async () => {
+    server.doc = withElements(createWhiteboardDocument(), rect("x"));
     const { client: a } = await connected();
     const { client: b } = await connected();
     const [socketA] = server.allSockets;
@@ -303,15 +303,15 @@ describe("ShareClient", () => {
     await flush();
     expect(a.getState().status).toBe("conflict");
     expect(a.getState().lastError).toContain("collaborator");
-    expect(parseCanvasDocument(a.draftText()!).elements[0].x).toBe(50);
-    a.useSharedCanvas();
+    expect(parseWhiteboardDocument(a.draftText()!).elements[0].x).toBe(50);
+    a.useSharedWhiteboard();
     await flush();
     expect(a.getState().document!.elements[0].x).toBe(100);
     expect(a.getState()).toMatchObject({ status: "connected", hasDraft: false });
   });
 
   test("a kept conflict survives a reload without discarding its downloadable drawing", async () => {
-    server.doc = withElements(createCanvasDocument(), rect("x"));
+    server.doc = withElements(createWhiteboardDocument(), rect("x"));
     const storage = new MemoryStorage();
     const { client: a } = await connected(storage);
     server.allSockets[0].muted = true;
@@ -322,9 +322,9 @@ describe("ShareClient", () => {
     const { client: reloaded } = client(storage);
     reloaded.start(); await flush();
     expect(reloaded.getState().status).toBe("conflict");
-    expect(parseCanvasDocument(reloaded.draftText()!).elements[0].x).toBe(50);
+    expect(parseWhiteboardDocument(reloaded.draftText()!).elements[0].x).toBe(50);
     expect(server.doc.elements[0].x).toBe(100);
-    reloaded.useSharedCanvas(); await flush();
+    reloaded.useSharedWhiteboard(); await flush();
     expect(reloaded.getState().status).toBe("connected");
     expect(reloaded.getState().document!.elements[0].x).toBe(100);
   });
@@ -333,7 +333,7 @@ describe("ShareClient", () => {
     const { client: a } = await connected();
     const { client: b } = await connected();
     const dataUrl = bigPng(2.2 * 1024 * 1024);
-    const image: CanvasElement = { ...rect("img"), type: "image", width: 400, height: 300, dataUrl, naturalWidth: 400, naturalHeight: 300, sourceName: "photo.png" };
+    const image: WhiteboardElement = { ...rect("img"), type: "image", width: 400, height: 300, dataUrl, naturalWidth: 400, naturalHeight: 300, sourceName: "photo.png" };
     a.edit(withElements(a.getState().document!, image));
     await flush();
     const commit = server.requests.find((request) => request.path.endsWith("/commit"))!;
@@ -408,8 +408,8 @@ describe("ShareClient", () => {
 
   test("a burst of strokes and acknowledgements does no full-drawing work until a pause", async () => {
     const memory = new MemoryStorage();
-    const page: CanvasElement = { ...rect("page"), type: "image", dataUrl: bigPng(5 * 1024 * 1024), naturalWidth: 1, naturalHeight: 1 };
-    server.doc = withElements(createCanvasDocument(), page);
+    const page: WhiteboardElement = { ...rect("page"), type: "image", dataUrl: bigPng(5 * 1024 * 1024), naturalWidth: 1, naturalHeight: 1 };
+    server.doc = withElements(createWhiteboardDocument(), page);
     const writes: string[] = [];
     const { client: a } = await connected({
       getItem: key => memory.getItem(key),
@@ -453,14 +453,14 @@ describe("ShareClient", () => {
   for (const otherEpoch of [false, true]) {
     test(`an inline single-key draft survives upgrade in ${otherEpoch ? "another epoch" : "a kept conflict"}`, async () => {
       const storage = new MemoryStorage();
-      const draft = JSON.stringify(withElements(createCanvasDocument(), rect("legacy")));
+      const draft = JSON.stringify(withElements(createWhiteboardDocument(), rect("legacy")));
       storage.setItem(draftKey(server.shareId), JSON.stringify({
         v: 1, epoch: otherEpoch ? "earlier" : server.epoch, clientId: "old-client", seqFloor: 1,
         inflight: null, pending: null, conflict: "Keep this drawing", draft, savedAt: clock.now(),
       }));
       const { client: a } = client(storage);
       a.start(); await flush();
-      expect(ids(parseCanvasDocument((otherEpoch ? a.recoveryText() : a.draftText())!))).toEqual(["legacy"]);
+      expect(ids(parseWhiteboardDocument((otherEpoch ? a.recoveryText() : a.draftText())!))).toEqual(["legacy"]);
       expect(a.getState().status).toBe(otherEpoch ? "connected" : "conflict");
       expect(server.commits()).toHaveLength(0);
     });
@@ -469,7 +469,7 @@ describe("ShareClient", () => {
   for (const mode of ["pending", "conflict", "other-epoch", "ended"] as const) {
     test(`newer operation records rebuild a stale complete drawing for ${mode}`, async () => {
       const storage = new MemoryStorage();
-      const base = withElements(createCanvasDocument(), rect("base"));
+      const base = withElements(createWhiteboardDocument(), rect("base"));
       server.doc = base;
       const { client: a, env } = await connected(storage);
       server.down = true;
@@ -491,7 +491,7 @@ describe("ShareClient", () => {
       const { client: restored } = client(copy);
       restored.start(); await flush();
       const text = mode === "other-epoch" ? restored.recoveryText() : restored.draftText();
-      expect(ids(parseCanvasDocument(text!))).toEqual(["base", "first", "second"]);
+      expect(ids(parseWhiteboardDocument(text!))).toEqual(["base", "first", "second"]);
       if (mode === "other-epoch" || mode === "ended" || mode === "conflict") expect(server.commits()).toHaveLength(0);
     });
   }
@@ -499,7 +499,7 @@ describe("ShareClient", () => {
   test("a confirmed operation record ignores a leftover older drawing", async () => {
     const storage = new MemoryStorage();
     storage.setItem(draftKey(server.shareId), JSON.stringify({ v: 1, epoch: server.epoch, clientId: "old", seqFloor: 1, inflight: null, pending: null, savedAt: 20 }));
-    storage.setItem(drawingDraftKey(server.shareId), JSON.stringify({ epoch: server.epoch, savedAt: 10, draft: withElements(createCanvasDocument(), rect("stale")) }));
+    storage.setItem(drawingDraftKey(server.shareId), JSON.stringify({ epoch: server.epoch, savedAt: 10, draft: withElements(createWhiteboardDocument(), rect("stale")) }));
     const { client: a } = await connected(storage);
     expect(a.getState().hasDraft).toBe(false);
     expect(ids(a.getState().document)).toEqual([]);
@@ -508,7 +508,7 @@ describe("ShareClient", () => {
   test("a separate drawing must match the operation record epoch", async () => {
     const storage = new MemoryStorage();
     storage.setItem(draftKey(server.shareId), JSON.stringify({ v: 1, epoch: server.epoch, clientId: "old", seqFloor: 1, inflight: null, pending: null, savedAt: 20 }));
-    storage.setItem(drawingDraftKey(server.shareId), JSON.stringify({ epoch: "earlier", savedAt: 30, draft: createCanvasDocument() }));
+    storage.setItem(drawingDraftKey(server.shareId), JSON.stringify({ epoch: "earlier", savedAt: 30, draft: createWhiteboardDocument() }));
     expect((await readDraft(storage, server.shareId))?.draft).toBeNull();
   });
 
@@ -662,7 +662,7 @@ describe("ShareClient", () => {
     expect(ids(server.doc)).toEqual([]);
     expect(server.commits()).toEqual([]);
     expect(reloaded.getState().recovery).not.toBeNull();
-    expect(ids(parseCanvasDocument(reloaded.recoveryText()!))).toEqual(["old"]);
+    expect(ids(parseWhiteboardDocument(reloaded.recoveryText()!))).toEqual(["old"]);
     reloaded.dismissRecovery();
     expect(reloaded.getState().recovery).toBeNull();
   });
@@ -704,7 +704,7 @@ describe("ShareClient", () => {
     const spies = (["log", "info", "warn", "error", "debug"] as const).map((level) => spyOn(console, level));
     try {
       server.conflictMessage = `refused for ${server.secret}`;
-      server.doc = withElements(createCanvasDocument(), rect("x"));
+      server.doc = withElements(createWhiteboardDocument(), rect("x"));
       const { client: a } = await connected();
       server.remote({ edits: [{ id: "x", before: rect("x"), after: rect("x", 9) }] });
       [...server.sockets][0].muted = true;

@@ -1,5 +1,5 @@
 import { ArrowDownIcon, ArrowLineDownIcon, ArrowLineUpIcon, ArrowUpIcon, type Icon } from '@phosphor-icons/react';
-import type { LayerMove } from '@/lib/canvas/layers';
+import type { LayerMove } from '@/lib/whiteboard/layers';
 import { shortcut } from '@/lib/platform';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { InspectorSection } from './InspectorSection';

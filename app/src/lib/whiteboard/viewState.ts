@@ -2,27 +2,28 @@
  * What a reload or reopen resumes, kept on this device only: the tool and drawing style last used, and each drawing's
  * camera. Collaborators never see it, and a drawing's file never holds it.
  */
-import type { CanvasTool, CanvasViewport } from './model';
+import type { WhiteboardTool, WhiteboardViewport } from './model';
 import { DEFAULT_DRAWING_STYLE, type DrawingStyle } from './style';
+import { adoptLegacyKey } from './storageKeys';
 
-const TOOL_KEY = 'oculus-canvas-tool-state-v1';
-const CAMERA_KEY = 'oculus-canvas-cameras-v1';
+const TOOL_KEY = 'oculus-whiteboard-tool-state-v1';
+const CAMERA_KEY = 'oculus-whiteboard-cameras-v1';
 /** The most recently viewed drawings whose camera is kept; older ones are forgotten. */
 const CAMERA_LIMIT = 60;
 
 /** Crop needs an image chosen in this session, so it resumes as Select. */
-const RESUMABLE: ReadonlySet<CanvasTool> = new Set(['select', 'lasso', 'capture', 'hand', 'rectangle', 'ellipse', 'diamond', 'arrow', 'line', 'freedraw', 'highlighter', 'text', 'eraser']);
+const RESUMABLE: ReadonlySet<WhiteboardTool> = new Set(['select', 'lasso', 'capture', 'hand', 'rectangle', 'ellipse', 'diamond', 'arrow', 'line', 'freedraw', 'highlighter', 'text', 'eraser']);
 
-const read = (key: string): unknown => { try { return JSON.parse(localStorage.getItem(key) ?? 'null'); } catch { return null; } };
-const write = (key: string, value: unknown) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage unavailable */ } };
+const read = (key: string): unknown => { adoptLegacyKey(key); try { return JSON.parse(localStorage.getItem(key) ?? 'null'); } catch { return null; } };
+const write = (key: string, value: unknown) => { adoptLegacyKey(key); try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage unavailable */ } };
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 
-export interface ToolState { tool: CanvasTool; style: DrawingStyle }
+export interface ToolState { tool: WhiteboardTool; style: DrawingStyle }
 
 /** Each saved style field is kept only when it has the default's type, so an old or damaged entry falls back field by field. */
 export function loadToolState(): ToolState {
   const saved = read(TOOL_KEY);
-  const tool = isRecord(saved) && typeof saved.tool === 'string' && RESUMABLE.has(saved.tool as CanvasTool) ? saved.tool as CanvasTool : 'select';
+  const tool = isRecord(saved) && typeof saved.tool === 'string' && RESUMABLE.has(saved.tool as WhiteboardTool) ? saved.tool as WhiteboardTool : 'select';
   const style: Record<string, unknown> = { ...DEFAULT_DRAWING_STYLE };
   if (isRecord(saved) && isRecord(saved.style)) {
     for (const [key, fallback] of Object.entries(DEFAULT_DRAWING_STYLE)) {
@@ -35,17 +36,17 @@ export function loadToolState(): ToolState {
 
 export function saveToolState(state: ToolState): void { write(TOOL_KEY, state); }
 
-type Cameras = Record<string, CanvasViewport & { at: number }>;
+type Cameras = Record<string, WhiteboardViewport & { at: number }>;
 const cameras = (): Cameras => { const saved = read(CAMERA_KEY); return isRecord(saved) ? saved as Cameras : {}; };
-const validCamera = (value: unknown): value is CanvasViewport =>
+const validCamera = (value: unknown): value is WhiteboardViewport =>
   isRecord(value) && [value.x, value.y, value.zoom].every(part => typeof part === 'number' && Number.isFinite(part)) && (value.zoom as number) > 0;
 
-export function loadCamera(key: string): CanvasViewport | null {
+export function loadCamera(key: string): WhiteboardViewport | null {
   const saved = cameras()[key];
   return validCamera(saved) ? { x: saved.x, y: saved.y, zoom: saved.zoom } : null;
 }
 
-export function saveCamera(key: string, { x, y, zoom }: CanvasViewport, now = Date.now()): void {
+export function saveCamera(key: string, { x, y, zoom }: WhiteboardViewport, now = Date.now()): void {
   const all = cameras();
   all[key] = { x, y, zoom, at: now };
   const keys = Object.keys(all);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { noteNotebookPage, openNotebookContext, registerOpenNotebook } from '../../../src/lib/canvas/openNotebooks';
+import { noteNotebookPage, openNotebookContext, registerOpenNotebook } from '../../../src/lib/whiteboard/openNotebooks';
 
 const a = { path: 'courses/X/Assignment 1.notebook', title: 'Assignment 1', pages: 4, page: 1 };
 const b = { path: 'courses/X/Notes "quoted" $5.notebook', title: 'Notes', pages: 2, page: 1 };

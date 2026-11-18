@@ -1,14 +1,14 @@
-/** The share dialog's flow for one canvas session, over injected commands, so
+/** The share dialog's flow for one whiteboard session, over injected commands, so
  * it runs on fakes in tests (docs/device-sharing.md, "Desktop UI"). Starting
- * hands the file to the canvas authority first, because the native side shares
+ * hands the file to the whiteboard authority first, because the native side shares
  * only a live authority; stopping does the reverse. Every action resolves
  * (never rejects) with the failure it also shows. */
-import { errorMessage, type CanvasAuthorityPhase } from "@/lib/canvas/authority";
+import { errorMessage, type WhiteboardAuthorityPhase } from "@/lib/whiteboard/authority";
 import type { CompanionState, ShareEndpoints, ShareInfo, SharingApi } from "./types";
 
 export interface ShareSessionPort {
   readonly file: { id: number };
-  readonly authority: CanvasAuthorityPhase;
+  readonly authority: WhiteboardAuthorityPhase;
   attachAuthority(): Promise<void>;
   detachAuthority(): Promise<void>;
 }
@@ -54,7 +54,7 @@ export function shareFailure(error: unknown): ShareFailure {
   return { ...(typeof code === "string" ? { code } : {}), message: errorMessage(error) };
 }
 
-const holding = (phase: CanvasAuthorityPhase) => phase === "live" || phase === "paused";
+const holding = (phase: WhiteboardAuthorityPhase) => phase === "live" || phase === "paused";
 
 export function shareController(session: ShareSessionPort, api: SharingApi): ShareController {
   const fileId = session.file.id;

@@ -1,7 +1,7 @@
 {
   "name": "placement must be a string or null",
   "document": {
-    "type": "oculus-canvas",
+    "type": "oculus-whiteboard",
     "version": 1,
     "elements": [
       {

@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { DEFAULT_INK_PRESETS, activePreset, loadInkPresets, patchPreset, saveInkPresets, selectPreset, toolPresets } from '@/lib/canvas/inkPresets';
+import { DEFAULT_INK_PRESETS, activePreset, loadInkPresets, patchPreset, saveInkPresets, selectPreset, toolPresets } from '@/lib/whiteboard/inkPresets';
 
 // Test files share one global, so a replaced `localStorage` goes back exactly as it was: still writable, or absent.
 const g = globalThis as { localStorage?: unknown };
 const had = 'localStorage' in g, before = g.localStorage;
 function withStorage(initial?: string) {
-  const store = new Map<string, string>(initial ? [['oculus-canvas-ink-presets-v1', initial]] : []);
+  const store = new Map<string, string>(initial ? [['oculus-whiteboard-ink-presets-v1', initial]] : []);
   g.localStorage = { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => { store.set(key, value); } };
   return store;
 }

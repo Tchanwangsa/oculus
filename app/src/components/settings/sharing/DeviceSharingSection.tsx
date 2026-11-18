@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { errorMessage } from "@/lib/canvas/authority";
+import { errorMessage } from "@/lib/whiteboard/authority";
 import { fileTitle } from "@/lib/files/openFile";
 import { tauriSharingApi } from "@/lib/sharing/api";
 import { sharedFile, stopAllShares, stopShare } from "@/lib/sharing/registry";
@@ -31,7 +31,7 @@ export function DeviceSharingSection() {
 
   const shares = (state?.shares ?? []).filter((s) => s.phase !== "ended").map((share) => {
     const file = sharedFile(share.fileId);
-    return { share, title: file ? fileTitle(file) : `Canvas ${share.fileId}` };
+    return { share, title: file ? fileTitle(file) : `Whiteboard ${share.fileId}` };
   });
 
   const stop = async (fileId: number) => {

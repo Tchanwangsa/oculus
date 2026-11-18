@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { DEFAULT_DRAWING_STYLE } from '@/lib/canvas/style';
-import { loadCamera, loadToolState, saveCamera, saveToolState } from '@/lib/canvas/viewState';
+import { DEFAULT_DRAWING_STYLE } from '@/lib/whiteboard/style';
+import { loadCamera, loadToolState, saveCamera, saveToolState } from '@/lib/whiteboard/viewState';
 
 const previous = (globalThis as { localStorage?: Storage }).localStorage;
 let store: Map<string, string>;
@@ -19,13 +19,13 @@ test('the tool and style come back as saved', () => {
 });
 
 test('crop, unknown tools and damaged fields fall back without losing the rest', () => {
-  store.set('oculus-canvas-tool-state-v1', JSON.stringify({ tool: 'crop', style: { stroke: 7, strokeWidth: 4, opacity: null } }));
+  store.set('oculus-whiteboard-tool-state-v1', JSON.stringify({ tool: 'crop', style: { stroke: 7, strokeWidth: 4, opacity: null } }));
   const state = loadToolState();
   expect(state.tool).toBe('select');
   expect(state.style.stroke).toBe(DEFAULT_DRAWING_STYLE.stroke);
   expect(state.style.strokeWidth).toBe(4);
   expect(state.style.opacity).toBe(DEFAULT_DRAWING_STYLE.opacity);
-  store.set('oculus-canvas-tool-state-v1', 'not json');
+  store.set('oculus-whiteboard-tool-state-v1', 'not json');
   expect(loadToolState()).toEqual({ tool: 'select', style: DEFAULT_DRAWING_STYLE });
 });
 

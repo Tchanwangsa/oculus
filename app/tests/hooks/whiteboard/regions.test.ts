@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { createCanvasDocument, type CanvasElement } from '@/lib/canvas/model';
-import { CAPTURE_LIFT_DELAY_MS, regionHandleAt, moveRegion, regionBounds, resizeRegion } from '@/lib/canvas/region';
+import { createWhiteboardDocument, type WhiteboardElement } from '@/lib/whiteboard/model';
+import { CAPTURE_LIFT_DELAY_MS, regionHandleAt, moveRegion, regionBounds, resizeRegion } from '@/lib/whiteboard/region';
 import { createHarness, key, pointer, type Harness } from './harness';
 
 const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=';
-const image: CanvasElement = { id: 'image', type: 'image', x: 0, y: 0, width: 500, height: 700, naturalWidth: 500, naturalHeight: 700, dataUrl, stroke: 'transparent', fill: 'transparent', strokeWidth: 0, style: 'clean', seed: 0, opacity: 0.5 };
-const ink: CanvasElement = { ...image, id: 'ink', type: 'freedraw', x: 200, y: 200, points: [{ x: 0, y: 0 }, { x: 40, y: 30 }] };
+const image: WhiteboardElement = { id: 'image', type: 'image', x: 0, y: 0, width: 500, height: 700, naturalWidth: 500, naturalHeight: 700, dataUrl, stroke: 'transparent', fill: 'transparent', strokeWidth: 0, style: 'clean', seed: 0, opacity: 0.5 };
+const ink: WhiteboardElement = { ...image, id: 'ink', type: 'freedraw', x: 200, y: 200, points: [{ x: 0, y: 0 }, { x: 40, y: 30 }] };
 const result = { dataUrl, width: 200, height: 300, name: 'Capture.png' };
 function setup(elements = [image, ink], zoom = 1) {
   const h = createHarness({ localViewport: true });
-  h.render({ ...createCanvasDocument(), viewport: { x: 0, y: 0, zoom }, elements });
+  h.render({ ...createWhiteboardDocument(), viewport: { x: 0, y: 0, zoom }, elements });
   if (zoom !== 1) { h.editor.zoom(zoom); h.render(); }
   return h;
 }
@@ -216,7 +216,7 @@ test('small crop handles choose the nearest edge and remain inside the source af
 
 describe('adjustable capture selections', () => {
   function capture() { const h = setup(); h.editor.setTool('capture'); h.render(); drag(h, 'pen', [100, 100], [300, 400]); return h; }
-  test('edges and corners adjust the screenshot bounds without editing canvas content', () => {
+  test('edges and corners adjust the screenshot bounds without editing whiteboard content', () => {
     const h = capture();
     drag(h, 'mouse', [300, 250], [380, 250]);
     expect(h.editor.region?.bounds).toEqual({ x: 100, y: 100, width: 280, height: 300 });
@@ -245,7 +245,7 @@ describe('adjustable capture selections', () => {
     expect(resizeRegion(bounds, 0, { x: -400, y: -500 }, undefined, 1)).toEqual({ x: -400, y: -500, width: 700, height: 900 });
     expect(moveRegion(bounds, { x: -500, y: 800 })).toEqual({ ...bounds, x: -400, y: 900 });
   });
-  test('a clipboard failure is shown beside the selection and never mutates the canvas', async () => {
+  test('a clipboard failure is shown beside the selection and never mutates the whiteboard', async () => {
     const h = capture();
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
     Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {} });

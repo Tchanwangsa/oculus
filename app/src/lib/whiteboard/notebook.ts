@@ -1,8 +1,8 @@
-import { createCanvasDocument, serializeCanvasDocument, type CanvasDocument, type CanvasElement } from './model';
+import { createWhiteboardDocument, serializeWhiteboardDocument, type WhiteboardDocument, type WhiteboardElement } from './model';
 import { createPaper, pageRects, type Paper, type PaperTemplate } from './paper';
 import { createNotebook } from './files';
 import { readPdfPages } from './pdfCopy';
-import type { CanvasImportedImage } from './importMedia';
+import type { WhiteboardImportedImage } from './importMedia';
 import { pageBackdrop } from './pages';
 import type { DbFile } from '@/lib/db';
 
@@ -11,22 +11,22 @@ export const NOTEBOOK_DESK = '#e4e5ea';
 
 export type NotebookOrientation = 'portrait' | 'landscape';
 
-export function blankNotebook(template: PaperTemplate, orientation: NotebookOrientation = 'portrait'): CanvasDocument {
-  return { ...createCanvasDocument(), background: NOTEBOOK_DESK, paper: createPaper(template, orientation) };
+export function blankNotebook(template: PaperTemplate, orientation: NotebookOrientation = 'portrait'): WhiteboardDocument {
+  return { ...createWhiteboardDocument(), background: NOTEBOOK_DESK, paper: createPaper(template, orientation) };
 }
 
 /** A notebook with one blank page per PDF page, each page's picture laid on it as a locked image the size of the page. */
-export function notebookFromPages(sizes: readonly { width: number; height: number }[], images: readonly CanvasImportedImage[]): CanvasDocument {
+export function notebookFromPages(sizes: readonly { width: number; height: number }[], images: readonly WhiteboardImportedImage[]): WhiteboardDocument {
   if (!sizes.length || sizes.length !== images.length) throw new Error('A notebook needs one picture for each page.');
   const paper: Paper = { pages: sizes.map((size, i) => ({ id: `p${i + 1}`, width: size.width, height: size.height, template: 'blank' })) };
-  const elements: CanvasElement[] = pageRects(paper).map((rect, i) => pageBackdrop(rect, images[i]));
-  return { ...createCanvasDocument(), background: NOTEBOOK_DESK, paper, elements };
+  const elements: WhiteboardElement[] = pageRects(paper).map((rect, i) => pageBackdrop(rect, images[i]));
+  return { ...createWhiteboardDocument(), background: NOTEBOOK_DESK, paper, elements };
 }
 
 type Subject = { id: number; code: string };
 
 export const createBlankNotebook = (subject: Subject, title: string, template: PaperTemplate, orientation: NotebookOrientation, targetDir?: string): Promise<DbFile> =>
-  createNotebook(subject, title, serializeCanvasDocument(blankNotebook(template, orientation)), targetDir);
+  createNotebook(subject, title, serializeWhiteboardDocument(blankNotebook(template, orientation)), targetDir);
 
 /**
  * A new notebook on a copy of a library PDF's pages. The PDF is only read: its pages are rendered into
@@ -36,5 +36,5 @@ export async function createNotebookFromPdf(
   subject: Subject, relativePath: string, title: string, onProgress?: (done: number, total: number) => void, targetDir?: string,
 ): Promise<DbFile> {
   const { sizes, images } = await readPdfPages(relativePath, 'a notebook', onProgress);
-  return createNotebook(subject, title, serializeCanvasDocument(notebookFromPages(sizes, images)), targetDir);
+  return createNotebook(subject, title, serializeWhiteboardDocument(notebookFromPages(sizes, images)), targetDir);
 }

@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { pointDrag, pointHandleAt, pointHandles } from '../../../src/lib/canvas/arrow/handles';
-import { endAt, insertPoint, movePoint, removePoint, worldPoints } from '../../../src/lib/canvas/arrow/points';
-import { bindArrowEnd, followBindings, resolveArrow } from '../../../src/lib/canvas/bindings';
-import { elementBounds } from '../../../src/lib/canvas/geometry';
-import { stylePatchChanges } from '../../../src/lib/canvas/labels';
-import { resizeElements } from '../../../src/lib/canvas/resize';
-import { adoptElementStyle, DEFAULT_DRAWING_STYLE, newElementStyle } from '../../../src/lib/canvas/style';
-import type { CanvasElement, Point } from '../../../src/lib/canvas/model';
+import { pointDrag, pointHandleAt, pointHandles } from '../../../src/lib/whiteboard/arrow/handles';
+import { endAt, insertPoint, movePoint, removePoint, worldPoints } from '../../../src/lib/whiteboard/arrow/points';
+import { bindArrowEnd, followBindings, resolveArrow } from '../../../src/lib/whiteboard/bindings';
+import { elementBounds } from '../../../src/lib/whiteboard/geometry';
+import { stylePatchChanges } from '../../../src/lib/whiteboard/labels';
+import { resizeElements } from '../../../src/lib/whiteboard/resize';
+import { adoptElementStyle, DEFAULT_DRAWING_STYLE, newElementStyle } from '../../../src/lib/whiteboard/style';
+import type { WhiteboardElement, Point } from '../../../src/lib/whiteboard/model';
 
 const base = { stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
-const through = (world: Point[], extra: Partial<CanvasElement> = {}): CanvasElement => {
+const through = (world: Point[], extra: Partial<WhiteboardElement> = {}): WhiteboardElement => {
   const [s, e] = [world[0], world[world.length - 1]];
   return { id: 'a', type: 'arrow', x: s.x, y: s.y, width: e.x - s.x, height: e.y - s.y, points: world.map(p => ({ x: p.x - s.x, y: p.y - s.y })), ...base, ...extra };
 };
@@ -89,7 +89,7 @@ describe('point handles', () => {
 
 describe('arrow type switching', () => {
   const arrow = through(zigzag);
-  const retype = (el: CanvasElement, arrowType: 'sharp' | 'curved' | 'elbow') => stylePatchChanges([el], new Set([el.id]), { arrowType }).get(el.id);
+  const retype = (el: WhiteboardElement, arrowType: 'sharp' | 'curved' | 'elbow') => stylePatchChanges([el], new Set([el.id]), { arrowType }).get(el.id);
   test('sharp and curved keep their points', () => {
     const curved = retype(arrow, 'curved')!;
     expect(curved.arrowType).toBe('curved');
@@ -113,7 +113,7 @@ describe('arrow type switching', () => {
 });
 
 describe('bound arrows with interior points', () => {
-  const box = (id: string, x: number, y: number): CanvasElement => ({ id, type: 'rectangle', x, y, width: 100, height: 60, ...base });
+  const box = (id: string, x: number, y: number): WhiteboardElement => ({ id, type: 'rectangle', x, y, width: 100, height: 60, ...base });
   const left = box('l', -200, -30), right = box('r', 300, 200);
   const bound = resolveArrow(through([{ x: -150, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 230 }, { x: 350, y: 230 }], {
     arrowType: 'curved', startBinding: { elementId: 'l', mode: 'center' }, endBinding: { elementId: 'r', mode: 'center' },

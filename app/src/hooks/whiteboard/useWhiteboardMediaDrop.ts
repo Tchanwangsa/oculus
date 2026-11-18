@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent, type ClipboardEvent, type RefObject } from 'react';
-import { readCanvasImages, type CanvasImportedImage } from '@/lib/canvas/importMedia';
-import { placeImagesIn } from '@/lib/canvas/mediaPlacement';
-import { screenToWorld } from '@/lib/canvas/geometry';
-import type { CanvasDocument, Point } from '@/lib/canvas/model';
-import { useCanvasPlatform } from '@/lib/canvas/platform';
+import { readWhiteboardImages, type WhiteboardImportedImage } from '@/lib/whiteboard/importMedia';
+import { placeImagesIn } from '@/lib/whiteboard/mediaPlacement';
+import { screenToWorld } from '@/lib/whiteboard/geometry';
+import type { WhiteboardDocument, Point } from '@/lib/whiteboard/model';
+import { useWhiteboardPlatform } from '@/lib/whiteboard/platform';
 
 const imageFiles = (data: DataTransfer) => Array.from(data.files).filter(file => file.type.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(file.name));
 const imageUrl = (data: DataTransfer) => {
@@ -18,20 +18,20 @@ const imageUrl = (data: DataTransfer) => {
  * Drops and pastes use the modal's decoder, placement and one-step insertion; a `notebook` previews them where its placement
  * puts them. `area` is the drawing, whose box drops are measured in; `root` takes focus after one.
  */
-export function useCanvasMediaDrop(root: RefObject<HTMLDivElement | null>, area: RefObject<HTMLElement | null>, documentRef: RefObject<CanvasDocument>, insert: (images: CanvasImportedImage[], at?: Point) => void, notebook = false) {
-  const platform = useCanvasPlatform();
-  const [preview, setPreview] = useState<{ at: Point; images: CanvasImportedImage[] } | null>(null);
+export function useWhiteboardMediaDrop(root: RefObject<HTMLDivElement | null>, area: RefObject<HTMLElement | null>, documentRef: RefObject<WhiteboardDocument>, insert: (images: WhiteboardImportedImage[], at?: Point) => void, notebook = false) {
+  const platform = useWhiteboardPlatform();
+  const [preview, setPreview] = useState<{ at: Point; images: WhiteboardImportedImage[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const latest = useRef({ insert, platform });
   latest.current = { insert, platform };
   const abort = useRef<AbortController | null>(null);
-  const native = useRef<{ key: string; promise: Promise<CanvasImportedImage[]> } | null>(null);
+  const native = useRef<{ key: string; promise: Promise<WhiteboardImportedImage[]> } | null>(null);
   const hover = useRef<Point | null>(null);
   const revision = useRef(0);
   useEffect(() => () => { revision.current++; hover.current = null; native.current = null; abort.current?.abort(); }, []);
   const world = (at: Point) => screenToWorld(at, documentRef.current.viewport);
-  const read = async (files: File[], signal: AbortSignal) => readCanvasImages(files, signal);
-  const finish = async (promise: Promise<CanvasImportedImage[]>, at?: Point) => {
+  const read = async (files: File[], signal: AbortSignal) => readWhiteboardImages(files, signal);
+  const finish = async (promise: Promise<WhiteboardImportedImage[]>, at?: Point) => {
     const current = ++revision.current;
     setPreview(null); setError(null);
     try {
@@ -94,7 +94,7 @@ export function useCanvasMediaDrop(root: RefObject<HTMLDivElement | null>, area:
       if (!response.ok) throw new Error('This image could not be read');
       const blob = await response.blob();
       return read([new File([blob], 'Dropped image', { type: blob.type })], signal);
-    }) : Promise.reject(new Error('Drop PNG, JPEG, WebP or GIF images onto the canvas'));
+    }) : Promise.reject(new Error('Drop PNG, JPEG, WebP or GIF images onto the whiteboard'));
     void finish(promise, world(position(event)));
   };
   const paste = (event: ClipboardEvent<HTMLDivElement>) => {

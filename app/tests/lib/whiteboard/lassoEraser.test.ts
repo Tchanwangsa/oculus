@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { lassoSelection, pointInPolygon } from '@/lib/canvas/lasso';
-import type { CanvasElement, Point } from '@/lib/canvas/model';
+import { lassoSelection, pointInPolygon } from '@/lib/whiteboard/lasso';
+import type { WhiteboardElement, Point } from '@/lib/whiteboard/model';
 
 const look = { stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
-const ink = (id: string, x: number, y: number, points: Point[]): CanvasElement => ({ id, type: 'freedraw', x, y, width: 0, height: 0, ...look, points });
-const box = (id: string, x: number, y: number, size = 20): CanvasElement => ({ id, type: 'rectangle', x, y, width: size, height: size, ...look });
+const ink = (id: string, x: number, y: number, points: Point[]): WhiteboardElement => ({ id, type: 'freedraw', x, y, width: 0, height: 0, ...look, points });
+const box = (id: string, x: number, y: number, size = 20): WhiteboardElement => ({ id, type: 'rectangle', x, y, width: size, height: size, ...look });
 const square: Point[] = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
 
 describe('lasso', () => {

@@ -1,4 +1,4 @@
-import type { CanvasElement, Point } from './model';
+import type { WhiteboardElement, Point } from './model';
 import type { Bounds } from './geometry';
 import type { ElementChanges } from './changes';
 import { growToFitLabel } from './labels';
@@ -38,12 +38,12 @@ export function resizeBounds(from: Bounds, handle: number, point: Point, shift =
  * affine in its points). Text scales its font; a shape keeps its label's size,
  * rewraps it and grows if the label no longer fits.
  */
-export function resizeElements(elements: readonly CanvasElement[], ids: ReadonlySet<string>, from: Bounds, to: Bounds): ElementChanges {
+export function resizeElements(elements: readonly WhiteboardElement[], ids: ReadonlySet<string>, from: Bounds, to: Bounds): ElementChanges {
   const sx = to.width / Math.max(from.width, 1), sy = to.height / Math.max(from.height, 1);
-  const changes = new Map<string, CanvasElement>();
+  const changes = new Map<string, WhiteboardElement>();
   for (const element of elements) {
     if (!ids.has(element.id)) continue;
-    const resized: CanvasElement = {
+    const resized: WhiteboardElement = {
       ...element, x: to.x + (element.x - from.x) * sx, y: to.y + (element.y - from.y) * sy,
       width: element.width * (element.type === 'text' ? sy : sx), height: element.height * sy,
       points: element.points?.map(p => ({ x: p.x * sx, y: p.y * sy })),

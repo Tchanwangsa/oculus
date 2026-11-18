@@ -1,48 +1,48 @@
-.canvas-frame { container: canvas-frame / inline-size; --canvas-rail-width: 52px; }
-.canvas-editor { container-type: inline-size; isolation: isolate; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-.canvas-editor canvas { touch-action: none; -webkit-user-select: none; user-select: none; }
+.whiteboard-frame { container: whiteboard-frame / inline-size; --whiteboard-rail-width: 52px; }
+.whiteboard-editor { container-type: inline-size; isolation: isolate; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.whiteboard-editor canvas { touch-action: none; -webkit-user-select: none; user-select: none; }
 /* The rail scrolls up and down and the style bar sideways, by touch too, with no scrollbar showing. */
-.canvas-rail { touch-action: pan-y; scrollbar-width: none; }
-.canvas-style-bar { touch-action: pan-x; scrollbar-width: none; }
-.canvas-rail::-webkit-scrollbar, .canvas-style-bar::-webkit-scrollbar { display: none; }
+.whiteboard-rail { touch-action: pan-y; scrollbar-width: none; }
+.whiteboard-style-bar { touch-action: pan-x; scrollbar-width: none; }
+.whiteboard-rail::-webkit-scrollbar, .whiteboard-style-bar::-webkit-scrollbar { display: none; }
 /* Floating chrome over the drawing (the page bar, popovers) lets it show through, and firms up under the pointer or keyboard focus. The blur is always on, so hover never promotes a new layer. */
-.canvas-chrome { --canvas-chrome-mix: 70%; background-color: color-mix(in oklab, var(--color-card) var(--canvas-chrome-mix), transparent); -webkit-backdrop-filter: blur(14px) saturate(1.4); backdrop-filter: blur(14px) saturate(1.4); transition: background-color 150ms ease; }
+.whiteboard-chrome { --whiteboard-chrome-mix: 70%; background-color: color-mix(in oklab, var(--color-card) var(--whiteboard-chrome-mix), transparent); -webkit-backdrop-filter: blur(14px) saturate(1.4); backdrop-filter: blur(14px) saturate(1.4); transition: background-color 150ms ease; }
 /* A dark card over white paper turns grey sooner, so it keeps more of itself. */
-.dark .canvas-chrome { --canvas-chrome-mix: 82%; }
-.canvas-chrome:is(:hover, :focus-within) { background-color: color-mix(in oklab, var(--color-card) 96%, transparent); }
+.dark .whiteboard-chrome { --whiteboard-chrome-mix: 82%; }
+.whiteboard-chrome:is(:hover, :focus-within) { background-color: color-mix(in oklab, var(--color-card) 96%, transparent); }
 /* The page bar's bottom edge; the companion moves it clear of the home indicator. */
-.canvas-editor { --canvas-bottom-edge: 0.75rem; }
-.canvas-pages { bottom: var(--canvas-bottom-edge); }
-.canvas-text-input { field-sizing: content; min-width: 3ch; min-height: 1.4em; max-width: 70vw; outline: 1px solid var(--color-brand); outline-offset: 5px; resize: none; overflow: hidden; border: 0; padding: 0; margin: 0; background: transparent; line-height: 1.4; white-space: pre; -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
-.canvas-label-input { field-sizing: fixed; min-width: 1ch; max-width: none; outline-offset: 3px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.whiteboard-editor { --whiteboard-bottom-edge: 0.75rem; }
+.whiteboard-pages { bottom: var(--whiteboard-bottom-edge); }
+.whiteboard-text-input { field-sizing: content; min-width: 3ch; min-height: 1.4em; max-width: 70vw; outline: 1px solid var(--color-brand); outline-offset: 5px; resize: none; overflow: hidden; border: 0; padding: 0; margin: 0; background: transparent; line-height: 1.4; white-space: pre; -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+.whiteboard-label-input { field-sizing: fixed; min-width: 1ch; max-width: none; outline-offset: 3px; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* The top bar gives up its least needed parts as the editor narrows; the style half then scrolls sideways. */
 @container (max-width: 1180px) {
-  .canvas-bar-zoom { display: none; }
+  .whiteboard-bar-zoom { display: none; }
 }
 @container (max-width: 1100px) {
-  .canvas-bar-pen-name { display: none; }
+  .whiteboard-bar-pen-name { display: none; }
 }
 @container (max-width: 1000px) {
-  .canvas-style-pick-extra, .canvas-short-hint { display: none; }
+  .whiteboard-style-pick-extra, .whiteboard-short-hint { display: none; }
 }
 @container (max-width: 860px) {
-  .canvas-style-picks { display: none; }
+  .whiteboard-style-picks { display: none; }
 }
 @container (max-width: 760px) {
-  .canvas-style-size-field, .canvas-bar-help { display: none; }
+  .whiteboard-style-size-field, .whiteboard-bar-help { display: none; }
 }
 
-.canvas-capture-hold { opacity: 0; animation: canvas-capture-hold-reveal 0s 180ms forwards; }
-.canvas-capture-lifted { opacity: 1; animation: none; }
-.canvas-capture-hold-progress { stroke-dashoffset: 100; animation: canvas-capture-hold-progress linear forwards; }
-@keyframes canvas-capture-hold-reveal { to { opacity: 1; } }
-@keyframes canvas-capture-hold-progress { to { stroke-dashoffset: 0; } }
+.whiteboard-capture-hold { opacity: 0; animation: whiteboard-capture-hold-reveal 0s 180ms forwards; }
+.whiteboard-capture-lifted { opacity: 1; animation: none; }
+.whiteboard-capture-hold-progress { stroke-dashoffset: 100; animation: whiteboard-capture-hold-progress linear forwards; }
+@keyframes whiteboard-capture-hold-reveal { to { opacity: 1; } }
+@keyframes whiteboard-capture-hold-progress { to { stroke-dashoffset: 0; } }
 /* A tip shows for a few seconds, then fades; its `key` is its text, so a new tip starts the fade again. */
-.canvas-short-hint { animation: canvas-hint-fade 4s ease forwards; }
-@keyframes canvas-hint-fade { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
-.canvas-page-scrim { display: none; }
+.whiteboard-short-hint { animation: whiteboard-hint-fade 4s ease forwards; }
+@keyframes whiteboard-hint-fade { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
+.whiteboard-page-scrim { display: none; }
 /* Narrow, the page sidebar lies over the drawing beside the rail and closes like a drawer. */
-@container canvas-frame (max-width: 560px) {
-  .canvas-page-sidebar { position: absolute; top: 0; bottom: 0; left: var(--canvas-rail-width); z-index: 30; box-shadow: var(--shadow-lg); }
-  .canvas-page-scrim { display: block; position: absolute; inset: 0 0 0 var(--canvas-rail-width); z-index: 29; background: rgb(0 0 0 / 0.2); }
+@container whiteboard-frame (max-width: 560px) {
+  .whiteboard-page-sidebar { position: absolute; top: 0; bottom: 0; left: var(--whiteboard-rail-width); z-index: 30; box-shadow: var(--shadow-lg); }
+  .whiteboard-page-scrim { display: block; position: absolute; inset: 0 0 0 var(--whiteboard-rail-width); z-index: 29; background: rgb(0 0 0 / 0.2); }
 }

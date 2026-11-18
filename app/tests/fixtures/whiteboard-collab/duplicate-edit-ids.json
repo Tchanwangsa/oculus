@@ -1,7 +1,7 @@
 {
   "name": "duplicate edit ids",
   "document": {
-    "type": "oculus-canvas",
+    "type": "oculus-whiteboard",
     "version": 1,
     "elements": [],
     "viewport": {

@@ -1,34 +1,34 @@
 import { describe, expect, test } from 'bun:test';
-import { parseCanvasDocument, serializeCanvasDocument, type CanvasDocument, type CanvasElement, type CanvasPen } from '@/lib/canvas/model';
-import { MARKERS, PENS, nibOutline, paintsIncrementally, penLine, strokeSamples } from '@/lib/canvas/pens';
-import { exportCanvasSvg } from '@/lib/canvas/renderSvg';
-import { DEFAULT_DRAWING_STYLE, inspectorSections, newElementStyle, patchElementStyle } from '@/lib/canvas/style';
+import { parseWhiteboardDocument, serializeWhiteboardDocument, type WhiteboardDocument, type WhiteboardElement, type WhiteboardPen } from '@/lib/whiteboard/model';
+import { MARKERS, PENS, nibOutline, paintsIncrementally, penLine, strokeSamples } from '@/lib/whiteboard/pens';
+import { exportWhiteboardSvg } from '@/lib/whiteboard/renderSvg';
+import { DEFAULT_DRAWING_STYLE, inspectorSections, newElementStyle, patchElementStyle } from '@/lib/whiteboard/style';
 
-const stroke = (pen?: CanvasPen, points = [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 40, y: 20 }, { x: 60, y: 20 }]): CanvasElement =>
+const stroke = (pen?: WhiteboardPen, points = [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 40, y: 20 }, { x: 60, y: 20 }]): WhiteboardElement =>
   ({ id: 'ink', type: 'freedraw', x: 5, y: 5, width: 60, height: 20, stroke: '#123456', fill: 'transparent', strokeWidth: 4, style: 'clean', seed: 2, points, ...(pen ? { pen } : {}) });
-const document = (elements: CanvasElement[]): CanvasDocument => ({ type: 'oculus-canvas', version: 1, elements, viewport: { x: 0, y: 0, zoom: 1 }, background: '#ffffff' });
+const document = (elements: WhiteboardElement[]): WhiteboardDocument => ({ type: 'oculus-whiteboard', version: 1, elements, viewport: { x: 0, y: 0, zoom: 1 }, background: '#ffffff' });
 /** The discs of an outline as [centre x, centre y, radius]. */
 const discs = (d: string) => [...d.matchAll(/M(-?[\d.]+) (-?[\d.]+)a([\d.]+)/g)].map(match => [Number(match[1]) + Number(match[3]), Number(match[2]), Number(match[3])]);
 
 describe('pens', () => {
   test('every pen and marker is a saved choice, and an unknown one is refused', () => {
-    for (const pen of [...PENS, ...MARKERS]) expect(parseCanvasDocument(serializeCanvasDocument(document([stroke(pen)]))).elements[0].pen).toBe(pen);
-    expect(() => serializeCanvasDocument(document([stroke('quill' as CanvasPen)]))).toThrow('invalid pen');
+    for (const pen of [...PENS, ...MARKERS]) expect(parseWhiteboardDocument(serializeWhiteboardDocument(document([stroke(pen)]))).elements[0].pen).toBe(pen);
+    expect(() => serializeWhiteboardDocument(document([stroke('quill' as WhiteboardPen)]))).toThrow('invalid pen');
   });
 
   test('a stroke without a pen is a ball pen: one solid round line, with the SVG it always had', () => {
     expect(penLine(stroke())).toEqual({ dash: [], cap: 'round', join: 'round', passes: [{ dx: 0, dy: 0, width: 4, alpha: 1 }] });
-    expect(exportCanvasSvg(document([stroke()]))).toContain('<path d="M 0 0 Q 20 0 30 10 Q 40 20 50 20 L 60 20" fill="none" stroke="#123456" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>');
+    expect(exportWhiteboardSvg(document([stroke()]))).toContain('<path d="M 0 0 Q 20 0 30 10 Q 40 20 50 20 L 60 20" fill="none" stroke="#123456" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>');
   });
 
   test('a stroke with no saved points still exports its bounds as a ball pen line', () => {
     const ink = stroke();
     delete ink.points;
-    expect(exportCanvasSvg(document([ink]))).toContain('<path d="M 0 0 L 60 20"');
+    expect(exportWhiteboardSvg(document([ink]))).toContain('<path d="M 0 0 L 60 20"');
   });
 
   test('a translucent pencil applies opacity to each pass', () => {
-    const svg = exportCanvasSvg(document([{ ...stroke('pencil'), opacity: 0.5 }]));
+    const svg = exportWhiteboardSvg(document([{ ...stroke('pencil'), opacity: 0.5 }]));
     expect(svg.match(/ opacity="[^"]+"/g)).toEqual([' opacity="0.275"', ' opacity="0.25"']);
   });
 
@@ -38,8 +38,8 @@ describe('pens', () => {
     expect(penLine(stroke('flatMarker'))).toMatchObject({ cap: 'butt', join: 'bevel' });
     expect(penLine(stroke('roundMarker'))).toEqual(penLine(stroke()));
     for (const pen of ['pencil', 'sketch'] as const) expect(penLine(stroke(pen))!.passes).toHaveLength(2);
-    expect(exportCanvasSvg(document([stroke('dotted')]))).toContain('stroke-dasharray="0 10"');
-    expect(exportCanvasSvg(document([stroke('flatMarker')]))).toContain('stroke-linecap="butt"');
+    expect(exportWhiteboardSvg(document([stroke('dotted')]))).toContain('stroke-dasharray="0 10"');
+    expect(exportWhiteboardSvg(document([stroke('flatMarker')]))).toContain('stroke-linecap="butt"');
   });
 
   test('only a single solid round line is built piece by piece while it is drawn', () => {
@@ -72,7 +72,7 @@ describe('pens', () => {
   });
 
   test('a nib pen exports its outline filled, and a tap is one dot', () => {
-    expect(exportCanvasSvg(document([stroke('brush')]))).toMatch(/<path d="M[^"]+Z" fill="#123456" fill-rule="nonzero"\/>/);
+    expect(exportWhiteboardSvg(document([stroke('brush')]))).toMatch(/<path d="M[^"]+Z" fill="#123456" fill-rule="nonzero"\/>/);
     expect(discs(nibOutline(stroke('fountain', [{ x: 0, y: 0 }, { x: 0, y: 0 }])))).toEqual([[0, 0, 2]]);
     expect(nibOutline(stroke('dashed'))).toBe('');
   });

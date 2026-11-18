@@ -1,7 +1,7 @@
 {
   "name": "paper must be an object",
   "document": {
-    "type": "oculus-canvas",
+    "type": "oculus-whiteboard",
     "version": 1,
     "elements": [],
     "viewport": {

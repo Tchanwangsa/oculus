@@ -25,10 +25,10 @@ const STATUS_CODE: Record<number, ShareErrorCode> = { 401: "unauthorized", 403: 
 const KNOWN = new Set<string>(["conflict-shape", "conflict-order", "conflict-background", "invalid", "stale-op", "session-ended", "too-large", "external-edit", "io", "gone"]);
 const FALLBACK: Partial<Record<ShareErrorCode, string>> = {
   unauthorized: "This share link is no longer valid.",
-  "not-found": "This canvas is no longer shared.",
-  gone: "This canvas is no longer shared.",
-  "session-ended": "This canvas is no longer shared.",
-  "external-edit": "The canvas changed on the Mac outside Oculus. Saving resumes once it is resolved there.",
+  "not-found": "This whiteboard is no longer shared.",
+  gone: "This whiteboard is no longer shared.",
+  "session-ended": "This whiteboard is no longer shared.",
+  "external-edit": "The whiteboard changed on the Mac outside Oculus. Saving resumes once it is resolved there.",
   "too-large": "This change is too large to share.",
   server: "The Mac could not save this change.",
 };
@@ -65,20 +65,20 @@ export class ShareApi {
     throw new ShareHttpError(response.status, code, message);
   }
 
-  /** The canvas file text, read as a stream so its size is bounded before it is held. */
+  /** The whiteboard file text, read as a stream so its size is bounded before it is held. */
   async snapshot(signal?: AbortSignal): Promise<ShareSnapshot> {
     const response = await this.request("/snapshot", { signal });
     const epoch = response.headers.get("X-Oculus-Epoch");
     const revision = Number(response.headers.get("X-Oculus-Revision"));
-    if (!epoch || !Number.isSafeInteger(revision) || revision < 0) throw new ShareHttpError(response.status, "bad-response", "The Mac sent an incomplete canvas.");
+    if (!epoch || !Number.isSafeInteger(revision) || revision < 0) throw new ShareHttpError(response.status, "bad-response", "The Mac sent an incomplete whiteboard.");
     const declared = response.headers.get("Content-Length");
     const length = declared === null ? null : Number(declared);
-    if (length !== null && length > MAX_SNAPSHOT_BYTES) throw new ShareHttpError(response.status, "too-large", "This canvas is too large to open here.");
+    if (length !== null && length > MAX_SNAPSHOT_BYTES) throw new ShareHttpError(response.status, "too-large", "This whiteboard is too large to open here.");
     let text: string;
     try { text = await readText(response, length); }
     catch (error) {
       if (error instanceof ShareHttpError) throw error;
-      throw new ShareNetworkError("The canvas stopped downloading.");
+      throw new ShareNetworkError("The whiteboard stopped downloading.");
     }
     return { epoch, revision, text, kind: parseKind(response.headers.get("X-Oculus-Kind")) };
   }
@@ -121,11 +121,11 @@ async function readText(response: Response, length: number | null): Promise<stri
     received += value.byteLength;
     if (received > MAX_SNAPSHOT_BYTES) {
       void reader.cancel().catch(() => {});
-      throw new ShareHttpError(response.status, "too-large", "This canvas is too large to open here.");
+      throw new ShareHttpError(response.status, "too-large", "This whiteboard is too large to open here.");
     }
     parts.push(decoder.decode(value, { stream: true }));
   }
   parts.push(decoder.decode());
-  if (length !== null && received !== length) throw new ShareNetworkError("The canvas stopped downloading.");
+  if (length !== null && received !== length) throw new ShareNetworkError("The whiteboard stopped downloading.");
   return parts.join("");
 }

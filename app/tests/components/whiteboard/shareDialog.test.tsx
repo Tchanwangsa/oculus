@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ShareDialogBody } from "@/components/canvas/share/ShareDialogBody";
+import { ShareDialogBody } from "@/components/whiteboard/share/ShareDialogBody";
 import { SharingSettingsView } from "@/components/settings/sharing/SharingSettingsView";
 import type { ShareView } from "@/lib/sharing/controller";
 import type { ShareEndpoint, ShareInfo } from "@/lib/sharing/types";
@@ -53,7 +53,7 @@ describe("share dialog", () => {
     expect(text(render(view({ status: "sharing", share: share({ clients: 1 }) }), false, "live"))).toContain("Sharing · 1 device connected");
     const paused = text(render(view({ status: "sharing", share: share({ phase: "paused" }) }), false, "paused"));
     expect(paused).toContain("Paused");
-    expect(paused).toContain("choose a version in the canvas");
+    expect(paused).toContain("choose a version in the whiteboard");
   });
 
   test("an address names its devices only when a socket came in through it", () => {
@@ -71,9 +71,9 @@ describe("share dialog", () => {
   });
 
   test("errors and ended shares are inline", () => {
-    const failed = render(view({ error: { code: "not-live", message: "This canvas is not open for sharing." } }));
+    const failed = render(view({ error: { code: "not-live", message: "This whiteboard is not open for sharing." } }));
     expect(failed).toContain('role="alert"');
-    expect(text(failed)).toContain("This canvas is not open for sharing.");
+    expect(text(failed)).toContain("This whiteboard is not open for sharing.");
     const ended = text(render(view({ status: "ended" })));
     expect(ended).toContain("Sharing ended");
     expect(ended).toContain("Share again");

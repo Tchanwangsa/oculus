@@ -1,5 +1,5 @@
-import { applyCanvasTransaction, type CanvasTransaction } from "@/lib/canvas/collaboration";
-import { createCanvasDocument, serializeCanvasDocument, type CanvasDocument } from "@/lib/canvas/model";
+import { applyWhiteboardTransaction, type WhiteboardTransaction } from "@/lib/whiteboard/collaboration";
+import { createWhiteboardDocument, serializeWhiteboardDocument, type WhiteboardDocument } from "@/lib/whiteboard/model";
 import type { ShareClientEnv, ShareLifecycleEvent, StorageLike, DraftStorage, WebSocketLike } from "@/lib/companion/env";
 import type { ShareChange } from "@/lib/companion/protocol";
 
@@ -87,7 +87,7 @@ export class FakeShareServer {
   readonly secret = "S3cretValue_abcdefghijklmnopqrstuvwxyz012345";
   epoch = "epoch-1";
   revision = 0;
-  doc: CanvasDocument;
+  doc: WhiteboardDocument;
   log: ShareChange[] = [];
   logLimit = 256;
   readonly sockets = new Set<FakeSocket>();
@@ -109,7 +109,7 @@ export class FakeShareServer {
   /** The `X-Oculus-Kind` the snapshot carries; null sends none, as an older Mac would. */
   kind: string | null = null;
 
-  constructor(doc: CanvasDocument = createCanvasDocument()) { this.doc = doc; }
+  constructor(doc: WhiteboardDocument = createWhiteboardDocument()) { this.doc = doc; }
 
   env(overrides: Partial<ShareClientEnv> & { clock: FakeClock; storage?: DraftStorage | null }): ShareClientEnv & { emit(event: ShareLifecycleEvent): void } {
     const listeners = new Set<(event: ShareLifecycleEvent) => void>();
@@ -129,13 +129,13 @@ export class FakeShareServer {
   commits() { return this.requests.filter((request) => request.path.endsWith("/commit")).map((request) => JSON.parse(request.body!)); }
 
   /** A change from someone else (the desktop pane), broadcast like any commit. */
-  remote(transaction: CanvasTransaction, clientId = "desktop") {
-    this.doc = applyCanvasTransaction(this.doc, transaction);
+  remote(transaction: WhiteboardTransaction, clientId = "desktop") {
+    this.doc = applyWhiteboardTransaction(this.doc, transaction);
     this.record(clientId, transaction);
   }
 
   /** App restart or Stop then Share again: a new epoch, every socket closed, no receipts. */
-  restart(doc: CanvasDocument = this.doc) {
+  restart(doc: WhiteboardDocument = this.doc) {
     this.epoch = `${this.epoch}+`;
     this.revision = 0;
     this.doc = doc;
@@ -152,7 +152,7 @@ export class FakeShareServer {
 
   broadcast(frame: unknown) { for (const socket of this.sockets) socket.deliver(frame); }
 
-  private record(clientId: string | null, transaction: CanvasTransaction) {
+  private record(clientId: string | null, transaction: WhiteboardTransaction) {
     this.revision += 1;
     const change: ShareChange = { epoch: this.epoch, revision: this.revision, clientId, transaction };
     this.log.push(change);
@@ -195,7 +195,7 @@ export class FakeShareServer {
     if (this.stopped) return json(404, { code: "not-found", message: "No such share." });
     const route = url.pathname.slice(`/api/s/${this.shareId}`.length);
     if (route === "/snapshot") {
-      const text = serializeCanvasDocument(this.doc);
+      const text = serializeWhiteboardDocument(this.doc);
       return new Response(text, { status: 200, headers: { "Content-Type": "text/plain", "X-Oculus-Epoch": this.epoch, "X-Oculus-Revision": String(this.revision), "Content-Length": String(new TextEncoder().encode(text).byteLength), ...(this.kind ? { "X-Oculus-Kind": this.kind } : {}) } });
     }
     if (route === "/changes") {
@@ -208,15 +208,15 @@ export class FakeShareServer {
     return json(404, { code: "not-found", message: "No such route." });
   }
 
-  private commit(op: { clientId: string; seq: number; opId: string; epoch: string; transaction: CanvasTransaction }): Response {
-    if (op.epoch !== this.epoch) return json(410, { code: "session-ended", message: "This canvas is no longer shared." });
-    if (this.paused) return json(423, { code: "external-edit", message: "The canvas file changed outside Oculus." });
+  private commit(op: { clientId: string; seq: number; opId: string; epoch: string; transaction: WhiteboardTransaction }): Response {
+    if (op.epoch !== this.epoch) return json(410, { code: "session-ended", message: "This whiteboard is no longer shared." });
+    if (this.paused) return json(423, { code: "external-edit", message: "The whiteboard file changed outside Oculus." });
     if (this.staleNext) { this.staleNext = false; return json(409, { code: "stale-op", message: "This change is too old to confirm." }); }
     const receipts = this.receipts.get(op.clientId) ?? new Map<number, Receipt>();
     const replay = receipts.get(op.seq);
     if (replay) return json(200, { epoch: this.epoch, revision: replay.revision, seq: op.seq, opId: replay.opId, replayed: true, transaction: null });
     if (receipts.size >= 64 && op.seq < Math.min(...receipts.keys())) return json(409, { code: "stale-op", message: "This change is too old to confirm." });
-    try { this.doc = applyCanvasTransaction(this.doc, op.transaction); }
+    try { this.doc = applyWhiteboardTransaction(this.doc, op.transaction); }
     catch (error) {
       const message = (error as Error).message;
       return json(409, { code: conflictCode(message), message: this.conflictMessage ?? message });

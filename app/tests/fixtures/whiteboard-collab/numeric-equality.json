@@ -1,7 +1,7 @@
 {
   "name": "1 and 1.0 are the same number",
   "document": {
-    "type": "oculus-canvas",
+    "type": "oculus-whiteboard",
     "version": 1,
     "elements": [
       {
@@ -60,7 +60,7 @@
   },
   "expect": {
     "ok": {
-      "type": "oculus-canvas",
+      "type": "oculus-whiteboard",
       "version": 1,
       "elements": [
         {

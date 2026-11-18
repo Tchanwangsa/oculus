@@ -1,11 +1,11 @@
 import type { DbFile } from "@/lib/db";
-import { parseCanvasDocument } from "./model";
-import { canvasDrafts } from "./drafts";
-import { createCanvasSessions } from "./sessions";
-import { canvasAuthority, deleteCanvasFile, readCanvas, renameCanvasFile, saveCanvas } from "./files";
+import { parseWhiteboardDocument } from "./model";
+import { whiteboardDrafts } from "./drafts";
+import { createWhiteboardSessions } from "./sessions";
+import { whiteboardAuthority, deleteWhiteboardFile, readWhiteboard, renameWhiteboardFile, saveWhiteboard } from "./files";
 
-export const canvasSessions = createCanvasSessions<DbFile>({
-  validate: (text) => { parseCanvasDocument(text); },
-  read: readCanvas, write: saveCanvas, rename: renameCanvasFile, remove: deleteCanvasFile, authority: canvasAuthority,
-  drafts: canvasDrafts,
+export const whiteboardSessions = createWhiteboardSessions<DbFile>({
+  validate: (text) => { parseWhiteboardDocument(text); },
+  read: readWhiteboard, write: saveWhiteboard, rename: renameWhiteboardFile, remove: deleteWhiteboardFile, authority: whiteboardAuthority,
+  drafts: whiteboardDrafts,
 });

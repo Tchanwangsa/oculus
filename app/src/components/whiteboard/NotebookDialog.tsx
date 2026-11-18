@@ -9,8 +9,8 @@ import { PillTabs } from '@/components/ui/table/PillTabs';
 import { useScrollFade } from '@/hooks/ui/useScrollFade';
 import type { DbFile } from '@/lib/db';
 import { searchLibraryFiles, type LibraryFileHit } from '@/lib/db/search';
-import { createBlankNotebook, createNotebookFromPdf, type NotebookOrientation } from '@/lib/canvas/notebook';
-import { PAPER_TEMPLATES, type PaperTemplate } from '@/lib/canvas/paper';
+import { createBlankNotebook, createNotebookFromPdf, type NotebookOrientation } from '@/lib/whiteboard/notebook';
+import { PAPER_TEMPLATES, type PaperTemplate } from '@/lib/whiteboard/paper';
 import { cn } from '@/lib/utils';
 import { PaperThumb, TEMPLATE_LABELS } from './pages/PaperThumb';
 

@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { DbFile } from "@/lib/db";
-import type { CanvasSession } from "@/lib/canvas/sessions";
+import type { WhiteboardSession } from "@/lib/whiteboard/sessions";
 import { shareControllerFor } from "@/lib/sharing/registry";
 import { ShareDialogBody } from "./share/ShareDialogBody";
 
 /** Share to a device: start, the link and QR per address, stop. Sharing goes on
- * after the dialog closes; the canvas header says so (docs/device-sharing.md). */
-export function CanvasShareDialog({ session, open, onOpenChange }: {
-  session: CanvasSession<DbFile>;
+ * after the dialog closes; the whiteboard header says so (docs/device-sharing.md). */
+export function WhiteboardShareDialog({ session, open, onOpenChange }: {
+  session: WhiteboardSession<DbFile>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -37,7 +37,7 @@ export function CanvasShareDialog({ session, open, onOpenChange }: {
       >
         <DialogHeader>
           <DialogTitle>Share to a device</DialogTitle>
-          <DialogDescription>Draw on this canvas from an iPad or phone on your network.</DialogDescription>
+          <DialogDescription>Draw on this whiteboard from an iPad or phone on your network.</DialogDescription>
         </DialogHeader>
         <ShareDialogBody
           view={view} authority={authority} confirmingStop={confirmingStop}

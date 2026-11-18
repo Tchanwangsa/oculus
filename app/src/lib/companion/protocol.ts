@@ -1,19 +1,19 @@
-import type { CanvasTransaction } from "@/lib/canvas/collaboration";
+import type { WhiteboardTransaction } from "@/lib/whiteboard/collaboration";
 
 /** Wire protocol v1 between a paired browser and the Mac's companion server
  * (docs/device-sharing.md). Only commits write; the socket only announces. */
 
 /** One commit: `seq` increases per `clientId`; a retry resends the same op unchanged. */
-export interface ShareOp { clientId: string; seq: number; opId: string; epoch: string; transaction: CanvasTransaction }
+export interface ShareOp { clientId: string; seq: number; opId: string; epoch: string; transaction: WhiteboardTransaction }
 /** A replayed ack carries the original revision and no transaction. */
-export interface ShareAck { epoch: string; revision: number; seq: number; opId: string; replayed: boolean; transaction: CanvasTransaction | null }
-export interface ShareChange { epoch: string; revision: number; clientId: string | null; transaction: CanvasTransaction }
+export interface ShareAck { epoch: string; revision: number; seq: number; opId: string; replayed: boolean; transaction: WhiteboardTransaction | null }
+export interface ShareChange { epoch: string; revision: number; clientId: string | null; transaction: WhiteboardTransaction }
 /** `kind` is the shared file's (`X-Oculus-Kind`), from its path, never from what the document holds. */
 export interface ShareSnapshot { epoch: string; revision: number; text: string; kind: ShareKind }
-export type ShareKind = "canvas" | "notebook";
+export type ShareKind = "whiteboard" | "notebook";
 
-/** The kind a snapshot names; anything else, or none, is a canvas. */
-export const parseKind = (value: string | null): ShareKind => value === "notebook" ? "notebook" : "canvas";
+/** The kind a snapshot names; anything else, or none, is a whiteboard. */
+export const parseKind = (value: string | null): ShareKind => value === "notebook" ? "notebook" : "whiteboard";
 
 export type SharePhase = "live" | "paused" | "ended";
 export type ServerFrame =
@@ -29,7 +29,7 @@ const record = (value: unknown): value is Record<string, unknown> => typeof valu
 const revision = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 /** `clients` is a count; a list of client entries counts as its length. */
 const count = (value: unknown): number => Array.isArray(value) ? value.length : typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
-const transaction = (value: unknown): value is CanvasTransaction => record(value) && Array.isArray(value.edits);
+const transaction = (value: unknown): value is WhiteboardTransaction => record(value) && Array.isArray(value.edits);
 
 export function parseChange(value: unknown): ShareChange | null {
   if (!record(value) || typeof value.epoch !== "string" || !revision(value.revision) || !transaction(value.transaction)) return null;

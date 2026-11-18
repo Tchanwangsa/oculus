@@ -5,7 +5,7 @@
  * (`cutPieces`). Pieces keep only the stroke's own points plus the two at each cut, so a cut adds little to the file.
  */
 import { boundsIntersect, elementHitTest, segmentDistance, type Bounds } from './geometry';
-import type { CanvasElement, Point } from './model';
+import type { WhiteboardElement, Point } from './model';
 import { polylinePoints } from './arrow/path';
 
 export type EraserMode = 'stroke' | 'partial';
@@ -14,7 +14,7 @@ export const ERASER_SIZES = { small: 6, medium: 12, large: 24 } as const;
 export type EraserSize = keyof typeof ERASER_SIZES;
 
 export interface StrokeCut {
-  source: CanvasElement;
+  source: WhiteboardElement;
   /** The stroke in world coordinates, no step longer than the cut's resolution. */
   points: Point[];
   /** 1 for the stroke's own points; subdivision points are kept only where a run ends. */
@@ -26,7 +26,7 @@ export interface StrokeCut {
 }
 
 /** `step` is the longest gap left between points, so a cut lands within `step` of the eraser's edge. */
-export function startCut(source: CanvasElement, step: number, clip?: Bounds): StrokeCut {
+export function startCut(source: WhiteboardElement, step: number, clip?: Bounds): StrokeCut {
   const local = polylinePoints(source), points: Point[] = [], original: number[] = [];
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const push = (x: number, y: number, own: boolean) => {
@@ -61,13 +61,13 @@ export function cutAlong(cut: StrokeCut, from: Point, to: Point, radius: number)
 
 export interface CutPieces {
   /** In stroke order; the first keeps the stroke's ID, the rest have new ones. Empty when nothing is left. */
-  kept: CanvasElement[];
+  kept: WhiteboardElement[];
   /** What the eraser took, as strokes for the preview; never saved. */
-  removed: CanvasElement[];
+  removed: WhiteboardElement[];
 }
 
 /** A run of the cut's points as a freedraw element normalised as a new stroke is: x/y at its first point, points local. */
-function piece(source: CanvasElement, points: Point[], id: string): CanvasElement {
+function piece(source: WhiteboardElement, points: Point[], id: string): WhiteboardElement {
   const first = points[0], last = points[points.length - 1];
   return {
     ...source, id, x: first.x, y: first.y, width: last.x - first.x, height: last.y - first.y,
@@ -102,7 +102,7 @@ function runPoints(cut: StrokeCut, start: number, end: number): { points: Point[
  */
 export function cutPieces(cut: StrokeCut, newId: () => string, minLength = 0): CutPieces {
   const shortest = Math.max(minLength, cut.source.strokeWidth / 2, 1e-9);
-  const kept: CanvasElement[] = [];
+  const kept: WhiteboardElement[] = [];
   for (const [start, end] of runs(cut, false)) {
     const run = runPoints(cut, start, end);
     if (run.length >= shortest) kept.push(piece(cut.source, run.points, kept.length ? newId() : cut.source.id));
@@ -116,7 +116,7 @@ export function cutPieces(cut: StrokeCut, newId: () => string, minLength = 0): C
 }
 
 /** Whether the eraser swept from `from` to `to` touches `element` anywhere, tested a radius apart along the way. */
-export function sweepTouches(element: CanvasElement, from: Point, to: Point, radius: number): boolean {
+export function sweepTouches(element: WhiteboardElement, from: Point, to: Point, radius: number): boolean {
   const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y) / Math.max(radius, 1e-3)));
   for (let k = 0; k <= steps; k++) {
     if (elementHitTest(element, { x: from.x + (to.x - from.x) * k / steps, y: from.y + (to.y - from.y) * k / steps }, radius)) return true;
@@ -125,7 +125,7 @@ export function sweepTouches(element: CanvasElement, from: Point, to: Point, rad
 }
 
 /** Cuts `element` along the eraser path `sweep` (one point is a dab); null when the path never reaches it. */
-export function eraseStroke(element: CanvasElement, sweep: readonly Point[], radius: number, newId: () => string, options: { step?: number; minLength?: number; clip?: Bounds } = {}): CutPieces | null {
+export function eraseStroke(element: WhiteboardElement, sweep: readonly Point[], radius: number, newId: () => string, options: { step?: number; minLength?: number; clip?: Bounds } = {}): CutPieces | null {
   const cut = startCut(element, options.step ?? radius / 4, options.clip);
   let touched = false;
   sweep.forEach((point, i) => { touched = cutAlong(cut, sweep[Math.max(0, i - 1)], point, radius) || touched; });

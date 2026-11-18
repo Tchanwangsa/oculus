@@ -1,20 +1,20 @@
 import { describe, expect, test } from 'bun:test';
-import { applyElementChanges } from '../../../src/lib/canvas/changes';
-import { commitShapeLabel, growToFitLabel, labelTargetAt, restyleElement, stylePatchChanges } from '../../../src/lib/canvas/labels';
-import { labelBox, layoutShapeLabel, measureTextElement, type TextMeasure } from '../../../src/lib/canvas/renderText';
-import type { CanvasElement } from '../../../src/lib/canvas/model';
+import { applyElementChanges } from '../../../src/lib/whiteboard/changes';
+import { commitShapeLabel, growToFitLabel, labelTargetAt, restyleElement, stylePatchChanges } from '../../../src/lib/whiteboard/labels';
+import { labelBox, layoutShapeLabel, measureTextElement, type TextMeasure } from '../../../src/lib/whiteboard/renderText';
+import type { WhiteboardElement } from '../../../src/lib/whiteboard/model';
 
 const measure: TextMeasure = (line, size) => line.length * size * 0.5;
 const base = { stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
-const rect: CanvasElement = { id: 'r', type: 'rectangle', x: 0, y: 0, width: 200, height: 60, ...base, fontSize: 20 };
-const text: CanvasElement = { id: 't', type: 'text', x: 5, y: 5, width: 50, height: 28, ...base, text: 'abcde', fontSize: 20 };
-const arrow: CanvasElement = { id: 'a', type: 'arrow', x: 0, y: 0, width: 50, height: 0, ...base, points: [{ x: 0, y: 0 }, { x: 50, y: 0 }] };
+const rect: WhiteboardElement = { id: 'r', type: 'rectangle', x: 0, y: 0, width: 200, height: 60, ...base, fontSize: 20 };
+const text: WhiteboardElement = { id: 't', type: 'text', x: 5, y: 5, width: 50, height: 28, ...base, text: 'abcde', fontSize: 20 };
+const arrow: WhiteboardElement = { id: 'a', type: 'arrow', x: 0, y: 0, width: 50, height: 0, ...base, points: [{ x: 0, y: 0 }, { x: 50, y: 0 }] };
 
 describe('element changes', () => {
   test('replace in place, remove and append while keeping untouched identities', () => {
     const elements = [rect, text, arrow];
     const moved = { ...text, x: 9 }, added = { ...rect, id: 'n' };
-    const next = applyElementChanges(elements, new Map<string, CanvasElement | null>([['t', moved], ['a', null], ['n', added]]));
+    const next = applyElementChanges(elements, new Map<string, WhiteboardElement | null>([['t', moved], ['a', null], ['n', added]]));
     expect(next.map(el => el.id)).toEqual(['r', 't', 'n']);
     expect(next[0]).toBe(rect); expect(next[1]).toBe(moved);
   });
@@ -58,7 +58,7 @@ describe('shape labels', () => {
     expect(narrow.height).toBeCloseTo(2 * 28 + 16);
   });
   test('finds the topmost shape under a point, including inside hollow shapes', () => {
-    const ellipse: CanvasElement = { ...rect, id: 'e', type: 'ellipse', x: 0, y: 0, width: 100, height: 100 };
+    const ellipse: WhiteboardElement = { ...rect, id: 'e', type: 'ellipse', x: 0, y: 0, width: 100, height: 100 };
     expect(labelTargetAt([rect, text], { x: 100, y: 30 })?.id).toBe('r');
     expect(labelTargetAt([rect, { ...rect, id: 'top' }], { x: 100, y: 30 })?.id).toBe('top');
     expect(labelTargetAt([ellipse], { x: 50, y: 50 })?.id).toBe('e');
@@ -69,7 +69,7 @@ describe('shape labels', () => {
 
 describe('style patches', () => {
   test('write only the fields that apply to each type', () => {
-    const line: CanvasElement = { ...arrow, id: 'l', type: 'line' };
+    const line: WhiteboardElement = { ...arrow, id: 'l', type: 'line' };
     const changes = stylePatchChanges([rect, text, arrow, line], new Set(['r', 't', 'a', 'l']), { fill: '#e6e5fb', strokeWidth: 4, endArrowhead: 'dot', verticalAlign: 'top' }, measure);
     expect(changes.get('r')).toMatchObject({ fill: '#e6e5fb', strokeWidth: 4, verticalAlign: 'top' });
     expect(changes.get('r')).not.toHaveProperty('endArrowhead');

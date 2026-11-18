@@ -1,6 +1,6 @@
 /** What the share dialog and Settings say about a share, derived from the
  * controller's view; no claim goes past what the native side reported. */
-import type { CanvasAuthorityPhase } from "@/lib/canvas/authority";
+import type { WhiteboardAuthorityPhase } from "@/lib/whiteboard/authority";
 import type { ShareView } from "./controller";
 import type { ShareEndpoint } from "./types";
 
@@ -21,7 +21,7 @@ export interface ShareStatusLine {
   tone: "muted" | "live" | "warning";
 }
 
-export function shareStatusLine(view: ShareView, authority: CanvasAuthorityPhase): ShareStatusLine {
+export function shareStatusLine(view: ShareView, authority: WhiteboardAuthorityPhase): ShareStatusLine {
   switch (view.status) {
     case "unknown": return { text: "Checking…", tone: "muted" };
     case "starting": return { text: "Starting…", tone: "muted" };

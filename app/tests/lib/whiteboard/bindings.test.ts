@@ -1,22 +1,22 @@
 import { describe, expect, test } from 'bun:test';
-import { bindArrowEnd, findBindingSnap, followBindings, moveElements, resolveArrow } from '../../../src/lib/canvas/bindings';
-import { anchorPoint, nearestOutlinePoint, outlineAlong, outlineAnchor, outlineGauge } from '../../../src/lib/canvas/outline';
-import { applyElementChanges } from '../../../src/lib/canvas/changes';
-import { cloneCanvasElements } from '../../../src/lib/canvas/renderClipboard';
-import type { CanvasElement, Point } from '../../../src/lib/canvas/model';
+import { bindArrowEnd, findBindingSnap, followBindings, moveElements, resolveArrow } from '../../../src/lib/whiteboard/bindings';
+import { anchorPoint, nearestOutlinePoint, outlineAlong, outlineAnchor, outlineGauge } from '../../../src/lib/whiteboard/outline';
+import { applyElementChanges } from '../../../src/lib/whiteboard/changes';
+import { cloneWhiteboardElements } from '../../../src/lib/whiteboard/renderClipboard';
+import type { WhiteboardElement, Point } from '../../../src/lib/whiteboard/model';
 
 const base = { stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
-const shape = (id: string, type: CanvasElement['type'], x: number, y: number, width: number, height: number): CanvasElement => ({ id, type, x, y, width, height, ...base });
-const arrowBetween = (id: string, a: Point, b: Point, extra: Partial<CanvasElement> = {}): CanvasElement =>
+const shape = (id: string, type: WhiteboardElement['type'], x: number, y: number, width: number, height: number): WhiteboardElement => ({ id, type, x, y, width, height, ...base });
+const arrowBetween = (id: string, a: Point, b: Point, extra: Partial<WhiteboardElement> = {}): WhiteboardElement =>
   ({ id, type: 'arrow', x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y, points: [{ x: 0, y: 0 }, { x: b.x - a.x, y: b.y - a.y }], ...base, ...extra });
-const ends = (arrow: CanvasElement) => {
+const ends = (arrow: WhiteboardElement) => {
   const points = arrow.points!;
   return [{ x: arrow.x + points[0].x, y: arrow.y + points[0].y }, { x: arrow.x + points[points.length - 1].x, y: arrow.y + points[points.length - 1].y }];
 };
-const finite = (arrow: CanvasElement) => [arrow.x, arrow.y, arrow.width, arrow.height, ...arrow.points!.flatMap(p => [p.x, p.y])].every(Number.isFinite);
+const finite = (arrow: WhiteboardElement) => [arrow.x, arrow.y, arrow.width, arrow.height, ...arrow.points!.flatMap(p => [p.x, p.y])].every(Number.isFinite);
 const near = (a: Point, b: Point, digits = 6) => { expect(a.x).toBeCloseTo(b.x, digits); expect(a.y).toBeCloseTo(b.y, digits); };
-const centerOf = (el: CanvasElement) => ({ x: el.x + el.width / 2, y: el.y + el.height / 2 });
-const offset = (el: CanvasElement, p: Point) => ({ x: p.x - centerOf(el).x, y: p.y - centerOf(el).y });
+const centerOf = (el: WhiteboardElement) => ({ x: el.x + el.width / 2, y: el.y + el.height / 2 });
+const offset = (el: WhiteboardElement, p: Point) => ({ x: p.x - centerOf(el).x, y: p.y - centerOf(el).y });
 
 const rect = shape('r', 'rectangle', 0, 0, 100, 50);
 const ellipse = shape('e', 'ellipse', 0, 0, 100, 50);
@@ -207,7 +207,7 @@ describe('cloning bound arrows', () => {
 
   test('bindings to shapes cloned together point at the clones', () => {
     let n = 0;
-    const [ca, cb, cx] = cloneCanvasElements([a, b, arrow], { x: 10, y: 10 }, () => `c${++n}`);
+    const [ca, cb, cx] = cloneWhiteboardElements([a, b, arrow], { x: 10, y: 10 }, () => `c${++n}`);
     expect([ca.id, cb.id, cx.id]).toEqual(['c1', 'c2', 'c3']);
     expect(cx.startBinding).toEqual({ elementId: 'c1', mode: 'center' });
     expect(cx.endBinding).toEqual({ elementId: 'c2', mode: 'edge', anchor: { x: 0, y: 0.5 } });
@@ -216,7 +216,7 @@ describe('cloning bound arrows', () => {
 
   test('bindings to shapes left behind are dropped', () => {
     let n = 0;
-    const [ca, cx] = cloneCanvasElements([a, arrow], undefined, () => `c${++n}`);
+    const [ca, cx] = cloneWhiteboardElements([a, arrow], undefined, () => `c${++n}`);
     expect(cx.startBinding).toEqual({ elementId: ca.id, mode: 'center' });
     expect('endBinding' in cx).toBe(false);
   });
@@ -224,7 +224,7 @@ describe('cloning bound arrows', () => {
 
 describe('elbow ends inside a shape', () => {
   const big = shape('big', 'rectangle', 0, 0, 200, 120);
-  const drawn = (extra: Partial<CanvasElement>) => arrowBetween('x', { x: 400, y: 300 }, { x: 140, y: 30 }, extra);
+  const drawn = (extra: Partial<WhiteboardElement>) => arrowBetween('x', { x: 400, y: 300 }, { x: 140, y: 30 }, extra);
   test('bind by the side facing the other end, not the nearest edge', () => {
     expect(bindArrowEnd(drawn({ arrowType: 'elbow' }), 'end', { x: 140, y: 30 }, [big], 1).arrow.endBinding).toEqual({ elementId: 'big', mode: 'center' });
     expect(bindArrowEnd(drawn({}), 'end', { x: 140, y: 30 }, [big], 1).arrow.endBinding?.mode).toBe('edge');

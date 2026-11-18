@@ -1,9 +1,9 @@
-import type { CanvasElement, CanvasViewport, Point } from './model';
+import type { WhiteboardElement, WhiteboardViewport, Point } from './model';
 import type { DrawingKind } from './drawingKinds';
-import { CANVAS_ZOOM_LIMITS, clampZoom, type ZoomLimits } from './zoom';
+import { WHITEBOARD_ZOOM_LIMITS, clampZoom, type ZoomLimits } from './zoom';
 
 /** What a document opens as: a whiteboard, or a notebook whose pages bound the camera, the pen and the ink. The file's kind (`DrawingKind`). */
-export type CanvasKind = DrawingKind;
+export type WhiteboardKind = DrawingKind;
 
 export type PaperTemplate = 'blank' | 'grid' | 'ruled' | 'dotted' | 'graph' | 'cornell' | 'music' | 'isometric';
 
@@ -48,25 +48,25 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
 
 /** Why `value` is not a paper, or null. `authority/model.rs` `validate_paper` is its port. */
 export function paperProblem(value: unknown): string | null {
-  if (!record(value)) return 'Canvas paper must be an object.';
-  if (value.gap !== undefined && (!finite(value.gap) || value.gap < 0 || value.gap > MAX_GAP)) return 'Canvas paper has an invalid gap.';
+  if (!record(value)) return 'Whiteboard paper must be an object.';
+  if (value.gap !== undefined && (!finite(value.gap) || value.gap < 0 || value.gap > MAX_GAP)) return 'Whiteboard paper has an invalid gap.';
   const pages = value.pages;
-  if (!Array.isArray(pages) || pages.length === 0 || pages.length > MAX_PAGES) return `Canvas paper needs between 1 and ${MAX_PAGES} pages.`;
+  if (!Array.isArray(pages) || pages.length === 0 || pages.length > MAX_PAGES) return `Whiteboard paper needs between 1 and ${MAX_PAGES} pages.`;
   const ids = new Set<string>();
   for (const [i, page] of pages.entries()) {
-    if (!record(page) || typeof page.id !== 'string' || !page.id || ids.has(page.id)) return `Canvas page ${i + 1} needs a unique ID.`;
+    if (!record(page) || typeof page.id !== 'string' || !page.id || ids.has(page.id)) return `Whiteboard page ${i + 1} needs a unique ID.`;
     ids.add(page.id);
     for (const key of ['width', 'height']) {
       const side = page[key];
-      if (!finite(side) || side <= 0 || side > MAX_SIDE) return `Canvas page ${i + 1} has an invalid ${key}.`;
+      if (!finite(side) || side <= 0 || side > MAX_SIDE) return `Whiteboard page ${i + 1} has an invalid ${key}.`;
     }
-    if (page.template !== undefined && !PAPER_TEMPLATES.includes(page.template as PaperTemplate)) return `Canvas page ${i + 1} has an invalid template.`;
+    if (page.template !== undefined && !PAPER_TEMPLATES.includes(page.template as PaperTemplate)) return `Whiteboard page ${i + 1} has an invalid template.`;
   }
   return null;
 }
 
 /**
- * The pages `document` is drawn and edited on: its paper when it is a notebook, else nothing. A canvas holding `paper`
+ * The pages `document` is drawn and edited on: its paper when it is a notebook, else nothing. A whiteboard holding `paper`
  * keeps it in its file but is a whiteboard all the same, so every page behaviour asks here rather than reading `paper`.
  */
 export const notebookPaper = (document: { paper?: Paper }, notebook: boolean | undefined): Paper | undefined => notebook ? document.paper : undefined;
@@ -136,7 +136,7 @@ export function pageLocator(paper: Paper): (point: Point) => PageRect {
 }
 
 /** The page an element belongs to: the one holding the centre of its bounds. */
-export function pageOfElement(paper: Paper, element: Pick<CanvasElement, 'x' | 'y' | 'width' | 'height'>): PageRect {
+export function pageOfElement(paper: Paper, element: Pick<WhiteboardElement, 'x' | 'y' | 'width' | 'height'>): PageRect {
   return pageAt(paper, { x: element.x + element.width / 2, y: element.y + element.height / 2 });
 }
 
@@ -169,7 +169,7 @@ type ViewSize = { width: number; height: number };
 /** The zoom at which the widest page fills the view's width less a margin each side, uncapped. */
 const fitWidthZoom = (paper: Paper, size: ViewSize) => (size.width - PAGE_MARGIN * 2) / Math.max(...paper.pages.map(page => page.width));
 /** Fitting the page width, kept between 10% and 140%: what a notebook opens at and what Fit shows. */
-const fittedZoom = (paper: Paper, size: ViewSize) => Math.min(1.4, Math.max(CANVAS_ZOOM_LIMITS.min, fitWidthZoom(paper, size)));
+const fittedZoom = (paper: Paper, size: ViewSize) => Math.min(1.4, Math.max(WHITEBOARD_ZOOM_LIMITS.min, fitWidthZoom(paper, size)));
 
 /** The camera that shows page `index` from its top, centred, at `zoom` (default: the widest page fills the width, up to 140%). */
 export function pageView(paper: Paper, size: ViewSize, index = 0, zoom?: number): { x: number; y: number; zoom: number } {
@@ -180,7 +180,7 @@ export function pageView(paper: Paper, size: ViewSize, index = 0, zoom?: number)
 
 /** A notebook's zoom range: down to 60% of the fitted view, so some desk always shows around the page, up to 800%. */
 export function zoomLimits(paper: Paper, size: ViewSize): ZoomLimits {
-  return { min: Math.max(0.01, ZOOM_OUT * fittedZoom(paper, size)), max: CANVAS_ZOOM_LIMITS.max };
+  return { min: Math.max(0.01, ZOOM_OUT * fittedZoom(paper, size)), max: WHITEBOARD_ZOOM_LIMITS.max };
 }
 
 /**
@@ -188,7 +188,7 @@ export function zoomLimits(paper: Paper, size: ViewSize): ZoomLimits {
  * the view is centred; a wider one pans only until its edge comes 24px inside the view's. Vertically, desk may show above
  * the first page or below the last for at most 40% of the view's height. Returns `viewport` itself when it is already in.
  */
-export function clampCamera(paper: Paper, size: ViewSize, viewport: CanvasViewport): CanvasViewport {
+export function clampCamera(paper: Paper, size: ViewSize, viewport: WhiteboardViewport): WhiteboardViewport {
   if (size.width <= 0 || size.height <= 0) return viewport;
   let { x, y, zoom } = viewport;
   const next = clampZoom(zoom, zoomLimits(paper, size));
@@ -207,23 +207,23 @@ export function clampCamera(paper: Paper, size: ViewSize, viewport: CanvasViewpo
 }
 
 /** The page at the centre of the view. */
-export function pageInView(paper: Paper, viewport: CanvasViewport, size: ViewSize): PageRect {
+export function pageInView(paper: Paper, viewport: WhiteboardViewport, size: ViewSize): PageRect {
   return pageAt(paper, { x: (size.width / 2 - viewport.x) / viewport.zoom, y: (size.height / 2 - viewport.y) / viewport.zoom });
 }
 
 /** The centre of the part of `rect` the view shows, or of the whole page when none of it is on screen. */
-export function visiblePageCentre(rect: PageRect, viewport: CanvasViewport, size: ViewSize): Point {
+export function visiblePageCentre(rect: PageRect, viewport: WhiteboardViewport, size: ViewSize): Point {
   const left = Math.max(rect.x, -viewport.x / viewport.zoom), right = Math.min(rect.x + rect.width, (size.width - viewport.x) / viewport.zoom);
   const top = Math.max(rect.y, -viewport.y / viewport.zoom), bottom = Math.min(rect.y + rect.height, (size.height - viewport.y) / viewport.zoom);
   return left < right && top < bottom ? { x: (left + right) / 2, y: (top + bottom) / 2 } : { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
 }
 
 /** Elements the pointer can pick: locked ones (an assignment's page images) are backdrops, never selected, moved or erased. */
-export const isLocked = (element: CanvasElement) => element.locked === true;
+export const isLocked = (element: WhiteboardElement) => element.locked === true;
 
-const selectableCache = new WeakMap<readonly CanvasElement[], readonly CanvasElement[]>();
+const selectableCache = new WeakMap<readonly WhiteboardElement[], readonly WhiteboardElement[]>();
 /** `elements` without the locked ones; the same array when none is locked, so a whiteboard's cached geometry is reused. */
-export function selectableElements(elements: readonly CanvasElement[]): readonly CanvasElement[] {
+export function selectableElements(elements: readonly WhiteboardElement[]): readonly WhiteboardElement[] {
   const cached = selectableCache.get(elements);
   if (cached) return cached;
   const result = elements.some(isLocked) ? elements.filter(element => !isLocked(element)) : elements;

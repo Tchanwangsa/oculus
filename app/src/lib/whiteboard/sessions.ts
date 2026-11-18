@@ -1,30 +1,30 @@
 /** One serialized write queue per file, shared by every mounted pane. While the
- * file is shared the same queue commits content transactions to the canvas
+ * file is shared the same queue commits content transactions to the whiteboard
  * authority instead of writing the file, and merges everyone else's changes
  * under this desktop's unsent edits (docs/drawing-canvas.md, "One save session
  * owns every pane editing a file"). */
 import { clientPendingTransactions, containsClientTransaction, reconcileClientDocument } from "./clientReconciliation";
-import { applyCanvasTransaction, diffCanvasContent, hasCanvasChanges, sameValue, type CanvasTransaction } from "./collaboration";
+import { applyWhiteboardTransaction, diffWhiteboardContent, hasWhiteboardChanges, sameValue, type WhiteboardTransaction } from "./collaboration";
 import { secureId } from "./ids";
-import { parseCanvasDocument, serializeCanvasDocument, type CanvasDocument, type CanvasViewport } from "./model";
+import { parseWhiteboardDocument, serializeWhiteboardDocument, type WhiteboardDocument, type WhiteboardViewport } from "./model";
 import {
   authorityCode, errorMessage,
-  type CanvasAuthorityAck, type CanvasAuthorityEvent, type CanvasAuthorityIO, type CanvasAuthorityOp,
-  type CanvasAuthorityPhase, type CanvasAuthoritySnapshot, type CanvasExternalChoice,
+  type WhiteboardAuthorityAck, type WhiteboardAuthorityEvent, type WhiteboardAuthorityIO, type WhiteboardAuthorityOp,
+  type WhiteboardAuthorityPhase, type WhiteboardAuthoritySnapshot, type WhiteboardExternalChoice,
 } from "./authority";
 
-export interface CanvasFileRef { id: number; relative_path: string }
-export interface CanvasSnapshot {
+export interface WhiteboardFileRef { id: number; relative_path: string }
+export interface WhiteboardSnapshot {
   text: string | null;
   status: "loading" | "saved" | "unsaved" | "saving" | "error" | "deleted";
   error?: string;
   recoveryError?: string;
   recovery?: { text: string; valid: boolean };
-  authority: CanvasAuthorityPhase;
+  authority: WhiteboardAuthorityPhase;
   /** A collaborator's change clashed with this draft; it is kept, unsent, until resolved. */
   conflict?: string;
 }
-export interface CanvasSessionIO<F extends CanvasFileRef> {
+export interface WhiteboardSessionIO<F extends WhiteboardFileRef> {
   read(path: string): Promise<string>;
   write(file: F, text: string): Promise<void>;
   rename(file: F, title: string): Promise<F>;
@@ -37,12 +37,12 @@ export interface CanvasSessionIO<F extends CanvasFileRef> {
   delay?: number;
   validate?(text: string): void;
   /** Absent where sharing is unavailable. */
-  authority?: CanvasAuthorityIO<F>;
+  authority?: WhiteboardAuthorityIO<F>;
 }
-export interface CanvasSession<F extends CanvasFileRef> {
+export interface WhiteboardSession<F extends WhiteboardFileRef> {
   file: F;
-  readonly authority: CanvasAuthorityPhase;
-  snapshot(): CanvasSnapshot;
+  readonly authority: WhiteboardAuthorityPhase;
+  snapshot(): WhiteboardSnapshot;
   subscribe(listener: () => void): () => void;
   load(): Promise<void>;
   update(text: string): void;
@@ -56,40 +56,40 @@ export interface CanvasSession<F extends CanvasFileRef> {
   attachAuthority(): Promise<void>;
   /** Commits what it can, ends the epoch and saves through the file again. */
   detachAuthority(): Promise<void>;
-  /** Drops this desktop's unsent change and shows the shared canvas. */
-  useSharedCanvas(): Promise<void>;
+  /** Drops this desktop's unsent change and shows the shared whiteboard. */
+  useSharedWhiteboard(): Promise<void>;
   /** Ends a pause after an outside edit: adopt the file on disk or overwrite it. */
-  resolveExternal(choice: CanvasExternalChoice): Promise<void>;
+  resolveExternal(choice: WhiteboardExternalChoice): Promise<void>;
 }
 
-const PAUSED = "The canvas file changed outside Oculus. Choose which version to keep.";
+const PAUSED = "The whiteboard file changed outside Oculus. Choose which version to keep.";
 const ENDED = "Sharing ended.";
-const STALLED = "The shared canvas did not take this change. Your draft is kept.";
+const STALLED = "The shared whiteboard did not take this change. Your draft is kept.";
 
 interface Shared {
   epoch: string;
   revision: number;
-  canonical: CanvasDocument;
+  canonical: WhiteboardDocument;
   /** The viewport the authority last took from this desktop. */
-  viewport: CanvasViewport;
+  viewport: WhiteboardViewport;
   /** The one unacknowledged op; resent unchanged after a lost reply. */
-  inflight?: CanvasAuthorityOp;
+  inflight?: WhiteboardAuthorityOp;
   inflightSeen?: boolean;
   /** Close or delete is under way: its own `ended` is not news. */
   closing: boolean;
   resyncing?: Promise<void>;
 }
 
-export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionIO<F>) {
-  const sessions = new Map<number, CanvasSession<F>>();
+export function createWhiteboardSessions<F extends WhiteboardFileRef>(io: WhiteboardSessionIO<F>) {
+  const sessions = new Map<number, WhiteboardSession<F>>();
   return {
     get: (id: number) => sessions.get(id),
-    open(file: F): CanvasSession<F> {
+    open(file: F): WhiteboardSession<F> {
       const existing = sessions.get(file.id);
       if (existing) return existing;
-      const key = `oculus:canvas-draft:${file.id}`;
+      const key = `oculus:whiteboard-draft:${file.id}`;
       const authority = io.authority;
-      let state: CanvasSnapshot = { text: null, status: "loading", authority: "off" };
+      let state: WhiteboardSnapshot = { text: null, status: "loading", authority: "off" };
       let saved: string | null = null;
       let loading: Promise<void> | undefined;
       let tail = Promise.resolve();
@@ -103,13 +103,13 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
       let fenced = false;
       let shared: Shared | null = null;
       let attaching: Promise<void> | undefined;
-      let buffered: CanvasAuthorityEvent[] | null = null;
+      let buffered: WhiteboardAuthorityEvent[] | null = null;
       let unsubscribe: (() => void) | undefined;
       let clientId = secureId();
       let seq = 1;
-      let parsed: { text: string; document: CanvasDocument } | undefined;
+      let parsed: { text: string; document: WhiteboardDocument } | undefined;
 
-      const publish = (patch: Partial<CanvasSnapshot>) => {
+      const publish = (patch: Partial<WhiteboardSnapshot>) => {
         state = { ...state, ...patch };
         for (const listener of listeners) listener();
       };
@@ -136,16 +136,16 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
           .then(() => publish({ recoveryError: undefined }), recoveryFailed);
       };
       const writeFile = (text: string) => {
-        if (fenced) throw new Error("This canvas is shared; only its authority writes the file.");
+        if (fenced) throw new Error("This whiteboard is shared; only its authority writes the file.");
         return io.write(session.file, text);
       };
       const local = () => {
         const text = state.text!;
-        if (parsed?.text !== text) parsed = { text, document: parseCanvasDocument(text) };
+        if (parsed?.text !== text) parsed = { text, document: parseWhiteboardDocument(text) };
         return parsed.document;
       };
-      const show = (document: CanvasDocument) => {
-        const text = serializeCanvasDocument(document);
+      const show = (document: WhiteboardDocument) => {
+        const text = serializeWhiteboardDocument(document);
         parsed = { text, document };
         publish({ text });
         if (state.status !== "saved") keepDraft(text);
@@ -163,10 +163,10 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
         void session.flush().catch(() => {});
       };
       /** Shows the canonical document with this desktop's unsent content edits on top. */
-      const rebase = (s: Shared, before: CanvasDocument, own = false) => {
+      const rebase = (s: Shared, before: WhiteboardDocument, own = false) => {
         if (state.text == null || state.conflict) return;
         const current = local();
-        let next: CanvasDocument;
+        let next: WhiteboardDocument;
         try {
           const inflight = !s.inflightSeen ? s.inflight?.transaction : undefined;
           const pending = clientPendingTransactions(before, current, inflight);
@@ -176,19 +176,19 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
         catch (error) { conflict(errorMessage(error)); return; }
         if (next !== current) show(next);
       };
-      const advance = (s: Shared, revision: number, transaction: CanvasTransaction, own = false) => {
+      const advance = (s: Shared, revision: number, transaction: WhiteboardTransaction, own = false) => {
         const before = s.canonical;
-        try { s.canonical = applyCanvasTransaction(before, transaction); }
+        try { s.canonical = applyWhiteboardTransaction(before, transaction); }
         catch { void resync(s); return; }
         s.revision = revision;
         rebase(s, before, own);
       };
-      const replace = (s: Shared, snapshot: CanvasAuthoritySnapshot) => {
+      const replace = (s: Shared, snapshot: WhiteboardAuthoritySnapshot) => {
         if (snapshot.epoch !== s.epoch) { leave(s, ENDED); return; }
         if (snapshot.paused) pause();
         if (snapshot.revision < s.revision) return;
         const before = s.canonical;
-        s.canonical = parseCanvasDocument(snapshot.text);
+        s.canonical = parseWhiteboardDocument(snapshot.text);
         s.revision = snapshot.revision;
         rebase(s, before);
         if (s.inflight && !s.inflightSeen && !state.conflict) s.inflightSeen = containsClientTransaction(s.canonical, s.inflight.transaction);
@@ -220,7 +220,7 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
         }
         releaseIfIdle();
       };
-      const unshared = (s: Shared) => !!state.conflict || (state.text != null && hasCanvasChanges(diffCanvasContent(s.canonical, local())));
+      const unshared = (s: Shared) => !!state.conflict || (state.text != null && hasWhiteboardChanges(diffWhiteboardContent(s.canonical, local())));
       /** The authority ended this epoch: save through the file again, keeping any unsent change for an explicit choice. */
       const leave = (s: Shared, notice: string) => {
         if (shared !== s) return;
@@ -231,7 +231,7 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
         publish({ authority: "ended", conflict: undefined });
         void enqueue(() => reopen(pending, since, notice)).catch(() => {});
       };
-      const onEvent = (event: CanvasAuthorityEvent) => {
+      const onEvent = (event: WhiteboardAuthorityEvent) => {
         if (buffered) { buffered.push(event); return; }
         const s = shared;
         if (!s || s.closing || event.fileId !== session.file.id || event.epoch !== s.epoch) return;
@@ -246,7 +246,7 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
         // Our own change past a gap waits for its ack, which checks the revision itself.
         else if (event.clientId !== clientId) void resync(s);
       };
-      const acknowledge = async (s: Shared, ack: CanvasAuthorityAck) => {
+      const acknowledge = async (s: Shared, ack: WhiteboardAuthorityAck) => {
         if (ack.revision <= s.revision) return;
         if (ack.transaction && ack.revision === s.revision + 1) advance(s, ack.revision, ack.transaction, true);
         else await resync(s);
@@ -266,15 +266,15 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
         throw error;
       };
       const commitAll = async (s: Shared) => {
-        let previous: CanvasAuthorityOp | undefined;
+        let previous: WhiteboardAuthorityOp | undefined;
         while (shared === s) {
           if (state.conflict) throw new Error(state.conflict);
           let op = s.inflight;
           if (!op) {
             const document = local();
-            const transaction = diffCanvasContent(s.canonical, document);
+            const transaction = diffWhiteboardContent(s.canonical, document);
             const viewport = sameValue(document.viewport, s.viewport) ? undefined : document.viewport;
-            if (!hasCanvasChanges(transaction) && !viewport) break;
+            if (!hasWhiteboardChanges(transaction) && !viewport) break;
             if (previous && sameValue(previous.transaction, transaction) && sameValue(previous.viewport, viewport)) throw new Error(STALLED);
             if (state.authority === "paused") throw new Error(PAUSED);
             op = { clientId, seq, opId: secureId(), transaction, epoch: s.epoch, ...(viewport ? { viewport } : {}) };
@@ -282,7 +282,7 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
             s.inflightSeen = false;
           } else if (state.authority === "paused") throw new Error(PAUSED);
           publish({ status: "saving", error: undefined });
-          let ack: CanvasAuthorityAck;
+          let ack: WhiteboardAuthorityAck;
           try { ack = await authority!.commit(session.file, op); }
           catch (error) {
             if (shared !== s) return;
@@ -314,8 +314,8 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
           return snapshot;
         } catch (error) { buffered = null; stopListening(); fenced = false; throw error; }
       };
-      const joinAuthority = (snapshot: CanvasAuthoritySnapshot, before?: CanvasDocument) => {
-        const canonical = parseCanvasDocument(snapshot.text);
+      const joinAuthority = (snapshot: WhiteboardAuthoritySnapshot, before?: WhiteboardDocument) => {
+        const canonical = parseWhiteboardDocument(snapshot.text);
         const s: Shared = { epoch: snapshot.epoch, revision: snapshot.revision, canonical, viewport: canonical.viewport, closing: false };
         shared = s;
         publish({ authority: "live" });
@@ -350,7 +350,7 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
 
       const save = async () => {
         if (state.status === "deleted" || state.text == null) return;
-        if (state.recovery) throw new Error("Choose which canvas version to keep before saving.");
+        if (state.recovery) throw new Error("Choose which whiteboard version to keep before saving.");
         if (shared) return commitAll(shared);
         // Sharing is opening or closing; that step saves when it finishes.
         if (fenced) return;
@@ -364,7 +364,7 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
         await clearDraft();
         publish({ status: "saved", error: undefined });
       };
-      const session: CanvasSession<F> = {
+      const session: WhiteboardSession<F> = {
         file,
         get authority() { return state.authority; },
         snapshot: () => state,
@@ -458,14 +458,14 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
             if (shared) return;
             await session.load();
             if (shared) return;
-            if (state.status === "deleted") throw new Error("This canvas was deleted.");
+            if (state.status === "deleted") throw new Error("This whiteboard was deleted.");
             const existing = await probeAuthority();
             if (existing) {
-              joinAuthority(existing, parseCanvasDocument(saved!));
+              joinAuthority(existing, parseWhiteboardDocument(saved!));
               void session.flush().catch(() => {});
               return;
             }
-            if (state.recovery) throw new Error("Choose which canvas version to keep before sharing.");
+            if (state.recovery) throw new Error("Choose which whiteboard version to keep before sharing.");
             publish({ authority: "attaching" });
             try {
               try { await save(); } catch (error) { failed(error); throw error; }
@@ -474,13 +474,13 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
               unsubscribe = authority.onRemote(session.file.id, onEvent);
               fenced = true;
               const snapshot = await authority.open(session.file, sent);
-              const canonical = parseCanvasDocument(snapshot.text);
+              const canonical = parseWhiteboardDocument(snapshot.text);
               const s: Shared = { epoch: snapshot.epoch, revision: snapshot.revision, canonical, viewport: canonical.viewport, closing: false };
               shared = s;
               publish({ authority: "live" });
               if (snapshot.paused) pause();
               // Edits made while the authority opened, or a share that was already live, meet here.
-              rebase(s, parseCanvasDocument(sent));
+              rebase(s, parseWhiteboardDocument(sent));
               const early = buffered;
               buffered = null;
               for (const event of early) onEvent(event);
@@ -515,7 +515,7 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
             await reopen(pending, since);
           });
         },
-        useSharedCanvas() {
+        useSharedWhiteboard() {
           return enqueue(async () => {
             const s = shared;
             if (!s) return;
@@ -524,7 +524,7 @@ export function createCanvasSessions<F extends CanvasFileRef>(io: CanvasSessionI
             const snapshot = await authority!.snapshot(session.file);
             if (shared !== s) return;
             if (snapshot.epoch !== s.epoch) { leave(s, ENDED); return; }
-            s.canonical = parseCanvasDocument(snapshot.text);
+            s.canonical = parseWhiteboardDocument(snapshot.text);
             s.revision = snapshot.revision;
             const viewport = local().viewport;
             await clearDraft();

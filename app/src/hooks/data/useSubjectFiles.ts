@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { getFilesForSubject, type DbFile } from "@/lib/db";
 import { FILE_ACCESSED_EVENT } from "@/lib/files/openFile";
-import { CANVASES_CHANGED_EVENT } from "@/lib/canvas/files";
+import { WHITEBOARDS_CHANGED_EVENT } from "@/lib/whiteboard/files";
 import { DOCUMENTS_CHANGED_EVENT } from "@/lib/notes/documents";
 import { DRIVE_CHANGED_EVENT } from "@/lib/drive/listing";
 import { useWindowEvent } from "@/hooks/backend/useEvents";
@@ -12,7 +12,7 @@ const readFiles = createPendingReader(getFilesForSubject);
 /** The `files.category` values (`category_of` in
  *  `app/src-tauri/src/library/layout/category.rs`), each always listed. */
 const KNOWN_CATEGORIES = [
-  "home", "syllabus", "module", "page", "file", "upload", "document", "canvas", "notebook",
+  "home", "syllabus", "module", "page", "file", "upload", "document", "whiteboard", "notebook",
   "announcement", "assignment", "quiz", "ed", "lessons", "image", "other",
 ] as const;
 type KnownCategory = (typeof KNOWN_CATEGORIES)[number];
@@ -56,7 +56,7 @@ export function useSubjectFiles(subjectId: number | null) {
   // These events change `files` rows (an open stamps last_accessed_at, Drive
   // moves and renames), so every list of a subject's files refetches here
   // rather than page by page.
-  useWindowEvent([FILE_ACCESSED_EVENT, DOCUMENTS_CHANGED_EVENT, CANVASES_CHANGED_EVENT, DRIVE_CHANGED_EVENT], (event) => {
+  useWindowEvent([FILE_ACCESSED_EVENT, DOCUMENTS_CHANGED_EVENT, WHITEBOARDS_CHANGED_EVENT, DRIVE_CHANGED_EVENT], (event) => {
     const changedId = (event as CustomEvent<{ subjectId?: number } | undefined>).detail?.subjectId;
     if (changedId == null || changedId === subjectId) reload();
   });

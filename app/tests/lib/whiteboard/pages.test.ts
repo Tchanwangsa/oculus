@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { createCanvasDocument, type CanvasDocument, type CanvasElement } from '../../../src/lib/canvas/model';
-import { addPage, removePage, setAllPageTemplates, setPageTemplate } from '../../../src/lib/canvas/pages';
-import { applyCanvasTransaction, diffCanvasContent } from '../../../src/lib/canvas/collaboration';
-import { createPaper, pageRects, pageView, type Paper, type PaperTemplate } from '../../../src/lib/canvas/paper';
-import { exportBounds, paperSvg, templateMarks } from '../../../src/lib/canvas/renderPaper';
-import { exportCanvasSvg } from '../../../src/lib/canvas/renderSvg';
-import { parseCanvasDocument, serializeCanvasDocument } from '../../../src/lib/canvas/model';
+import { createWhiteboardDocument, type WhiteboardDocument, type WhiteboardElement } from '../../../src/lib/whiteboard/model';
+import { addPage, removePage, setAllPageTemplates, setPageTemplate } from '../../../src/lib/whiteboard/pages';
+import { applyWhiteboardTransaction, diffWhiteboardContent } from '../../../src/lib/whiteboard/collaboration';
+import { createPaper, pageRects, pageView, type Paper, type PaperTemplate } from '../../../src/lib/whiteboard/paper';
+import { exportBounds, paperSvg, templateMarks } from '../../../src/lib/whiteboard/renderPaper';
+import { exportWhiteboardSvg } from '../../../src/lib/whiteboard/renderSvg';
+import { parseWhiteboardDocument, serializeWhiteboardDocument } from '../../../src/lib/whiteboard/model';
 
 const base = { stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
-const box = (id: string, x: number, y: number): CanvasElement => ({ id, type: 'rectangle', x, y, width: 20, height: 20, ...base });
-const notebook = (paper: Paper, elements: CanvasElement[] = []): CanvasDocument => ({ ...createCanvasDocument(), paper, elements });
+const box = (id: string, x: number, y: number): WhiteboardElement => ({ id, type: 'rectangle', x, y, width: 20, height: 20, ...base });
+const notebook = (paper: Paper, elements: WhiteboardElement[] = []): WhiteboardDocument => ({ ...createWhiteboardDocument(), paper, elements });
 const three: Paper = { gap: 10, pages: [{ id: 'p1', width: 100, height: 200 }, { id: 'p2', width: 100, height: 200 }, { id: 'p3', width: 100, height: 200 }] };
 
 describe('addPage', () => {
@@ -21,7 +21,7 @@ describe('addPage', () => {
     expect(pageRects(next.paper!)[1].template).toBe('grid');
   });
   test('a whiteboard has nowhere to add one', () => {
-    const doc = createCanvasDocument();
+    const doc = createWhiteboardDocument();
     expect(addPage(doc)).toBe(doc);
   });
 });
@@ -50,8 +50,8 @@ describe('removePage', () => {
     expect(removePage(single, 'p1')).toBe(single);
     expect(removePage(doc, 'nope')).toBe(doc);
   });
-  test('the result is still a valid canvas', () => {
-    expect(() => parseCanvasDocument(serializeCanvasDocument(removePage(doc, 'p2')))).not.toThrow();
+  test('the result is still a valid whiteboard', () => {
+    expect(() => parseWhiteboardDocument(serializeWhiteboardDocument(removePage(doc, 'p2')))).not.toThrow();
   });
 });
 
@@ -145,11 +145,11 @@ describe('notebook export', () => {
     expect(exportBounds(doc, doc.paper)).toEqual({ x: -50, y: 0, width: 100, height: 620 });
   });
   test('a whiteboard exports around its elements, and an empty one has nothing to export', () => {
-    expect(exportBounds(createCanvasDocument(), undefined)).toBeNull();
-    expect(exportBounds({ ...createCanvasDocument(), elements: [box('a', 5, 6)] }, undefined)).toMatchObject({ x: 5, y: 6 });
+    expect(exportBounds(createWhiteboardDocument(), undefined)).toBeNull();
+    expect(exportBounds({ ...createWhiteboardDocument(), elements: [box('a', 5, 6)] }, undefined)).toMatchObject({ x: 5, y: 6 });
   });
   test('the SVG has a white sheet for each page, under the elements', () => {
-    const svg = exportCanvasSvg(notebook(createPaper('grid'), [box('a', 0, 0)]), () => 0, { notebook: true });
+    const svg = exportWhiteboardSvg(notebook(createPaper('grid'), [box('a', 0, 0)]), () => 0, { notebook: true });
     expect((svg.match(/fill="#ffffff"\/>/g) ?? []).length).toBeGreaterThanOrEqual(2);
     expect(svg.indexOf('stroke="#cfd8ea"')).toBeGreaterThan(-1);
     expect(svg.indexOf('stroke="#cfd8ea"')).toBeLessThan(svg.indexOf('<g transform'));
@@ -158,8 +158,8 @@ describe('notebook export', () => {
 });
 
 describe('changing a page template', () => {
-  const doc = (): CanvasDocument => ({
-    ...createCanvasDocument(),
+  const doc = (): WhiteboardDocument => ({
+    ...createWhiteboardDocument(),
     elements: [{ id: 'ink', type: 'freedraw', x: 0, y: 900, width: 10, height: 10, stroke: '#000', fill: 'transparent', strokeWidth: 2, style: 'clean', seed: 1, points: [{ x: 0, y: 0 }, { x: 10, y: 10 }] }],
     paper: { pages: [{ id: 'p1', width: 595, height: 842, template: 'grid' }, { id: 'p2', width: 595, height: 842 }] },
   });
@@ -181,16 +181,16 @@ describe('changing a page template', () => {
     expect(setPageTemplate(before, 0, 'grid')).toBe(before);
     expect(setPageTemplate(before, 1, 'blank')).toBe(before);
     expect(setPageTemplate(before, 2, 'ruled')).toBe(before);
-    const board = createCanvasDocument();
+    const board = createWhiteboardDocument();
     expect(setPageTemplate(board, 0, 'ruled')).toBe(board);
     expect(setAllPageTemplates(board, 'ruled')).toBe(board);
   });
   test('the change travels as a paper edit and undoes', () => {
     const before = doc(), after = setAllPageTemplates(before, 'isometric');
-    const redo = diffCanvasContent(before, after), undo = diffCanvasContent(after, before);
+    const redo = diffWhiteboardContent(before, after), undo = diffWhiteboardContent(after, before);
     expect(redo.edits).toEqual([]);
     expect(redo.paper?.after?.pages.map(page => page.template)).toEqual(['isometric', 'isometric']);
-    expect(applyCanvasTransaction(before, redo).paper).toEqual(after.paper);
-    expect(applyCanvasTransaction(after, undo).paper).toEqual(before.paper);
+    expect(applyWhiteboardTransaction(before, redo).paper).toEqual(after.paper);
+    expect(applyWhiteboardTransaction(after, undo).paper).toEqual(before.paper);
   });
 });

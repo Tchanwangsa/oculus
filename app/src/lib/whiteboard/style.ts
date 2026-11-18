@@ -1,4 +1,4 @@
-import { CANVAS_DEFAULTS, LABELLED_TYPES, roundnessOf, type CanvasElement, type CanvasTextAlign } from './model';
+import { WHITEBOARD_DEFAULTS, LABELLED_TYPES, roundnessOf, type WhiteboardElement, type WhiteboardTextAlign } from './model';
 
 /** Appearance fields the inspector edits; everything else on an element is geometry or content. */
 export const STYLE_KEYS = [
@@ -6,18 +6,18 @@ export const STYLE_KEYS = [
   'fontFamily', 'fontSize', 'textAlign', 'verticalAlign', 'startArrowhead', 'endArrowhead', 'roundness', 'arrowType', 'pen',
 ] as const;
 export type StyleKey = typeof STYLE_KEYS[number];
-export type StylePatch = Partial<Pick<CanvasElement, StyleKey>>;
-export type StyleValues = Required<Pick<CanvasElement, StyleKey>>;
+export type StylePatch = Partial<Pick<WhiteboardElement, StyleKey>>;
+export type StyleValues = Required<Pick<WhiteboardElement, StyleKey>>;
 /** Defaults for new elements. Shape labels keep their own alignment so new text can start left while labels centre. */
-export type DrawingStyle = StyleValues & { labelAlign: CanvasTextAlign };
+export type DrawingStyle = StyleValues & { labelAlign: WhiteboardTextAlign };
 
-type ElementType = CanvasElement['type'];
+type ElementType = WhiteboardElement['type'];
 export const DEFAULT_DRAWING_STYLE: DrawingStyle = {
-  stroke: '#292b32', fill: 'transparent', strokeWidth: 2, style: 'sketch', opacity: CANVAS_DEFAULTS.opacity,
-  strokeStyle: CANVAS_DEFAULTS.strokeStyle, fontFamily: CANVAS_DEFAULTS.fontFamily, fontSize: CANVAS_DEFAULTS.fontSize,
-  textAlign: CANVAS_DEFAULTS.textAlign, labelAlign: CANVAS_DEFAULTS.labelAlign, verticalAlign: CANVAS_DEFAULTS.verticalAlign,
-  startArrowhead: CANVAS_DEFAULTS.startArrowhead, endArrowhead: CANVAS_DEFAULTS.endArrowhead, roundness: CANVAS_DEFAULTS.roundness,
-  arrowType: CANVAS_DEFAULTS.arrowType, pen: CANVAS_DEFAULTS.pen,
+  stroke: '#292b32', fill: 'transparent', strokeWidth: 2, style: 'sketch', opacity: WHITEBOARD_DEFAULTS.opacity,
+  strokeStyle: WHITEBOARD_DEFAULTS.strokeStyle, fontFamily: WHITEBOARD_DEFAULTS.fontFamily, fontSize: WHITEBOARD_DEFAULTS.fontSize,
+  textAlign: WHITEBOARD_DEFAULTS.textAlign, labelAlign: WHITEBOARD_DEFAULTS.labelAlign, verticalAlign: WHITEBOARD_DEFAULTS.verticalAlign,
+  startArrowhead: WHITEBOARD_DEFAULTS.startArrowhead, endArrowhead: WHITEBOARD_DEFAULTS.endArrowhead, roundness: WHITEBOARD_DEFAULTS.roundness,
+  arrowType: WHITEBOARD_DEFAULTS.arrowType, pen: WHITEBOARD_DEFAULTS.pen,
 };
 
 const ALL: ElementType[] = ['rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text'];
@@ -36,17 +36,17 @@ export const appliesTo = (key: StyleKey, type: ElementType) => KEY_TYPES[key].in
 
 /** What an element without the field draws with; base fields are always present. */
 export function defaultValue<K extends StyleKey>(key: K, type: ElementType): StyleValues[K] {
-  if (key === 'textAlign') return (type === 'text' ? CANVAS_DEFAULTS.textAlign : CANVAS_DEFAULTS.labelAlign) as StyleValues[K];
-  if (key === 'roundness') return roundnessOf({ type } as CanvasElement) as StyleValues[K];
-  return (CANVAS_DEFAULTS as Record<string, unknown>)[key] as StyleValues[K];
+  if (key === 'textAlign') return (type === 'text' ? WHITEBOARD_DEFAULTS.textAlign : WHITEBOARD_DEFAULTS.labelAlign) as StyleValues[K];
+  if (key === 'roundness') return roundnessOf({ type } as WhiteboardElement) as StyleValues[K];
+  return (WHITEBOARD_DEFAULTS as Record<string, unknown>)[key] as StyleValues[K];
 }
-export const elementValue = <K extends StyleKey>(el: CanvasElement, key: K): StyleValues[K] => (el[key] ?? defaultValue(key, el.type)) as StyleValues[K];
+export const elementValue = <K extends StyleKey>(el: WhiteboardElement, key: K): StyleValues[K] => (el[key] ?? defaultValue(key, el.type)) as StyleValues[K];
 const styleValue = <K extends StyleKey>(style: DrawingStyle, key: K, type: ElementType): StyleValues[K] =>
   (key === 'textAlign' && type !== 'text' ? style.labelAlign : style[key]) as StyleValues[K];
 
 /** Base fields always; optional ones only where they apply and differ from the default, so files stay small. */
-export function newElementStyle(type: ElementType, style: DrawingStyle): StylePatch & Pick<CanvasElement, 'stroke' | 'fill' | 'strokeWidth' | 'style'> {
-  const out: StylePatch & Pick<CanvasElement, 'stroke' | 'fill' | 'strokeWidth' | 'style'> = {
+export function newElementStyle(type: ElementType, style: DrawingStyle): StylePatch & Pick<WhiteboardElement, 'stroke' | 'fill' | 'strokeWidth' | 'style'> {
+  const out: StylePatch & Pick<WhiteboardElement, 'stroke' | 'fill' | 'strokeWidth' | 'style'> = {
     stroke: style.stroke, fill: appliesTo('fill', type) ? style.fill : 'transparent', strokeWidth: style.strokeWidth, style: style.style,
   };
   for (const key of STYLE_KEYS) {
@@ -58,7 +58,7 @@ export function newElementStyle(type: ElementType, style: DrawingStyle): StylePa
 }
 
 /** Selecting an element makes its look the default for the next one drawn. */
-export function adoptElementStyle(style: DrawingStyle, el: CanvasElement): DrawingStyle {
+export function adoptElementStyle(style: DrawingStyle, el: WhiteboardElement): DrawingStyle {
   const next = { ...style };
   for (const key of STYLE_KEYS) {
     if (!appliesTo(key, el.type)) continue;
@@ -81,7 +81,7 @@ export function patchDrawingStyle(style: DrawingStyle, patch: StylePatch, types:
 }
 
 /** Writes only fields that apply to the element and change what it draws; returns the same object when nothing does. */
-export function patchElementStyle(el: CanvasElement, patch: StylePatch): CanvasElement {
+export function patchElementStyle(el: WhiteboardElement, patch: StylePatch): WhiteboardElement {
   let next = el;
   for (const key of STYLE_KEYS) {
     const value = patch[key];
@@ -98,8 +98,8 @@ const SECTION_KEYS: [InspectorSection, StyleKey][] = [
 ];
 
 /** What the inspector describes: a selected element, an element being written in, or the active tool's next element. */
-export interface InspectorTarget { type: ElementType; label: boolean; element?: CanvasElement }
-export const inspectorTarget = (el: CanvasElement, label = LABELLED_TYPES.has(el.type) && Boolean(el.text?.trim())): InspectorTarget => ({ type: el.type, label, element: el });
+export interface InspectorTarget { type: ElementType; label: boolean; element?: WhiteboardElement }
+export const inspectorTarget = (el: WhiteboardElement, label = LABELLED_TYPES.has(el.type) && Boolean(el.text?.trim())): InspectorTarget => ({ type: el.type, label, element: el });
 
 /** Text options show on a shape only once it has a label (or one is being written). */
 const shows = (key: StyleKey, target: InspectorTarget) => appliesTo(key, target.type) && (!LABEL_KEYS.has(key) || target.type === 'text' || target.label);

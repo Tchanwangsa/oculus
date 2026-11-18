@@ -1,4 +1,4 @@
-import type { CanvasElement, CanvasFixedSegment, Point } from '../model';
+import type { WhiteboardElement, WhiteboardFixedSegment, Point } from '../model';
 
 /**
  * A fixed segment pins the line an elbow route runs along there, not its ends: a re-route keeps the line and finds
@@ -11,28 +11,28 @@ export interface Lane { horizontal: boolean; at: number }
 const EPSILON = 1e-6;
 const near = (a: number, b: number) => Math.abs(a - b) < EPSILON;
 
-export function elementLanes(el: CanvasElement): Lane[] {
+export function elementLanes(el: WhiteboardElement): Lane[] {
   return (el.fixedSegments ?? []).map(s => 'y' in s ? { horizontal: true, at: el.y + s.y } : { horizontal: false, at: el.x + s.x });
 }
 
-export function withoutFixedSegments(el: CanvasElement): CanvasElement {
+export function withoutFixedSegments(el: WhiteboardElement): WhiteboardElement {
   if (el.fixedSegments === undefined) return el;
   const { fixedSegments: _removed, ...rest } = el;
-  return rest as CanvasElement;
+  return rest as WhiteboardElement;
 }
 
 /** Stores `lanes` as the element's fixed segments, local to its current x/y; none removes the field. */
-export function withLanes(el: CanvasElement, lanes: readonly Lane[]): CanvasElement {
+export function withLanes(el: WhiteboardElement, lanes: readonly Lane[]): WhiteboardElement {
   if (!lanes.length) return withoutFixedSegments(el);
   return { ...el, fixedSegments: lanes.map(lane => lane.horizontal ? { y: lane.at - el.y } : { x: lane.at - el.x }) };
 }
 
 /** The same world lanes after the element's x/y moves by (dx, dy). */
-export const rebaseFixedSegments = (segments: readonly CanvasFixedSegment[], dx: number, dy: number): CanvasFixedSegment[] =>
+export const rebaseFixedSegments = (segments: readonly WhiteboardFixedSegment[], dx: number, dy: number): WhiteboardFixedSegment[] =>
   segments.map(s => 'y' in s ? { y: s.y - dy } : { x: s.x - dx });
 
 /** Local lanes scale with the points they sit among. */
-export const scaleFixedSegments = (segments: readonly CanvasFixedSegment[], sx: number, sy: number): CanvasFixedSegment[] =>
+export const scaleFixedSegments = (segments: readonly WhiteboardFixedSegment[], sx: number, sy: number): WhiteboardFixedSegment[] =>
   segments.map(s => 'y' in s ? { y: s.y * sy } : { x: s.x * sx });
 
 /** Whether the segment from `a` to `b` runs some distance along the lane. */

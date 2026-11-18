@@ -40,7 +40,7 @@ describe("overview activity", () => {
 
   test("announcements use their source creation, personal files stay in Yours", () => {
     const files = [file({ category: "announcement", source_created_at: iso(6), source_updated_at: iso(20) }),
-      ...["document", "canvas", "notebook", "upload", "module"].map((category, id) => file({ id: id + 2, category })),
+      ...["document", "whiteboard", "notebook", "upload", "module"].map((category, id) => file({ id: id + 2, category })),
       file({ id: 10, subject_id: 2 })];
     expect(activity(files).map((item) => item.kind)).toEqual(["announcement"]);
     expect(activity(files, second)).toEqual([]);

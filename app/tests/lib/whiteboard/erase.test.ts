@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test';
-import { applyElementChanges } from '../../../src/lib/canvas/changes';
-import { eraseStroke, sweepTouches } from '../../../src/lib/canvas/erase';
-import { parseCanvasDocument, serializeCanvasDocument, createCanvasDocument, type CanvasElement } from '../../../src/lib/canvas/model';
+import { applyElementChanges } from '../../../src/lib/whiteboard/changes';
+import { eraseStroke, sweepTouches } from '../../../src/lib/whiteboard/erase';
+import { parseWhiteboardDocument, serializeWhiteboardDocument, createWhiteboardDocument, type WhiteboardElement } from '../../../src/lib/whiteboard/model';
 
 // A horizontal stroke from world (10, 20) to (110, 20) through (60, 20). Subdivided at radius / 4 = 1.25 units, so with
 // a radius of 5 and a width of 2 (reach 6) a dab at x = 60 takes the points from 54.x to 65.x.
-const stroke: CanvasElement = {
+const stroke: WhiteboardElement = {
   id: 's', type: 'freedraw', x: 10, y: 20, width: 100, height: 0, stroke: '#123456', fill: 'transparent', strokeWidth: 2, style: 'clean', seed: 7,
   opacity: 0.8, custom: 'kept', points: [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 100, y: 0 }],
 };
 const ids = () => { let n = 0; return () => `n${++n}`; };
-const world = (element: CanvasElement) => element.points!.map(p => ({ x: element.x + p.x, y: element.y + p.y }));
+const world = (element: WhiteboardElement) => element.points!.map(p => ({ x: element.x + p.x, y: element.y + p.y }));
 
 describe('partial erasing', () => {
   test('a dab cuts a stroke in two: the first piece keeps its ID, the second gets a new one', () => {
@@ -63,8 +63,8 @@ describe('partial erasing', () => {
   });
   test('pieces are valid elements that save', () => {
     const { kept } = eraseStroke(stroke, [{ x: 60, y: 20 }], 5, ids())!;
-    const document = { ...createCanvasDocument(), elements: kept };
-    expect(parseCanvasDocument(serializeCanvasDocument(document)).elements).toEqual(kept);
+    const document = { ...createWhiteboardDocument(), elements: kept };
+    expect(parseWhiteboardDocument(serializeWhiteboardDocument(document)).elements).toEqual(kept);
   });
   test('pieces added with the stroke commit directly above it', () => {
     const below = { ...stroke, id: 'below' }, above = { ...stroke, id: 'above' };
@@ -73,7 +73,7 @@ describe('partial erasing', () => {
     expect(next.map(element => element.id)).toEqual(['below', 's', 'n1', 'above']);
   });
   test('a shape is touched anywhere along the sweep', () => {
-    const box: CanvasElement = { ...stroke, id: 'b', type: 'rectangle', x: 0, y: 0, width: 20, height: 20, points: undefined };
+    const box: WhiteboardElement = { ...stroke, id: 'b', type: 'rectangle', x: 0, y: 0, width: 20, height: 20, points: undefined };
     expect(sweepTouches(box, { x: -30, y: 10 }, { x: -12, y: 10 }, 5)).toBe(false);
     expect(sweepTouches(box, { x: -30, y: 10 }, { x: 50, y: 10 }, 5)).toBe(true);
   });

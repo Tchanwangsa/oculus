@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_DRAWING_STYLE } from '@/lib/canvas/style';
-import { buildTemplate } from '@/lib/canvas/templates';
+import { DEFAULT_DRAWING_STYLE } from '@/lib/whiteboard/style';
+import { buildTemplate } from '@/lib/whiteboard/templates';
 
 const centre = { x: 500, y: 300 };
 const build = (kind: Parameters<typeof buildTemplate>[0]) => buildTemplate(kind, centre, DEFAULT_DRAWING_STYLE);
 
-describe('canvas templates', () => {
+describe('whiteboard templates', () => {
   test('a matrix is a 3 by 3 grid of equal squares centred on the point', () => {
     const cells = build('matrix');
     expect(cells).toHaveLength(9);

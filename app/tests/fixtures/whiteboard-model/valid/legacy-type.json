@@ -1,0 +1,25 @@
+{
+  "type": "oculus-canvas",
+  "version": 1,
+  "elements": [
+    {
+      "id": "a",
+      "type": "rectangle",
+      "x": 10,
+      "y": 20,
+      "width": 100,
+      "height": 50,
+      "stroke": "#111111",
+      "fill": "transparent",
+      "strokeWidth": 2,
+      "style": "clean",
+      "seed": 1
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "background": "#ffffff"
+}

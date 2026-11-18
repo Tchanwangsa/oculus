@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { createCanvasDocument } from '@/lib/canvas/model';
-import type { Paper } from '@/lib/canvas/paper';
-import { NotebookPageBar } from '@/components/canvas/pages/NotebookPageBar';
-import { PageSidebar, type NotebookPages } from '@/components/canvas/pages/PageSidebar';
-import { dropTarget } from '@/components/canvas/pages/usePageReorder';
-import { staleThumbnails } from '@/components/canvas/pages/usePageThumbnails';
+import { createWhiteboardDocument } from '@/lib/whiteboard/model';
+import type { Paper } from '@/lib/whiteboard/paper';
+import { NotebookPageBar } from '@/components/whiteboard/pages/NotebookPageBar';
+import { PageSidebar, type NotebookPages } from '@/components/whiteboard/pages/PageSidebar';
+import { dropTarget } from '@/components/whiteboard/pages/usePageReorder';
+import { staleThumbnails } from '@/components/whiteboard/pages/usePageThumbnails';
 
 const paper: Paper = { pages: [{ id: 'p1', width: 595, height: 842 }, { id: 'p2', width: 842, height: 595, template: 'grid' }, { id: 'p3', width: 595, height: 842 }] };
 const noop = () => {};
@@ -22,7 +22,7 @@ describe('notebook page controls', () => {
     expect(html).toContain('aria-pressed="false"');
   });
   test('the sidebar lists every page at its proportions, marks the one in view, and gives each a menu', () => {
-    const html = renderToStaticMarkup(<PageSidebar pages={pages} document={{ ...createCanvasDocument(), paper }} onClose={noop} />);
+    const html = renderToStaticMarkup(<PageSidebar pages={pages} document={{ ...createWhiteboardDocument(), paper }} onClose={noop} />);
     expect(html.match(/aria-label="Page \d"/g)).toEqual(['aria-label="Page 1"', 'aria-label="Page 2"', 'aria-label="Page 3"']);
     expect(html.match(/aria-current="page"/g)).toHaveLength(1);
     expect(html).toMatch(/aria-label="Page 2" aria-current="page"/);

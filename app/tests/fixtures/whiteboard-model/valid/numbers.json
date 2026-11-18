@@ -1,5 +1,5 @@
 {
-  "type": "oculus-canvas",
+  "type": "oculus-whiteboard",
   "version": 1.0,
   "elements": [
     {"id": "n", "type": "rectangle", "x": -0, "y": 1E2, "width": 1e21, "height": 1e20, "stroke": "#000", "fill": "#fff",

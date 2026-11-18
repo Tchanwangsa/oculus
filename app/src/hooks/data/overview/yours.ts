@@ -17,7 +17,7 @@ export function deriveYours(subjectId: number, strip: SubjectWeeks, key: number 
   for (const file of files) {
     if (file.subject_id !== subjectId) continue;
     const kind = file.category;
-    if (kind !== "document" && kind !== "canvas" && kind !== "notebook" && kind !== "upload") continue;
+    if (kind !== "document" && kind !== "whiteboard" && kind !== "notebook" && kind !== "upload") continue;
     const date = latestInWeek(strip, key, file.first_seen_at, file.content_changed_at);
     if (!date) continue;
     out.push({ id: `file:${file.id}`, kind, title: fileTitle(file), date, href: filePagePath(subjectId, file.relative_path) });

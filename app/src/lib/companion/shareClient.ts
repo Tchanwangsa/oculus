@@ -1,7 +1,7 @@
-import { measureCanvas, traceCanvas } from "@/lib/canvas/diagnostics";
-import { applyCanvasTransaction, diffCanvasContent, hasCanvasChanges, type CanvasTransaction } from "@/lib/canvas/collaboration";
-import { clientPendingTransactions, containsClientTransaction, reconcileClientDocument } from "@/lib/canvas/clientReconciliation";
-import { parseCanvasDocument, serializeCanvasDocument, type CanvasDocument } from "@/lib/canvas/model";
+import { measureWhiteboard, traceWhiteboard } from "@/lib/whiteboard/diagnostics";
+import { applyWhiteboardTransaction, diffWhiteboardContent, hasWhiteboardChanges, type WhiteboardTransaction } from "@/lib/whiteboard/collaboration";
+import { clientPendingTransactions, containsClientTransaction, reconcileClientDocument } from "@/lib/whiteboard/clientReconciliation";
+import { parseWhiteboardDocument, serializeWhiteboardDocument, type WhiteboardDocument } from "@/lib/whiteboard/model";
 import { ShareApi, ShareHttpError } from "./api";
 import { clearRecovery, readDraft, readRecovery, writeDraft, writeDrawingDraft, writeRecovery, LatestWriter, type ShareOpRecord, type ShareDraftRecord, type ShareRecovery } from "./drafts";
 import { backoffDelay, type ShareClientEnv, type ShareLifecycleEvent, type WebSocketLike } from "./env";
@@ -9,9 +9,9 @@ import { redactSecret, type ShareCredentials } from "./link";
 import { parseFrame, type ServerFrame, type ShareAck, type ShareKind, type ShareOp, type ShareSnapshot } from "./protocol";
 
 /**
- * A paired browser's side of a shared canvas (wire protocol v1, docs/device-sharing.md).
+ * A paired browser's side of a shared whiteboard (wire protocol v1, docs/device-sharing.md).
  *
- * The local drawing is the shared canvas (`canonical`, at `revision`) with this
+ * The local drawing is the shared whiteboard (`canonical`, at `revision`) with this
  * device's unconfirmed edits on top. At most one commit is in flight: its
  * transaction is the difference between the last confirmed canonical drawing and
  * the local one, sent over HTTP with a fixed (clientId, seq, opId), so a retry
@@ -25,8 +25,8 @@ export type ShareStatus = "connecting" | "connected" | "saving" | "reconnecting"
 export interface ShareClientState {
   status: ShareStatus;
   /** The drawing as this device sees it; null until the first snapshot. */
-  document: CanvasDocument | null;
-  /** Whether the shared file is a canvas or a notebook, from the first snapshot. */
+  document: WhiteboardDocument | null;
+  /** Whether the shared file is a whiteboard or a notebook, from the first snapshot. */
   kind: ShareKind;
   /** Unconfirmed ops: the one in flight plus the edits waiting behind it (0–2). */
   pendingOps: number;
@@ -55,7 +55,7 @@ const ENDED = `Sharing was stopped on the Mac. ${KEPT}`;
 /** `session-ended` carries a reason code, never text to show. */
 const ENDED_BECAUSE: Record<string, string> = {
   stopped: ENDED,
-  ended: `The canvas was closed on the Mac. ${KEPT}`,
+  ended: `The whiteboard was closed on the Mac. ${KEPT}`,
   shutdown: `Oculus quit on the Mac. ${KEPT}`,
 };
 const NEW_SESSION = "The Mac started a new sharing session. Changes from before are not added to it.";
@@ -73,9 +73,9 @@ export class ShareClient {
   private readonly deadManMs: number;
   private readonly persistDelayMs: number;
 
-  private canonical: CanvasDocument | null = null;
-  private kind: ShareKind = "canvas";
-  private local: CanvasDocument | null = null;
+  private canonical: WhiteboardDocument | null = null;
+  private kind: ShareKind = "whiteboard";
+  private local: WhiteboardDocument | null = null;
   private epoch: string | null = null;
   private revision = 0;
   /** The highest revision announced; catching up continues until it is reached. */
@@ -181,7 +181,7 @@ export class ShareClient {
   }
 
   /** The pane's edit: a whole drawing, whose content difference becomes the next commit. */
-  edit(document: CanvasDocument): void {
+  edit(document: WhiteboardDocument): void {
     if (!this.local || this.ended || this.conflict || document === this.local) return;
     this.local = document;
     if (this.inflight) this.dirty = true;
@@ -191,8 +191,8 @@ export class ShareClient {
     void this.pump();
   }
 
-  /** Conflict: drop this device's unsaved edits and show the shared canvas. */
-  useSharedCanvas(): void {
+  /** Conflict: drop this device's unsaved edits and show the shared whiteboard. */
+  useSharedWhiteboard(): void {
     if (!this.canonical || this.ended) return;
     if (this.inflight) {
       // Its fate is unknown, so its seq is never reused for another op.
@@ -210,9 +210,9 @@ export class ShareClient {
     void this.pump();
   }
 
-  /** The local drawing as a `.canvas` file: the shared canvas with this device's unsaved edits. */
+  /** The local drawing as a `.whiteboard` file: the shared whiteboard with this device's unsaved edits. */
   draftText(): string | null {
-    return this.local ? serializeCanvasDocument(this.local) : null;
+    return this.local ? serializeWhiteboardDocument(this.local) : null;
   }
 
   recoveryText(): string | null { return this.recovery?.draft ?? null; }
@@ -262,7 +262,7 @@ export class ShareClient {
     const marker = `${this.state.status}:${this.revision}:${this.state.pendingOps}:${!!this.storageWarning}`;
     if (marker !== this.tracedState) {
       this.tracedState = marker;
-      traceCanvas('share.state', { status: this.state.status, revision: this.revision, pendingOps: this.state.pendingOps, blocked: !!this.conflict || this.ended, storageWarning: !!this.storageWarning });
+      traceWhiteboard('share.state', { status: this.state.status, revision: this.revision, pendingOps: this.state.pendingOps, blocked: !!this.conflict || this.ended, storageWarning: !!this.storageWarning });
     }
     for (const listener of this.listeners) listener();
   }
@@ -271,7 +271,7 @@ export class ShareClient {
     if (!this.local) return false;
     if (this.inflight || this.conflict) return true;
     if (!this.canonical) return true;
-    return this.local !== this.canonical && hasCanvasChanges(diffCanvasContent(this.canonical, this.local));
+    return this.local !== this.canonical && hasWhiteboardChanges(diffWhiteboardContent(this.canonical, this.local));
   }
 
   private setError(message: string | null): void {
@@ -348,9 +348,9 @@ export class ShareClient {
         return;
       }
       if (this.disposed || this.ended) return;
-      let document: CanvasDocument;
-      try { document = parseCanvasDocument(snapshot.text); }
-      catch (error) { this.trouble(`The Mac sent a canvas this page cannot read: ${(error as Error).message}`); return; }
+      let document: WhiteboardDocument;
+      try { document = parseWhiteboardDocument(snapshot.text); }
+      catch (error) { this.trouble(`The Mac sent a whiteboard this page cannot read: ${(error as Error).message}`); return; }
       this.adopt(snapshot, document);
       this.attempt = 0;
       this.setError(null);
@@ -361,7 +361,7 @@ export class ShareClient {
   }
 
   /** The first snapshot of this page: resume a draft from this epoch, or keep one from another for download. */
-  private adopt(snapshot: ShareSnapshot, document: CanvasDocument): void {
+  private adopt(snapshot: ShareSnapshot, document: WhiteboardDocument): void {
     this.canonical = document;
     this.local = document;
     this.kind = snapshot.kind;
@@ -375,12 +375,12 @@ export class ShareClient {
       this.nextSeq = record.seqFloor;
       this.inflight = record.inflight;
       if (draft && (record.conflict || (!record.pending && !record.inflight))) {
-        this.setConflict(record.conflict ?? "This device has a kept draft. Download it or use the shared canvas.");
-        try { this.local = parseCanvasDocument(draft); } catch { /* keep the shared canvas */ }
+        this.setConflict(record.conflict ?? "This device has a kept draft. Download it or use the shared whiteboard.");
+        try { this.local = parseWhiteboardDocument(draft); } catch { /* keep the shared whiteboard */ }
       } else if (record.pending || (record.inflight && record.afterInflight !== undefined)) {
         try {
           const seen = record.inflightRevision !== undefined && record.inflightRevision <= snapshot.revision;
-          const pending: CanvasTransaction[] = [];
+          const pending: WhiteboardTransaction[] = [];
           if (record.inflight && record.afterInflight !== undefined) {
             if (!seen) pending.push(record.inflight.transaction);
             if (record.afterInflight) pending.push(record.afterInflight);
@@ -391,7 +391,7 @@ export class ShareClient {
         }
         catch (error) {
           this.setConflict((error as Error).message);
-          if (draft) try { this.local = parseCanvasDocument(draft); } catch { /* keep the shared canvas */ }
+          if (draft) try { this.local = parseWhiteboardDocument(draft); } catch { /* keep the shared whiteboard */ }
         }
       }
     } else if (record && draft) {
@@ -415,13 +415,13 @@ export class ShareClient {
     const record = this.restored;
     if (!record?.draft || this.local) return;
     try {
-      const stored = parseCanvasDocument(record.draft);
-      this.local = parseCanvasDocument(this.restoredDrawing(record, stored)!);
+      const stored = parseWhiteboardDocument(record.draft);
+      this.local = parseWhiteboardDocument(this.restoredDrawing(record, stored)!);
       this.epoch = record.epoch;
     } catch { /* nothing to offer */ }
   }
 
-  private restoredDrawing(record: ShareDraftRecord, snapshotDoc: CanvasDocument, snapshot?: ShareSnapshot): string | null {
+  private restoredDrawing(record: ShareDraftRecord, snapshotDoc: WhiteboardDocument, snapshot?: ShareSnapshot): string | null {
     if ((record.draftSavedAt ?? 0) < record.savedAt && (record.pending || record.inflight)) {
       // Operation records can be newer than the debounced drawing; rebuild before using the fallback.
       try {
@@ -537,22 +537,22 @@ export class ShareClient {
     if (revision > this.revision) void this.catchUp();
   }
 
-  /** Applies the next revision to the shared canvas and rebases the local edits; false when it cannot apply. */
-  private advance(revision: number, transaction: CanvasTransaction, own = false): boolean {
+  /** Applies the next revision to the shared whiteboard and rebases the local edits; false when it cannot apply. */
+  private advance(revision: number, transaction: WhiteboardTransaction, own = false): boolean {
     const before = this.canonical!;
-    try { this.canonical = applyCanvasTransaction(before, transaction); }
+    try { this.canonical = applyWhiteboardTransaction(before, transaction); }
     catch { return false; }
     this.revision = revision;
     this.rebase(before, own);
     return true;
   }
 
-  /** Keeps this device's edits (the difference from `before`) on top of the new shared canvas. */
-  private rebase(before: CanvasDocument, own = false): void {
-    measureCanvas('share.rebase', () => this.rebaseContent(before, own), { revision: this.revision, own });
+  /** Keeps this device's edits (the difference from `before`) on top of the new shared whiteboard. */
+  private rebase(before: WhiteboardDocument, own = false): void {
+    measureWhiteboard('share.rebase', () => this.rebaseContent(before, own), { revision: this.revision, own });
   }
 
-  private rebaseContent(before: CanvasDocument, own = false): void {
+  private rebaseContent(before: WhiteboardDocument, own = false): void {
     if (!this.local || !this.canonical) return;
     if (this.conflict) { this.publish(); return; }
     try {
@@ -603,7 +603,7 @@ export class ShareClient {
     return this.catching;
   }
 
-  /** Replaces the shared canvas with a fresh snapshot, rebasing the local edits onto it. */
+  /** Replaces the shared whiteboard with a fresh snapshot, rebasing the local edits onto it. */
   private resync(): Promise<void> {
     this.resyncing ??= (async () => {
       let snapshot: ShareSnapshot;
@@ -612,9 +612,9 @@ export class ShareClient {
       if (this.ended || this.disposed) return;
       if (snapshot.epoch !== this.epoch) { this.end(NEW_SESSION); return; }
       if (snapshot.revision < this.revision) return;
-      let document: CanvasDocument;
-      try { document = parseCanvasDocument(snapshot.text); }
-      catch (error) { this.trouble(`The Mac sent a canvas this page cannot read: ${(error as Error).message}`); return; }
+      let document: WhiteboardDocument;
+      try { document = parseWhiteboardDocument(snapshot.text); }
+      catch (error) { this.trouble(`The Mac sent a whiteboard this page cannot read: ${(error as Error).message}`); return; }
       const before = this.canonical!;
       this.canonical = document;
       this.revision = snapshot.revision;
@@ -640,8 +640,8 @@ export class ShareClient {
         if (!this.canCommit()) break;
         let op = this.inflight;
         if (!op) {
-          const transaction = diffCanvasContent(this.canonical!, this.local!);
-          if (!hasCanvasChanges(transaction)) { this.dirty = false; break; }
+          const transaction = diffWhiteboardContent(this.canonical!, this.local!);
+          if (!hasWhiteboardChanges(transaction)) { this.dirty = false; break; }
           op = { clientId: this.clientId, seq: this.nextSeq, opId: this.env.newId(), epoch: this.epoch!, transaction };
           this.inflight = op;
           this.inflightSeen = false;
@@ -663,7 +663,7 @@ export class ShareClient {
         if (this.lastError && !this.down) this.setError(null);
         await this.acknowledge(ack);
         if (this.inflight !== op) break;
-        // Our own change is not in the shared canvas yet: wait for it rather than send it twice.
+        // Our own change is not in the shared whiteboard yet: wait for it rather than send it twice.
         if (this.revision < ack.revision) break;
         this.inflight = null;
         this.inflightSeen = false;
@@ -679,8 +679,8 @@ export class ShareClient {
   private send(op: ShareOp): Promise<ShareAck> {
     const controller = new AbortController();
     const timer = this.env.clock.setTimeout(() => controller.abort(), commitTimeout(op));
-    traceCanvas("share.commit-start", { seq: op.seq, edits: op.transaction.edits.length });
-    return this.api.commit(op, controller.signal).finally(() => traceCanvas("share.commit-finish", { seq: op.seq })).finally(() => this.env.clock.clearTimeout(timer));
+    traceWhiteboard("share.commit-start", { seq: op.seq, edits: op.transaction.edits.length });
+    return this.api.commit(op, controller.signal).finally(() => traceWhiteboard("share.commit-finish", { seq: op.seq })).finally(() => this.env.clock.clearTimeout(timer));
   }
 
   /** Decides what a refused or unanswered commit means; true sends again at once. */
@@ -736,23 +736,23 @@ export class ShareClient {
   }
 
   private persistNow(): Promise<void> {
-    return measureCanvas('share.persist-operations', () => this.persistOperations());
+    return measureWhiteboard('share.persist-operations', () => this.persistOperations());
   }
 
   private persistOperations(): Promise<void> {
     if (this.persistTimer !== null) { this.env.clock.clearTimeout(this.persistTimer); this.persistTimer = null; }
     if (this.disposed || !this.epoch) return Promise.resolve();
     const unconfirmed = this.unconfirmed();
-    let pending: CanvasTransaction | null = null;
-    let afterInflight: CanvasTransaction | null | undefined;
+    let pending: WhiteboardTransaction | null = null;
+    let afterInflight: WhiteboardTransaction | null | undefined;
     if (unconfirmed && this.canonical && this.local) {
-      const transaction = diffCanvasContent(this.canonical, this.local);
-      pending = hasCanvasChanges(transaction) ? transaction : null;
+      const transaction = diffWhiteboardContent(this.canonical, this.local);
+      pending = hasWhiteboardChanges(transaction) ? transaction : null;
       if (this.inflight && !this.conflict) {
         // Keep the undo separately even when the aggregate pending diff is empty.
-        const base = this.inflightSeen ? this.canonical : applyCanvasTransaction(this.canonical, this.inflight.transaction);
-        const after = diffCanvasContent(base, this.local);
-        afterInflight = hasCanvasChanges(after) ? after : null;
+        const base = this.inflightSeen ? this.canonical : applyWhiteboardTransaction(this.canonical, this.inflight.transaction);
+        const after = diffWhiteboardContent(base, this.local);
+        afterInflight = hasWhiteboardChanges(after) ? after : null;
       }
     }
     const record: ShareOpRecord = {
@@ -781,7 +781,7 @@ export class ShareClient {
     if (this.disposed || !this.epoch) return Promise.resolve();
     let record: ShareRecovery | null = null;
     if (this.unconfirmed() && this.local) {
-      record = { epoch: this.epoch, savedAt: this.saveTime(), draft: measureCanvas("share.serialize-drawing", () => JSON.stringify(this.local)) };
+      record = { epoch: this.epoch, savedAt: this.saveTime(), draft: measureWhiteboard("share.serialize-drawing", () => JSON.stringify(this.local)) };
     }
     return this.draftWriter.store(record);
   }

@@ -1,7 +1,7 @@
 {
   "name": "placement consecutive mid-stack additions",
   "document": {
-    "type": "oculus-canvas",
+    "type": "oculus-whiteboard",
     "version": 1,
     "elements": [
       {
@@ -93,7 +93,7 @@
   },
   "expect": {
     "ok": {
-      "type": "oculus-canvas",
+      "type": "oculus-whiteboard",
       "version": 1,
       "elements": [
         {

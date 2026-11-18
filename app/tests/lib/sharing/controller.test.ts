@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { CanvasAuthorityPhase } from "@/lib/canvas/authority";
+import type { WhiteboardAuthorityPhase } from "@/lib/whiteboard/authority";
 import { shareController, type ShareSessionPort } from "@/lib/sharing/controller";
 import type { CompanionState, ShareEndpoints, ShareInfo, SharingApi } from "@/lib/sharing/types";
 import { pickEndpoint, shareStatusLine } from "@/lib/sharing/view";
@@ -16,7 +16,7 @@ const state = (patch: Partial<CompanionState> = {}): CompanionState => ({ runnin
 const summary = (patch: Partial<ShareInfo> = {}) => { const { fileId, shareId, epoch, clients, phase } = info(patch); return { fileId, shareId, epoch, clients, phase }; };
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function fakeSession(phase: CanvasAuthorityPhase = "off") {
+function fakeSession(phase: WhiteboardAuthorityPhase = "off") {
   const calls: string[] = [];
   const session = {
     file: { id: FILE },
@@ -71,7 +71,7 @@ describe("share controller", () => {
 
   test("a failed attach never asks for a share", async () => {
     const session = fakeSession(), api = fakeApi();
-    session.attachFails = new Error("Choose which canvas version to keep before sharing.");
+    session.attachFails = new Error("Choose which whiteboard version to keep before sharing.");
     const controller = shareController(session, api);
     expect((await controller.start())?.message).toContain("Choose which");
     expect(api.calls).toEqual([]);
@@ -204,7 +204,7 @@ describe("share controller", () => {
     expect(api.calls.sort()).toEqual(["endpoints", "shares"]);
   });
 
-  test("opening on a canvas shared earlier finds its share", async () => {
+  test("opening on a whiteboard shared earlier finds its share", async () => {
     const session = fakeSession("live"), api = fakeApi();
     api.live.set(FILE, info({ clients: 1 }));
     const controller = shareController(session, api);

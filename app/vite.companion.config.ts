@@ -7,7 +7,7 @@ import path from "node:path";
  * The page a paired browser loads from the Mac's companion server
  * (docs/device-sharing.md): `companion.html` and `src/companion/`, built to
  * `dist/companion/` after the desktop bundle, which the server serves under `/c/`.
- * The canvas WebAssembly and the fonts are emitted as hashed files under
+ * The whiteboard WebAssembly and the fonts are emitted as hashed files under
  * `dist/companion/assets/`, so the page loads nothing from outside `/c/`.
  */
 
@@ -48,7 +48,7 @@ export default defineConfig({
     assetsDir: "assets",
     // Fonts and the wasm stay files the server serves with their own MIME, never data: URLs.
     assetsInlineLimit: 0,
-    // React, Radix and the canvas in one chunk the page needs at once.
+    // React, Radix and the whiteboard in one chunk the page needs at once.
     chunkSizeWarningLimit: 700,
     rollupOptions: { input: [path.resolve(__dirname, "companion.html"), path.resolve(__dirname, "input-test.html")] },
   },

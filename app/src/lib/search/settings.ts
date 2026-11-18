@@ -159,7 +159,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   ]),
 
   page("device-sharing", ["share", "ipad", "phone", "tablet", "pencil", "qr code", "link", "network", "lan", "vpn", "companion"]),
-  ...section("device-sharing", "Active shares", ["shared canvases", "devices", "connected", "addresses"], [
+  ...section("device-sharing", "Active shares", ["shared whiteboards", "devices", "connected", "addresses"], [
     ["Stop all", ["stop sharing", "revoke", "end sharing"]],
   ]),
 

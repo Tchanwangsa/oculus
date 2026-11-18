@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Slider } from '@/components/ui/slider';
-import type { StylePatch } from '@/lib/canvas/style';
+import type { StylePatch } from '@/lib/whiteboard/style';
 import { InspectorSection, type SectionProps } from './InspectorSection';
 
-/** Dragging previews on the canvas; releasing commits one undo step. */
+/** Dragging previews on the whiteboard; releasing commits one undo step. */
 export function OpacitySection({ values, onChange, onPreview }: SectionProps & { onPreview: (patch: StylePatch) => void }) {
   const [live, setLive] = useState<number | null>(null);
   const percent = live ?? Math.round(values.opacity * 100);

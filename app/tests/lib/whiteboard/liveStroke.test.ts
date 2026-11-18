@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { LiveStroke, type LiveStrokeContext } from '@/lib/canvas/liveStroke';
-import type { CanvasElement, Point } from '@/lib/canvas/model';
+import { LiveStroke, type LiveStrokeContext } from '@/lib/whiteboard/liveStroke';
+import type { WhiteboardElement, Point } from '@/lib/whiteboard/model';
 
 type Call = [name: string, ...args: number[]];
 function fakeContext() {
@@ -13,10 +13,10 @@ function fakeContext() {
   };
   return { context: context as unknown as LiveStrokeContext, calls, named: (name: string) => calls.filter(call => call[0] === name) };
 }
-const element: CanvasElement = { id: 'ink', type: 'freedraw', x: 100, y: 50, width: 0, height: 0, stroke: '#123456', fill: 'transparent', strokeWidth: 4, style: 'clean', seed: 1 };
+const element: WhiteboardElement = { id: 'ink', type: 'freedraw', x: 100, y: 50, width: 0, height: 0, stroke: '#123456', fill: 'transparent', strokeWidth: 4, style: 'clean', seed: 1 };
 const viewport = { x: 10, y: 20, zoom: 2 };
 const points: Point[] = [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: 10 }, { x: 20, y: 30 }, { x: 0, y: 40 }];
-const at = (path: Point[]): CanvasElement => ({ ...element, points: path });
+const at = (path: Point[]): WhiteboardElement => ({ ...element, points: path });
 function setup() {
   const ink = fakeContext(), tail = fakeContext();
   const stroke = new LiveStroke(ink.context, tail.context);

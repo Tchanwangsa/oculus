@@ -3,13 +3,13 @@
  * moved with their pages: an element belongs to the page holding the centre of its drawn bounds (`elementPage`, the
  * page the screen clips it to), and keeps its offset from that page's top-centre wherever the page ends up.
  */
-import type { CanvasDocument, CanvasElement } from './model';
+import type { WhiteboardDocument, WhiteboardElement } from './model';
 import { isLocked, nextPageId, pageRects, templateOf, withAddedPage, type PageRect, type Paper, type PaperPage, type PaperTemplate } from './paper';
 import { elementPage } from './renderPaper';
 import { elementBounds } from './geometry';
-import { cloneCanvasElements } from './renderClipboard';
+import { cloneWhiteboardElements } from './renderClipboard';
 import { secureId } from './ids';
-import type { CanvasImportedImage } from './importMedia';
+import type { WhiteboardImportedImage } from './importMedia';
 
 export type PageSize = { width: number; height: number };
 
@@ -26,10 +26,10 @@ const replaced = (pages: readonly PaperPage[], index: number, page: PaperPage) =
  * moved just enough to keep their centre, and so their page, with the rest clipped. `added` go in last: locked ones
  * above the existing locked backdrops, the rest on top.
  */
-function relayout(document: CanvasDocument, paper: Paper, added: readonly CanvasElement[] = [], keepOn?: string): CanvasDocument {
+function relayout(document: WhiteboardDocument, paper: Paper, added: readonly WhiteboardElement[] = [], keepOn?: string): WhiteboardDocument {
   const old = document.paper!;
   const places = new Map(pageRects(paper).map(rect => [rect.id, rect]));
-  const elements: CanvasElement[] = [];
+  const elements: WhiteboardElement[] = [];
   for (const element of document.elements) {
     const from = elementPage(old, element), to = places.get(from.id);
     if (!to) continue;
@@ -51,7 +51,7 @@ function relayout(document: CanvasDocument, paper: Paper, added: readonly Canvas
 }
 
 /** A page's picture as a locked image filling `rect`: the backdrop a page copied from a PDF has. */
-export function pageBackdrop(rect: Pick<PageRect, 'x' | 'y' | 'width' | 'height'>, image: CanvasImportedImage): CanvasElement {
+export function pageBackdrop(rect: Pick<PageRect, 'x' | 'y' | 'width' | 'height'>, image: WhiteboardImportedImage): WhiteboardElement {
   return {
     id: secureId(), type: 'image', x: rect.x, y: rect.y, width: rect.width, height: rect.height,
     dataUrl: image.dataUrl, sourceName: image.name, naturalWidth: image.width, naturalHeight: image.height,
@@ -60,7 +60,7 @@ export function pageBackdrop(rect: Pick<PageRect, 'x' | 'y' | 'width' | 'height'
 }
 
 /** The notebook with one more page after the last, the size and template of that one. */
-export function addPage(document: CanvasDocument): CanvasDocument {
+export function addPage(document: WhiteboardDocument): WhiteboardDocument {
   return document.paper ? { ...document, paper: withAddedPage(document.paper) } : document;
 }
 
@@ -68,7 +68,7 @@ export function addPage(document: CanvasDocument): CanvasDocument {
  * A blank page at position `at` (0 puts it first, the page count puts it last), the size and template of `like`, by
  * default the page just before that position (or after it, for a new first page). The pages below move down.
  */
-export function insertPage(document: CanvasDocument, at: number, like?: Pick<PaperPage, 'width' | 'height' | 'template'>): CanvasDocument {
+export function insertPage(document: WhiteboardDocument, at: number, like?: Pick<PaperPage, 'width' | 'height' | 'template'>): WhiteboardDocument {
   const { paper } = document;
   if (!paper || !Number.isInteger(at) || at < 0 || at > paper.pages.length) return document;
   const model = like ?? paper.pages[at - 1] ?? paper.pages[at];
@@ -80,18 +80,18 @@ export function insertPage(document: CanvasDocument, at: number, like?: Pick<Pap
  * A copy of page `index` right after it: the same size and template, with a clone of everything on it under new ids.
  * Locked backdrops stay locked; an arrow bound to something on another page loses that binding in its copy.
  */
-export function duplicatePage(document: CanvasDocument, index: number): CanvasDocument {
+export function duplicatePage(document: WhiteboardDocument, index: number): WhiteboardDocument {
   const { paper } = document;
   if (!valid(paper, index)) return document;
   const source = paper.pages[index];
   const next = withPages(paper, spliced(paper.pages, index + 1, { ...source, id: nextPageId(paper) }));
   const from = pageRects(paper)[index], to = pageRects(next)[index + 1];
   const owned = document.elements.filter(element => elementPage(paper, element).id === source.id);
-  return relayout(document, next, cloneCanvasElements(owned, { x: 0, y: to.y - from.y }));
+  return relayout(document, next, cloneWhiteboardElements(owned, { x: 0, y: to.y - from.y }));
 }
 
 /** Page `from` moved to position `to` (its index afterwards); every page's elements go with it. */
-export function movePage(document: CanvasDocument, from: number, to: number): CanvasDocument {
+export function movePage(document: WhiteboardDocument, from: number, to: number): WhiteboardDocument {
   const { paper } = document;
   if (!valid(paper, from) || !valid(paper, to) || from === to) return document;
   const pages = [...paper.pages];
@@ -103,21 +103,21 @@ export function movePage(document: CanvasDocument, from: number, to: number): Ca
  * The notebook without page `pageId`: the page and everything on it go, and the pages below move up
  * into its place, taking their elements with them. A notebook keeps at least one page.
  */
-export function removePage(document: CanvasDocument, pageId: string): CanvasDocument {
+export function removePage(document: WhiteboardDocument, pageId: string): WhiteboardDocument {
   const { paper } = document;
   if (!paper || paper.pages.length < 2 || !paper.pages.some(page => page.id === pageId)) return document;
   return relayout(document, withPages(paper, paper.pages.filter(page => page.id !== pageId)));
 }
 
 /** Page `index` drawn on `template`; nothing moves. */
-export function setPageTemplate(document: CanvasDocument, index: number, template: PaperTemplate): CanvasDocument {
+export function setPageTemplate(document: WhiteboardDocument, index: number, template: PaperTemplate): WhiteboardDocument {
   const { paper } = document;
   if (!valid(paper, index) || templateOf(paper.pages[index]) === template) return document;
   return { ...document, paper: withPages(paper, replaced(paper.pages, index, { ...paper.pages[index], template })) };
 }
 
 /** Apply one template to every page while keeping the layout and elements. */
-export function setAllPageTemplates(document: CanvasDocument, template: PaperTemplate): CanvasDocument {
+export function setAllPageTemplates(document: WhiteboardDocument, template: PaperTemplate): WhiteboardDocument {
   const { paper } = document;
   if (!paper || paper.pages.every(page => templateOf(page) === template)) return document;
   const pages = paper.pages.map(page => templateOf(page) === template ? page : { ...page, template });
@@ -129,7 +129,7 @@ export function setAllPageTemplates(document: CanvasDocument, template: PaperTem
  * the smaller page is moved just enough to stay on it, and what overhangs is clipped. The pages below move by the
  * change in height.
  */
-export function setPageSize(document: CanvasDocument, index: number, size: PageSize): CanvasDocument {
+export function setPageSize(document: WhiteboardDocument, index: number, size: PageSize): WhiteboardDocument {
   const { paper } = document;
   if (!valid(paper, index)) return document;
   const page = paper.pages[index];
@@ -141,7 +141,7 @@ export function setPageSize(document: CanvasDocument, index: number, size: PageS
  * New pages at position `at`, one per picture, each the PDF page's size with its picture laid on it as a locked
  * backdrop (as a notebook made from a PDF has). The pages below move down.
  */
-export function insertPdfPages(document: CanvasDocument, at: number, sizes: readonly PageSize[], images: readonly CanvasImportedImage[]): CanvasDocument {
+export function insertPdfPages(document: WhiteboardDocument, at: number, sizes: readonly PageSize[], images: readonly WhiteboardImportedImage[]): WhiteboardDocument {
   const { paper } = document;
   if (!paper || !Number.isInteger(at) || at < 0 || at > paper.pages.length || !sizes.length) return document;
   if (sizes.length !== images.length) throw new Error('Each new page needs one picture.');

@@ -40,7 +40,7 @@ describe("kindOf", () => {
     expect(kindOf("deck.pptx")).toBe("slides");
     expect(kindOf("marks.xlsx")).toBe("sheet");
     expect(kindOf("essay.docx")).toBe("document");
-    expect(kindOf("board.canvas")).toBe("canvas");
+    expect(kindOf("board.whiteboard")).toBe("whiteboard");
     expect(kindOf("paper.notebook")).toBe("notebook");
     expect(kindOf("demo.mov")).toBe("video");
     expect(kindOf("a.png")).toBe("image");

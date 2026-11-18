@@ -4,7 +4,7 @@ import { CollapsibleSection } from "@/components/ui/CollapsibleSection";
 import type { ShareEndpoint, ShareSummary } from "@/lib/sharing/types";
 import { devices } from "@/lib/sharing/view";
 
-/** One live share: its canvas, how many devices are connected, the addresses
+/** One live share: its whiteboard, how many devices are connected, the addresses
  * it answers on (folded; no link, since a link holds the secret), and Stop. */
 export function ActiveShare({ share, title, endpoints, stopping, onStop }: {
   share: ShareSummary;

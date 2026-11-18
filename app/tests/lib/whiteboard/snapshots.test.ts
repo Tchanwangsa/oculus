@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { createCanvasDocument, type CanvasDocument, type CanvasElement } from '../../../src/lib/canvas/model';
-import { createPaper, pageRects, type Paper } from '../../../src/lib/canvas/paper';
-import { NotebookSnapshots, type SnapshotDeps, type SnapshotRequest } from '../../../src/lib/canvas/snapshots';
-import { pageFingerprints } from '../../../src/lib/canvas/pageFingerprints';
+import { createWhiteboardDocument, type WhiteboardDocument, type WhiteboardElement } from '../../../src/lib/whiteboard/model';
+import { createPaper, pageRects, type Paper } from '../../../src/lib/whiteboard/paper';
+import { NotebookSnapshots, type SnapshotDeps, type SnapshotRequest } from '../../../src/lib/whiteboard/snapshots';
+import { pageFingerprints } from '../../../src/lib/whiteboard/pageFingerprints';
 
 const base = { stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
-const stroke = (id: string, x: number, y: number): CanvasElement => ({ id, type: 'rectangle', x, y, width: 20, height: 20, ...base });
-const notebook = (paper: Paper, elements: CanvasElement[] = [], viewport = { x: 0, y: 0, zoom: 1 }): CanvasDocument => ({ ...createCanvasDocument(), paper, elements, viewport });
+const stroke = (id: string, x: number, y: number): WhiteboardElement => ({ id, type: 'rectangle', x, y, width: 20, height: 20, ...base });
+const notebook = (paper: Paper, elements: WhiteboardElement[] = [], viewport = { x: 0, y: 0, zoom: 1 }): WhiteboardDocument => ({ ...createWhiteboardDocument(), paper, elements, viewport });
 const two: Paper = { gap: 10, pages: [{ id: 'p1', width: 100, height: 200 }, { id: 'p2', width: 100, height: 200 }] };
 const PATH = 'courses/X/Work.notebook';
 
@@ -20,7 +20,7 @@ function fakes() {
   };
   const errors: (string | null)[] = [];
   const writer = new NotebookSnapshots(7, deps, error => errors.push(error), 10_000);
-  const write = async (document: CanvasDocument, path = PATH) => { writer.schedule(document, path); await writer.flush(); };
+  const write = async (document: WhiteboardDocument, path = PATH) => { writer.schedule(document, path); await writer.flush(); };
   return { rendered, sent, state, errors, writer, write };
 }
 
@@ -46,14 +46,14 @@ describe('pageFingerprints', () => {
     expect(pageFingerprints(notebook(one)).get('p2')).not.toBe(pageFingerprints(notebook(two)).get('p2'));
   });
   test('a whiteboard has no pages', () => {
-    expect(pageFingerprints(createCanvasDocument()).size).toBe(0);
+    expect(pageFingerprints(createWhiteboardDocument()).size).toBe(0);
   });
 });
 
 describe('NotebookSnapshots', () => {
-  test('a .canvas has no page pictures, even one holding paper', async () => {
+  test('a .whiteboard has no page pictures, even one holding paper', async () => {
     const f = fakes();
-    await f.write(notebook(two, [stroke('a', 10, 10)]), 'courses/X/Work.canvas');
+    await f.write(notebook(two, [stroke('a', 10, 10)]), 'courses/X/Work.whiteboard');
     expect(f.rendered).toEqual([]);
     expect(f.sent).toHaveLength(0);
   });
@@ -110,7 +110,7 @@ describe('NotebookSnapshots', () => {
   });
   test('a whiteboard is ignored', async () => {
     const f = fakes();
-    await f.write(createCanvasDocument());
+    await f.write(createWhiteboardDocument());
     expect(f.sent).toHaveLength(0);
   });
   test('a write started while another is in flight waits for it, so pages arrive in order', async () => {

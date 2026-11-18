@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createCanvasDocument, type CanvasElement } from '@/lib/canvas/model';
+import { createWhiteboardDocument, type WhiteboardElement } from '@/lib/whiteboard/model';
 import { createHarness, pointer } from './harness';
 
 function startText() {
@@ -35,8 +35,8 @@ describe('formatting an open text draft', () => {
 
   test('opacity previews on an existing label commit once and undo restores its opacity', () => {
     const h = createHarness();
-    const shape: CanvasElement = { id: 'shape', type: 'rectangle', x: 300, y: 200, width: 120, height: 80, stroke: '#000000', fill: 'transparent', strokeWidth: 2, style: 'clean', seed: 1, text: 'Label' };
-    h.render({ ...createCanvasDocument(), elements: [shape] });
+    const shape: WhiteboardElement = { id: 'shape', type: 'rectangle', x: 300, y: 200, width: 120, height: 80, stroke: '#000000', fill: 'transparent', strokeWidth: 2, style: 'clean', seed: 1, text: 'Label' };
+    h.render({ ...createWhiteboardDocument(), elements: [shape] });
     h.editor.setTool('text'); h.render();
     h.editor.pointerDown(pointer(1, 'mouse', 330, 230)); h.render();
     h.editor.previewStyle({ opacity: 0.7 }); h.render();

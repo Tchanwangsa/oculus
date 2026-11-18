@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { createCanvasDocument, type CanvasElement } from '@/lib/canvas/model';
+import { createWhiteboardDocument, type WhiteboardElement } from '@/lib/whiteboard/model';
 import { createHarness, key, pointer, type Harness } from './harness';
 
 // At the harness's camera a client pixel is a world unit, so a small partial eraser (6 px) reaches 7 units of a 2-wide stroke.
-const ink: CanvasElement = { id: 'ink', type: 'freedraw', x: 10, y: 20, width: 100, height: 0, stroke: '#000', fill: 'transparent', strokeWidth: 2, style: 'clean', seed: 1, points: [{ x: 0, y: 0 }, { x: 100, y: 0 }] };
-const under: CanvasElement = { ...ink, id: 'under' };
-const box: CanvasElement = { ...ink, id: 'box', type: 'rectangle', x: 300, y: 300, width: 40, height: 40, points: undefined };
+const ink: WhiteboardElement = { id: 'ink', type: 'freedraw', x: 10, y: 20, width: 100, height: 0, stroke: '#000', fill: 'transparent', strokeWidth: 2, style: 'clean', seed: 1, points: [{ x: 0, y: 0 }, { x: 100, y: 0 }] };
+const under: WhiteboardElement = { ...ink, id: 'under' };
+const box: WhiteboardElement = { ...ink, id: 'box', type: 'rectangle', x: 300, y: 300, width: 40, height: 40, points: undefined };
 
-function setup(elements: CanvasElement[], options: Parameters<typeof createHarness>[0] = {}) {
+function setup(elements: WhiteboardElement[], options: Parameters<typeof createHarness>[0] = {}) {
   const h = createHarness(options);
-  h.render({ ...createCanvasDocument(), elements });
+  h.render({ ...createWhiteboardDocument(), elements });
   h.editor.setTool('eraser'); h.render();
   return h;
 }

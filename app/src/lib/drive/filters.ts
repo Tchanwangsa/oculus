@@ -9,7 +9,7 @@ import type { DriveZone, FileEntry, FolderEntry, FolderListing } from "./listing
  */
 
 export type DriveKind =
-  | "pdf" | "document" | "slides" | "sheet" | "note" | "canvas" | "notebook"
+  | "pdf" | "document" | "slides" | "sheet" | "note" | "whiteboard" | "notebook"
   | "video" | "audio" | "image" | "code" | "archive" | "other";
 
 export const KIND_LABEL: Record<DriveKind, string> = {
@@ -18,7 +18,7 @@ export const KIND_LABEL: Record<DriveKind, string> = {
   slides: "Slides",
   sheet: "Spreadsheet",
   note: "Note",
-  canvas: "Canvas",
+  whiteboard: "Whiteboard",
   notebook: "Notebook",
   video: "Video",
   audio: "Audio",
@@ -38,7 +38,7 @@ const ext = (name: string) => name.slice(name.lastIndexOf(".") + 1).toLowerCase(
 export function kindOf(name: string, category?: string | null): DriveKind {
   const e = name.includes(".") ? ext(name) : "";
   if (e === "pdf") return "pdf";
-  if (e === "canvas") return "canvas";
+  if (e === "whiteboard") return "whiteboard";
   if (e === "notebook") return "notebook";
   if (e === "ppt" || e === "pptx" || e === "key") return "slides";
   if (isSheetFile(name)) return "sheet";

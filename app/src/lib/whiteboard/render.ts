@@ -1,4 +1,4 @@
-import { CANVAS_DEFAULTS, hasLabel, LABELLED_TYPES, roundnessOf, type CanvasDocument, type CanvasElement, type Point } from './model';
+import { WHITEBOARD_DEFAULTS, hasLabel, LABELLED_TYPES, roundnessOf, type WhiteboardDocument, type WhiteboardElement, type Point } from './model';
 import { diamondCorners, diamondVertices, elementArrowheads, elementBounds, rectangleRadius, selectionBounds, strokeDash, type Bounds } from './geometry';
 import { notebookPaper, pageRects, type PageRect, type Paper } from './paper';
 import { PAGE_COLOR, clipToPage, elementPage, exportBounds, paintPaper, paintTemplate } from './renderPaper';
@@ -8,10 +8,10 @@ import { canvasFont, LINE_HEIGHT, layoutShapeLabel, layoutTextElement, lineBasel
 import { visibleElements } from './engine';
 import { outlineCenter, outlineMidpoints } from './outline';
 import type { BindingSnap } from './bindings';
-import { drawCanvasImage, loadCanvasImages } from './renderImages';
+import { drawWhiteboardImage, loadWhiteboardImages } from './renderImages';
 import { nibOutline, penLine } from './pens';
 
-export interface CanvasPaintOptions {
+export interface WhiteboardPaintOptions {
   width: number;
   height: number;
   pixelRatio: number;
@@ -23,18 +23,18 @@ export interface CanvasPaintOptions {
   lasso?: readonly Point[];
   cropSource?: Bounds;
   captureSelection?: boolean;
-  captureGhost?: { snapshot: CanvasDocument; from: Bounds; to: Bounds };
+  captureGhost?: { snapshot: WhiteboardDocument; from: Bounds; to: Bounds };
   /** Text being edited is hidden; a shape being labelled draws without its label, which the overlay replaces. */
   editingId?: string;
   /** The freehand override currently painted on the ink layer. */
   inkId?: string;
-  overrides?: Map<string, CanvasElement | null>;
+  overrides?: Map<string, WhiteboardElement | null>;
   /** The shape an arrow end would bind to while one is drawn or dragged; never exported. */
   bindingHint?: BindingSnap | null;
-  /** A notebook paints its pages and clips each element to its own; a canvas is a whiteboard, whatever `paper` it holds. */
+  /** A notebook paints its pages and clips each element to its own; a whiteboard ignores whatever `paper` it holds. */
   notebook?: boolean;
   /** What an erase in progress will remove, painted faint (`GHOST_ALPHA`) until the release commits it. */
-  ghosts?: readonly CanvasElement[];
+  ghosts?: readonly WhiteboardElement[];
   /** The partial eraser's outline, in world units. */
   eraser?: { center: Point; radius: number };
   /** Bounds of the elements a selection box would add if released now, outlined lighter than a selection. */
@@ -44,15 +44,15 @@ export interface CanvasPaintOptions {
 /** A ghost's share of its element's opacity. */
 export const GHOST_ALPHA = 0.25;
 
-export interface CanvasRenderOptions { notebook?: boolean }
+export interface WhiteboardRenderOptions { notebook?: boolean }
 
 interface ElementPaths { body: Path2D; heads?: Path2D; filledHeads?: Path2D }
-const pathCache = new WeakMap<CanvasElement, ElementPaths>();
-let labelCache = new WeakMap<CanvasElement, TextLayout>();
+const pathCache = new WeakMap<WhiteboardElement, ElementPaths>();
+let labelCache = new WeakMap<WhiteboardElement, TextLayout>();
 // Labels measured before the web font arrived wrap with fallback widths.
 if (typeof document !== 'undefined') document.fonts?.addEventListener('loadingdone', () => { labelCache = new WeakMap(); });
 
-function elementPaths(element: CanvasElement): ElementPaths {
+function elementPaths(element: WhiteboardElement): ElementPaths {
   const cached = pathCache.get(element);
   if (cached) return cached;
   const path = new Path2D(), paths: ElementPaths = { body: path };
@@ -91,9 +91,9 @@ function elementPaths(element: CanvasElement): ElementPaths {
   return paths;
 }
 
-const nibCache = new WeakMap<CanvasElement, Path2D>();
+const nibCache = new WeakMap<WhiteboardElement, Path2D>();
 /** A freehand stroke in its pen: a nib pen's filled outline, or a line pen's passes over the smoothed path. */
-function drawInk(context: CanvasRenderingContext2D, element: CanvasElement, opacity: number) {
+function drawInk(context: CanvasRenderingContext2D, element: WhiteboardElement, opacity: number) {
   const line = penLine(element);
   if (!line) {
     let outline = nibCache.get(element);
@@ -114,13 +114,13 @@ function drawInk(context: CanvasRenderingContext2D, element: CanvasElement, opac
   context.setLineDash([]);
 }
 
-function strokeOutline(context: CanvasRenderingContext2D, element: CanvasElement, paths: ElementPaths) {
+function strokeOutline(context: CanvasRenderingContext2D, element: WhiteboardElement, paths: ElementPaths) {
   context.setLineDash(strokeDash(element)); context.stroke(paths.body); context.setLineDash([]);
   if (paths.heads) context.stroke(paths.heads);
   if (paths.filledHeads) context.stroke(paths.filledHeads);
 }
 
-function drawLines(context: CanvasRenderingContext2D, element: CanvasElement, layout: TextLayout) {
+function drawLines(context: CanvasRenderingContext2D, element: WhiteboardElement, layout: TextLayout) {
   context.font = canvasFont(layout.fontSize, layout.fontFamily);
   context.textAlign = layout.textAlign;
   context.textBaseline = 'alphabetic';
@@ -132,17 +132,17 @@ function drawLines(context: CanvasRenderingContext2D, element: CanvasElement, la
 }
 
 /** `alpha` scales the element's own opacity (a ghost). */
-export function drawElement(context: CanvasRenderingContext2D, element: CanvasElement, label = true, alpha = 1) {
+export function drawElement(context: CanvasRenderingContext2D, element: WhiteboardElement, label = true, alpha = 1) {
   context.save();
   context.translate(element.x, element.y);
-  const opacity = (element.opacity ?? CANVAS_DEFAULTS.opacity) * alpha;
+  const opacity = (element.opacity ?? WHITEBOARD_DEFAULTS.opacity) * alpha;
   context.globalAlpha = opacity;
   context.strokeStyle = element.stroke;
   context.fillStyle = element.fill;
   context.lineWidth = element.strokeWidth;
   context.lineCap = 'round';
   context.lineJoin = 'round';
-  if (element.type === 'image') drawCanvasImage(context, element);
+  if (element.type === 'image') drawWhiteboardImage(context, element);
   else if (element.type === 'text') drawLines(context, element, layoutTextElement(element));
   else if (element.type === 'freedraw') drawInk(context, element, opacity);
   else {
@@ -172,7 +172,7 @@ export function drawElement(context: CanvasRenderingContext2D, element: CanvasEl
  * Draws `elements` in order. With `paper` each is clipped to its page (`elementPage`), and a run of elements on one page
  * shares a clip; without it they are drawn as they are.
  */
-export function drawElementsOnPages(context: CanvasRenderingContext2D, elements: Iterable<CanvasElement>, paper: Paper | undefined, draw = (element: CanvasElement) => drawElement(context, element)) {
+export function drawElementsOnPages(context: CanvasRenderingContext2D, elements: Iterable<WhiteboardElement>, paper: Paper | undefined, draw = (element: WhiteboardElement) => drawElement(context, element)) {
   if (!paper) { for (const element of elements) draw(element); return; }
   let page: PageRect | null = null;
   for (const element of elements) {
@@ -197,19 +197,19 @@ export function resizeHandles(bounds: Bounds): Point[] {
 }
 
 /** A single selected line or arrow edits its points (`pointHandles`) instead of resizing. */
-export const pointEditTarget = (elements: readonly CanvasElement[]) =>
+export const pointEditTarget = (elements: readonly WhiteboardElement[]) =>
   elements.length === 1 && (elements[0].type === 'line' || elements[0].type === 'arrow') ? elements[0] : undefined;
 
-export function elementResizeHandles(elements: CanvasElement[], bounds: Bounds): Point[] {
+export function elementResizeHandles(elements: WhiteboardElement[], bounds: Bounds): Point[] {
   return pointEditTarget(elements) ? [] : resizeHandles(bounds);
 }
 
 /** The dashed frame drawn round a selection; a single line or arrow has none, only its point handles. */
-export const selectionFrame = (elements: CanvasElement[]): Bounds | null =>
+export const selectionFrame = (elements: WhiteboardElement[]): Bounds | null =>
   pointEditTarget(elements) ? null : selectionBounds(elements);
 
 /** Points as the resize handles' squares; midpoints and elbow segment handles smaller, round and faint. */
-function paintPointHandles(context: CanvasRenderingContext2D, element: CanvasElement, background: string, zoom: number) {
+function paintPointHandles(context: CanvasRenderingContext2D, element: WhiteboardElement, background: string, zoom: number) {
   for (const handle of pointHandles(element, zoom)) {
     context.beginPath();
     if (handle.kind === 'point') {
@@ -260,7 +260,7 @@ function paintEraser(context: CanvasRenderingContext2D, center: Point, radius: n
   context.restore();
 }
 
-export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasDocument, options: CanvasPaintOptions) {
+export function paintWhiteboard(context: CanvasRenderingContext2D, document: WhiteboardDocument, options: WhiteboardPaintOptions) {
   const { width, height, pixelRatio, grid, selected, selectionColor } = options;
   const { x, y, zoom } = document.viewport;
   context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
@@ -283,14 +283,14 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
   context.translate(x, y); context.scale(zoom, zoom);
   const viewport = { x: -x / zoom, y: -y / zoom, width: width / zoom, height: height / zoom };
   if (paper) paintPaper(context, paper, viewport, zoom);
-  const draw = (element: CanvasElement) => {
+  const draw = (element: WhiteboardElement) => {
     if (element.id !== options.editingId) drawElement(context, element);
     else if (element.type !== 'text') drawElement(context, element, false);
   };
   const scene = visibleElements(document.elements, viewport);
   drawElementsOnPages(context, options.overrides?.size ? scene.filter(element => !options.overrides!.has(element.id)) : scene, paper, draw);
   if (options.ghosts?.length) drawElementsOnPages(context, options.ghosts, paper, element => drawElement(context, element, true, GHOST_ALPHA));
-  if (options.overrides) drawElementsOnPages(context, [...options.overrides.values()].filter((element): element is CanvasElement => !!element && element.id !== options.inkId), paper, draw);
+  if (options.overrides) drawElementsOnPages(context, [...options.overrides.values()].filter((element): element is WhiteboardElement => !!element && element.id !== options.inkId), paper, draw);
   if (options.bindingHint) paintBindingHint(context, options.bindingHint, selectionColor, document.background, zoom);
   context.strokeStyle = selectionColor;
   context.lineWidth = 1 / zoom;
@@ -389,11 +389,11 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
 }
 
 /** The whole drawing as a PNG; a notebook (`options.notebook`) is its pages, each element clipped to its own. */
-export async function exportCanvasPng(document: CanvasDocument, options: CanvasRenderOptions = {}): Promise<Blob | null> {
+export async function exportWhiteboardPng(document: WhiteboardDocument, options: WhiteboardRenderOptions = {}): Promise<Blob | null> {
   const paper = notebookPaper(document, options.notebook);
   const bounds = exportBounds(document, paper);
   if (!bounds) return null;
-  await loadCanvasImages(document.elements);
+  await loadWhiteboardImages(document.elements);
   const padding = 32;
   const ratio = Math.min(2, 8192 / Math.max(bounds.width + padding * 2, bounds.height + padding * 2));
   const canvas = window.document.createElement('canvas');
@@ -413,11 +413,11 @@ export async function exportCanvasPng(document: CanvasDocument, options: CanvasR
  * A notebook's page as a PNG at `scale` pixels per point: its sheet, template and the elements that belong to it
  * (`elementPage`), clipped to the page as on screen; ink from the next page stays there.
  */
-export async function renderPagePng(document: CanvasDocument, pageId: string, scale = 2): Promise<Blob | null> {
+export async function renderPagePng(document: WhiteboardDocument, pageId: string, scale = 2): Promise<Blob | null> {
   const paper = document.paper, rect = paper && pageRects(paper).find(page => page.id === pageId);
   if (!paper || !rect) return null;
   const elements = document.elements.filter(element => elementPage(paper, element).id === rect.id);
-  await loadCanvasImages(elements);
+  await loadWhiteboardImages(elements);
   const ratio = Math.min(scale, 4096 / Math.max(rect.width, rect.height));
   const canvas = window.document.createElement('canvas');
   canvas.width = Math.ceil(rect.width * ratio);
@@ -433,7 +433,7 @@ export async function renderPagePng(document: CanvasDocument, pageId: string, sc
   return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
 }
 
-export function selectedBounds(document: CanvasDocument, selected: Set<string>) {
+export function selectedBounds(document: WhiteboardDocument, selected: Set<string>) {
   return selectionBounds(document.elements.filter(element => selected.has(element.id)));
 }
 

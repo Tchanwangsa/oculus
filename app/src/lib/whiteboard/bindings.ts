@@ -1,4 +1,4 @@
-import { arrowTypeOf, type CanvasBinding, type CanvasElement, type Point } from './model';
+import { arrowTypeOf, type WhiteboardBinding, type WhiteboardElement, type Point } from './model';
 import { elementBounds, pointInBounds, polylinePoints } from './geometry';
 import { anchorPoint, isBindable, nearestOutlinePoint, outlineAlong, outlineAnchor, outlineCenter, outlineMidpoints, pointInsideOutline } from './outline';
 import type { ElementChanges } from './changes';
@@ -11,17 +11,17 @@ import { withoutFixedSegments } from './elbow/lanes';
  * Distances in screen pixels are divided by the zoom so they feel the same at any scale.
  */
 export type ArrowEnd = 'start' | 'end';
-export interface BindingSnap { target: CanvasElement; binding: CanvasBinding; point: Point }
-type Live = ReadonlyMap<string, CanvasElement | null>;
+export interface BindingSnap { target: WhiteboardElement; binding: WhiteboardBinding; point: Point }
+type Live = ReadonlyMap<string, WhiteboardElement | null>;
 
 const BIND_RANGE = 16, MIDPOINT_RANGE = 12, CENTER_RANGE = 10;
 export const bindingKey = (end: ArrowEnd) => end === 'start' ? 'startBinding' : 'endBinding';
 
-export function withoutBinding(el: CanvasElement, end: ArrowEnd): CanvasElement {
+export function withoutBinding(el: WhiteboardElement, end: ArrowEnd): WhiteboardElement {
   const key = bindingKey(end);
   if (el[key] === undefined) return el;
   const { [key]: _removed, ...rest } = el;
-  return rest as CanvasElement;
+  return rest as WhiteboardElement;
 }
 
 /**
@@ -29,7 +29,7 @@ export function withoutBinding(el: CanvasElement, end: ArrowEnd): CanvasElement 
  * its central zone binds to the centre, elsewhere to the nearest outline point, pulled onto an edge midpoint when close.
  * `avoidCenter` is a shape the other end already binds to by its centre, which this end may only bind to by an edge.
  */
-export function findBindingSnap(elements: readonly CanvasElement[], point: Point, zoom: number, options: { live?: Live; avoidCenter?: string } = {}): BindingSnap | null {
+export function findBindingSnap(elements: readonly WhiteboardElement[], point: Point, zoom: number, options: { live?: Live; avoidCenter?: string } = {}): BindingSnap | null {
   for (let i = elements.length - 1; i >= 0; i--) {
     const el = options.live?.has(elements[i].id) ? options.live.get(elements[i].id) : elements[i];
     if (!el || !isBindable(el)) continue;
@@ -57,7 +57,7 @@ export const sameSnap = (a: BindingSnap | null, b: BindingSnap | null) =>
  * An elbow arrow is re-routed here, bound or not, since `followBindings` only re-places bound arrows; binding an end
  * to a different shape drops its fixed segments, which were placed for the old one.
  */
-export function bindArrowEnd(arrow: CanvasElement, end: ArrowEnd, point: Point, elements: readonly CanvasElement[], zoom: number, options: { live?: Live; free?: boolean } = {}) {
+export function bindArrowEnd(arrow: WhiteboardElement, end: ArrowEnd, point: Point, elements: readonly WhiteboardElement[], zoom: number, options: { live?: Live; free?: boolean } = {}) {
   const other = arrow[bindingKey(end === 'start' ? 'end' : 'start')];
   const avoidCenter = other?.mode === 'center' ? other.elementId : undefined;
   let snap = options.free ? null : findBindingSnap(elements, point, zoom, { live: options.live, avoidCenter });
@@ -75,10 +75,10 @@ export function bindArrowEnd(arrow: CanvasElement, end: ArrowEnd, point: Point, 
 const same = (a: Point, b: Point) => Math.abs(a.x - b.x) < 1e-9 && Math.abs(a.y - b.y) < 1e-9;
 
 /** A bound end before clipping: an edge anchor's outline point, or the centre. */
-const targetPoint = (binding: CanvasBinding, target: CanvasElement) => binding.mode === 'edge' ? anchorPoint(target, binding.anchor) : outlineCenter(target);
+const targetPoint = (binding: WhiteboardBinding, target: WhiteboardElement) => binding.mode === 'edge' ? anchorPoint(target, binding.anchor) : outlineCenter(target);
 
 /** Centre mode crosses the outline on the way to `other`; when `other` is inside the shape (or on it) there is no crossing and the end stays at the centre. */
-function placeEnd(binding: CanvasBinding, target: CanvasElement, raw: Point, other: Point, gap: number): Point {
+function placeEnd(binding: WhiteboardBinding, target: WhiteboardElement, raw: Point, other: Point, gap: number): Point {
   if (binding.mode === 'center') {
     if (pointInsideOutline(target, other, 1e-6)) return raw;
     raw = outlineAlong(target, other);
@@ -94,9 +94,9 @@ function placeEnd(binding: CanvasBinding, target: CanvasElement, raw: Point, oth
  * Both raw targets are found first so two bound ends aim at each other. An elbow arrow is routed afresh instead
  * (`routeElbow`). Returns the arrow itself when nothing moves.
  */
-export function resolveArrow(arrow: CanvasElement, lookup: (id: string) => CanvasElement | null | undefined): CanvasElement {
+export function resolveArrow(arrow: WhiteboardElement, lookup: (id: string) => WhiteboardElement | null | undefined): WhiteboardElement {
   if (arrow.type !== 'arrow') return arrow;
-  const target = (binding?: CanvasBinding) => {
+  const target = (binding?: WhiteboardBinding) => {
     const el = binding ? lookup(binding.elementId) : undefined;
     return el && isBindable(el) ? el : undefined;
   };
@@ -117,15 +117,15 @@ export function resolveArrow(arrow: CanvasElement, lookup: (id: string) => Canva
   };
 }
 
-const indexes = new WeakMap<readonly CanvasElement[], Map<string, CanvasElement>>();
-function indexOf(elements: readonly CanvasElement[]) {
+const indexes = new WeakMap<readonly WhiteboardElement[], Map<string, WhiteboardElement>>();
+function indexOf(elements: readonly WhiteboardElement[]) {
   let index = indexes.get(elements);
   if (!index) indexes.set(elements, index = new Map(elements.map(el => [el.id, el])));
   return index;
 }
 
 /** Finds elements by ID, live geometry where `live` overrides the scene. */
-export function sceneLookup(elements: readonly CanvasElement[], live?: Live) {
+export function sceneLookup(elements: readonly WhiteboardElement[], live?: Live) {
   const index = indexOf(elements);
   return (id: string) => live?.has(id) ? live.get(id) : index.get(id);
 }
@@ -134,12 +134,12 @@ export function sceneLookup(elements: readonly CanvasElement[], live?: Live) {
  * The changes plus every bound arrow they affect: an arrow whose target changed (or which changed itself) is
  * re-placed, and an end whose target the changes remove loses its binding where it is. Returns `changes` when nothing follows.
  */
-export function followBindings(elements: readonly CanvasElement[], changes: ElementChanges): ElementChanges {
+export function followBindings(elements: readonly WhiteboardElement[], changes: ElementChanges): ElementChanges {
   if (!changes.size) return changes;
   const index = indexOf(elements);
   const lookup = (id: string) => changes.has(id) ? changes.get(id) : index.get(id);
-  let out: Map<string, CanvasElement | null> | undefined;
-  const follow = (id: string, arrow: CanvasElement | null | undefined) => {
+  let out: Map<string, WhiteboardElement | null> | undefined;
+  const follow = (id: string, arrow: WhiteboardElement | null | undefined) => {
     if (!arrow || arrow.type !== 'arrow' || (!arrow.startBinding && !arrow.endBinding)) return;
     const start = arrow.startBinding?.elementId, end = arrow.endBinding?.elementId;
     if (!changes.has(id) && !(start && changes.has(start)) && !(end && changes.has(end))) return;
@@ -155,11 +155,11 @@ export function followBindings(elements: readonly CanvasElement[], changes: Elem
 }
 
 /** Moved elements; a moved arrow keeps only the bindings whose target moves with it. */
-export function moveElements(elements: readonly CanvasElement[], ids: ReadonlySet<string>, dx: number, dy: number): ElementChanges {
-  const changes = new Map<string, CanvasElement>();
+export function moveElements(elements: readonly WhiteboardElement[], ids: ReadonlySet<string>, dx: number, dy: number): ElementChanges {
+  const changes = new Map<string, WhiteboardElement>();
   for (const el of elements) {
     if (!ids.has(el.id)) continue;
-    let next: CanvasElement = { ...el, x: el.x + dx, y: el.y + dy };
+    let next: WhiteboardElement = { ...el, x: el.x + dx, y: el.y + dy };
     if (el.startBinding && !ids.has(el.startBinding.elementId)) next = withoutBinding(next, 'start');
     if (el.endBinding && !ids.has(el.endBinding.elementId)) next = withoutBinding(next, 'end');
     changes.set(el.id, next);

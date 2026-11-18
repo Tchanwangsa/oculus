@@ -1,5 +1,5 @@
 import { getCurrentWebview } from '@tauri-apps/api/webview';
-import type { Point } from '@/lib/canvas/model';
+import type { Point } from '@/lib/whiteboard/model';
 
 /** Native drag coordinates are points, even though Tauri calls them PhysicalPosition. */
 export function watchNativeFileDrop(target: HTMLElement, onHover: (paths: string[], at: Point | null) => void, onDrop: (paths: string[], at: Point) => void, slack = 0): () => void {

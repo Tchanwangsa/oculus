@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { installBrowserSelectionGuard, isCanvasTextEditorTarget, preventCanvasChromeSelection, preventNativeCanvasTouch } from '../../../src/lib/canvas/browserSelectionGuard';
+import { installBrowserSelectionGuard, isWhiteboardTextEditorTarget, preventWhiteboardChromeSelection, preventNativeWhiteboardTouch } from '../../../src/lib/whiteboard/browserSelectionGuard';
 
 // A minimal selector port keeps these policy tests independent of a browser runtime.
 function element(kind: string, editable?: string, parent?: Element): Element {
@@ -23,16 +23,16 @@ function selectionEvent(target: EventTarget, type = 'selectstart'): Event {
   return event;
 }
 
-test('canvas chrome selection and menus are cancelled without cancelling editor selection', () => {
+test('whiteboard chrome selection and menus are cancelled without cancelling editor selection', () => {
   for (const type of ['selectstart', 'contextmenu']) {
     for (const target of [element('canvas'), element('footer'), element('button')]) {
       const event = selectionEvent(target, type);
-      preventCanvasChromeSelection(event);
+      preventWhiteboardChromeSelection(event);
       expect(event.defaultPrevented).toBe(true);
     }
     for (const target of [element('textarea'), element('input'), element('span', undefined, element('div', 'true'))]) {
       const event = selectionEvent(target, type);
-      preventCanvasChromeSelection(event);
+      preventWhiteboardChromeSelection(event);
       expect(event.defaultPrevented).toBe(false);
     }
   }
@@ -41,18 +41,18 @@ test('canvas chrome selection and menus are cancelled without cancelling editor 
 test('text node targets, plaintext hosts and explicitly noneditable islands are classified correctly', () => {
   const textInEditor = { nodeType: 3, parentElement: element('div', '') } as unknown as EventTarget;
   const textInFooter = { nodeType: 3, parentElement: element('footer') } as unknown as EventTarget;
-  expect(isCanvasTextEditorTarget(textInEditor)).toBe(true);
-  expect(isCanvasTextEditorTarget(textInFooter)).toBe(false);
-  expect(isCanvasTextEditorTarget(element('div', 'plaintext-only'))).toBe(true);
-  expect(isCanvasTextEditorTarget(element('span', undefined, element('div', 'false', element('div', 'true'))))).toBe(false);
-  expect(isCanvasTextEditorTarget(null)).toBe(false);
+  expect(isWhiteboardTextEditorTarget(textInEditor)).toBe(true);
+  expect(isWhiteboardTextEditorTarget(textInFooter)).toBe(false);
+  expect(isWhiteboardTextEditorTarget(element('div', 'plaintext-only'))).toBe(true);
+  expect(isWhiteboardTextEditorTarget(element('span', undefined, element('div', 'false', element('div', 'true'))))).toBe(false);
+  expect(isWhiteboardTextEditorTarget(null)).toBe(false);
 });
 
 test('native touch and gesture defaults are blocked only on the canvas while events keep propagating', () => {
   for (const type of ['touchstart', 'touchmove', 'touchend', 'gesturestart', 'gesturechange', 'gestureend']) {
     for (const [target, blocked] of [[element('canvas'), true], [element('button'), false], [element('textarea'), false], [element('input'), false], [element('a'), false], [element('canvas', undefined, element('div', 'true')), false]] as const) {
       const event = selectionEvent(target, type);
-      preventNativeCanvasTouch(event);
+      preventNativeWhiteboardTouch(event);
       expect(event.defaultPrevented).toBe(blocked);
       expect(event.cancelBubble).toBe(false);
     }

@@ -1,7 +1,7 @@
 {
   "name": "background must hold strings",
   "document": {
-    "type": "oculus-canvas",
+    "type": "oculus-whiteboard",
     "version": 1,
     "elements": [],
     "viewport": {

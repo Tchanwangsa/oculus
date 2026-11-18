@@ -1,6 +1,6 @@
-import { installCanvasTrace, type TraceFields } from '@/lib/canvas/diagnostics';
+import { installWhiteboardTrace, type TraceFields } from '@/lib/whiteboard/diagnostics';
 import { InputHealth } from './health';
-import { secureId } from '@/lib/canvas/ids';
+import { secureId } from '@/lib/whiteboard/ids';
 import type { ShareCredentials } from '@/lib/companion/link';
 import { redactDiagnosticText, type DiagnosticEvent, type DiagnosticMessage } from './protocol';
 
@@ -29,7 +29,7 @@ function attachDiagnostics(credentials: ShareCredentials, config: { port: number
     events.push({ at: Date.now(), name, fields: clean });
     if (events.length > 200) { events.shift(); dropped++; }
   };
-  installCanvasTrace({
+  installWhiteboardTrace({
     event: record,
     begin(name, fields) {
       const id = ++nextSpan, start = performance.now(), at = Date.now();
@@ -62,13 +62,13 @@ function attachDiagnostics(credentials: ShareCredentials, config: { port: number
     const touch = event as TouchEvent;
     if (phase === 'capture' && event.type.includes('pointer')) health.pointer(event.type, pointer.pointerId, pointer.pointerType ?? '', Date.now());
     const target = event.target instanceof Element ? event.target : null;
-    const control = target?.closest('button,[role="button"],canvas,[data-canvas-editor],[role="dialog"]');
+    const control = target?.closest('button,[role="button"],canvas,[data-whiteboard-editor],[role="dialog"]');
     const editable = !!target?.closest('input,textarea,[contenteditable="true"]');
     const key = event as KeyboardEvent;
     record(`input.${event.type}`, {
       phase, scope: phase === 'capture' ? 'window' : 'document', target: control?.tagName ?? target?.tagName ?? 'unknown',
       control: control?.getAttribute('aria-label') ?? control?.getAttribute('title') ?? '',
-      bodyPointerEvents: document.body.style.pointerEvents, canvasInert: !!document.querySelector('[data-canvas-editor]')?.closest('[inert]'),
+      bodyPointerEvents: document.body.style.pointerEvents, whiteboardInert: !!document.querySelector('[data-whiteboard-editor]')?.closest('[inert]'),
       selectionType: event.type === 'selectionchange' ? document.getSelection()?.type ?? '' : '',
       disabled: !!control?.hasAttribute('disabled'), inert: !!target?.closest('[inert]'),
       touches: touch.touches?.length ?? 0, changedTouches: touch.changedTouches?.length ?? 0,
@@ -86,7 +86,7 @@ function attachDiagnostics(credentials: ShareCredentials, config: { port: number
   window.addEventListener('error', event => record('javascript.error', { message: event.message, stack: event.error instanceof Error ? event.error.stack ?? '' : '', line: event.lineno, column: event.colno }));
   window.addEventListener('unhandledrejection', event => record('javascript.rejection', { message: event.reason instanceof Error ? event.reason.message : 'Unhandled rejection', stack: event.reason instanceof Error ? event.reason.stack ?? '' : '' }));
   for (const name of ['pageshow', 'pagehide', 'online', 'offline', 'focus', 'blur']) window.addEventListener(name, () => record(`page.${name}`));
-  record('diagnostics.started', { userAgent: navigator.userAgent, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, offsetMinutes: new Date().getTimezoneOffset(), build: 'input-trace-v8', page, touchPolicy: page === 'input-test' ? 'probe-body-touch-defaults-blocked' : 'canvas-touch-defaults-blocked-at-body', gesturePolicy: page === 'input-test' ? 'browser-defaults' : 'canvas-native-gestures-blocked', width: innerWidth, height: innerHeight });
+  record('diagnostics.started', { userAgent: navigator.userAgent, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, offsetMinutes: new Date().getTimezoneOffset(), build: 'input-trace-v8', page, touchPolicy: page === 'input-test' ? 'probe-body-touch-defaults-blocked' : 'whiteboard-touch-defaults-blocked-at-body', gesturePolicy: page === 'input-test' ? 'browser-defaults' : 'whiteboard-native-gestures-blocked', width: innerWidth, height: innerHeight });
   let lastViewport = 0;
   const recordViewport = () => {
     const now = performance.now();

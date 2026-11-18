@@ -1,7 +1,7 @@
 {
   "name": "image addition with an svg rejected",
   "document": {
-    "type": "oculus-canvas",
+    "type": "oculus-whiteboard",
     "version": 1,
     "elements": [],
     "viewport": {

@@ -1,4 +1,4 @@
-import type { CanvasViewport } from './model';
+import type { WhiteboardViewport } from './model';
 
 /** Camera speed in screen pixels per millisecond. */
 export interface Velocity { x: number; y: number }
@@ -44,10 +44,10 @@ export class VelocityTracker {
   lastRelease: ReleaseTrace | null = null;
 
   /** Starts a pan at `viewport`. */
-  start(time: number, viewport: CanvasViewport) { this.samples = []; this.history = []; this.add(time, viewport); this.origin = this.samples[0]; }
+  start(time: number, viewport: WhiteboardViewport) { this.samples = []; this.history = []; this.add(time, viewport); this.origin = this.samples[0]; }
 
   /** Records the camera at `time`; an unmoved camera adds nothing, so a held finger leaves its last sample to go stale. */
-  add(time: number, { x, y, zoom }: CanvasViewport) {
+  add(time: number, { x, y, zoom }: WhiteboardViewport) {
     const last = this.samples[this.samples.length - 1];
     if (last && last.x === x && last.y === y && last.zoom === zoom) return;
     this.samples.push({ time, x, y, zoom });

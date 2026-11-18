@@ -3,24 +3,24 @@ import { XIcon } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useScrollFade } from '@/hooks/ui/useScrollFade';
-import type { useCanvasInteraction } from '@/hooks/canvas/useCanvasInteraction';
-import type { CanvasDocument } from '@/lib/canvas/model';
-import { useCanvasPlatform } from '@/lib/canvas/platform';
-import { CanvasImageDialog } from '../CanvasImageDialog';
+import type { useWhiteboardInteraction } from '@/hooks/whiteboard/useWhiteboardInteraction';
+import type { WhiteboardDocument } from '@/lib/whiteboard/model';
+import { useWhiteboardPlatform } from '@/lib/whiteboard/platform';
+import { WhiteboardImageDialog } from '../WhiteboardImageDialog';
 import { AddPageMenu } from './AddPageMenu';
 import { PageThumbnail } from './PageThumbnail';
 import { usePageReorder } from './usePageReorder';
 import { usePageThumbnails } from './usePageThumbnails';
 
-export type NotebookPages = NonNullable<ReturnType<typeof useCanvasInteraction>['pages']>;
+export type NotebookPages = NonNullable<ReturnType<typeof useWhiteboardInteraction>['pages']>;
 
 /**
  * A notebook's pages as a column of thumbnails beside the drawing: the page in view is marked, a click goes to a page,
  * a drag reorders, each page's ⋯ menu edits it, and + adds a blank page or PDF pages at the end. The list is the column's one scroller.
- * Below the canvas's narrow width it lies over the drawing instead of beside it (`canvas.css`).
+ * Below the whiteboard's narrow width it lies over the drawing instead of beside it (`whiteboard.css`).
  */
-export function PageSidebar({ pages, document, onClose }: { pages: NotebookPages; document: CanvasDocument; onClose: () => void }) {
-  const platform = useCanvasPlatform();
+export function PageSidebar({ pages, document, onClose }: { pages: NotebookPages; document: WhiteboardDocument; onClose: () => void }) {
+  const platform = useWhiteboardPlatform();
   const scroller = useRef<HTMLDivElement>(null);
   const [removing, setRemoving] = useState<number | null>(null);
   const [pdfAfter, setPdfAfter] = useState<number | null>(null);
@@ -33,7 +33,7 @@ export function PageSidebar({ pages, document, onClose }: { pages: NotebookPages
     scroller.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest' });
   }, [pages.index]);
 
-  return <aside className="canvas-page-sidebar flex h-full w-[188px] shrink-0 flex-col border-r border-border-subtle bg-card" aria-label="Pages">
+  return <aside className="whiteboard-page-sidebar flex h-full w-[188px] shrink-0 flex-col border-r border-border-subtle bg-card" aria-label="Pages">
     <div className="flex h-11 shrink-0 items-center gap-2 pr-1.5 pl-3.5">
       <span className="text-[12px] font-medium text-foreground">Pages</span>
       <span className="text-[11px] tabular-nums text-muted-foreground">{pages.count}</span>
@@ -57,7 +57,7 @@ export function PageSidebar({ pages, document, onClose }: { pages: NotebookPages
     <ConfirmDialog open={removing !== null} onCancel={() => setRemoving(null)} title={`Delete page ${(removing ?? 0) + 1}?`}
       description="The page and everything drawn on it are removed, and the pages after it move up. Undo brings it back."
       confirmLabel="Delete page" onConfirm={() => { const index = removing; setRemoving(null); if (index !== null) pages.remove(index); }} />
-    {platform.libraryPdfs ? <CanvasImageDialog open={pdfAfter !== null} onOpenChange={open => { if (!open) setPdfAfter(null); }}
+    {platform.libraryPdfs ? <WhiteboardImageDialog open={pdfAfter !== null} onOpenChange={open => { if (!open) setPdfAfter(null); }}
       pdfPages={{ after: (pdfAfter ?? 0) + 1, onInsert: (sizes, images) => { if (pdfAfter !== null) pages.insertPdfPages(pdfAfter, sizes, images); } }} /> : null}
   </aside>;
 }

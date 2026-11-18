@@ -1,17 +1,17 @@
-/** One share controller per canvas session, fed every `companion-state`. A
- * share that disappears is checked even for a canvas no dialog has opened, so
+/** One share controller per whiteboard session, fed every `companion-state`. A
+ * share that disappears is checked even for a whiteboard no dialog has opened, so
  * a file whose share was stopped in Settings or ended natively goes back to
  * ordinary saves. */
 import type { DbFile } from "@/lib/db";
-import type { CanvasSession } from "@/lib/canvas/sessions";
-import { canvasSessions } from "@/lib/canvas/sessionRuntime";
+import type { WhiteboardSession } from "@/lib/whiteboard/sessions";
+import { whiteboardSessions } from "@/lib/whiteboard/sessionRuntime";
 import { tauriSharingApi } from "./api";
 import { shareController, shareFailure, type ShareController, type ShareFailure } from "./controller";
 import { sharingStore, startSharingEvents } from "./store";
 
-const controllers = new Map<number, { session: CanvasSession<DbFile>; controller: ShareController }>();
+const controllers = new Map<number, { session: WhiteboardSession<DbFile>; controller: ShareController }>();
 
-export function shareControllerFor(session: CanvasSession<DbFile>): ShareController {
+export function shareControllerFor(session: WhiteboardSession<DbFile>): ShareController {
   startSharingEvents();
   const entry = controllers.get(session.file.id);
   if (entry?.session === session) return entry.controller;
@@ -25,7 +25,7 @@ export function shareControllerFor(session: CanvasSession<DbFile>): ShareControl
 sharingStore.observe((state, previous) => {
   for (const share of previous?.shares ?? []) {
     if (state.shares.some((s) => s.fileId === share.fileId)) continue;
-    const session = canvasSessions.get(share.fileId);
+    const session = whiteboardSessions.get(share.fileId);
     if (session) shareControllerFor(session);
   }
   for (const { controller } of controllers.values()) controller.observe(state);
@@ -33,7 +33,7 @@ sharingStore.observe((state, previous) => {
 
 /** Stops one file's share, handing its session back to ordinary saves. */
 export async function stopShare(fileId: number): Promise<ShareFailure | null> {
-  const session = canvasSessions.get(fileId);
+  const session = whiteboardSessions.get(fileId);
   if (session) return shareControllerFor(session).stop();
   try { await tauriSharingApi.stop(fileId); return null; }
   catch (error) { return shareFailure(error); }
@@ -45,5 +45,5 @@ export async function stopAllShares(): Promise<ShareFailure | null> {
   catch (error) { return shareFailure(error); }
 }
 
-/** A shared canvas's title, while its session is open in this window. */
-export const sharedFile = (fileId: number): DbFile | undefined => canvasSessions.get(fileId)?.file;
+/** A shared whiteboard's title, while its session is open in this window. */
+export const sharedFile = (fileId: number): DbFile | undefined => whiteboardSessions.get(fileId)?.file;

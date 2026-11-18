@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { createCanvasDocument } from '@/lib/canvas/model';
-import { A4, type Paper } from '@/lib/canvas/paper';
+import { createWhiteboardDocument } from '@/lib/whiteboard/model';
+import { A4, type Paper } from '@/lib/whiteboard/paper';
 import { createHarness, pointer, type Harness } from './harness';
 
 // A fake clock and frame queue, so a glide runs frame by frame at 16 ms a frame.
@@ -8,7 +8,7 @@ let clock = 0, frames = new Map<number, FrameRequestCallback>(), nextFrame = 1;
 let h: Harness;
 const view = () => h.editor.documentRef.current.viewport;
 const last = () => h.published[h.published.length - 1];
-function harness(options: Parameters<typeof createHarness>[0] = {}, document = createCanvasDocument()) {
+function harness(options: Parameters<typeof createHarness>[0] = {}, document = createWhiteboardDocument()) {
   h = createHarness(options, document);
   globalThis.requestAnimationFrame = (callback => { frames.set(nextFrame, callback); return nextFrame++; }) as typeof requestAnimationFrame;
   globalThis.cancelAnimationFrame = id => { frames.delete(id); };
@@ -146,7 +146,7 @@ describe('a glide stops', () => {
   });
   test('at the end of a notebook’s pages, and saves the camera there once', () => {
     const paper: Paper = { pages: [{ id: 'p1', ...A4 }, { id: 'p2', ...A4 }] };
-    harness({ kind: 'notebook', size: { width: 1000, height: 800 } }, { ...createCanvasDocument(), paper });
+    harness({ kind: 'notebook', size: { width: 1000, height: 800 } }, { ...createWhiteboardDocument(), paper });
     const { zoom, x } = view();
     flick('touch', [500, 600], [0, -200]);
     const ran = run();

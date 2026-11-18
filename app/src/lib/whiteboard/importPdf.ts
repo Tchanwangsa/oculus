@@ -1,10 +1,10 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { asDataUrl, canvasPdfRasterSize, type CanvasImportPdf } from "./importMedia";
+import { asDataUrl, whiteboardPdfRasterSize, type WhiteboardImportPdf } from "./importMedia";
 
-/** Native PDF page import (`canvases/imports.rs`). Desktop only: the browser companion
- * never imports this module, it reaches the canvas through `platform/tauri.ts`. */
+/** Native PDF page import (`whiteboards/imports.rs`). Desktop only: the browser companion
+ * never imports this module, it reaches the whiteboard through `platform/tauri.ts`. */
 interface OpenedPdf { id: string; name: string; pages: { width: number; height: number }[] }
-function importPdf(opened: OpenedPdf): CanvasImportPdf {
+function importPdf(opened: OpenedPdf): WhiteboardImportPdf {
   let closed = false;
   return {
     name: opened.name,
@@ -12,8 +12,8 @@ function importPdf(opened: OpenedPdf): CanvasImportPdf {
     async renderPage(page, thumbnail = false) {
       if (closed) throw new DOMException("PDF import closed", "AbortError");
       if (!Number.isInteger(page) || page < 1 || page > opened.pages.length) throw new Error("Choose an existing PDF page");
-      const size = canvasPdfRasterSize(opened.pages[page - 1].width, opened.pages[page - 1].height, thumbnail);
-      const bytes = await invoke<ArrayBuffer>("canvas_render_pdf_page", { id: opened.id, page, ...size });
+      const size = whiteboardPdfRasterSize(opened.pages[page - 1].width, opened.pages[page - 1].height, thumbnail);
+      const bytes = await invoke<ArrayBuffer>("whiteboard_render_pdf_page", { id: opened.id, page, ...size });
       if (closed) throw new DOMException("PDF import closed", "AbortError");
       const dataUrl = await asDataUrl(new Blob([bytes], { type: "image/png" }));
       if (closed) throw new DOMException("PDF import closed", "AbortError");
@@ -22,11 +22,11 @@ function importPdf(opened: OpenedPdf): CanvasImportPdf {
     async close() {
       if (closed) return;
       closed = true;
-      await invoke("canvas_close_pdf", { id: opened.id });
+      await invoke("whiteboard_close_pdf", { id: opened.id });
     },
   };
 }
-export async function openCanvasLibraryPdf(relativePath: string): Promise<CanvasImportPdf> {
+export async function openWhiteboardLibraryPdf(relativePath: string): Promise<WhiteboardImportPdf> {
   if (!isTauri()) throw new Error("Open Oculus desktop to import PDF pages");
-  return importPdf(await invoke<OpenedPdf>("canvas_open_library_pdf", { relativePath }));
+  return importPdf(await invoke<OpenedPdf>("whiteboard_open_library_pdf", { relativePath }));
 }

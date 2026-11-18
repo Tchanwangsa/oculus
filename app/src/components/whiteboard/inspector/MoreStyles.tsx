@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { SlidersHorizontalIcon } from '@phosphor-icons/react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import type { InspectorSection, StylePatch } from '@/lib/canvas/style';
-import { CanvasIconButton } from '../CanvasToolbar';
+import type { InspectorSection, StylePatch } from '@/lib/whiteboard/style';
+import { WhiteboardIconButton } from '../WhiteboardToolbar';
 import { ArrowheadSection } from './ArrowheadSection';
 import { ArrowTypeSection } from './ArrowTypeSection';
 import type { SectionProps } from './InspectorSection';
@@ -24,10 +24,10 @@ export function MoreStyles({ sections, values, onChange, onPreview }: SectionPro
   const props = { values, onChange };
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
-      <CanvasIconButton label="More styles" active={open} className="size-8"><SlidersHorizontalIcon size={17} /></CanvasIconButton>
+      <WhiteboardIconButton label="More styles" active={open} className="size-8"><SlidersHorizontalIcon size={17} /></WhiteboardIconButton>
     </PopoverTrigger>
     <PopoverContent {...inspectorPopoverProps} onMouseDown={keepTextFocus} side="bottom" align="end" sideOffset={8} collisionPadding={12}
-      className="canvas-chrome max-h-[var(--radix-popover-content-available-height)] w-[212px] overflow-y-auto p-3.5">
+      className="whiteboard-chrome max-h-[var(--radix-popover-content-available-height)] w-[212px] overflow-y-auto p-3.5">
       <div className="flex flex-col gap-3.5 text-xs">
         {has('text') ? <TextSection {...props} vertical={has('verticalAlign')} /> : null}
         {has('strokeStyle') ? <StrokeStyleSection {...props} /> : null}

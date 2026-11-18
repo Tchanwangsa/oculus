@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CaretLeftIcon, CaretRightIcon, CheckIcon, SpinnerGapIcon } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
-import type { CanvasImportPdf } from '@/lib/canvas/importMedia';
+import type { WhiteboardImportPdf } from '@/lib/whiteboard/importMedia';
 import { cn } from '@/lib/utils';
 
 const PAGE_WINDOW = 12;
@@ -9,8 +9,8 @@ const PAGE_WINDOW = 12;
 type Preview = { dataUrl: string } | { error: true };
 
 /** A bounded page window avoids rasterizing a whole PDF just to choose its pages. */
-export function CanvasPdfPages({ pdf, selected, onSelected, disabled }: {
-  pdf: CanvasImportPdf;
+export function WhiteboardPdfPages({ pdf, selected, onSelected, disabled }: {
+  pdf: WhiteboardImportPdf;
   selected: Set<number>;
   onSelected: (pages: Set<number>) => void;
   disabled: boolean;

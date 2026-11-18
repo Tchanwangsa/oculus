@@ -3,7 +3,7 @@ import { useWindowEvent } from "@/hooks/backend/useEvents";
 import { DRIVE_CHANGED_EVENT, listFolder, type FolderListing } from "@/lib/drive/listing";
 import { UPLOADS_CHANGED_EVENT } from "@/lib/files/uploads";
 import { DOCUMENTS_CHANGED_EVENT } from "@/lib/notes/documents";
-import { CANVASES_CHANGED_EVENT } from "@/lib/canvas/files";
+import { WHITEBOARDS_CHANGED_EVENT } from "@/lib/whiteboard/files";
 import { FILE_SCRAPED_EVENT } from "@/lib/pipeline/syncRunner";
 
 /** Events after which a folder on screen may hold something else. */
@@ -11,7 +11,7 @@ export const LIBRARY_CHANGE_EVENTS = [
   DRIVE_CHANGED_EVENT,
   UPLOADS_CHANGED_EVENT,
   DOCUMENTS_CHANGED_EVENT,
-  CANVASES_CHANGED_EVENT,
+  WHITEBOARDS_CHANGED_EVENT,
   FILE_SCRAPED_EVENT,
 ] as const;
 

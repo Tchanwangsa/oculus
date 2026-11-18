@@ -39,7 +39,7 @@ jobs:
               - 'app/keyd/**'
               - 'app/studio-core/**'
               - 'app/math-core/**'
-              - 'app/canvas-core/**'
+              - 'app/whiteboard-core/**'
               - 'app/scripts/**'
               - 'app/package.json'
               - 'app/bun.lock'
@@ -97,13 +97,13 @@ jobs:
         with:
           workspaces: |
             app/math-core -> target
-            app/canvas-core -> target
+            app/whiteboard-core -> target
       - name: Rust is formatted
         run: |
           (cd src-tauri && cargo fmt --check)
           (cd keyd && cargo fmt --check)
           (cd keyd/core && cargo fmt --check)
-          if [ -d canvas-core ]; then (cd canvas-core && cargo fmt --check); fi
+          if [ -d whiteboard-core ]; then (cd whiteboard-core && cargo fmt --check); fi
           # The vendored katex/ keeps upstream's formatting.
           (cd math-core && cargo fmt --check -p oculus-math -p oculus-math-edit -p oracle)
       - name: Install frontend dependencies
@@ -122,15 +122,15 @@ jobs:
           retention-days: 1
       - name: Portable Rust clippy
         run: |
-          if [ -d canvas-core ]; then
-            (cd canvas-core && cargo clippy --locked --all-targets -- -D warnings)
-            (cd canvas-core && cargo clippy --locked --target wasm32-unknown-unknown -- -D warnings)
+          if [ -d whiteboard-core ]; then
+            (cd whiteboard-core && cargo clippy --locked --all-targets -- -D warnings)
+            (cd whiteboard-core && cargo clippy --locked --target wasm32-unknown-unknown -- -D warnings)
           fi
           (cd math-core && cargo clippy --locked --all-targets --no-deps -p oculus-math -p oculus-math-edit -p oracle -- -D warnings)
           (cd math-core && cargo clippy --locked --no-deps -p oculus-math --target wasm32-unknown-unknown -- -D warnings)
-      - name: Canvas engine tests
-        if: hashFiles('app/canvas-core/Cargo.toml') != ''
-        working-directory: app/canvas-core
+      - name: Whiteboard engine tests
+        if: hashFiles('app/whiteboard-core/Cargo.toml') != ''
+        working-directory: app/whiteboard-core
         run: cargo test --locked
       - name: Maths engine tests
         working-directory: app/math-core

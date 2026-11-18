@@ -1,4 +1,4 @@
-import { type CanvasElement, type CanvasViewport, type Point } from './model';
+import { type WhiteboardElement, type WhiteboardViewport, type Point } from './model';
 import type { Paper, PageRect } from './paper';
 import { clipToPage, elementPage } from './renderPaper';
 
@@ -13,9 +13,9 @@ import { clipToPage, elementPage } from './renderPaper';
 export type LiveStrokeContext = Pick<CanvasRenderingContext2D,
   'setTransform' | 'clearRect' | 'beginPath' | 'moveTo' | 'lineTo' | 'quadraticCurveTo' | 'stroke' | 'strokeStyle' | 'lineWidth' | 'lineCap' | 'lineJoin' | 'save' | 'restore' | 'rect' | 'clip'
 > & { canvas: { width: number; height: number } };
-export type LiveStrokePaint = (context: CanvasRenderingContext2D, element: CanvasElement) => void;
+export type LiveStrokePaint = (context: CanvasRenderingContext2D, element: WhiteboardElement) => void;
 
-interface Placement { element: CanvasElement; scale: number; dx: number; dy: number; paint?: LiveStrokePaint }
+interface Placement { element: WhiteboardElement; scale: number; dx: number; dy: number; paint?: LiveStrokePaint }
 type Box = [x: number, y: number, width: number, height: number];
 const mid = (a: Point, b: Point) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 /** A nib pen's ink reaches this many stroke widths from its path at most. */
@@ -36,7 +36,7 @@ export class LiveStroke {
   constructor(private ink: LiveStrokeContext, private tail: LiveStrokeContext) {}
 
   /** `element` gives the stroke's origin and look. With `paint` the stroke is painted whole; without, piece by piece. */
-  begin(element: CanvasElement, viewport: CanvasViewport, pixelRatio: number, paint?: LiveStrokePaint) {
+  begin(element: WhiteboardElement, viewport: WhiteboardViewport, pixelRatio: number, paint?: LiveStrokePaint) {
     this.clear();
     const scale = pixelRatio * viewport.zoom;
     this.placement = paint
@@ -59,7 +59,7 @@ export class LiveStroke {
   }
 
   /** Paints what `element.points` (element-local, only ever appended to) has gained since the last call. */
-  draw(element: CanvasElement, paper?: Paper) {
+  draw(element: WhiteboardElement, paper?: Paper) {
     const placement = this.placement, points = element.points;
     if (!placement || !points || points.length < 2) return;
     if (paper || placement.paint) this.extendBounds(points);
@@ -113,7 +113,7 @@ export class LiveStroke {
     }
   }
 
-  private drawWhole(placement: Placement, element: CanvasElement) {
+  private drawWhole(placement: Placement, element: WhiteboardElement) {
     const bounds = this.bounds;
     placement.paint!(this.tail as CanvasRenderingContext2D, element);
     const { scale, dx, dy } = placement, pad = Math.max(element.strokeWidth * REACH, 2) * scale + 4;

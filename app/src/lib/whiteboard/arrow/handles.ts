@@ -1,4 +1,4 @@
-import { arrowTypeOf, type CanvasElement, type Point } from '../model';
+import { arrowTypeOf, type WhiteboardElement, type Point } from '../model';
 import { cubicAt } from './curve';
 import { linePath } from './path';
 import { insertPoint } from './points';
@@ -22,7 +22,7 @@ const HANDLE_RANGE = 10;
  * Ends always. A sharp or curved arrow also has every interior point and a midpoint per segment; an elbow arrow a
  * segment handle per segment. Lines edit only their ends.
  */
-export function pointHandles(el: CanvasElement, zoom: number): PointHandle[] {
+export function pointHandles(el: WhiteboardElement, zoom: number): PointHandle[] {
   const { points, curves } = linePath(el);
   const world = (p: Point) => ({ x: el.x + p.x, y: el.y + p.y });
   const last = points.length - 1, elbow = arrowTypeOf(el) === 'elbow';
@@ -39,7 +39,7 @@ export function pointHandles(el: CanvasElement, zoom: number): PointHandle[] {
 }
 
 /** The handle under the pointer: the nearest point within range, else the nearest midpoint or segment handle, so points win where they overlap. */
-export function pointHandleAt(el: CanvasElement, world: Point, zoom: number): PointHandle | null {
+export function pointHandleAt(el: WhiteboardElement, world: Point, zoom: number): PointHandle | null {
   let best: PointHandle | null = null, far = HANDLE_RANGE / zoom;
   const handles = pointHandles(el, zoom);
   for (const point of [true, false]) {
@@ -53,7 +53,7 @@ export function pointHandleAt(el: CanvasElement, world: Point, zoom: number): Po
 }
 
 /** What a point or midpoint drag edits: the element (with a midpoint's new point already in it) and the index of the point that follows the pointer. */
-export function pointDrag(el: CanvasElement, handle: Exclude<PointHandle, { kind: 'segment' }>): { base: CanvasElement; index: number } {
+export function pointDrag(el: WhiteboardElement, handle: Exclude<PointHandle, { kind: 'segment' }>): { base: WhiteboardElement; index: number } {
   if (handle.kind === 'point') return { base: el, index: handle.index };
   return { base: insertPoint(el, handle.segment, handle.at), index: handle.segment + 1 };
 }

@@ -1,31 +1,31 @@
 import { createContext, useContext } from "react";
-import type { CanvasImportedImage, CanvasImportPdf } from "../importMedia";
+import type { WhiteboardImportedImage, WhiteboardImportPdf } from "../importMedia";
 import type { Point } from '../model';
 
 /**
  * What the drawing surface needs from the host beyond the page itself. The
  * default is a plain browser (the device-sharing companion); the desktop app
- * provides `tauriCanvasPlatform` (`./tauri.ts`) at its root, so the surface's
+ * provides `tauriWhiteboardPlatform` (`./tauri.ts`) at its root, so the surface's
  * own import graph never reaches Tauri.
  */
-export interface CanvasLibraryPdf {
+export interface WhiteboardLibraryPdf {
   id: number;
   filename: string;
   relativePath: string;
   subjectCode: string;
 }
 
-export interface CanvasPlatform {
+export interface WhiteboardPlatform {
   watchFileDrop?(target: HTMLElement, onHover: (paths: string[], at: Point | null) => void, onDrop: (paths: string[], at: Point) => void): () => void;
-  readDroppedImages?(paths: string[], signal?: AbortSignal): Promise<CanvasImportedImage[]>;
+  readDroppedImages?(paths: string[], signal?: AbortSignal): Promise<WhiteboardImportedImage[]>;
   /** Saves an exported PNG or SVG. */
   saveExport(blob: Blob, format: "png" | "svg"): Promise<void>;
   /** Whether `searchPdfs` and `openPdf` reach a library; absent where they only say to open the desktop app. */
   libraryPdfs?: boolean;
   /** Searches library PDFs by filename and subject; an empty query lists recent files. */
-  searchPdfs(query: string): Promise<CanvasLibraryPdf[]>;
+  searchPdfs(query: string): Promise<WhiteboardLibraryPdf[]>;
   /** Opens a library result for picking pages. */
-  openPdf(relativePath: string): Promise<CanvasImportPdf>;
+  openPdf(relativePath: string): Promise<WhiteboardImportPdf>;
   /** Saves a notebook as a PDF, one page per picture, each as large in points as its page. Absent where only the desktop can. */
   exportPdf?(title: string, pages: { width: number; height: number; png: Blob }[]): Promise<void>;
 }
@@ -42,11 +42,11 @@ export function downloadBlob(blob: Blob, name: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export const browserCanvasPlatform: CanvasPlatform = {
-  async saveExport(blob, format) { downloadBlob(blob, `Canvas.${format}`); },
+export const browserWhiteboardPlatform: WhiteboardPlatform = {
+  async saveExport(blob, format) { downloadBlob(blob, `Whiteboard.${format}`); },
   async searchPdfs() { throw new Error(PDF_NEEDS_DESKTOP); },
   async openPdf() { throw new Error(PDF_NEEDS_DESKTOP); },
 };
 
-export const CanvasPlatformContext = createContext<CanvasPlatform>(browserCanvasPlatform);
-export const useCanvasPlatform = () => useContext(CanvasPlatformContext);
+export const WhiteboardPlatformContext = createContext<WhiteboardPlatform>(browserWhiteboardPlatform);
+export const useWhiteboardPlatform = () => useContext(WhiteboardPlatformContext);

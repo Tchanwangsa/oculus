@@ -1,14 +1,14 @@
-import type { CanvasDocument, CanvasElement, CanvasViewport, Point } from './model';
+import type { WhiteboardDocument, WhiteboardElement, WhiteboardViewport, Point } from './model';
 import { notebookPaper, pageContaining, pageInView, pageRects, visiblePageCentre, type Paper } from './paper';
 import { secureId } from './ids';
 
-export interface CanvasImageSource { dataUrl: string; width: number; height: number; name: string }
+export interface WhiteboardImageSource { dataUrl: string; width: number; height: number; name: string }
 type ViewSize = { width: number; height: number };
 
 const GAP = 24;
 
 /** Each image's size: no larger than the view comfortably shows, and in a notebook no larger than its page. */
-function imageBoxes(images: readonly CanvasImageSource[], viewport: CanvasViewport, size: ViewSize, page?: { width: number; height: number }) {
+function imageBoxes(images: readonly WhiteboardImageSource[], viewport: WhiteboardViewport, size: ViewSize, page?: { width: number; height: number }) {
   const maxWidth = Math.min(480, Math.max(160, (size.width - 96) / viewport.zoom), page?.width ?? Infinity);
   const maxHeight = Math.min(600, Math.max(160, (size.height - 180) / viewport.zoom), page?.height ?? Infinity);
   return images.map(image => {
@@ -18,14 +18,14 @@ function imageBoxes(images: readonly CanvasImageSource[], viewport: CanvasViewpo
   });
 }
 
-const imageElement = (image: CanvasImageSource, box: { width: number; height: number }, x: number, y: number): CanvasElement => ({
+const imageElement = (image: WhiteboardImageSource, box: { width: number; height: number }, x: number, y: number): WhiteboardElement => ({
   id: secureId(), type: 'image', x, y, ...box, dataUrl: image.dataUrl, sourceName: image.name,
   naturalWidth: image.width, naturalHeight: image.height,
   stroke: 'transparent', fill: 'transparent', strokeWidth: 0, style: 'clean', seed: 0,
 });
 
 /** Stack a batch in reading order, centring its first image at `at` or the view centre. */
-export function placeCanvasImages(images: readonly CanvasImageSource[], viewport: CanvasViewport, size: ViewSize, at?: Point): CanvasElement[] {
+export function placeWhiteboardImages(images: readonly WhiteboardImageSource[], viewport: WhiteboardViewport, size: ViewSize, at?: Point): WhiteboardElement[] {
   if (!images.length) return [];
   const boxes = imageBoxes(images, viewport, size);
   const centre = at?.x ?? (size.width / 2 - viewport.x) / viewport.zoom;
@@ -43,7 +43,7 @@ export function placeCanvasImages(images: readonly CanvasImageSource[], viewport
  * visible part. Each image fits its page and stays inside it; one that no longer fits below the last moves to the top
  * of the next page, and past the last page it keeps to the bottom of that one.
  */
-export function placeNotebookImages(images: readonly CanvasImageSource[], paper: Paper, viewport: CanvasViewport, size: ViewSize, at?: Point): CanvasElement[] {
+export function placeNotebookImages(images: readonly WhiteboardImageSource[], paper: Paper, viewport: WhiteboardViewport, size: ViewSize, at?: Point): WhiteboardElement[] {
   if (!images.length) return [];
   const rects = pageRects(paper), dropped = at && pageContaining(paper, at);
   let page = rects[(dropped ?? pageInView(paper, viewport, size)).index];
@@ -65,8 +65,8 @@ export function placeNotebookImages(images: readonly CanvasImageSource[], paper:
   });
 }
 
-/** Where `insertImages` puts a batch: onto a notebook's pages, or the plain stack on a canvas. */
-export function placeImagesIn(document: CanvasDocument, notebook: boolean, images: readonly CanvasImageSource[], size: ViewSize, at?: Point): CanvasElement[] {
+/** Where `insertImages` puts a batch: onto a notebook's pages, or the plain stack on a whiteboard. */
+export function placeImagesIn(document: WhiteboardDocument, notebook: boolean, images: readonly WhiteboardImageSource[], size: ViewSize, at?: Point): WhiteboardElement[] {
   const paper = notebookPaper(document, notebook);
-  return paper ? placeNotebookImages(images, paper, document.viewport, size, at) : placeCanvasImages(images, document.viewport, size, at);
+  return paper ? placeNotebookImages(images, paper, document.viewport, size, at) : placeWhiteboardImages(images, document.viewport, size, at);
 }

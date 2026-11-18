@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { createCanvasSessions, type CanvasFileRef, type CanvasSessionIO } from "@/lib/canvas/sessions";
+import { createWhiteboardSessions, type WhiteboardFileRef, type WhiteboardSessionIO } from "@/lib/whiteboard/sessions";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((r) => { resolve = r; }); return { promise, resolve }; }
-function harness(initial = "disk", overrides: Partial<CanvasSessionIO<CanvasFileRef>> = {}) {
+function harness(initial = "disk", overrides: Partial<WhiteboardSessionIO<WhiteboardFileRef>> = {}) {
   const drafts = new Map<string, string>();
-  const files = new Map([["courses/X/Ideas.canvas", initial]]);
+  const files = new Map([["courses/X/Ideas.whiteboard", initial]]);
   const writes: { path: string; text: string; done: ReturnType<typeof deferred> }[] = [];
   let fail = false;
-  const file: CanvasFileRef = { id: 1, relative_path: "courses/X/Ideas.canvas" };
-  const sessions = createCanvasSessions({
+  const file: WhiteboardFileRef = { id: 1, relative_path: "courses/X/Ideas.whiteboard" };
+  const sessions = createWhiteboardSessions({
     drafts: { getItem: (key) => drafts.get(key) ?? null, setItem: (key, text) => { drafts.set(key, text); }, removeItem: (key) => { drafts.delete(key); } },
     delay: 60_000,
     read: async (path) => { if (!files.has(path)) throw new Error("missing"); return files.get(path)!; },
@@ -18,7 +18,7 @@ function harness(initial = "disk", overrides: Partial<CanvasSessionIO<CanvasFile
       if (fail) throw new Error("disk full");
       files.set(ref.relative_path, text);
     },
-    rename: async (ref, title) => { const moved = ref.relative_path.replace(/[^/]+$/, `${title}.canvas`); files.set(moved, files.get(ref.relative_path)!); files.delete(ref.relative_path); return { ...ref, relative_path: moved }; },
+    rename: async (ref, title) => { const moved = ref.relative_path.replace(/[^/]+$/, `${title}.whiteboard`); files.set(moved, files.get(ref.relative_path)!); files.delete(ref.relative_path); return { ...ref, relative_path: moved }; },
     remove: async (ref) => { files.delete(ref.relative_path); },
     validate: (text) => { if (text.startsWith("invalid")) throw new Error("Invalid drawing"); },
     ...overrides,
@@ -26,7 +26,7 @@ function harness(initial = "disk", overrides: Partial<CanvasSessionIO<CanvasFile
   return { file, drafts, files, writes, sessions, setFail(value: boolean) { fail = value; } };
 }
 
-describe("canvas sessions", () => {
+describe("whiteboard sessions", () => {
   test("panes share edits and writes preserve latest revision in order", async () => {
     const h = harness(); const session = h.sessions.open(h.file); await session.load();
     expect(h.sessions.open(h.file)).toBe(session);
@@ -49,7 +49,7 @@ describe("canvas sessions", () => {
     const rename = session.rename("Plan");
     h.writes[0].done.resolve(); await flush; await rename;
     session.update("after"); const next = session.flush(); await tick();
-    expect(h.writes[1].path).toBe("courses/X/Plan.canvas");
+    expect(h.writes[1].path).toBe("courses/X/Plan.whiteboard");
     h.writes[1].done.resolve(); await next;
     expect(h.files.has(h.file.relative_path)).toBe(false);
     expect(h.files.get(session.file.relative_path)).toBe("after");
@@ -66,21 +66,21 @@ describe("canvas sessions", () => {
 
   test("recovery checks base and validates before overwriting disk", async () => {
     const h = harness("external");
-    h.drafts.set("oculus:canvas-draft:1", JSON.stringify({ version: 1, base: "disk", text: "recovered" }));
+    h.drafts.set("oculus:whiteboard-draft:1", JSON.stringify({ version: 1, base: "disk", text: "recovered" }));
     const session = h.sessions.open(h.file); await session.load();
     expect(session.snapshot().text).toBe("external"); expect(session.snapshot().recovery?.valid).toBe(true);
     await expect(session.flush()).rejects.toThrow("Choose"); expect(h.writes.length).toBe(0);
     session.recoverDraft(); const flush = session.flush(); await tick(); h.writes[0].done.resolve(); await flush;
     expect(h.files.get(h.file.relative_path)).toBe("recovered");
 
-    const invalid = harness(); invalid.drafts.set("oculus:canvas-draft:1", JSON.stringify({ version: 1, base: "disk", text: "invalid drawing" }));
+    const invalid = harness(); invalid.drafts.set("oculus:whiteboard-draft:1", JSON.stringify({ version: 1, base: "disk", text: "invalid drawing" }));
     const bad = invalid.sessions.open(invalid.file); await bad.load(); bad.recoverDraft();
     expect(bad.snapshot().recovery?.valid).toBe(false); expect(bad.snapshot().text).toBe("disk");
     expect(invalid.writes.length).toBe(0); expect(invalid.drafts.size).toBe(1);
   });
 
   test("matching-base recovery autosaves; deletion never recreates the file", async () => {
-    const h = harness(); h.drafts.set("oculus:canvas-draft:1", JSON.stringify({ version: 1, base: "disk", text: "draft" }));
+    const h = harness(); h.drafts.set("oculus:whiteboard-draft:1", JSON.stringify({ version: 1, base: "disk", text: "draft" }));
     const session = h.sessions.open(h.file); await session.load(); await tick();
     expect(h.writes[0].text).toBe("draft"); h.writes[0].done.resolve(); await session.flush();
     session.update("pending"); await session.remove(); await session.flush();

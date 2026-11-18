@@ -1,4 +1,4 @@
-import type { CanvasElement, Point } from '../model';
+import type { WhiteboardElement, Point } from '../model';
 import { throughPoints, worldPoints } from '../arrow/points';
 import { elbowEnds, type Lookup } from './ends';
 import { STEP, vectorHeading } from './headings';
@@ -25,7 +25,7 @@ const stub = (end: Point, next: Point, distance: number): Point => {
  * and the route turns onto the segment after it. The result is routed (`routeElbow`), which keeps these points
  * while they fit and re-routes along the fixed lines where they no longer can (the segment dragged past an end).
  */
-export function moveSegment(arrow: CanvasElement, segment: number, delta: Point, lookup: Lookup): CanvasElement {
+export function moveSegment(arrow: WhiteboardElement, segment: number, delta: Point, lookup: Lookup): WhiteboardElement {
   const points = worldPoints(arrow), last = points.length - 1, a = points[segment], b = points[segment + 1];
   if (!a || !b) return arrow;
   const horizontal = a.y === b.y && a.x !== b.x;
@@ -46,7 +46,7 @@ export function moveSegment(arrow: CanvasElement, segment: number, delta: Point,
 }
 
 /** Releases segment `segment` if it is fixed, and routes the arrow afresh along the fixed segments left. */
-export function releaseSegment(arrow: CanvasElement, segment: number, lookup: Lookup): CanvasElement {
+export function releaseSegment(arrow: WhiteboardElement, segment: number, lookup: Lookup): WhiteboardElement {
   const lanes = elementLanes(arrow), own = matchLanes(worldPoints(arrow), lanes)[segment];
   if (own === undefined) return arrow;
   return rerouteElbow(withLanes(arrow, lanes.filter((_, k) => k !== own)), lookup);

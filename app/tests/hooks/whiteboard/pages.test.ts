@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test';
-import { createCanvasDocument, parseCanvasDocument, serializeCanvasDocument, type CanvasDocument, type CanvasElement } from '@/lib/canvas/model';
-import type { Paper } from '@/lib/canvas/paper';
-import { applyCanvasTransaction, diffCanvasContent, sameValue } from '@/lib/canvas/collaboration';
+import { createWhiteboardDocument, parseWhiteboardDocument, serializeWhiteboardDocument, type WhiteboardDocument, type WhiteboardElement } from '@/lib/whiteboard/model';
+import type { Paper } from '@/lib/whiteboard/paper';
+import { applyWhiteboardTransaction, diffWhiteboardContent, sameValue } from '@/lib/whiteboard/collaboration';
 import { createHarness, key } from './harness';
 
 const base = { stroke: '#000', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
-const box = (id: string, y: number): CanvasElement => ({ id, type: 'rectangle', x: -10, y, width: 20, height: 20, ...base });
+const box = (id: string, y: number): WhiteboardElement => ({ id, type: 'rectangle', x: -10, y, width: 20, height: 20, ...base });
 // Two pages, 200 tall with a gap of 10: page one starts at y = 0, page two at y = 210.
 const paper: Paper = { gap: 10, pages: [{ id: 'p1', width: 100, height: 200 }, { id: 'p2', width: 100, height: 200 }] };
 
 function setup(extra: Paper = paper) {
   const h = createHarness({ kind: 'notebook' });
-  h.render({ ...createCanvasDocument(), paper: extra, elements: [box('on1', 20), box('on2', 240)] });
+  h.render({ ...createWhiteboardDocument(), paper: extra, elements: [box('on1', 20), box('on2', 240)] });
   h.render(); // the hook adopts a swapped-in document in an effect and shows it on the next render
   return h;
 }
@@ -64,10 +64,10 @@ describe('a notebook in the editor', () => {
 });
 
 /** The edit the last page operation sent, applied to the document before it as the authority would. */
-function replayed(before: CanvasDocument, after: CanvasDocument) {
-  const transaction = diffCanvasContent(before, after);
+function replayed(before: WhiteboardDocument, after: WhiteboardDocument) {
+  const transaction = diffWhiteboardContent(before, after);
   expect(transaction.paper).toBeDefined();
-  return sameValue({ ...applyCanvasTransaction(before, transaction), viewport: null }, { ...after, viewport: null });
+  return sameValue({ ...applyWhiteboardTransaction(before, transaction), viewport: null }, { ...after, viewport: null });
 }
 
 describe('page tools in a notebook', () => {
@@ -100,7 +100,7 @@ describe('page tools in a notebook', () => {
   });
   test('the view goes to the page an operation made', () => {
     const tall: Paper = { gap: 10, pages: [{ id: 'p1', width: 100, height: 1000 }, { id: 'p2', width: 100, height: 1000 }] };
-    const h = createHarness({ kind: 'notebook', size: { width: 400, height: 300 } }, { ...createCanvasDocument(), paper: tall });
+    const h = createHarness({ kind: 'notebook', size: { width: 400, height: 300 } }, { ...createWhiteboardDocument(), paper: tall });
     expect(h.editor.pages!.index).toBe(0);
     h.editor.pages!.insert(0, 'after'); h.render();
     expect(h.editor.pages!.index).toBe(1);
@@ -115,18 +115,18 @@ describe('page tools in a notebook', () => {
   });
 });
 
-describe('a canvas holding paper', () => {
+describe('a whiteboard holding paper', () => {
   test('has no pages and no page controls', () => {
-    const h = createHarness({ kind: 'canvas' }, { ...createCanvasDocument(), paper, elements: [box('on1', 20)] });
+    const h = createHarness({ kind: 'whiteboard' }, { ...createWhiteboardDocument(), paper, elements: [box('on1', 20)] });
     expect(h.editor.pages).toBeNull();
     expect(h.editor.notebook).toBe(false);
   });
   test('keeps its paper, untouched, through an edit and a save', () => {
-    const loaded = parseCanvasDocument(serializeCanvasDocument({ ...createCanvasDocument(), paper, elements: [box('on1', 20)] }));
-    const h = createHarness({ kind: 'canvas' }, loaded);
+    const loaded = parseWhiteboardDocument(serializeWhiteboardDocument({ ...createWhiteboardDocument(), paper, elements: [box('on1', 20)] }));
+    const h = createHarness({ kind: 'whiteboard' }, loaded);
     h.editor.keyDown(key('a', { meta: true })); h.render();
     h.editor.keyDown(key('ArrowDown', { shift: true })); h.render();
-    const saved = parseCanvasDocument(serializeCanvasDocument(h.published.at(-1)!));
+    const saved = parseWhiteboardDocument(serializeWhiteboardDocument(h.published.at(-1)!));
     expect(saved.elements.map(e => e.y)).toEqual([30]);
     expect(saved.paper).toEqual(paper);
   });

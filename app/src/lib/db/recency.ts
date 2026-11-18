@@ -54,7 +54,7 @@ export async function getRecentDriveFiles(limit = 100, days = 30): Promise<Recen
               MAX(COALESCE(f.last_accessed_at, ''), changed) AS recent_at,
               CASE WHEN COALESCE(f.last_accessed_at, '') >= changed THEN 'opened' ELSE 'changed' END AS recent_why
          FROM (SELECT *,
-                      CASE WHEN category IN ('upload', 'document', 'canvas', 'notebook')
+                      CASE WHEN category IN ('upload', 'document', 'whiteboard', 'notebook')
                            THEN MAX(COALESCE(modified_at, ''), COALESCE(first_seen_at, ''))
                            ELSE '' END AS changed
                  FROM files) f

@@ -1,7 +1,7 @@
 {
   "name": "paper already applied",
   "document": {
-    "type": "oculus-canvas",
+    "type": "oculus-whiteboard",
     "version": 1,
     "elements": [],
     "viewport": {
@@ -60,7 +60,7 @@
   },
   "expect": {
     "ok": {
-      "type": "oculus-canvas",
+      "type": "oculus-whiteboard",
       "version": 1,
       "elements": [],
       "viewport": {

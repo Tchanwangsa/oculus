@@ -53,7 +53,7 @@ function walk(entry: string, aliases: Record<string, string> = {}) {
 
 test("the companion's module graph never reaches Tauri or the database", () => {
   const { modules, violations } = walk("src/companion/main.tsx", COMPANION_ALIASES);
-  expect(modules).toContain("src/components/canvas/CanvasSurface.tsx");
+  expect(modules).toContain("src/components/whiteboard/WhiteboardSurface.tsx");
   expect(modules).toContain("src/lib/companion/shareClient.ts");
   expect(violations).toEqual([]);
 });
@@ -75,6 +75,6 @@ test("the desktop entry does not bundle the companion page or its transport", ()
 test("the input comparison page does not load the notebook, sharing client or React", () => {
   const { modules, violations } = walk("src/companion/diagnostics/inputTest.ts", COMPANION_ALIASES);
   expect(violations).toEqual([]);
-  expect(modules.some(file => file.includes('CanvasSurface') || file.includes('shareClient') || file.endsWith('/App.tsx'))).toBe(false);
+  expect(modules.some(file => file.includes('WhiteboardSurface') || file.includes('shareClient') || file.endsWith('/App.tsx'))).toBe(false);
   for (const file of modules) expect(readFileSync(join(APP, file), 'utf8')).not.toMatch(/from ["'](?:react|react-dom)(?:["'/])/);
 });

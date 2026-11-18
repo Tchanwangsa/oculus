@@ -1,11 +1,11 @@
-import type { CanvasElement } from './model';
+import type { WhiteboardElement } from './model';
 import { boundsIntersect, elementBounds } from './geometry';
 import { isLocked } from './paper';
 
 /** Paint order is array order, last on top. */
 export type LayerMove = 'front' | 'forward' | 'backward' | 'back';
 
-const unchanged = (a: readonly CanvasElement[], b: readonly CanvasElement[]) => a.every((element, i) => element === b[i]);
+const unchanged = (a: readonly WhiteboardElement[], b: readonly WhiteboardElement[]) => a.every((element, i) => element === b[i]);
 
 /**
  * Moves the selected elements in paint order, keeping their order among themselves; returns
@@ -14,13 +14,13 @@ const unchanged = (a: readonly CanvasElement[], b: readonly CanvasElement[]) => 
  * element or the end of the stack. Locked elements are the bottom layer and take no part:
  * nothing is sent beneath a page image, which would hide it.
  */
-export function reorderElements(elements: CanvasElement[], ids: ReadonlySet<string>, move: LayerMove): CanvasElement[] {
+export function reorderElements(elements: WhiteboardElement[], ids: ReadonlySet<string>, move: LayerMove): WhiteboardElement[] {
   if (!ids.size) return elements;
   if (elements.some(isLocked)) {
     const moved = [...elements.filter(isLocked), ...reorderElements(elements.filter(element => !isLocked(element)), ids, move)];
     return unchanged(elements, moved) ? elements : moved;
   }
-  let next: CanvasElement[];
+  let next: WhiteboardElement[];
   if (move === 'front' || move === 'back') {
     const chosen = elements.filter(element => ids.has(element.id)), rest = elements.filter(element => !ids.has(element.id));
     next = move === 'front' ? [...rest, ...chosen] : [...chosen, ...rest];
@@ -49,7 +49,7 @@ export function reorderElements(elements: CanvasElement[], ids: ReadonlySet<stri
 }
 
 /** Whether `move` would change anything: the selection is not already the top (or bottom) of the stack. */
-export function canReorder(all: readonly CanvasElement[], ids: ReadonlySet<string>, move: LayerMove): boolean {
+export function canReorder(all: readonly WhiteboardElement[], ids: ReadonlySet<string>, move: LayerMove): boolean {
   if (!ids.size) return false;
   const elements = all.some(isLocked) ? all.filter(element => !isLocked(element)) : all;
   const up = move === 'front' || move === 'forward';

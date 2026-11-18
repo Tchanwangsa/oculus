@@ -1,6 +1,6 @@
 import { startCompanionDiagnostics } from './index';
-import { secureId } from '@/lib/canvas/ids';
-import { traceCanvas } from '@/lib/canvas/diagnostics';
+import { secureId } from '@/lib/whiteboard/ids';
+import { traceWhiteboard } from '@/lib/whiteboard/diagnostics';
 
 /** A separate entry keeps the comparison pad free of React, sharing and notebook work. */
 async function start(): Promise<void> {
@@ -54,10 +54,10 @@ async function start(): Promise<void> {
   }, { capture: true, passive: false });
   test.addEventListener('click', () => {
     test.textContent = `Test button · ${++taps} taps`;
-    traceCanvas('probe.tap', { taps });
+    traceWhiteboard('probe.tap', { taps });
   });
-  document.querySelector('#clear')!.addEventListener('click', () => { context?.clearRect(0, 0, canvas.width, canvas.height); contacts.clear(); traceCanvas('probe.clear'); });
+  document.querySelector('#clear')!.addEventListener('click', () => { context?.clearRect(0, 0, canvas.width, canvas.height); contacts.clear(); traceWhiteboard('probe.clear'); });
   document.querySelector('#logging')!.textContent = await recording ? 'Recording input on the Mac' : 'Local logging is unavailable';
-  traceCanvas('probe.started');
+  traceWhiteboard('probe.started');
 }
 void start();

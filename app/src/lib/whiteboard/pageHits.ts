@@ -3,18 +3,18 @@
  * answer hit tests with only what is drawn: the elements a point can reach, and the bounds a box selection sees.
  */
 import { elementBounds, type Bounds } from './geometry';
-import type { CanvasElement, Point } from './model';
+import type { WhiteboardElement, Point } from './model';
 import { pageContaining, type Paper } from './paper';
 import { elementPage } from './renderPaper';
 
-const NONE: readonly CanvasElement[] = [];
-const byPage = new WeakMap<readonly CanvasElement[], { paper: Paper; pages: Map<string, readonly CanvasElement[]> }>();
+const NONE: readonly WhiteboardElement[] = [];
+const byPage = new WeakMap<readonly WhiteboardElement[], { paper: Paper; pages: Map<string, readonly WhiteboardElement[]> }>();
 
 /**
  * The elements of `elements` whose own page holds `point` (none on the desk), in order. Cached per array, paper and
  * page, so the hit-test engine keeps reusing its scene while the document is unchanged.
  */
-export function elementsAtPage(paper: Paper, elements: readonly CanvasElement[], point: Point): readonly CanvasElement[] {
+export function elementsAtPage(paper: Paper, elements: readonly WhiteboardElement[], point: Point): readonly WhiteboardElement[] {
   const page = pageContaining(paper, point);
   if (!page) return NONE;
   let entry = byPage.get(elements);
@@ -25,7 +25,7 @@ export function elementsAtPage(paper: Paper, elements: readonly CanvasElement[],
 }
 
 /** The part of `element`'s bounds its page shows, or null when none of it is on the page. */
-export function shownBounds(paper: Paper, element: CanvasElement): Bounds | null {
+export function shownBounds(paper: Paper, element: WhiteboardElement): Bounds | null {
   const b = elementBounds(element), page = elementPage(paper, element);
   const left = Math.max(b.x, page.x), right = Math.min(b.x + b.width, page.x + page.width);
   const top = Math.max(b.y, page.y), bottom = Math.min(b.y + b.height, page.y + page.height);

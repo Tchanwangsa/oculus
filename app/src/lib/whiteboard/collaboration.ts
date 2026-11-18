@@ -1,11 +1,11 @@
-import { measureCanvas } from './diagnostics';
-import { parseCanvasDocument, type CanvasDocument, type CanvasElement } from './model';
+import { measureWhiteboard } from './diagnostics';
+import { parseWhiteboardDocument, type WhiteboardDocument, type WhiteboardElement } from './model';
 import { paperProblem, type Paper } from './paper';
 
 /** `afterId`, only on an addition, places it just above that element (`null`: at the bottom);
  * without it, or when that element is gone, the addition goes on top. */
-export type ElementEdit = { id: string; before: CanvasElement | null; after: CanvasElement | null; afterId?: string | null };
-export interface CanvasTransaction {
+export type ElementEdit = { id: string; before: WhiteboardElement | null; after: WhiteboardElement | null; afterId?: string | null };
+export interface WhiteboardTransaction {
   edits: ElementEdit[];
   order?: { before: string[]; after: string[] };
   background?: { before: string; after: string };
@@ -23,7 +23,7 @@ export function sameValue(a: unknown, b: unknown): boolean {
 }
 
 /** Only drawing content crosses the network. Viewports remain local to each tab. */
-function diffContent(before: CanvasDocument, after: CanvasDocument): CanvasTransaction {
+function diffContent(before: WhiteboardDocument, after: WhiteboardDocument): WhiteboardTransaction {
   const old = new Map(before.elements.map(element => [element.id, element]));
   const next = new Map(after.elements.map(element => [element.id, element]));
   const edits: ElementEdit[] = [];
@@ -39,7 +39,7 @@ function diffContent(before: CanvasDocument, after: CanvasDocument): CanvasTrans
   });
   const oldOrder = before.elements.filter(el => next.has(el.id)).map(el => el.id);
   const newOrder = after.elements.filter(el => old.has(el.id)).map(el => el.id);
-  const transaction: CanvasTransaction = { edits };
+  const transaction: WhiteboardTransaction = { edits };
   if (!sameValue(oldOrder, newOrder)) transaction.order = { before: oldOrder, after: newOrder };
   if (before.background !== after.background) transaction.background = { before: before.background, after: after.background };
   // A paper is never added or taken away after creation, so only a change from one paper to another travels.
@@ -47,12 +47,12 @@ function diffContent(before: CanvasDocument, after: CanvasDocument): CanvasTrans
   return transaction;
 }
 
-export const hasCanvasChanges = (transaction: CanvasTransaction) => !!(transaction.edits.length || transaction.order || transaction.background || transaction.paper);
+export const hasWhiteboardChanges = (transaction: WhiteboardTransaction) => !!(transaction.edits.length || transaction.order || transaction.background || transaction.paper);
 
-function validateTransaction(value: unknown): asserts value is CanvasTransaction {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid canvas transaction.');
-  const tx = value as CanvasTransaction;
-  if (Object.keys(tx).some(key => !['edits', 'order', 'background', 'paper'].includes(key)) || !Array.isArray(tx.edits) || tx.edits.length > 10000) throw new Error('Invalid canvas transaction fields.');
+function validateTransaction(value: unknown): asserts value is WhiteboardTransaction {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid whiteboard transaction.');
+  const tx = value as WhiteboardTransaction;
+  if (Object.keys(tx).some(key => !['edits', 'order', 'background', 'paper'].includes(key)) || !Array.isArray(tx.edits) || tx.edits.length > 10000) throw new Error('Invalid whiteboard transaction fields.');
   const ids = new Set<string>();
   for (const edit of tx.edits) {
     if (!edit || typeof edit.id !== 'string' || !edit.id || ids.has(edit.id) || (edit.before === null && edit.after === null)) throw new Error('Invalid element edit.');
@@ -61,7 +61,7 @@ function validateTransaction(value: unknown): asserts value is CanvasTransaction
     for (const element of [edit.before, edit.after]) {
       if (element === null) continue;
       if (element?.id !== edit.id) throw new Error('Element edit IDs do not match.');
-      parseCanvasDocument(JSON.stringify({ type: 'oculus-canvas', version: 1, elements: [element], viewport: { x: 0, y: 0, zoom: 1 }, background: '#fff' }));
+      parseWhiteboardDocument(JSON.stringify({ type: 'oculus-whiteboard', version: 1, elements: [element], viewport: { x: 0, y: 0, zoom: 1 }, background: '#fff' }));
     }
   }
   if (tx.order) {
@@ -73,16 +73,16 @@ function validateTransaction(value: unknown): asserts value is CanvasTransaction
 }
 
 /** Compare only touched objects: independent edits merge even from the same old revision. */
-function applyTransaction(document: CanvasDocument, value: unknown): CanvasDocument {
+function applyTransaction(document: WhiteboardDocument, value: unknown): WhiteboardDocument {
   validateTransaction(value);
   const transaction = value;
-  if (!hasCanvasChanges(transaction)) return document;
+  if (!hasWhiteboardChanges(transaction)) return document;
   const elements = new Map(document.elements.map(element => [element.id, element]));
   let ids = document.elements.map(element => element.id);
   for (const edit of transaction.edits) {
     const current = elements.get(edit.id) ?? null;
     if (sameValue(current, edit.after)) continue;
-    if (!sameValue(current, edit.before)) throw new Error('A collaborator changed the same shape. Your draft is kept; download it or use the shared canvas.');
+    if (!sameValue(current, edit.before)) throw new Error('A collaborator changed the same shape. Your draft is kept; download it or use the shared whiteboard.');
     if (!edit.after) { elements.delete(edit.id); ids = ids.filter(id => id !== edit.id); continue; }
     if (!elements.has(edit.id)) {
       const anchor = edit.afterId === null ? 0 : edit.afterId === undefined || !elements.has(edit.afterId) ? ids.length : ids.indexOf(edit.afterId) + 1;
@@ -113,13 +113,13 @@ function applyTransaction(document: CanvasDocument, value: unknown): CanvasDocum
     paper = transaction.paper.after;
   }
   const result = { ...document, elements: ordered, background, ...(transaction.paper ? { paper } : {}) };
-  if (ordered.length !== elements.size || ordered.some(element => element === undefined)) throw new Error('Invalid canvas transaction.');
+  if (ordered.length !== elements.size || ordered.some(element => element === undefined)) throw new Error('Invalid whiteboard transaction.');
   return result;
 }
 
-export function diffCanvasContent(before: CanvasDocument, after: CanvasDocument): CanvasTransaction {
-  return measureCanvas('canvas.diff', () => diffContent(before, after), { elements: before.elements.length });
+export function diffWhiteboardContent(before: WhiteboardDocument, after: WhiteboardDocument): WhiteboardTransaction {
+  return measureWhiteboard('whiteboard.diff', () => diffContent(before, after), { elements: before.elements.length });
 }
-export function applyCanvasTransaction(document: CanvasDocument, value: unknown): CanvasDocument {
-  return measureCanvas('canvas.apply-transaction', () => applyTransaction(document, value), { elements: document.elements.length });
+export function applyWhiteboardTransaction(document: WhiteboardDocument, value: unknown): WhiteboardDocument {
+  return measureWhiteboard('whiteboard.apply-transaction', () => applyTransaction(document, value), { elements: document.elements.length });
 }

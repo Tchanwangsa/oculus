@@ -1,4 +1,4 @@
-import { arrowTypeOf, type CanvasElement } from '../model';
+import { arrowTypeOf, type WhiteboardElement } from '../model';
 import { routeElbow, type Lookup } from '../elbow';
 import { withoutFixedSegments } from '../elbow/lanes';
 import { throughPoints, worldPoints } from './points';
@@ -8,7 +8,7 @@ import { throughPoints, worldPoints } from './points';
  * leaving elbow keeps only the two ends, since its bends were routed rather than placed; sharp and curved share their points.
  * Any change of type drops fixed segments.
  */
-export function retypeArrow(next: CanvasElement, previous: CanvasElement, lookup: Lookup = () => undefined): CanvasElement {
+export function retypeArrow(next: WhiteboardElement, previous: WhiteboardElement, lookup: Lookup = () => undefined): WhiteboardElement {
   if (next.type !== 'arrow') return next;
   const was = arrowTypeOf(previous), now = arrowTypeOf(next);
   if (was !== now) next = withoutFixedSegments(next);

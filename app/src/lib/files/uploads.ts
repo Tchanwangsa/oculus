@@ -15,7 +15,7 @@ export interface ImportedFile {
   file_type: string;
   size_bytes: number;
   /** The row's category, from the path (`layout::category_of`): a dropped
-   *  `.md` is a document, a `.canvas` a canvas. */
+   *  `.md` is a document, a `.whiteboard` a whiteboard. */
   category: string;
 }
 

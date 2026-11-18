@@ -3,8 +3,8 @@ import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from "
 import { isWebUrl } from "@/lib/browser";
 import { edThreadId } from "@/lib/ed/links";
 import { OpenOriginal } from "@/components/files/OpenOriginal";
-import { DrawOnCopy } from "@/components/canvas/DrawOnCopy";
-import { drawingKindOf } from "@/lib/canvas/drawingKinds";
+import { DrawOnCopy } from "@/components/whiteboard/DrawOnCopy";
+import { drawingKindOf } from "@/lib/whiteboard/drawingKinds";
 import { markEdViewed } from "@/lib/ed/views";
 import {
   DocumentControls,
@@ -34,7 +34,7 @@ import { PaneHeaderRow, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeade
 import { useDocumentPrefsStore } from "@/stores/documents/documentPrefsStore";
 import type { DbFile } from "@/lib/db";
 
-const CanvasEditor = lazy(() => import("@/components/canvas/CanvasEditor"));
+const WhiteboardEditor = lazy(() => import("@/components/whiteboard/WhiteboardEditor"));
 
 /** A file the student writes in the app, whose editor follows it across a rename. */
 const authored = (file: DbFile) => file.category === "document" || drawingKindOf(file) !== null;
@@ -69,7 +69,7 @@ export default function SubjectFilePage() {
 
   // An authored file renamed under this page keeps its row but loses its path:
   // follow the row by id and update the route, so the editor stays mounted.
-  // Notes, canvases and notebooks retain their editors; other stale paths leave the file.
+  // Notes, whiteboards and notebooks retain their editors; other stale paths leave the file.
   const heldId = useRef<number | null>(null);
   if (found) heldId.current = authored(found) ? found.id : null;
   const moved = useMemo(
@@ -181,7 +181,7 @@ export default function SubjectFilePage() {
             <MarkdownUnavailable file={file} openSeq={parseDetails} />
           ))
         )}
-        {/* A PDF can be copied into a notebook or a canvas to draw on. */}
+        {/* A PDF can be copied into a notebook or a whiteboard to draw on. */}
         {!isDocument && !drawingKind && /\.pdf$/i.test(file.filename) && <DrawOnCopy file={file} />}
         {/* A synced page is our markdown of a Canvas page or an Ed thread;
             this opens the original, embeds and styling included, in a
@@ -192,7 +192,7 @@ export default function SubjectFilePage() {
       </PaneHeaderRow>
       <div ref={setBody} className="flex-1 min-h-0 overflow-hidden flex flex-col">
         {drawingKind ? (
-          <Suspense fallback={<LoadingFill />}><CanvasEditor key={file.id} file={file} kind={drawingKind} /></Suspense>
+          <Suspense fallback={<LoadingFill />}><WhiteboardEditor key={file.id} file={file} kind={drawingKind} /></Suspense>
         ) : isDocument ? (
           <Suspense fallback={<LoadingFill />}>
             <DocumentEditor

@@ -45,7 +45,7 @@ impl Bounds {
     }
 }
 
-/// Floats per shape record; see `CanvasScene::new`.
+/// Floats per shape record; see `WhiteboardScene::new`.
 const RECORD: usize = 14;
 
 /// An arrowhead's direction (the angle the path arrives at its tip) and size.
@@ -245,13 +245,13 @@ impl Node {
 }
 
 #[wasm_bindgen]
-pub struct CanvasScene {
+pub struct WhiteboardScene {
     shapes: Vec<Shape>,
     root: Option<Node>,
 }
 
 #[wasm_bindgen]
-impl CanvasScene {
+impl WhiteboardScene {
     /// Each shape is kind,x,y,width,height,strokeWidth,filled,pointStart,pointCount,heads,
     /// startAngle,startSize,endAngle,endSize. Point offsets count pairs, not scalar values;
     /// an arrow's points are its flattened rendered path. `heads` is a bitfield: 1 marks an
@@ -419,8 +419,8 @@ pub fn simplify_points(coordinates: &[f64], tolerance: f64) -> Vec<f64> {
 mod tests {
     use super::*;
     use std::f64::consts::FRAC_PI_4;
-    fn scene(records: &[[f64; RECORD]], points: &[f64]) -> CanvasScene {
-        CanvasScene::new(&records.concat(), points)
+    fn scene(records: &[[f64; RECORD]], points: &[f64]) -> WhiteboardScene {
+        WhiteboardScene::new(&records.concat(), points)
     }
     fn rect(x: f64, y: f64, filled: bool) -> [f64; RECORD] {
         let mut r = [0.0; RECORD];

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { TouchViewportGesture } from '../../../src/lib/canvas/touchViewport';
+import { TouchViewportGesture } from '../../../src/lib/whiteboard/touchViewport';
 
 const initial = { x: 20, y: 40, zoom: 2 };
 const start = () => {
@@ -8,7 +8,7 @@ const start = () => {
   expect(gesture.down(2, { x: 200, y: 100 }, initial)).toBe(true);
   return gesture;
 };
-describe('two-finger canvas navigation', () => {
+describe('two-finger whiteboard navigation', () => {
   test('translates without changing scale when both fingers move together', () => {
     const gesture = start();
     gesture.move(1, { x: 130, y: 150 });

@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import type { CanvasAuthorityPhase } from "@/lib/canvas/authority";
+import type { WhiteboardAuthorityPhase } from "@/lib/whiteboard/authority";
 import type { ShareView } from "@/lib/sharing/controller";
 import { pickEndpoint, shareStatusLine } from "@/lib/sharing/view";
 import { AddressList } from "./AddressList";
@@ -21,7 +21,7 @@ const TONE = { muted: "bg-muted-foreground/50", live: "bg-success", warning: "bg
  * caller, so this renders the same on the server in tests. */
 export function ShareDialogBody({ view, authority, confirmingStop, ...actions }: ShareDialogActions & {
   view: ShareView;
-  authority: CanvasAuthorityPhase;
+  authority: WhiteboardAuthorityPhase;
   confirmingStop: boolean;
 }) {
   const line = shareStatusLine(view, authority);
@@ -51,7 +51,7 @@ export function ShareDialogBody({ view, authority, confirmingStop, ...actions }:
       {share ? (
         <>
           {authority === "paused" || share.phase === "paused" ? (
-            <p className="text-xs text-muted-foreground">The file changed outside Oculus. Devices can look but not save until you choose a version in the canvas.</p>
+            <p className="text-xs text-muted-foreground">The file changed outside Oculus. Devices can look but not save until you choose a version in the whiteboard.</p>
           ) : null}
           <div className="flex min-w-0 flex-wrap items-start gap-4">
             {endpoint?.url ? <ShareQr link={endpoint.url} /> : null}
@@ -70,7 +70,7 @@ export function ShareDialogBody({ view, authority, confirmingStop, ...actions }:
           <p className="text-xs leading-relaxed text-muted-foreground">
             {view.status === "ended"
               ? "Devices can no longer open the old link. Sharing again makes a new link and code."
-              : "Open this canvas in a browser on an iPad or phone and draw on it together. You get a link and a QR code."}
+              : "Open this whiteboard in a browser on an iPad or phone and draw on it together. You get a link and a QR code."}
           </p>
           {noAddress && <p className="text-xs text-muted-foreground">This Mac has no address another device could use. Join a Wi‑Fi network or a VPN first.</p>}
           <ShareLimits />
@@ -90,7 +90,7 @@ export function ShareLimits() {
   return (
     <ul className="flex list-disc flex-col gap-1 pl-4 text-[11px] leading-relaxed text-muted-foreground">
       <li>Works on the same network or over your VPN. Public and guest Wi‑Fi often keep devices apart, so a device there may not open the link.</li>
-      <li>Anyone with the link can edit this canvas until you stop sharing.</li>
+      <li>Anyone with the link can edit this whiteboard until you stop sharing.</li>
       <li>If this Mac’s address changes, the link and code here update; a device that only has the old link has to open the new one.</li>
     </ul>
   );

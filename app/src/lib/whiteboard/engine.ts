@@ -1,19 +1,19 @@
-import { arrowheadOf, type CanvasElement, type Point } from './model';
+import { arrowheadOf, type WhiteboardElement, type Point } from './model';
 import { arrowheadSize, arrowPath, boundsIntersect, elementBounds, elementFilled, elementHitTest, simplifyPolyline, type Bounds } from './geometry';
 import { linePath, pathEnd } from './arrow/path';
 
-type WasmModule = typeof import('../../../canvas-core/pkg/oculus_canvas_core');
-type Scene = InstanceType<WasmModule['CanvasScene']>;
+type WasmModule = typeof import('../../../whiteboard-core/pkg/oculus_whiteboard_core');
+type Scene = InstanceType<WasmModule['WhiteboardScene']>;
 let wasm: WasmModule | undefined;
 let loading: Promise<void> | undefined;
 let status: 'loading' | 'rust' | 'javascript' = 'loading';
-const scenes = new Map<readonly CanvasElement[], Scene>();
-const kinds: CanvasElement['type'][] = ['rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text', 'image'];
-/** Floats per shape; the layout is documented on `CanvasScene::new` in canvas-core. */
+const scenes = new Map<readonly WhiteboardElement[], Scene>();
+const kinds: WhiteboardElement['type'][] = ['rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text', 'image'];
+/** Floats per shape; the layout is documented on `WhiteboardScene::new` in whiteboard-core. */
 const RECORD = 14;
 
 /** An arrow sends its flattened path and each head's angle and size, so Rust tests the heads the JS reference draws. */
-function record(el: CanvasElement, start: number, count: number): number[] {
+function record(el: WhiteboardElement, start: number, count: number): number[] {
   const base = [kinds.indexOf(el.type), el.x, el.y, el.width, el.height, el.strokeWidth, elementFilled(el) ? 1 : 0, start, count];
   if (el.type !== 'arrow') return [...base, 0, 0, 0, 0, 0];
   const heads = (arrowheadOf(el, 'start') !== 'none' ? 1 : 0) | (arrowheadOf(el, 'end') !== 'none' ? 2 : 0);
@@ -21,22 +21,22 @@ function record(el: CanvasElement, start: number, count: number): number[] {
   return [...base, heads, pathEnd(el, 'start').angle, size, pathEnd(el, 'end').angle, size];
 }
 
-export function getCanvasEngineStatus() { return status; }
+export function getWhiteboardEngineStatus() { return status; }
 
-export function loadCanvasEngine(): Promise<void> {
-  return loading ??= import('../../../canvas-core/pkg/oculus_canvas_core').then(async module => {
+export function loadWhiteboardEngine(): Promise<void> {
+  return loading ??= import('../../../whiteboard-core/pkg/oculus_whiteboard_core').then(async module => {
     await module.default();
     wasm = module;
     status = 'rust';
   }).catch(error => {
     status = 'javascript';
-    console.error('[canvas] Rust engine could not load; using JavaScript geometry.', error);
-    throw new Error('Rust canvas engine could not load. Drawing is using JavaScript geometry.');
+    console.error('[whiteboard] Rust engine could not load; using JavaScript geometry.', error);
+    throw new Error('Rust whiteboard engine could not load. Drawing is using JavaScript geometry.');
   });
 }
 
 /** Callers replace the array and edited elements, keeping queries allocation-light. */
-function sceneFor(elements: readonly CanvasElement[]): Scene | undefined {
+function sceneFor(elements: readonly WhiteboardElement[]): Scene | undefined {
   if (!wasm) return;
   const current = scenes.get(elements);
   if (current) return current;
@@ -48,7 +48,7 @@ function sceneFor(elements: readonly CanvasElement[]): Scene | undefined {
     if (points) for (const p of points) coordinates.push(p.x, p.y);
     records.set(record(el, start, coordinates.length / 2 - start), i * RECORD);
   });
-  const next = new wasm.CanvasScene(records, new Float64Array(coordinates));
+  const next = new wasm.WhiteboardScene(records, new Float64Array(coordinates));
   scenes.set(elements, next);
   // Undo history can retain many scene arrays. Keep Rust memory independently bounded.
   if (scenes.size > 8) {
@@ -58,7 +58,7 @@ function sceneFor(elements: readonly CanvasElement[]): Scene | undefined {
   return next;
 }
 
-export function hitTest(elements: readonly CanvasElement[], point: Point, tolerance = 6): string | null {
+export function hitTest(elements: readonly WhiteboardElement[], point: Point, tolerance = 6): string | null {
   const scene = sceneFor(elements);
   if (scene) {
     const index = scene.hit_test(point.x, point.y, tolerance);
@@ -68,7 +68,7 @@ export function hitTest(elements: readonly CanvasElement[], point: Point, tolera
   return null;
 }
 
-export function visibleElements(elements: readonly CanvasElement[], bounds: Bounds): CanvasElement[] {
+export function visibleElements(elements: readonly WhiteboardElement[], bounds: Bounds): WhiteboardElement[] {
   const scene = sceneFor(elements);
   if (scene) return Array.from(scene.visible_indices(bounds.x, bounds.y, bounds.width, bounds.height), i => elements[i]);
   return elements.filter(el => {

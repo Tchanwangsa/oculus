@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test';
-import { createCanvasDocument, type CanvasElement } from '@/lib/canvas/model';
+import { createWhiteboardDocument, type WhiteboardElement } from '@/lib/whiteboard/model';
 import { createHarness, key, pointer, type Harness } from './harness';
 
 const base = { stroke: '#000', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=';
-const page: CanvasElement = { id: 'page', type: 'image', x: 0, y: 0, width: 500, height: 700, naturalWidth: 1, naturalHeight: 1, dataUrl: PNG, locked: true, ...base };
-const shape: CanvasElement = { id: 'shape', type: 'rectangle', x: 100, y: 100, width: 40, height: 30, ...base };
-const ink: CanvasElement = { id: 'ink', type: 'freedraw', x: 180, y: 100, width: 40, height: 30, points: [{ x: 0, y: 0 }, { x: 40, y: 30 }], ...base };
+const page: WhiteboardElement = { id: 'page', type: 'image', x: 0, y: 0, width: 500, height: 700, naturalWidth: 1, naturalHeight: 1, dataUrl: PNG, locked: true, ...base };
+const shape: WhiteboardElement = { id: 'shape', type: 'rectangle', x: 100, y: 100, width: 40, height: 30, ...base };
+const ink: WhiteboardElement = { id: 'ink', type: 'freedraw', x: 180, y: 100, width: 40, height: 30, points: [{ x: 0, y: 0 }, { x: 40, y: 30 }], ...base };
 
 function setup() {
   const h = createHarness();
-  h.render({ ...createCanvasDocument(), elements: [page, shape, ink] });
+  h.render({ ...createWhiteboardDocument(), elements: [page, shape, ink] });
   return h;
 }
 function drag(h: Harness, from: [number, number], to: [number, number]) {

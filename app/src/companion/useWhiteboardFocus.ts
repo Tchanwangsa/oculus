@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { shouldUseNativeCanvasFullscreen } from './fullscreenPolicy';
+import { shouldUseNativeWhiteboardFullscreen } from './fullscreenPolicy';
 
 /** Focus mode works on plain HTTP and browsers without the Fullscreen API. */
-export function useCanvasFocus() {
+export function useWhiteboardFocus() {
   const root = useRef<HTMLDivElement>(null);
   const [focused, setFocused] = useState(false);
   const ownsFullscreen = useRef(false);
@@ -33,7 +33,7 @@ export function useCanvasFocus() {
     }
     setFocused(true);
     try {
-      if (shouldUseNativeCanvasFullscreen(navigator) && root.current?.requestFullscreen && document.fullscreenEnabled) {
+      if (shouldUseNativeWhiteboardFullscreen(navigator) && root.current?.requestFullscreen && document.fullscreenEnabled) {
         await root.current.requestFullscreen();
         if (pending.current !== request && document.fullscreenElement === root.current) await document.exitFullscreen();
       }

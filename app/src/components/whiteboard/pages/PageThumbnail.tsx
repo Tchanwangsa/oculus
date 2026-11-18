@@ -1,5 +1,5 @@
 import type { PointerEvent, Ref } from 'react';
-import type { PaperPage } from '@/lib/canvas/paper';
+import type { PaperPage } from '@/lib/whiteboard/paper';
 import { DRAG_SURFACE } from '@/hooks/gestures/usePointerDrag';
 import { cn } from '@/lib/utils';
 import { PageMenu, type PageMenuActions } from './PageMenu';

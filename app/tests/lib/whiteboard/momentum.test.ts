@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { DECELERATION, MAX_SPEED, STOP_SPEED, VelocityTracker, eventTime, glide, gliding } from '../../../src/lib/canvas/momentum';
+import { DECELERATION, MAX_SPEED, STOP_SPEED, VelocityTracker, eventTime, glide, gliding } from '../../../src/lib/whiteboard/momentum';
 
 /** A pan sampled every 16 ms from `from` ms, moving `step` pixels a sample, `count` samples long. */
 const pan = (count: number, step: { x: number; y: number }, zoom = 1, from = 0) => {

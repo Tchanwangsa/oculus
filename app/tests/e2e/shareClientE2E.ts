@@ -1,7 +1,7 @@
 /**
  * End-to-end check: real `ShareClient`s over bun's fetch, WebSocket and timers
  * against the real companion server. The Rust test `companion::tests::e2e`
- * starts the server, shares a canvas and runs this script with the port in
+ * starts the server, shares a whiteboard and runs this script with the port in
  * `OCULUS_E2E_PORT` and the link key in `OCULUS_E2E_KEY`; it plays the desktop
  * when asked: a line `@@ <command> <json>` on stdout is answered by
  * `@@ok <json>` (or `@@err <message>`) on stdin. Progress goes to stderr, and
@@ -10,9 +10,9 @@
  */
 import { createHash } from "node:crypto";
 import { createInterface } from "node:readline";
-import { parseCanvasDocument, serializeCanvasDocument, type CanvasDocument, type CanvasElement } from "@/lib/canvas/model";
-import { createCanvasSessions } from "@/lib/canvas/sessions";
-import type { CanvasAuthorityEvent, CanvasAuthorityIO } from "@/lib/canvas/authority";
+import { parseWhiteboardDocument, serializeWhiteboardDocument, type WhiteboardDocument, type WhiteboardElement } from "@/lib/whiteboard/model";
+import { createWhiteboardSessions } from "@/lib/whiteboard/sessions";
+import type { WhiteboardAuthorityEvent, WhiteboardAuthorityIO } from "@/lib/whiteboard/authority";
 import type { FetchLike } from "@/lib/companion/api";
 import { browserShareEnv, type SharePage, type StorageLike, type WebSocketLike } from "@/lib/companion/env";
 import { draftKey } from "@/lib/companion/drafts";
@@ -148,10 +148,10 @@ class Device {
   }
 }
 
-const rect = (id: string, x = 0): CanvasElement => ({ id, type: "rectangle", x, y: 0, width: 40, height: 30, stroke: "#000", fill: "transparent", strokeWidth: 2, style: "clean", seed: 1 });
-const ids = (document: CanvasDocument | null | undefined) => document?.elements.map((el) => el.id) ?? [];
-const find = (document: CanvasDocument | null | undefined, id: string) => document?.elements.find((el) => el.id === id);
-const added = (client: ShareClient, element: CanvasElement) => {
+const rect = (id: string, x = 0): WhiteboardElement => ({ id, type: "rectangle", x, y: 0, width: 40, height: 30, stroke: "#000", fill: "transparent", strokeWidth: 2, style: "clean", seed: 1 });
+const ids = (document: WhiteboardDocument | null | undefined) => document?.elements.map((el) => el.id) ?? [];
+const find = (document: WhiteboardDocument | null | undefined, id: string) => document?.elements.find((el) => el.id === id);
+const added = (client: ShareClient, element: WhiteboardElement) => {
   const document = client.getState().document!;
   return { ...document, elements: [...document.elements, element] };
 };
@@ -159,7 +159,7 @@ const moved = (client: ShareClient, id: string, x: number) => {
   const document = client.getState().document!;
   return { ...document, elements: document.elements.map((el) => el.id === id ? { ...el, x } : el) };
 };
-const sameIds = (document: CanvasDocument | null, expected: string[]) => {
+const sameIds = (document: WhiteboardDocument | null, expected: string[]) => {
   const have = ids(document);
   return have.length === expected.length && expected.every((id) => have.includes(id));
 };
@@ -191,7 +191,7 @@ async function snapshot(origin: string, key: ShareCredentials) {
   check(response.status === 200, `snapshot answered ${response.status}`);
   const text = await response.text();
   check(Number(response.headers.get("Content-Length")) === Buffer.byteLength(text), "the snapshot's Content-Length is exact");
-  return { epoch: response.headers.get("X-Oculus-Epoch")!, revision: Number(response.headers.get("X-Oculus-Revision")), document: parseCanvasDocument(text), text };
+  return { epoch: response.headers.get("X-Oculus-Epoch")!, revision: Number(response.headers.get("X-Oculus-Revision")), document: parseWhiteboardDocument(text), text };
 }
 
 function sameElements(a: ShareClient, b: ShareClient, what: string) {
@@ -240,11 +240,11 @@ log("(b) desktop commit reaches both: ok");
 // A fresh desktop JS runtime joins the authority that survived its reload.
 // Use the real session implementation over serialized native responses/events,
 // rather than issuing a synthetic desktop commit directly to the authority.
-const desktopFile = { id: 7, relative_path: "courses/TEST/File7.canvas" };
-const desktopListeners = new Set<(event: CanvasAuthorityEvent) => void>();
-const snapshotDesktop = () => desktop<Awaited<ReturnType<CanvasAuthorityIO<typeof desktopFile>["snapshot"]>>>("desktop-snapshot");
-const unexpected = async (): Promise<never> => { throw new Error("A rejoined shared canvas used the ordinary file path."); };
-const desktopSessions = createCanvasSessions({
+const desktopFile = { id: 7, relative_path: "courses/TEST/File7.whiteboard" };
+const desktopListeners = new Set<(event: WhiteboardAuthorityEvent) => void>();
+const snapshotDesktop = () => desktop<Awaited<ReturnType<WhiteboardAuthorityIO<typeof desktopFile>["snapshot"]>>>("desktop-snapshot");
+const unexpected = async (): Promise<never> => { throw new Error("A rejoined shared whiteboard used the ordinary file path."); };
+const desktopSessions = createWhiteboardSessions({
   read: unexpected, write: unexpected, rename: unexpected, remove: unexpected,
   drafts: new MemoryStorage(),
   authority: {
@@ -261,16 +261,16 @@ let desktopUpdates = 0;
 const stopDesktop = desktopSession.subscribe(() => { desktopUpdates++; });
 await desktopSession.load();
 check(desktopSession.authority === "live", "a recreated desktop session joins the live native authority");
-check(ids(parseCanvasDocument(desktopSession.snapshot().text!)).includes("a1"), "desktop rejoin starts with the device's saved strokes");
+check(ids(parseWhiteboardDocument(desktopSession.snapshot().text!)).includes("a1"), "desktop rejoin starts with the device's saved strokes");
 await desktop("desktop-events");
 b.edit(added(b, rect("rejoined-web", 80)));
 await until(b, "the device's new stroke saves after desktop rejoin", (s) => settled(s) && !!find(s.document, "rejoined-web"));
-const events = await desktop<CanvasAuthorityEvent[]>("desktop-events");
+const events = await desktop<WhiteboardAuthorityEvent[]>("desktop-events");
 const beforeUpdates = desktopUpdates;
 for (const event of events) for (const listener of desktopListeners) listener(event);
-check(desktopUpdates > beforeUpdates && ids(parseCanvasDocument(desktopSession.snapshot().text!)).includes("rejoined-web"), "the mounted desktop receives the device's edit without leaving the canvas");
-const desktopDocument = parseCanvasDocument(desktopSession.snapshot().text!);
-desktopSession.update(serializeCanvasDocument({ ...desktopDocument, elements: [...desktopDocument.elements, rect("rejoined-desk", 90)] }));
+check(desktopUpdates > beforeUpdates && ids(parseWhiteboardDocument(desktopSession.snapshot().text!)).includes("rejoined-web"), "the mounted desktop receives the device's edit without leaving the whiteboard");
+const desktopDocument = parseWhiteboardDocument(desktopSession.snapshot().text!);
+desktopSession.update(serializeWhiteboardDocument({ ...desktopDocument, elements: [...desktopDocument.elements, rect("rejoined-desk", 90)] }));
 await desktopSession.flush();
 for (const [client, name] of [[a, "A"], [b, "B"]] as const) {
   await until(client, `${name} sees the rejoined desktop's edit`, (s) => settled(s) && !!find(s.document, "rejoined-desk"));
@@ -279,7 +279,7 @@ stopDesktop();
 log("(b2) recreated desktop session rejoins; live edits work both ways with no whole-file writes: ok");
 
 // (c) Independent edits merge; the same shape edited on both is a conflict
-// for exactly one, whose draft is kept until it takes the shared canvas.
+// for exactly one, whose draft is kept until it takes the shared whiteboard.
 a.edit(moved(a, "a1", 100));
 b.edit(moved(b, "b1", 200));
 for (const [client, name] of [[a, "A"], [b, "B"]] as const) {
@@ -295,9 +295,9 @@ await until(winner, "the winner settles", (s) => settled(s) && find(s.document, 
 const conflicted = loser.getState();
 check(conflicted.hasDraft && !!conflicted.lastError, "the conflict keeps a draft and says why");
 check(find(conflicted.document, "base")?.x === lost, "the losing side still shows its own edit");
-check(find(parseCanvasDocument(loser.draftText()!), "base")?.x === lost, "the draft exports the losing edit");
-loser.useSharedCanvas();
-await until(loser, "the loser takes the shared canvas", (s) => settled(s) && find(s.document, "base")?.x === won && !s.hasDraft);
+check(find(parseWhiteboardDocument(loser.draftText()!), "base")?.x === lost, "the draft exports the losing edit");
+loser.useSharedWhiteboard();
+await until(loser, "the loser takes the shared whiteboard", (s) => settled(s) && find(s.document, "base")?.x === won && !s.hasDraft);
 sameElements(a, b, "(c) after recovery");
 log(`(c) merge, conflict on ${loser === a ? "A" : "B"}, recovery: ok`);
 
@@ -384,9 +384,9 @@ for (const [client, name] of [[a, "A"], [b, "B"]] as const) {
   const message = client.getState().lastError ?? "";
   check(message.length > 20 && !/^(stopped|ended|shutdown)$/.test(message), `${name} explains the end in words, not a code: "${message}"`);
 }
-const draftA = parseCanvasDocument(a.draftText()!);
+const draftA = parseWhiteboardDocument(a.draftText()!);
 check(!!find(draftA, "g1") && find(draftA, "img")?.dataUrl === dataUrl, "A's draft exports its unsaved stroke and the image");
-const draftB = parseCanvasDocument(b.draftText()!);
+const draftB = parseWhiteboardDocument(b.draftText()!);
 check(!find(draftB, "g1") && !!find(draftB, "f1"), "B's draft is the last shared drawing");
 // The complete image-bearing drawing remains recoverable after the share ends.
 check(A.storage.getItem(draftKey(key.shareId))?.includes("\"g1\""), "A's unsaved edit is stored for a reload");

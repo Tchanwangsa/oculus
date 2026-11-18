@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { resizeBounds, resizeElements } from '@/lib/canvas/resize';
-import { resizeHandles } from '@/lib/canvas/render';
-import type { CanvasElement } from '@/lib/canvas/model';
+import { resizeBounds, resizeElements } from '@/lib/whiteboard/resize';
+import { resizeHandles } from '@/lib/whiteboard/render';
+import type { WhiteboardElement } from '@/lib/whiteboard/model';
 
 const from = { x: 100, y: 50, width: 200, height: 100 };
-const image: CanvasElement = { id: 'a', type: 'image', x: 100, y: 50, width: 80, height: 40, stroke: 'transparent', fill: 'transparent', strokeWidth: 0, style: 'clean', seed: 0 };
+const image: WhiteboardElement = { id: 'a', type: 'image', x: 100, y: 50, width: 80, height: 40, stroke: 'transparent', fill: 'transparent', strokeWidth: 0, style: 'clean', seed: 0 };
 
 describe('selection resize handles', () => {
   test('corners keep the selection ratio and the opposite corner, with or without Shift', () => {

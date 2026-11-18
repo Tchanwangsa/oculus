@@ -31,6 +31,6 @@ export function openNotebookContext(): string | null {
   return [
     notebooks.length === 1 ? 'The student has a notebook open in Oculus, where they write their working by hand:' : 'The student has these notebooks open in Oculus, where they write their working by hand (the first was used last):',
     ...lines,
-    'That command lists the notebook\'s page pictures, redrawn a few seconds after each stroke. Open the page you need with your image tool and respond to what is written there; if they ask about "my working", "my solution" or "the canvas", this is it.',
+    'That command lists the notebook\'s page pictures, redrawn a few seconds after each stroke. Open the page you need with your image tool and respond to what is written there; if they ask about "my working", "my solution" or "the whiteboard", this is it.',
   ].join('\n');
 }

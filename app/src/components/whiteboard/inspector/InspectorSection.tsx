@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { StylePatch, StyleValues } from '@/lib/canvas/style';
+import type { StylePatch, StyleValues } from '@/lib/whiteboard/style';
 
 export interface SectionProps { values: StyleValues; onChange: (patch: StylePatch) => void }
 

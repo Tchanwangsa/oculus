@@ -1,5 +1,5 @@
 /** Only embedded raster images are allowed: SVG and external URLs can reference other resources. */
-export function isCanvasImageDataUrl(value: unknown): value is string {
+export function isWhiteboardImageDataUrl(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   const match = /^data:image\/(png|jpeg|webp|gif);base64,/.exec(value);
   if (!match) return false;

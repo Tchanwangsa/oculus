@@ -12,7 +12,7 @@ import { parseFile } from "@/lib/files/courseFiles";
 import { isPipelineFile } from "@/lib/files/fileTypes";
 import { UPLOADS_CHANGED_EVENT, type ImportedFile } from "@/lib/files/uploads";
 import { reconcileDocuments } from "@/lib/notes/documents";
-import { reconcileCanvases, reconcileNotebooks } from "@/lib/canvas/files";
+import { reconcileWhiteboards, reconcileNotebooks } from "@/lib/whiteboard/files";
 
 export interface ReconcileSubject {
   id: number;
@@ -37,7 +37,7 @@ export async function reconcileOwnFiles(subject: ReconcileSubject): Promise<Impo
   }
   if (added.length) window.dispatchEvent(new CustomEvent(UPLOADS_CHANGED_EVENT));
   await reconcileDocuments(subject);
-  await reconcileCanvases(subject);
+  await reconcileWhiteboards(subject);
   await reconcileNotebooks(subject);
   return added;
 }

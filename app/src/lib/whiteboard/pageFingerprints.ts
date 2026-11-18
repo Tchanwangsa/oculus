@@ -1,10 +1,10 @@
 import { boundsIntersect, elementBounds } from './geometry';
-import type { CanvasDocument, CanvasElement } from './model';
+import type { WhiteboardDocument, WhiteboardElement } from './model';
 import { pageRects } from './paper';
 
 /** An element's text, kept per element object so an untouched one is never serialised twice. An embedded picture counts by its size and tail. */
-const elementKeys = new WeakMap<CanvasElement, string>();
-function elementKey(element: CanvasElement): string {
+const elementKeys = new WeakMap<WhiteboardElement, string>();
+function elementKey(element: WhiteboardElement): string {
   let key = elementKeys.get(element);
   if (key === undefined) {
     const { dataUrl, ...rest } = element;
@@ -15,7 +15,7 @@ function elementKey(element: CanvasElement): string {
 }
 
 /** What each page's picture depends on, by page id: its number, size and template, and every element touching it. */
-export function pageFingerprints(document: CanvasDocument): Map<string, string> {
+export function pageFingerprints(document: WhiteboardDocument): Map<string, string> {
   const { paper } = document;
   if (!paper) return new Map();
   return new Map(pageRects(paper).map(rect => {

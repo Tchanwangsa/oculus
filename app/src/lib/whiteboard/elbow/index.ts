@@ -1,4 +1,4 @@
-import type { CanvasElement, Point } from '../model';
+import type { WhiteboardElement, Point } from '../model';
 import { throughPoints, worldPoints } from '../arrow/points';
 import { elbowEndChoices, elbowEnds, type Lookup } from './ends';
 import { elbowRoute } from './route';
@@ -9,7 +9,7 @@ import { cheapestRoute } from './sides';
 export type { Lookup } from './ends';
 
 /** The arrow through `route`, or the arrow itself when that is where it already runs. */
-function placeRoute(arrow: CanvasElement, route: readonly Point[]): CanvasElement {
+function placeRoute(arrow: WhiteboardElement, route: readonly Point[]): WhiteboardElement {
   const current = worldPoints(arrow);
   const unchanged = route.length === current.length && route.every((p, i) => Math.abs(p.x - current[i].x) < 1e-9 && Math.abs(p.y - current[i].y) < 1e-9);
   return unchanged ? arrow : throughPoints(arrow, route);
@@ -24,7 +24,7 @@ function placeRoute(arrow: CanvasElement, route: readonly Point[]): CanvasElemen
  * stays as dragged until an end moves; then it is routed along its fixed segments' lines, a centre-bound end leaving
  * by whichever side gives the cheapest route (`cheapestRoute`).
  */
-export function routeElbow(arrow: CanvasElement, lookup: Lookup): CanvasElement {
+export function routeElbow(arrow: WhiteboardElement, lookup: Lookup): WhiteboardElement {
   const lanes = elementLanes(arrow);
   if (!lanes.length) {
     const [start, end] = elbowEnds(arrow, lookup);
@@ -36,7 +36,7 @@ export function routeElbow(arrow: CanvasElement, lookup: Lookup): CanvasElement 
 }
 
 /** Routes the arrow afresh even where its points still fit, as after releasing a fixed segment. */
-export function rerouteElbow(arrow: CanvasElement, lookup: Lookup): CanvasElement {
+export function rerouteElbow(arrow: WhiteboardElement, lookup: Lookup): WhiteboardElement {
   const lanes: Lane[] = elementLanes(arrow);
   if (!lanes.length) return placeRoute(arrow, elbowRoute(...elbowEnds(arrow, lookup)));
   return placeRoute(arrow, cheapestRoute(...elbowEndChoices(arrow, lookup), lanes));

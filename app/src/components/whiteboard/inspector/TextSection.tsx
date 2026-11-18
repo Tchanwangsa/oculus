@@ -1,17 +1,17 @@
 import { AlignBottomSimpleIcon, AlignCenterVerticalSimpleIcon, AlignTopSimpleIcon, TextAlignCenterIcon, TextAlignLeftIcon, TextAlignRightIcon } from '@phosphor-icons/react';
-import type { CanvasFontFamily } from '@/lib/canvas/model';
-import { CANVAS_FONT_STACKS } from '@/lib/canvas/renderText';
+import type { WhiteboardFontFamily } from '@/lib/whiteboard/model';
+import { WHITEBOARD_FONT_STACKS } from '@/lib/whiteboard/renderText';
 import { InspectorSection, type SectionProps } from './InspectorSection';
 import { Segmented } from './Segmented';
 
-const FAMILIES: [CanvasFontFamily, string][] = [['sans', 'Sans'], ['serif', 'Serif'], ['mono', 'Mono']];
+const FAMILIES: [WhiteboardFontFamily, string][] = [['sans', 'Sans'], ['serif', 'Serif'], ['mono', 'Mono']];
 
 /** Font family and alignment; `vertical` adds top/middle/bottom for shape labels. The size sits in the bar (`FontSizePicker`). */
 export function TextSection({ values, onChange, vertical }: SectionProps & { vertical: boolean }) {
   return <>
     <InspectorSection label="Font">
       <Segmented label="Font family" value={values.fontFamily} onChange={fontFamily => onChange({ fontFamily })}
-        options={FAMILIES.map(([value, label]) => ({ value, label, content: <span className="text-[14px] leading-none" style={{ fontFamily: CANVAS_FONT_STACKS[value] }}>Aa</span> }))} />
+        options={FAMILIES.map(([value, label]) => ({ value, label, content: <span className="text-[14px] leading-none" style={{ fontFamily: WHITEBOARD_FONT_STACKS[value] }}>Aa</span> }))} />
     </InspectorSection>
     <InspectorSection label="Align">
       <div className="flex items-center gap-1.5">

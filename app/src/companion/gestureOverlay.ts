@@ -1,4 +1,4 @@
-import { installCanvasTrace, type TraceFields } from '@/lib/canvas/diagnostics';
+import { installWhiteboardTrace, type TraceFields } from '@/lib/whiteboard/diagnostics';
 
 type Line = { at: number; text: string; alert: boolean };
 
@@ -18,7 +18,7 @@ function describe(name: string, fields: TraceFields): Omit<Line, 'at'> | null {
     case 'camera.glide-end': return { alert: false, text: `glide end ${fields.reason}  moved ${fields.dx},${fields.dy} in ${fields.durationMs}ms` };
     case 'camera.jump': return fields.cause === 'two-finger' ? null
       : { alert: true, text: `JUMP ${fields.dx},${fields.dy}  ${fields.cause}${fields.clamped ? ' (clamped)' : ''}  zoom ${fields.fromZoom}→${fields.toZoom}` };
-    case 'canvas.resize': return { alert: false, text: `resize ${fields.fromWidth}×${fields.fromHeight} → ${fields.width}×${fields.height}` };
+    case 'whiteboard.resize': return { alert: false, text: `resize ${fields.fromWidth}×${fields.fromHeight} → ${fields.width}×${fields.height}` };
     default: return null;
   }
 }
@@ -93,7 +93,7 @@ export function showGestureOverlay(): () => void {
   const listeners: [string, (event: PointerEvent) => void][] = [['pointerdown', down], ['pointermove', move], ['pointerup', end], ['pointercancel', end], ['pointerleave', leave]];
   for (const [type, listener] of listeners) window.addEventListener(type, listener as EventListener, options);
 
-  const uninstall = installCanvasTrace({
+  const uninstall = installWhiteboardTrace({
     event(name, fields) {
       const line = describe(name, fields);
       if (!line) return;

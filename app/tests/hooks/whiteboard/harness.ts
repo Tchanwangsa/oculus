@@ -1,8 +1,8 @@
 import { mock } from 'bun:test';
 import * as React from 'react';
-import { createCanvasDocument, type CanvasDocument } from '@/lib/canvas/model';
-import type { CanvasKind } from '@/lib/canvas/paper';
-import type { EraserMode, EraserSize } from '@/lib/canvas/erase';
+import { createWhiteboardDocument, type WhiteboardDocument } from '@/lib/whiteboard/model';
+import type { WhiteboardKind } from '@/lib/whiteboard/paper';
+import type { EraserMode, EraserSize } from '@/lib/whiteboard/erase';
 
 // Drives the real hook's handlers without a DOM renderer. State and refs live in slots that persist between
 // explicit `render` calls; layout effects run after each render. Passive effects (DOM sizing, menus, the wheel) run
@@ -23,28 +23,28 @@ const hooks = {
   useLayoutEffect: (callback: () => void, deps?: unknown[]) => rendering ? void (cursor++, layoutEffects.push(callback)) : real.useLayoutEffect(callback, deps),
 };
 mock.module('react', () => ({ ...real, ...hooks, default: { ...(real as { default?: object }).default, ...hooks } }));
-const { useCanvasInteraction } = await import('@/hooks/canvas/useCanvasInteraction');
+const { useWhiteboardInteraction } = await import('@/hooks/whiteboard/useWhiteboardInteraction');
 
-export type Editor = ReturnType<typeof useCanvasInteraction>;
+export type Editor = ReturnType<typeof useWhiteboardInteraction>;
 type PointerInput = Parameters<Editor['pointerDown']>[0];
 export interface Harness {
   editor: Editor;
   /** Every document handed to `onChange`, in order. */
-  published: CanvasDocument[];
+  published: WhiteboardDocument[];
   /** Every viewport handed to `onViewportChange`, when the host keeps the camera. */
-  views: CanvasDocument['viewport'][];
+  views: WhiteboardDocument['viewport'][];
   /** Pointer captures held, by pointer id. */
   captures: Set<number>;
   canvas: { setPointerCapture: (id: number) => void; releasePointerCapture: (id: number) => void; hasPointerCapture: (id: number) => boolean };
   /** Renders with `next` as the host's document; by default the host echoes the hook's latest document. */
-  render: (next?: CanvasDocument) => Editor;
+  render: (next?: WhiteboardDocument) => Editor;
   /** With a `size`: sends a wheel event to the canvas's listener, in screen pixels. */
   wheel: (event: { deltaX?: number; deltaY?: number; ctrlKey?: boolean; clientX?: number; clientY?: number }) => void;
   /** With a `size`: lays the editor out again at `size`, as its resize observer would. */
   resize: (size: { width: number; height: number }) => void;
   /** Runs the pending animation frame callbacks and returns how many ran. */
   frame: () => number;
-  options: { eraserAutoReturn: boolean; eraserMode?: EraserMode; eraserSize?: EraserSize; localViewport: boolean; kind?: CanvasKind; size?: { width: number; height: number }; onInsertImage?: () => void };
+  options: { eraserAutoReturn: boolean; eraserMode?: EraserMode; eraserSize?: EraserSize; localViewport: boolean; kind?: WhiteboardKind; size?: { width: number; height: number }; onInsertImage?: () => void };
 }
 
 /** Runs `effect` with a stand-in `window` when the test runtime has none, so DOM-sizing code can read it. */
@@ -55,7 +55,7 @@ function withWindow(effect: () => void) {
 }
 
 /** `initial` is the document the hook mounts with; a `size` lays it out (a notebook's first fit) as the editor would. */
-export function createHarness(options: Partial<Harness['options']> = {}, initial: CanvasDocument = createCanvasDocument()): Harness {
+export function createHarness(options: Partial<Harness['options']> = {}, initial: WhiteboardDocument = createWhiteboardDocument()): Harness {
   slots = [];
   const frames = new Map<number, FrameRequestCallback>();
   let nextFrame = 1;
@@ -84,7 +84,7 @@ export function createHarness(options: Partial<Harness['options']> = {}, initial
       passiveEffects = harness.options.size && !mounted ? [] : null;
       rendering = true;
       try {
-        harness.editor = useCanvasInteraction(document, published => { harness.published.push(published); }, {
+        harness.editor = useWhiteboardInteraction(document, published => { harness.published.push(published); }, {
           onViewportChange: harness.options.localViewport ? view => { harness.views.push(view); } : undefined,
           eraserAutoReturn: harness.options.eraserAutoReturn,
           eraserMode: harness.options.eraserMode,

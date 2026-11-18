@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { catmullRomCubics, cubicAt, flattenCubics } from '../../../src/lib/canvas/arrow/curve';
-import { arrowPath, linePath, pathEnd, polylineEnd } from '../../../src/lib/canvas/arrow/path';
-import { elementArrowheads, elementBounds, elementHitTest, segmentDistance } from '../../../src/lib/canvas/geometry';
-import { exportCanvasSvg } from '../../../src/lib/canvas/renderSvg';
-import { createCanvasDocument, parseCanvasDocument, serializeCanvasDocument, type CanvasElement, type Point } from '../../../src/lib/canvas/model';
+import { catmullRomCubics, cubicAt, flattenCubics } from '../../../src/lib/whiteboard/arrow/curve';
+import { arrowPath, linePath, pathEnd, polylineEnd } from '../../../src/lib/whiteboard/arrow/path';
+import { elementArrowheads, elementBounds, elementHitTest, segmentDistance } from '../../../src/lib/whiteboard/geometry';
+import { exportWhiteboardSvg } from '../../../src/lib/whiteboard/renderSvg';
+import { createWhiteboardDocument, parseWhiteboardDocument, serializeWhiteboardDocument, type WhiteboardElement, type Point } from '../../../src/lib/whiteboard/model';
 
 const base = { stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
-const arrow = (points: Point[], extra: Partial<CanvasElement> = {}): CanvasElement => ({
+const arrow = (points: Point[], extra: Partial<WhiteboardElement> = {}): WhiteboardElement => ({
   id: 'a', type: 'arrow', x: 10, y: 20, width: points[points.length - 1].x, height: points[points.length - 1].y, points, ...base, ...extra,
 });
 const bend = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }];
@@ -83,12 +83,12 @@ describe('arrowheads on a path', () => {
 
 describe('arrow type in the format and export', () => {
   test('is validated and round-trips', () => {
-    const doc = { ...createCanvasDocument(), elements: ['sharp', 'curved', 'elbow'].map((arrowType, i) => arrow(bend, { id: String(i), arrowType } as Partial<CanvasElement>)) };
-    expect(parseCanvasDocument(serializeCanvasDocument(doc))).toEqual(doc);
-    expect(() => parseCanvasDocument(JSON.stringify({ ...doc, elements: [arrow(bend, { arrowType: 'round' } as never)] }))).toThrow('invalid arrowType');
+    const doc = { ...createWhiteboardDocument(), elements: ['sharp', 'curved', 'elbow'].map((arrowType, i) => arrow(bend, { id: String(i), arrowType } as Partial<WhiteboardElement>)) };
+    expect(parseWhiteboardDocument(serializeWhiteboardDocument(doc))).toEqual(doc);
+    expect(() => parseWhiteboardDocument(JSON.stringify({ ...doc, elements: [arrow(bend, { arrowType: 'round' } as never)] }))).toThrow('invalid arrowType');
   });
   test('SVG draws a curved arrow with cubic commands and a sharp one with lines', () => {
-    const svg = (el: CanvasElement) => exportCanvasSvg({ ...createCanvasDocument(), elements: [el] }).match(/<path d="([^"]+)"/)![1];
+    const svg = (el: WhiteboardElement) => exportWhiteboardSvg({ ...createWhiteboardDocument(), elements: [el] }).match(/<path d="([^"]+)"/)![1];
     expect(svg(arrow(wave, { arrowType: 'curved' })).match(/ C /g)).toHaveLength(3);
     expect(svg(arrow(wave, { arrowType: 'curved' }))).not.toContain(' L ');
     expect(svg(arrow(wave))).toBe('M 0 0 L 60 -40 L 120 30 L 200 0');

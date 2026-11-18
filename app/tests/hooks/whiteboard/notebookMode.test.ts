@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { createCanvasDocument, type CanvasDocument, type CanvasElement } from '@/lib/canvas/model';
-import { A4, pageView, zoomLimits, type CanvasKind, type Paper } from '@/lib/canvas/paper';
+import { createWhiteboardDocument, type WhiteboardDocument, type WhiteboardElement } from '@/lib/whiteboard/model';
+import { A4, pageView, zoomLimits, type WhiteboardKind, type Paper } from '@/lib/whiteboard/paper';
 import { createHarness, key, pointer, type Harness } from './harness';
 
 const base = { stroke: '#000', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
@@ -9,10 +9,10 @@ const paper: Paper = { pages: [{ id: 'p1', ...A4 }, { id: 'p2', ...A4 }] };
 const size = { width: 1000, height: 800 };
 // The opening fit is 140%, centred: page one's left edge is at screen x 83.5, its top at y 24.
 const fit = pageView(paper, size);
-const block: CanvasElement = { id: 'block', type: 'rectangle', x: 200, y: 100, width: 60, height: 40, ...base };
+const block: WhiteboardElement = { id: 'block', type: 'rectangle', x: 200, y: 100, width: 60, height: 40, ...base };
 
-function setup(kind: CanvasKind = 'notebook', document: Partial<CanvasDocument> = {}) {
-  return createHarness({ kind, size }, { ...createCanvasDocument(), paper, ...document });
+function setup(kind: WhiteboardKind = 'notebook', document: Partial<WhiteboardDocument> = {}) {
+  return createHarness({ kind, size }, { ...createWhiteboardDocument(), paper, ...document });
 }
 const view = (h: Harness) => h.editor.documentRef.current.viewport;
 const elements = (h: Harness) => h.editor.documentRef.current.elements;
@@ -132,9 +132,9 @@ describe('a notebook in the editor', () => {
   });
 });
 
-describe('a canvas holding paper is a whiteboard', () => {
+describe('a whiteboard holding paper is a whiteboard', () => {
   test('it opens at its own camera, pans anywhere and draws anywhere', () => {
-    const h = setup('canvas');
+    const h = setup('whiteboard');
     expect(h.editor.notebook).toBe(false);
     expect(view(h)).toEqual({ x: 0, y: 0, zoom: 1 });
     useTool(h, 'hand');
@@ -145,7 +145,7 @@ describe('a canvas holding paper is a whiteboard', () => {
     expect(elements(h)).toHaveLength(1);
   });
   test('its zoom keeps the whiteboard range and moves are not held to a page', () => {
-    const h = setup('canvas', { elements: [block] });
+    const h = setup('whiteboard', { elements: [block] });
     for (let i = 0; i < 30; i++) h.editor.zoom(1 / 1.2);
     expect(view(h).zoom).toBe(0.1);
     h.editor.keyDown(key('a', { meta: true })); h.render();

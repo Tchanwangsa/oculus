@@ -1,17 +1,18 @@
-import type { CanvasPen } from './model';
+import type { WhiteboardPen } from './model';
 import { MARKERS, PENS } from './pens';
 import type { StylePatch } from './style';
+import { adoptLegacyKey } from './storageKeys';
 
 /**
  * The pens and highlighters a device keeps ready: each remembers its pen, colour, width and opacity, and the one in
  * use is what the Pen or Highlighter tool draws with. Changing the look while a tool is chosen changes its preset in
  * use. Device-local, like the tool preferences; collaborators share drawing content only.
  */
-export interface InkPreset { pen: CanvasPen; stroke: string; strokeWidth: number; opacity: number }
+export interface InkPreset { pen: WhiteboardPen; stroke: string; strokeWidth: number; opacity: number }
 export interface InkPresets { pens: InkPreset[]; pen: number; markers: InkPreset[]; marker: number }
 export type InkTool = 'freedraw' | 'highlighter';
 
-const STORAGE_KEY = 'oculus-canvas-ink-presets-v1';
+const STORAGE_KEY = 'oculus-whiteboard-ink-presets-v1';
 const ball = (stroke: string): InkPreset => ({ pen: 'ball', stroke, strokeWidth: 2, opacity: 1 });
 const marker = (stroke: string): InkPreset => ({ pen: 'roundMarker', stroke, strokeWidth: 16, opacity: 0.4 });
 export const DEFAULT_INK_PRESETS: InkPresets = {
@@ -21,16 +22,17 @@ export const DEFAULT_INK_PRESETS: InkPresets = {
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 /** A saved list is used only if it has as many presets as the default and each is whole and of the list's kind. */
-function presets(value: unknown, fallback: InkPreset[], kinds: readonly CanvasPen[]): InkPreset[] {
+function presets(value: unknown, fallback: InkPreset[], kinds: readonly WhiteboardPen[]): InkPreset[] {
   if (!Array.isArray(value) || value.length !== fallback.length) return fallback;
-  const read = value.map((item: Partial<InkPreset> | null) => item && kinds.includes(item.pen as CanvasPen) && typeof item.stroke === 'string'
+  const read = value.map((item: Partial<InkPreset> | null) => item && kinds.includes(item.pen as WhiteboardPen) && typeof item.stroke === 'string'
     && finite(item.strokeWidth) && item.strokeWidth > 0 && finite(item.opacity) && item.opacity >= 0 && item.opacity <= 1
-    ? { pen: item.pen as CanvasPen, stroke: item.stroke, strokeWidth: item.strokeWidth, opacity: item.opacity } : null);
+    ? { pen: item.pen as WhiteboardPen, stroke: item.stroke, strokeWidth: item.strokeWidth, opacity: item.opacity } : null);
   return read.every((item): item is InkPreset => item !== null) ? read : fallback;
 }
 const index = (value: unknown, length: number) => Number.isInteger(value) && (value as number) >= 0 && (value as number) < length ? value as number : 0;
 
 export function loadInkPresets(): InkPresets {
+  adoptLegacyKey(STORAGE_KEY);
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Partial<InkPresets> | null;
     if (!saved || typeof saved !== 'object') return DEFAULT_INK_PRESETS;
@@ -40,6 +42,7 @@ export function loadInkPresets(): InkPresets {
 }
 
 export function saveInkPresets(value: InkPresets): void {
+  adoptLegacyKey(STORAGE_KEY);
   // Browsing modes that deny storage can still use the presets for this session.
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(value)); } catch { /* storage unavailable */ }
 }

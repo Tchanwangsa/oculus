@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { canReorder, reorderElements, type LayerMove } from '../../../src/lib/canvas/layers';
-import type { CanvasElement } from '../../../src/lib/canvas/model';
+import { canReorder, reorderElements, type LayerMove } from '../../../src/lib/whiteboard/layers';
+import type { WhiteboardElement } from '../../../src/lib/whiteboard/model';
 
 const base = { stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
-const box = (id: string, x: number, y = 0): CanvasElement => ({ id, type: 'rectangle', x, y, width: 100, height: 100, ...base });
-const order = (elements: CanvasElement[]) => elements.map(element => element.id).join('');
-const move = (elements: CanvasElement[], ids: string, to: LayerMove) => order(reorderElements(elements, new Set(ids), to));
+const box = (id: string, x: number, y = 0): WhiteboardElement => ({ id, type: 'rectangle', x, y, width: 100, height: 100, ...base });
+const order = (elements: WhiteboardElement[]) => elements.map(element => element.id).join('');
+const move = (elements: WhiteboardElement[], ids: string, to: LayerMove) => order(reorderElements(elements, new Set(ids), to));
 
 // `stacked` all overlap one another; `apart` overlap nothing.
 const stacked = [box('a', 0), box('b', 10), box('c', 20), box('d', 30)];

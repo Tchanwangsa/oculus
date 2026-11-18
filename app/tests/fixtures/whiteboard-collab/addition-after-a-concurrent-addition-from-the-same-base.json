@@ -1,7 +1,7 @@
 {
   "name": "addition after a concurrent addition from the same base",
   "document": {
-    "type": "oculus-canvas",
+    "type": "oculus-whiteboard",
     "version": 1,
     "elements": [
       {
@@ -61,7 +61,7 @@
   },
   "expect": {
     "ok": {
-      "type": "oculus-canvas",
+      "type": "oculus-whiteboard",
       "version": 1,
       "elements": [
         {

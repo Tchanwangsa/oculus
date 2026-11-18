@@ -1,6 +1,6 @@
 import { pageLocator, pageRects, paperBounds, type PageRect, type Paper, type PaperTemplate } from './paper';
 import { elementBounds, selectionBounds, type Bounds } from './geometry';
-import type { CanvasDocument, CanvasElement } from './model';
+import type { WhiteboardDocument, WhiteboardElement } from './model';
 
 export const PAGE_COLOR = '#ffffff';
 export const RULE_COLOR = '#cfd8ea';
@@ -149,14 +149,14 @@ export function paperSvg(paper: Paper): string {
 }
 
 /** What an export covers: a notebook's pages (`paper`, from `notebookPaper`) alone, since ink is clipped to them, or a whiteboard's elements. */
-export function exportBounds(document: CanvasDocument, paper: Paper | undefined): Bounds | null {
+export function exportBounds(document: WhiteboardDocument, paper: Paper | undefined): Bounds | null {
   return paper ? paperBounds(paper) : selectionBounds(document.elements);
 }
 
-const owners = new WeakMap<Paper, { locate: ReturnType<typeof pageLocator>; pages: WeakMap<CanvasElement, PageRect> }>();
+const owners = new WeakMap<Paper, { locate: ReturnType<typeof pageLocator>; pages: WeakMap<WhiteboardElement, PageRect> }>();
 
 /** The page a notebook clips `element` to: the one holding the centre of its drawn bounds (`pageAt`). Cached per paper and element. */
-export function elementPage(paper: Paper, element: CanvasElement, bounds?: Bounds): PageRect {
+export function elementPage(paper: Paper, element: WhiteboardElement, bounds?: Bounds): PageRect {
   let entry = owners.get(paper);
   if (!entry) owners.set(paper, entry = { locate: pageLocator(paper), pages: new WeakMap() });
   let page = entry.pages.get(element);

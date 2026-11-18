@@ -1,4 +1,4 @@
-import type { PaperTemplate } from '@/lib/canvas/paper';
+import type { PaperTemplate } from '@/lib/whiteboard/paper';
 
 export const TEMPLATE_LABELS: Record<PaperTemplate, string> = {
   blank: 'Blank', grid: 'Grid', ruled: 'Ruled', dotted: 'Dotted', graph: 'Graph', cornell: 'Cornell', music: 'Music', isometric: 'Isometric',

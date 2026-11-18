@@ -1,10 +1,10 @@
-import { CANVAS_DEFAULTS, hasLabel, roundnessOf, type CanvasDocument, type CanvasElement } from './model';
+import { WHITEBOARD_DEFAULTS, hasLabel, roundnessOf, type WhiteboardDocument, type WhiteboardElement } from './model';
 import { diamondCorners, diamondVertices, elementArrowheads, rectangleRadius, strokeDash } from './geometry';
 import { elementPage, exportBounds, paperSvg } from './renderPaper';
 import { notebookPaper, pageRects, type PageRect, type Paper } from './paper';
 import { linePath } from './arrow/path';
-import { CANVAS_FONT_STACKS, layoutShapeLabel, layoutTextElement, measureCanvasText, type TextLayout, type TextMeasure } from './renderText';
-import { isCanvasImageDataUrl } from './imageSource';
+import { WHITEBOARD_FONT_STACKS, layoutShapeLabel, layoutTextElement, measureWhiteboardText, type TextLayout, type TextMeasure } from './renderText';
+import { isWhiteboardImageDataUrl } from './imageSource';
 import { nibOutline, penLine } from './pens';
 
 const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -12,14 +12,14 @@ const number = (value: number) => Math.round(value * 1000) / 1000;
 const opacityAttr = (opacity: number) => opacity === 1 ? '' : ` opacity="${number(opacity)}"`;
 const ANCHORS = { left: 'start', center: 'middle', right: 'end' } as const;
 
-function textSvg(element: CanvasElement, layout: TextLayout): string {
+function textSvg(element: WhiteboardElement, layout: TextLayout): string {
   const tspans = layout.lines.map(line => `<tspan x="${number(line.x)}" y="${number(line.y)}">${escape(line.text)}</tspan>`).join('');
-  return `<text fill="${escape(element.stroke)}" font-family="${escape(CANVAS_FONT_STACKS[layout.fontFamily])}" font-size="${layout.fontSize}" text-anchor="${ANCHORS[layout.textAlign]}" dominant-baseline="text-before-edge">${tspans}</text>`;
+  return `<text fill="${escape(element.stroke)}" font-family="${escape(WHITEBOARD_FONT_STACKS[layout.fontFamily])}" font-size="${layout.fontSize}" text-anchor="${ANCHORS[layout.textAlign]}" dominant-baseline="text-before-edge">${tspans}</text>`;
 }
 
 /** A freehand stroke in its pen, as `drawInk` in `render.ts` paints it. */
-function inkSvg(element: CanvasElement): string {
-  const opacity = element.opacity ?? CANVAS_DEFAULTS.opacity;
+function inkSvg(element: WhiteboardElement): string {
+  const opacity = element.opacity ?? WHITEBOARD_DEFAULTS.opacity;
   const line = penLine(element);
   if (!line) return `<path d="${nibOutline(element)}" fill="${escape(element.stroke)}" fill-rule="nonzero"${opacityAttr(opacity)}/>`;
   const { points } = linePath(element);
@@ -36,7 +36,7 @@ function inkSvg(element: CanvasElement): string {
 }
 
 /** The sketch pass repeats this outline thinner and unfilled; labels are drawn once, outside it. */
-function outlineSvg(element: CanvasElement, strokeWidth: number, filled: boolean): string {
+function outlineSvg(element: WhiteboardElement, strokeWidth: number, filled: boolean): string {
   const { width: w, height: h } = element;
   const stroke = `stroke="${escape(element.stroke)}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"`;
   const dash = strokeDash(element), dashed = dash.length ? ` stroke-dasharray="${dash.map(number).join(' ')}"` : '';
@@ -63,12 +63,12 @@ function outlineSvg(element: CanvasElement, strokeWidth: number, filled: boolean
   return `<path d="${d}" fill="none" ${stroke}${dashed}/>${heads.join('')}`;
 }
 
-function elementSvg(element: CanvasElement, measure: TextMeasure): string {
+function elementSvg(element: WhiteboardElement, measure: TextMeasure): string {
   const transform = `transform="translate(${element.x},${element.y})"`;
   if (element.type === 'freedraw') return `<g ${transform}>${inkSvg(element)}</g>`;
-  const group = `<g ${transform}${opacityAttr(element.opacity ?? CANVAS_DEFAULTS.opacity)}>`;
+  const group = `<g ${transform}${opacityAttr(element.opacity ?? WHITEBOARD_DEFAULTS.opacity)}>`;
   if (element.type === 'image') {
-    if (!isCanvasImageDataUrl(element.dataUrl)) throw new Error('Cannot export an image without embedded raster data.');
+    if (!isWhiteboardImageDataUrl(element.dataUrl)) throw new Error('Cannot export an image without embedded raster data.');
     return `${group}<image x="${Math.min(0, element.width)}" y="${Math.min(0, element.height)}" width="${Math.abs(element.width)}" height="${Math.abs(element.height)}" href="${escape(element.dataUrl)}" preserveAspectRatio="none"/></g>`;
   }
   if (element.type === 'text') return `${group}${textSvg(element, layoutTextElement(element))}</g>`;
@@ -81,7 +81,7 @@ function elementSvg(element: CanvasElement, measure: TextMeasure): string {
 const clipId = (page: PageRect) => `oculus-page-${page.index}`;
 
 /** A notebook's elements, each run on one page wrapped in a group clipped to that page, after a clip path per page. */
-function clippedSvg(paper: Paper, elements: readonly CanvasElement[], measure: TextMeasure): string {
+function clippedSvg(paper: Paper, elements: readonly WhiteboardElement[], measure: TextMeasure): string {
   const clips = pageRects(paper).map(rect => `<clipPath id="${clipId(rect)}"><rect x="${rect.x}" y="${rect.y}" width="${rect.width}" height="${rect.height}"/></clipPath>`).join('');
   let out = `<defs>${clips}</defs>`, page: PageRect | null = null;
   for (const element of elements) {
@@ -93,7 +93,7 @@ function clippedSvg(paper: Paper, elements: readonly CanvasElement[], measure: T
 }
 
 /** `measure` wraps shape labels; tests pass a deterministic one. A notebook (`options.notebook`) is its pages, each element clipped to its own. */
-export function exportCanvasSvg(document: CanvasDocument, measure: TextMeasure = measureCanvasText, options: { notebook?: boolean } = {}): string {
+export function exportWhiteboardSvg(document: WhiteboardDocument, measure: TextMeasure = measureWhiteboardText, options: { notebook?: boolean } = {}): string {
   const paper = notebookPaper(document, options.notebook);
   const bounds = exportBounds(document, paper) ?? { x: 0, y: 0, width: 800, height: 600 };
   const x = bounds.x - 32, y = bounds.y - 32, width = bounds.width + 64, height = bounds.height + 64;

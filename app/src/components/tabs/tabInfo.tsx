@@ -188,8 +188,8 @@ export function tabInfo(
       const rel = new URLSearchParams(search).get("path");
       const base = rel?.split("/").pop();
       const own = rel && isOwnPath(rel) ? pathFile(rel).category : null;
-      if (base && own === "canvas")
-        return { title: base.replace(/\.canvas$/i, ""), icon: <Scribble size={size} /> };
+      if (base && own === "whiteboard")
+        return { title: base.replace(/\.whiteboard$/i, ""), icon: <Scribble size={size} /> };
       if (base && own === "notebook")
         return { title: base.replace(/\.notebook$/i, ""), icon: <Notebook size={size} /> };
       if (base && own === "document")

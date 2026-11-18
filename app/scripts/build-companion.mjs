@@ -13,7 +13,7 @@ const entries = dir => { try { return readdirSync(dir, { withFileTypes: true });
 const newest = dir => Math.max(mtime(dir), ...entries(dir).map(e => e.isDirectory() ? newest(join(dir, e.name)) : mtime(join(dir, e.name))));
 const inputs = Math.max(
   newest(join(app, 'src')),
-  newest(join(app, 'canvas-core', 'pkg')),
+  newest(join(app, 'whiteboard-core', 'pkg')),
   ...['companion.html', 'vite.companion.config.ts', 'package.json', 'bun.lock', 'tsconfig.json'].map(f => mtime(join(app, f))),
   mtime(fileURLToPath(import.meta.url)),
 );

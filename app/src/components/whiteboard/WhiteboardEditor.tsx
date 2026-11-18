@@ -2,35 +2,35 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { ShareNetworkIcon } from "@phosphor-icons/react";
 import type { DbFile } from "@/lib/db";
 import { fileTitle } from "@/lib/files/openFile";
-import { parseCanvasDocument, serializeCanvasDocument, type CanvasDocument } from "@/lib/canvas/model";
-import { canvasSessions } from "@/lib/canvas/sessionRuntime";
-import { noteNotebookPage, registerOpenNotebook } from "@/lib/canvas/openNotebooks";
-import { useNotebookSnapshots } from "@/hooks/canvas/useNotebookSnapshots";
-import { saveCanvasCopy } from "@/lib/canvas/files";
-import { errorMessage } from "@/lib/canvas/authority";
-import type { CanvasSnapshot } from "@/lib/canvas/sessions";
+import { parseWhiteboardDocument, serializeWhiteboardDocument, type WhiteboardDocument } from "@/lib/whiteboard/model";
+import { whiteboardSessions } from "@/lib/whiteboard/sessionRuntime";
+import { noteNotebookPage, registerOpenNotebook } from "@/lib/whiteboard/openNotebooks";
+import { useNotebookSnapshots } from "@/hooks/whiteboard/useNotebookSnapshots";
+import { saveWhiteboardCopy } from "@/lib/whiteboard/files";
+import { errorMessage } from "@/lib/whiteboard/authority";
+import type { WhiteboardSnapshot } from "@/lib/whiteboard/sessions";
 import { LoadingFill } from "@/components/ui/layout/PageParts";
 import { Button } from "@/components/ui/button";
 import { useSharing } from "@/lib/sharing/store";
 import { devices } from "@/lib/sharing/view";
-import { CanvasShareDialog } from "./CanvasShareDialog";
-import type { CanvasKind } from "@/lib/canvas/paper";
-import { CanvasSurface } from "./CanvasSurface";
+import { WhiteboardShareDialog } from "./WhiteboardShareDialog";
+import type { WhiteboardKind } from "@/lib/whiteboard/paper";
+import { WhiteboardSurface } from "./WhiteboardSurface";
 
-const SHARING: Partial<Record<CanvasSnapshot["authority"], string>> = { attaching: "Starting sharing", live: "Sharing", paused: "Sharing paused", ended: "Sharing ended" };
-const saveLabel = (status: CanvasSnapshot["status"]) =>
+const SHARING: Partial<Record<WhiteboardSnapshot["authority"], string>> = { attaching: "Starting sharing", live: "Sharing", paused: "Sharing paused", ended: "Sharing ended" };
+const saveLabel = (status: WhiteboardSnapshot["status"]) =>
   status === "saving" ? "Saving…" : status === "unsaved" ? "Unsaved changes" : status === "error" ? "Save failed" : "Saved";
 // Scrolling and zooming are not edits: the camera is written only alongside a real change.
 const keepCameraLocal = () => {};
 
 /**
- * `kind` is the file's. A `.notebook` gets its pages (`CanvasSurface`), page pictures for chat agents and the open-notebook
- * chat context; a `.canvas` is a whiteboard, and any `paper` in it is saved back untouched and otherwise ignored.
+ * `kind` is the file's. A `.notebook` gets its pages (`WhiteboardSurface`), page pictures for chat agents and the open-notebook
+ * chat context; a `.whiteboard` is an infinite board, and any `paper` in it is saved back untouched and otherwise ignored.
  */
-export default function CanvasEditor({ file, kind = "canvas" }: { file: DbFile; kind?: CanvasKind }) {
-  const session = useMemo(() => canvasSessions.open(file), [file.id]);
+export default function WhiteboardEditor({ file, kind = "whiteboard" }: { file: DbFile; kind?: WhiteboardKind }) {
+  const session = useMemo(() => whiteboardSessions.open(file), [file.id]);
   const snapshot = useSyncExternalStore(session.subscribe, session.snapshot);
-  const lastDocument = useRef<{ text: string; document: CanvasDocument } | null>(null);
+  const lastDocument = useRef<{ text: string; document: WhiteboardDocument } | null>(null);
   const [title, setTitle] = useState(() => fileTitle(file));
   const [renaming, setRenaming] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
@@ -51,7 +51,7 @@ export default function CanvasEditor({ file, kind = "canvas" }: { file: DbFile; 
     if (snapshot.text == null) return {};
     try {
       if (lastDocument.current?.text === snapshot.text) return { document: lastDocument.current.document };
-      const document = parseCanvasDocument(snapshot.text);
+      const document = parseWhiteboardDocument(snapshot.text);
       lastDocument.current = { text: snapshot.text, document };
       return { document };
     }
@@ -68,7 +68,7 @@ export default function CanvasEditor({ file, kind = "canvas" }: { file: DbFile; 
   };
   const act = (action: () => Promise<unknown>) => { setNotice(null); void action().catch((error) => setNotice({ text: errorMessage(error), failed: true })); };
   const keepDraftCopy = () => act(async () => {
-    const copy = await saveCanvasCopy(session.file, `${fileTitle(session.file)} (draft)`, snapshot.text!);
+    const copy = await saveWhiteboardCopy(session.file, `${fileTitle(session.file)} (draft)`, snapshot.text!);
     setNotice({ text: `Draft saved as ${fileTitle(copy)} in Drive.`, failed: false });
   });
   const clients = snapshot.authority === "live" && share?.clients ? ` · ${devices(share.clients)}` : "";
@@ -88,17 +88,17 @@ export default function CanvasEditor({ file, kind = "canvas" }: { file: DbFile; 
   if (snapshot.text == null && snapshot.status !== "error") return <LoadingFill />;
   if (!parsed.document) return (
     <div className="p-6 text-xs text-destructive" role="alert">
-      <p>{parsed.error ?? snapshot.error ?? "Canvas could not be loaded."}</p>
+      <p>{parsed.error ?? snapshot.error ?? "Whiteboard could not be loaded."}</p>
       {snapshot.text == null && <Button className="mt-3" size="sm" variant="outline" onClick={() => void session.load().catch(() => {})}>Retry</Button>}
     </div>
   );
-  if (snapshot.status === "deleted") return <div className="p-6 text-xs text-muted-foreground">This canvas was deleted.</div>;
+  if (snapshot.status === "deleted") return <div className="p-6 text-xs text-muted-foreground">This whiteboard was deleted.</div>;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-3 border-b border-border-subtle px-4 py-2">
         <input
-          aria-label="Canvas title" value={title} disabled={renaming}
+          aria-label="Whiteboard title" value={title} disabled={renaming}
           onChange={(event) => setTitle(event.target.value)} onBlur={() => void rename()}
           onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setTitle(fileTitle(session.file)); event.preventDefault(); } }}
           className="min-w-0 flex-1 bg-transparent text-xs font-medium outline-none"
@@ -109,7 +109,7 @@ export default function CanvasEditor({ file, kind = "canvas" }: { file: DbFile; 
         {snapshot.status === "error" && !blocked && snapshot.authority !== "paused" && <Button size="sm" variant="outline" onClick={() => void session.flush().catch(() => {})}>Retry save</Button>}
         <Button size="sm" variant="ghost" onClick={() => { setShareMounted(true); setShareOpen(true); }}><ShareNetworkIcon />Share</Button>
       </div>
-      {shareMounted && <CanvasShareDialog session={session} open={shareOpen} onOpenChange={setShareOpen} />}
+      {shareMounted && <WhiteboardShareDialog session={session} open={shareOpen} onOpenChange={setShareOpen} />}
       {(snapshot.error || renameError) && <p role="alert" className="shrink-0 border-b border-border-subtle px-4 py-2 text-xs text-destructive">{renameError ?? snapshot.error}</p>}
       {snapshotError && <p role="alert" className="shrink-0 border-b border-border-subtle px-4 py-2 text-xs text-destructive">The page pictures a chat agent reads could not be updated: {snapshotError}</p>}
       {notice && <p role={notice.failed ? "alert" : "status"} className={`shrink-0 border-b border-border-subtle px-4 py-2 text-xs ${notice.failed ? "text-destructive" : "text-muted-foreground"}`}>{notice.text}</p>}
@@ -118,7 +118,7 @@ export default function CanvasEditor({ file, kind = "canvas" }: { file: DbFile; 
         <Button size="sm" variant="outline" onClick={() => session.discardDraft()}>Keep disk version</Button>
       </div>}
       {snapshot.conflict && <div className="flex shrink-0 gap-2 px-4 py-2">
-        <Button size="sm" variant="outline" onClick={() => act(() => session.useSharedCanvas())}>Use shared canvas</Button>
+        <Button size="sm" variant="outline" onClick={() => act(() => session.useSharedWhiteboard())}>Use shared whiteboard</Button>
         <Button size="sm" variant="outline" onClick={keepDraftCopy}>Save draft as copy</Button>
       </div>}
       {snapshot.authority === "paused" && <div className="flex shrink-0 gap-2 px-4 py-2">
@@ -127,7 +127,7 @@ export default function CanvasEditor({ file, kind = "canvas" }: { file: DbFile; 
       </div>}
       <div className="relative min-h-0 flex-1">
         {snapshot.recoveryError && <p role="status" className="absolute right-3 bottom-16 left-3 z-30 rounded-xl border border-border-subtle bg-card px-3 py-2 text-xs text-muted-foreground">{snapshot.recoveryError}</p>}
-        <div inert={blocked} className="h-full"><CanvasSurface document={parsed.document} title={openTitle} kind={kind} onPageChange={(index) => { pageInView.current = index; noteNotebookPage(file.id, index + 1); }} onViewportChange={keepCameraLocal} cameraKey={`file:${file.id}`} onChange={(document) => { const text = serializeCanvasDocument(document); lastDocument.current = { text, document }; session.update(text); }} /></div>
+        <div inert={blocked} className="h-full"><WhiteboardSurface document={parsed.document} title={openTitle} kind={kind} onPageChange={(index) => { pageInView.current = index; noteNotebookPage(file.id, index + 1); }} onViewportChange={keepCameraLocal} cameraKey={`file:${file.id}`} onChange={(document) => { const text = serializeWhiteboardDocument(document); lastDocument.current = { text, document }; session.update(text); }} /></div>
       </div>
     </div>
   );

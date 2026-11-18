@@ -1,22 +1,22 @@
 import { elementBounds, type Bounds } from './geometry';
-import type { CanvasDocument, CanvasElement, Point } from './model';
+import type { WhiteboardDocument, WhiteboardElement, Point } from './model';
 import { drawElement, drawElementsOnPages, resizeHandles } from './render';
 import { paintPaper } from './renderPaper';
 import { notebookPaper } from './paper';
 import { visibleElements } from './engine';
-import { loadCanvasImages } from './renderImages';
+import { loadWhiteboardImages } from './renderImages';
 
 export const CAPTURE_LIFT_DELAY_MS = 1200;
 export interface CaptureHoldIndicator { point: Point; phase: 'holding' | 'lifted' }
 
-export interface CanvasRegion {
+export interface WhiteboardRegion {
   kind: 'capture' | 'crop';
   bounds: Bounds;
-  snapshot: CanvasDocument;
-  source?: CanvasElement;
+  snapshot: WhiteboardDocument;
+  source?: WhiteboardElement;
 }
 
-export function regionBounds(start: Point, end: Point, source?: CanvasElement): Bounds {
+export function regionBounds(start: Point, end: Point, source?: WhiteboardElement): Bounds {
   const box = source ? elementBounds(source) : null;
   const clamp = (point: Point): Point => box ? {
     x: Math.max(box.x, Math.min(box.x + box.width, point.x)),
@@ -27,11 +27,11 @@ export function regionBounds(start: Point, end: Point, source?: CanvasElement): 
 }
 
 /** Crops preserve source pixels and transparency; captures flatten all intersecting layers, and in a `notebook` its pages, clipping ink to them. */
-export async function rasterizeRegion(region: CanvasRegion, notebook = false): Promise<{ blob: Blob; width: number; height: number }> {
+export async function rasterizeRegion(region: WhiteboardRegion, notebook = false): Promise<{ blob: Blob; width: number; height: number }> {
   const { bounds, snapshot, source } = region, paper = notebookPaper(snapshot, notebook);
   if (bounds.width <= 0 || bounds.height <= 0) throw new Error('Drag an area with a width and height.');
   const elements = source ? [{ ...source, opacity: 1 }] : visibleElements(snapshot.elements, bounds);
-  await Promise.all([loadCanvasImages(elements), window.document.fonts?.ready]);
+  await Promise.all([loadWhiteboardImages(elements), window.document.fonts?.ready]);
   const desired = source ? Math.max((source.naturalWidth ?? Math.abs(source.width)) / Math.abs(source.width), (source.naturalHeight ?? Math.abs(source.height)) / Math.abs(source.height)) : 2;
   const scale = Math.min(desired, 8192 / Math.max(bounds.width, bounds.height), Math.sqrt(32_000_000 / (bounds.width * bounds.height)));
   const canvas = window.document.createElement('canvas');
@@ -54,8 +54,8 @@ export async function rasterizeRegion(region: CanvasRegion, notebook = false): P
 }
 
 /** Supply the PNG promise during the click so Safari keeps clipboard user activation while pixels decode. */
-export function copyRegionImage(region: CanvasRegion, notebook = false): Promise<void> {
-  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error(globalThis.isSecureContext === false ? 'Copying to other apps requires an HTTPS connection. Use Duplicate to copy within the canvas.' : 'Image copying is unavailable here. Use Duplicate to copy within the canvas.');
+export function copyRegionImage(region: WhiteboardRegion, notebook = false): Promise<void> {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error(globalThis.isSecureContext === false ? 'Copying to other apps requires an HTTPS connection. Use Duplicate to copy within the drawing.' : 'Image copying is unavailable here. Use Duplicate to copy within the canvas.');
   return navigator.clipboard.write([new ClipboardItem({ 'image/png': rasterizeRegion(region, notebook).then(result => result.blob) })]);
 }
 
@@ -80,7 +80,7 @@ export function regionHandleAt(bounds: Bounds, point: Point, zoom: number, point
   return candidates.filter(candidate => candidate.distance <= candidate.tolerance).sort((a, b) => a.distance - b.distance)[0]?.handle;
 }
 
-export function resizeRegion(bounds: Bounds, handle: number, point: Point, source: CanvasElement | undefined, zoom: number): Bounds {
+export function resizeRegion(bounds: Bounds, handle: number, point: Point, source: WhiteboardElement | undefined, zoom: number): Bounds {
   const full = source ? elementBounds(source) : undefined;
   const minWidth = Math.min(full?.width ?? Infinity, bounds.width, 8 / zoom), minHeight = Math.min(full?.height ?? Infinity, bounds.height, 8 / zoom);
   const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
@@ -92,7 +92,7 @@ export function resizeRegion(bounds: Bounds, handle: number, point: Point, sourc
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
-export function moveRegion(bounds: Bounds, delta: Point, source?: CanvasElement): Bounds {
+export function moveRegion(bounds: Bounds, delta: Point, source?: WhiteboardElement): Bounds {
   if (!source) return { ...bounds, x: bounds.x + delta.x, y: bounds.y + delta.y };
   const full = elementBounds(source);
   return { ...bounds, x: Math.max(full.x, Math.min(full.x + full.width - bounds.width, bounds.x + delta.x)), y: Math.max(full.y, Math.min(full.y + full.height - bounds.height, bounds.y + delta.y)) };

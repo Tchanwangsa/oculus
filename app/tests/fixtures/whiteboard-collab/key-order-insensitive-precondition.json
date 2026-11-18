@@ -1,7 +1,7 @@
 {
   "name": "key-order-insensitive precondition",
   "document": {
-    "type": "oculus-canvas",
+    "type": "oculus-whiteboard",
     "version": 1,
     "elements": [
       {
@@ -72,7 +72,7 @@
   },
   "expect": {
     "ok": {
-      "type": "oculus-canvas",
+      "type": "oculus-whiteboard",
       "version": 1,
       "elements": [
         {

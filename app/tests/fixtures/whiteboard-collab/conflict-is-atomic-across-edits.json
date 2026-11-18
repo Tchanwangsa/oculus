@@ -1,7 +1,7 @@
 {
   "name": "conflict is atomic across edits",
   "document": {
-    "type": "oculus-canvas",
+    "type": "oculus-whiteboard",
     "version": 1,
     "elements": [
       {

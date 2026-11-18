@@ -22,7 +22,7 @@ test("native source, shared dependencies and build inputs select both platform j
     "app/keyd/core/src/platform/windows.rs",
     "app/studio-core/src/lib.rs",
     "app/math-core/katex/src/lib.rs",
-    "app/canvas-core/src/lib.rs",
+    "app/whiteboard-core/src/lib.rs",
     "app/scripts/stage-cli.mjs",
     "app/package.json",
     "app/bun.lock",

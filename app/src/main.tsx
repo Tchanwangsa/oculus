@@ -12,8 +12,8 @@ import { useSubjectIconStore } from "./stores/planning/subjectIconStore";
 import { watchMathSelect, watchMathSelection } from "./lib/markdown/mathSelection";
 import { loadMaths } from "./lib/maths";
 import { applyAppearance, getAppearance } from "./lib/ui/themes";
-import { CanvasPlatformContext } from "./lib/canvas/platform";
-import { tauriCanvasPlatform } from "./lib/canvas/platform/tauri";
+import { WhiteboardPlatformContext } from "./lib/whiteboard/platform";
+import { tauriWhiteboardPlatform } from "./lib/whiteboard/platform/tauri";
 
 // A release webview has no console, so paint uncaught errors over the window.
 // Escape dismisses; a later error replaces the box rather than stacking.
@@ -59,9 +59,9 @@ void loadMaths();
 function render() {
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
-      <CanvasPlatformContext.Provider value={tauriCanvasPlatform}>
+      <WhiteboardPlatformContext.Provider value={tauriWhiteboardPlatform}>
         <App />
-      </CanvasPlatformContext.Provider>
+      </WhiteboardPlatformContext.Provider>
     </React.StrictMode>,
   );
 }

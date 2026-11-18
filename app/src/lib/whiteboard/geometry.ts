@@ -1,4 +1,4 @@
-import { arrowheadOf, hasLabel, roundnessOf, type CanvasArrowhead, type CanvasElement, type CanvasViewport, type Point } from './model';
+import { arrowheadOf, hasLabel, roundnessOf, type WhiteboardArrowhead, type WhiteboardElement, type WhiteboardViewport, type Point } from './model';
 import { arrowPath, linePath, pathEnd, polylineEnd, polylineLength, type PathEnd } from './arrow/path';
 import { clampZoom, type ZoomLimits } from './zoom';
 
@@ -6,10 +6,10 @@ export { arrowPath, polylinePoints } from './arrow/path';
 
 export interface Bounds { x: number; y: number; width: number; height: number }
 
-const LINEAR: ReadonlySet<CanvasElement['type']> = new Set(['line', 'arrow', 'freedraw']);
+const LINEAR: ReadonlySet<WhiteboardElement['type']> = new Set(['line', 'arrow', 'freedraw']);
 
 /** A line, arrow or stroke spans its rendered path, so a curve's overshoot past its points counts. */
-export function elementBounds(element: CanvasElement): Bounds {
+export function elementBounds(element: WhiteboardElement): Bounds {
   if (LINEAR.has(element.type)) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const p of arrowPath(element)) {
@@ -21,7 +21,7 @@ export function elementBounds(element: CanvasElement): Bounds {
   return { x: Math.min(element.x, element.x + element.width), y: Math.min(element.y, element.y + element.height), width: Math.abs(element.width), height: Math.abs(element.height) };
 }
 
-export function selectionBounds(elements: readonly CanvasElement[]): Bounds | null {
+export function selectionBounds(elements: readonly WhiteboardElement[]): Bounds | null {
   if (!elements.length) return null;
   let x = Infinity, y = Infinity, right = -Infinity, bottom = -Infinity;
   for (const el of elements) {
@@ -45,9 +45,9 @@ export function pointInBounds(p: Point, b: Bounds, padding = 0): boolean {
 }
 
 /** Viewport x/y are the screen-space translation before the world-space zoom. */
-export function screenToWorld(p: Point, v: CanvasViewport): Point { return { x: (p.x - v.x) / v.zoom, y: (p.y - v.y) / v.zoom }; }
-export function worldToScreen(p: Point, v: CanvasViewport): Point { return { x: p.x * v.zoom + v.x, y: p.y * v.zoom + v.y }; }
-export function zoomAt(v: CanvasViewport, p: Point, zoom: number, limits?: ZoomLimits): CanvasViewport {
+export function screenToWorld(p: Point, v: WhiteboardViewport): Point { return { x: (p.x - v.x) / v.zoom, y: (p.y - v.y) / v.zoom }; }
+export function worldToScreen(p: Point, v: WhiteboardViewport): Point { return { x: p.x * v.zoom + v.x, y: p.y * v.zoom + v.y }; }
+export function zoomAt(v: WhiteboardViewport, p: Point, zoom: number, limits?: ZoomLimits): WhiteboardViewport {
   const world = screenToWorld(p, v);
   const next = clampZoom(zoom, limits);
   return { ...v, zoom: next, x: p.x - world.x * next, y: p.y - world.y * next };
@@ -60,7 +60,7 @@ export function segmentDistance(p: Point, a: Point, b: Point): number {
 }
 
 export interface ArrowheadShape {
-  type: Exclude<CanvasArrowhead, 'none'>;
+  type: Exclude<WhiteboardArrowhead, 'none'>;
   tip: Point;
   size: number;
   /** The chevron's wing ends. Hit testing covers tip-to-wing for every type, as Rust does. */
@@ -78,13 +78,13 @@ export interface ArrowheadShape {
 export const arrowheadSize = (pathLength: number) => Math.min(16, pathLength / 3);
 
 /** A head on a polyline, aimed along its end segment; the inspector's glyphs draw with this. */
-export function arrowheadShape(points: readonly Point[], end: 'start' | 'end', type: CanvasArrowhead): ArrowheadShape | null {
+export function arrowheadShape(points: readonly Point[], end: 'start' | 'end', type: WhiteboardArrowhead): ArrowheadShape | null {
   if (points.length < 2) return null;
   return arrowheadAt(type, polylineEnd(points, end), arrowheadSize(polylineLength(points)));
 }
 
 /** A head at `tip`, pointing along `angle` (the direction the path arrives in). */
-export function arrowheadAt(type: CanvasArrowhead, { tip, angle }: PathEnd, size: number): ArrowheadShape | null {
+export function arrowheadAt(type: WhiteboardArrowhead, { tip, angle }: PathEnd, size: number): ArrowheadShape | null {
   if (type === 'none') return null;
   const [left, right] = [-Math.PI / 6, Math.PI / 6].map(a => ({ x: tip.x - Math.cos(angle + a) * size, y: tip.y - Math.sin(angle + a) * size }));
   const along = (d: number, side = 0) => ({ x: tip.x - Math.cos(angle) * d - Math.sin(angle) * side, y: tip.y - Math.sin(angle) * d + Math.cos(angle) * side });
@@ -96,14 +96,14 @@ export function arrowheadAt(type: CanvasArrowhead, { tip, angle }: PathEnd, size
 }
 
 /** Each head aims along the path's end tangent and is sized from the whole path; the engine record carries the same numbers to Rust. */
-export function elementArrowheads(el: CanvasElement): ArrowheadShape[] {
+export function elementArrowheads(el: WhiteboardElement): ArrowheadShape[] {
   if (el.type !== 'arrow') return [];
   const size = arrowheadSize(linePath(el).length);
   return (['start', 'end'] as const).flatMap(end => arrowheadAt(arrowheadOf(el, end), pathEnd(el, end), size) ?? []);
 }
 
 /** A round rectangle's corner radius, from its size so a resize keeps its look; 0 when sharp. */
-export const rectangleRadius = (el: CanvasElement) =>
+export const rectangleRadius = (el: WhiteboardElement) =>
   roundnessOf(el) === 'round' ? Math.min(8, Math.abs(el.width) / 8, Math.abs(el.height) / 8) : 0;
 
 /** A diamond's top, right, bottom and left vertices, local to its x/y. */
@@ -124,7 +124,7 @@ export function diamondCorners(w: number, h: number): { from: Point; vertex: Poi
 }
 
 /** Dash lengths grow with the stroke; dotted relies on round caps. Arrowheads always draw solid. */
-export function strokeDash(el: CanvasElement): number[] {
+export function strokeDash(el: WhiteboardElement): number[] {
   if (el.type === 'freedraw' || el.type === 'text') return [];
   if (el.strokeStyle === 'dashed') return [Math.max(6, 4 * el.strokeWidth), Math.max(4, 3 * el.strokeWidth)];
   if (el.strokeStyle === 'dotted') return [0, 2 * el.strokeWidth + 2];
@@ -132,9 +132,9 @@ export function strokeDash(el: CanvasElement): number[] {
 }
 
 /** A label makes a hollow shape selectable across its inside. */
-export const elementFilled = (el: CanvasElement) => el.type === 'image' || (el.fill !== 'transparent' && el.fill !== 'none' && el.fill !== '') || hasLabel(el);
+export const elementFilled = (el: WhiteboardElement) => el.type === 'image' || (el.fill !== 'transparent' && el.fill !== 'none' && el.fill !== '') || hasLabel(el);
 
-export function elementHitTest(el: CanvasElement, world: Point, tolerance = 6): boolean {
+export function elementHitTest(el: WhiteboardElement, world: Point, tolerance = 6): boolean {
   const p = { x: world.x - el.x, y: world.y - el.y };
   const pad = Math.max(0, tolerance) + el.strokeWidth / 2;
   if (LINEAR.has(el.type)) {

@@ -1,29 +1,29 @@
 import { describe, expect, test } from 'bun:test';
-import { createCanvasDocument, parseCanvasDocument, serializeCanvasDocument, type CanvasDocument, type CanvasElement } from '../../../src/lib/canvas/model';
-import { duplicatePage, insertPage, insertPdfPages, movePage, setPageSize, setPageTemplate } from '../../../src/lib/canvas/pages';
-import { A4, pageRects, paperProblem, type Paper } from '../../../src/lib/canvas/paper';
-import { elementPage } from '../../../src/lib/canvas/renderPaper';
+import { createWhiteboardDocument, parseWhiteboardDocument, serializeWhiteboardDocument, type WhiteboardDocument, type WhiteboardElement } from '../../../src/lib/whiteboard/model';
+import { duplicatePage, insertPage, insertPdfPages, movePage, setPageSize, setPageTemplate } from '../../../src/lib/whiteboard/pages';
+import { A4, pageRects, paperProblem, type Paper } from '../../../src/lib/whiteboard/paper';
+import { elementPage } from '../../../src/lib/whiteboard/renderPaper';
 
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=';
 const base = { stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
-const box = (id: string, x: number, y: number, extra: Partial<CanvasElement> = {}): CanvasElement => ({ id, type: 'rectangle', x, y, width: 20, height: 20, ...base, ...extra });
-const image = (id: string, y: number): CanvasElement => ({
+const box = (id: string, x: number, y: number, extra: Partial<WhiteboardElement> = {}): WhiteboardElement => ({ id, type: 'rectangle', x, y, width: 20, height: 20, ...base, ...extra });
+const image = (id: string, y: number): WhiteboardElement => ({
   id, type: 'image', x: -50, y, width: 100, height: 200, dataUrl: PNG, naturalWidth: 10, naturalHeight: 20,
   stroke: 'transparent', fill: 'transparent', strokeWidth: 0, style: 'clean', seed: 0, locked: true,
 });
 // Pages are 100 x 200 with a gap of 10, so page n starts at y = 210 * (n - 1).
 const three: Paper = { gap: 10, pages: [{ id: 'p1', width: 100, height: 200, template: 'grid' }, { id: 'p2', width: 100, height: 200 }, { id: 'p3', width: 100, height: 200, template: 'ruled' }] };
-const notebook = (elements: CanvasElement[] = [], paper: Paper = three): CanvasDocument => ({ ...createCanvasDocument(), paper, elements });
+const notebook = (elements: WhiteboardElement[] = [], paper: Paper = three): WhiteboardDocument => ({ ...createWhiteboardDocument(), paper, elements });
 const doc = notebook([image('bg2', 210), box('on1', 0, 20), box('on2', 0, 230), box('on3', 0, 440)]);
 
-const ys = (document: CanvasDocument) => Object.fromEntries(document.elements.map(e => [e.id, e.y]));
-const pages = (document: CanvasDocument) => document.paper!.pages.map(p => p.id);
-const owner = (document: CanvasDocument, id: string) => elementPage(document.paper!, document.elements.find(e => e.id === id)!).id;
+const ys = (document: WhiteboardDocument) => Object.fromEntries(document.elements.map(e => [e.id, e.y]));
+const pages = (document: WhiteboardDocument) => document.paper!.pages.map(p => p.id);
+const owner = (document: WhiteboardDocument, id: string) => elementPage(document.paper!, document.elements.find(e => e.id === id)!).id;
 /** Every result must still be a document the app and the Rust authority accept. */
-function valid(document: CanvasDocument) {
+function valid(document: WhiteboardDocument) {
   expect(paperProblem(document.paper)).toBeNull();
   expect(new Set(document.elements.map(e => e.id)).size).toBe(document.elements.length);
-  expect(() => parseCanvasDocument(serializeCanvasDocument(document))).not.toThrow();
+  expect(() => parseWhiteboardDocument(serializeWhiteboardDocument(document))).not.toThrow();
 }
 
 describe('insertPage', () => {
@@ -44,7 +44,7 @@ describe('insertPage', () => {
   test('an index outside the notebook, or a whiteboard, is left alone', () => {
     expect(insertPage(doc, 9)).toBe(doc);
     expect(insertPage(doc, -1)).toBe(doc);
-    const board = createCanvasDocument();
+    const board = createWhiteboardDocument();
     expect(insertPage(board, 0)).toBe(board);
   });
 });
@@ -72,7 +72,7 @@ describe('duplicatePage', () => {
     expect(duplicatePage(notebook(), 0).elements).toEqual([]);
   });
   test('an arrow bound inside the page keeps its binding on its copy; one bound elsewhere loses it', () => {
-    const arrow = (id: string, target: string): CanvasElement => ({ ...box(id, -10, 60), type: 'arrow', points: [{ x: 0, y: 0 }, { x: 10, y: 10 }], startBinding: { elementId: target, mode: 'center' } });
+    const arrow = (id: string, target: string): WhiteboardElement => ({ ...box(id, -10, 60), type: 'arrow', points: [{ x: 0, y: 0 }, { x: 10, y: 10 }], startBinding: { elementId: target, mode: 'center' } });
     const next = duplicatePage(notebook([box('a', 0, 20), arrow('in', 'a'), arrow('out', 'on3'), box('on3', 0, 440)]), 0);
     const [boxCopy, inCopy, outCopy] = next.elements.slice(-3);
     expect(inCopy.startBinding?.elementId).toBe(boxCopy.id);

@@ -9,7 +9,7 @@ export function fileReferenceAppearance(file: { category: string | null; filenam
   if (path.endsWith("/")) return { Icon: Folder, tone: "text-muted-foreground", kind: "Folder" };
   if (recordingOf(path)) return { Icon: VideoCamera, tone: "text-reference-lecture", kind: "Lecture" };
   const category = file.category;
-  if (category === "canvas") return { Icon: Scribble, tone: "text-reference-page", kind: "Canvas" };
+  if (category === "whiteboard") return { Icon: Scribble, tone: "text-reference-page", kind: "Whiteboard" };
   if (category === "notebook") return { Icon: Notebook, tone: "text-reference-page", kind: "Notebook" };
   if (category === "page" || category === "document" || category === "home" || category === "syllabus")
     return { Icon: File, tone: "text-reference-page", kind: category === "document" ? "Note" : "Page" };

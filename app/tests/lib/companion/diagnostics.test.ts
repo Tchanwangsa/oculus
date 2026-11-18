@@ -2,34 +2,34 @@ import { expect, test } from 'bun:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { installCanvasTrace, measureCanvas, traceCanvas } from '@/lib/canvas/diagnostics';
+import { installWhiteboardTrace, measureWhiteboard, traceWhiteboard } from '@/lib/whiteboard/diagnostics';
 import { redactDiagnosticText, StallWatch, type DiagnosticEvent } from '@/companion/diagnostics/protocol';
 import { allowedOrigin, logLines, MAX_BODY, readBatch } from '../../../scripts/companion-diagnostics';
 
 test('diagnostics cannot change a handler result or exception, even when the receiver fails', () => {
-  const stop = installCanvasTrace({ event() { throw new Error('offline'); }, begin() { throw new Error('offline'); } });
+  const stop = installWhiteboardTrace({ event() { throw new Error('offline'); }, begin() { throw new Error('offline'); } });
   try {
-    traceCanvas('input.test');
-    expect(measureCanvas('handler.test', () => 42)).toBe(42);
-    expect(() => measureCanvas('handler.test', () => { throw new Error('original'); })).toThrow('original');
+    traceWhiteboard('input.test');
+    expect(measureWhiteboard('handler.test', () => 42)).toBe(42);
+    expect(() => measureWhiteboard('handler.test', () => { throw new Error('original'); })).toThrow('original');
   } finally { stop(); }
-  expect(measureCanvas('disabled', () => 7)).toBe(7);
+  expect(measureWhiteboard('disabled', () => 7)).toBe(7);
 });
 
 test('trace strings redact sharing and receiver secrets and embedded image data', () => {
-  const text = redactDiagnosticText('http://192.168.1.2:43821/c/assets/canvas.js#share-secret receiver-token data:image/png;base64,AAAA', ['share-secret', 'receiver-token']);
+  const text = redactDiagnosticText('http://192.168.1.2:43821/c/assets/whiteboard.js#share-secret receiver-token data:image/png;base64,AAAA', ['share-secret', 'receiver-token']);
   expect(text).not.toContain('share-secret');
   expect(text).not.toContain('receiver-token');
   expect(text).not.toContain('192.168.1.2');
   expect(text).not.toContain('AAAA');
-  expect(text).toContain('canvas.js');
+  expect(text).toContain('whiteboard.js');
   expect(redactDiagnosticText('x'.repeat(5000), [])).toHaveLength(3000);
 });
 
 test('worker watchdog identifies the active operation once, then reports recovery', () => {
   const watch = new StallWatch();
   watch.heartbeat(1000, true);
-  watch.active.set(1, { name: 'canvas.paint', at: 1100 });
+  watch.active.set(1, { name: 'whiteboard.paint', at: 1100 });
   expect(watch.check(1999)).toBeNull();
   expect(watch.check(2400)).toMatchObject({ name: 'main-thread.unresponsive', fields: { gapMs: 1400 } });
   expect(watch.check(3000)).toBeNull();
@@ -47,7 +47,7 @@ test('collector accepts the sharing origin on the same host, not unrelated sites
 });
 
 test('collector validates fields and bounds streaming request bodies without a content-length', async () => {
-  const lines = logLines({ session: 'session-1', shareId: 'share-1', events: [{ at: 1234, name: 'input.pointerdown', fields: { x: 12, canvas: { elements: ['private'] }, content: ['private'], label: 'Pen' } }] }, 5678);
+  const lines = logLines({ session: 'session-1', shareId: 'share-1', events: [{ at: 1234, name: 'input.pointerdown', fields: { x: 12, whiteboard: { elements: ['private'] }, content: ['private'], label: 'Pen' } }] }, 5678);
   expect(JSON.parse(lines)).toMatchObject({ at: 1234, receivedAt: 5678, fields: { x: 12, label: 'Pen' } });
   expect(lines).not.toContain('private');
   expect(() => logLines({ session: '../bad', events: [] })).toThrow();
@@ -69,10 +69,10 @@ test('real diagnostic worker reports a stalled main thread and its active phase 
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     worker.postMessage({ type: 'init', port: server.port, token: 'test-token', hostname: '127.0.0.1', session: 'test-worker', shareId: 'share' });
-    worker.postMessage({ type: 'begin', id: 1, name: 'canvas.paint', at: Date.now() });
+    worker.postMessage({ type: 'begin', id: 1, name: 'whiteboard.paint', at: Date.now() });
     worker.postMessage({ type: 'heartbeat', visible: true, events: [], dropped: 0 });
     await Promise.race([reported, new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('No worker stall report')), 4500); })]);
-    expect(received.find(event => event.name === 'main-thread.unresponsive')?.fields.active).toContain('canvas.paint');
+    expect(received.find(event => event.name === 'main-thread.unresponsive')?.fields.active).toContain('whiteboard.paint');
   } finally { clearTimeout(timeout); worker.terminate(); await server.stop(true); }
 }, 6000);
 

@@ -1,13 +1,13 @@
 // Geometry throughput only: this does not measure rendering or input latency.
-// From app/: bun canvas-core/bench.ts (build with bun run canvas first).
-import { initSync } from './pkg/oculus_canvas_core';
-import { hitTest, loadCanvasEngine, visibleElements } from '../src/lib/canvas/engine';
-import { boundsIntersect, elementBounds, elementHitTest } from '../src/lib/canvas/geometry';
-import type { CanvasElement } from '../src/lib/canvas/model';
+// From app/: bun whiteboard-core/bench.ts (build with bun run whiteboard first).
+import { initSync } from './pkg/oculus_whiteboard_core';
+import { hitTest, loadWhiteboardEngine, visibleElements } from '../src/lib/whiteboard/engine';
+import { boundsIntersect, elementBounds, elementHitTest } from '../src/lib/whiteboard/geometry';
+import type { WhiteboardElement } from '../src/lib/whiteboard/model';
 
-initSync({ module: await Bun.file(new URL('./pkg/oculus_canvas_core_bg.wasm', import.meta.url)).arrayBuffer() });
-await loadCanvasEngine();
-const elements: CanvasElement[] = Array.from({ length: 10000 }, (_, i) => ({ id: String(i), type: 'rectangle', x: i % 100 * 150, y: Math.floor(i / 100) * 150, width: 100, height: 100, strokeWidth: 2, stroke: '#111', fill: 'transparent', style: 'clean', seed: i }));
+initSync({ module: await Bun.file(new URL('./pkg/oculus_whiteboard_core_bg.wasm', import.meta.url)).arrayBuffer() });
+await loadWhiteboardEngine();
+const elements: WhiteboardElement[] = Array.from({ length: 10000 }, (_, i) => ({ id: String(i), type: 'rectangle', x: i % 100 * 150, y: Math.floor(i / 100) * 150, width: 100, height: 100, strokeWidth: 2, stroke: '#111', fill: 'transparent', style: 'clean', seed: i }));
 const queries = Array.from({ length: 2000 }, (_, i) => ({ x: (i * 139) % 15000, y: (i * 313) % 15000 }));
 const areas = queries.slice(0, 500).map(p => ({ ...p, width: 900, height: 700 }));
 function measure(label: string, run: () => void) {

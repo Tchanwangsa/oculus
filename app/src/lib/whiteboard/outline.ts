@@ -1,4 +1,4 @@
-import type { CanvasElement, Point } from './model';
+import type { WhiteboardElement, Point } from './model';
 import { elementBounds } from './geometry';
 
 /**
@@ -6,16 +6,16 @@ import { elementBounds } from './geometry';
  * rectangle; a rectangle's rounded corners are ignored, which the arrow's gap
  * hides. Every function returns a finite point for zero-size shapes.
  */
-export const BINDABLE_TYPES: ReadonlySet<CanvasElement['type']> = new Set(['rectangle', 'ellipse', 'diamond', 'text']);
-export const isBindable = (el: CanvasElement) => BINDABLE_TYPES.has(el.type);
+export const BINDABLE_TYPES: ReadonlySet<WhiteboardElement['type']> = new Set(['rectangle', 'ellipse', 'diamond', 'text']);
+export const isBindable = (el: WhiteboardElement) => BINDABLE_TYPES.has(el.type);
 
-export function outlineCenter(el: CanvasElement): Point {
+export function outlineCenter(el: WhiteboardElement): Point {
   const b = elementBounds(el);
   return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
 }
 
 /** Top, right, bottom and left: these lie on every bindable kind's outline. */
-export function outlineMidpoints(el: CanvasElement): Point[] {
+export function outlineMidpoints(el: WhiteboardElement): Point[] {
   const b = elementBounds(el), cx = b.x + b.width / 2, cy = b.y + b.height / 2;
   return [{ x: cx, y: b.y }, { x: b.x + b.width, y: cy }, { x: cx, y: b.y + b.height }, { x: b.x, y: cy }];
 }
@@ -24,7 +24,7 @@ const ratio = (d: number, half: number) => half > 0 ? Math.abs(d) / half : d ===
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /** How far an offset from the centre reaches toward the outline: 1 on it, under 1 inside. Each kind is convex and scales about its centre. */
-export function outlineGauge(el: CanvasElement, offset: Point): number {
+export function outlineGauge(el: WhiteboardElement, offset: Point): number {
   const b = elementBounds(el), rx = ratio(offset.x, b.width / 2), ry = ratio(offset.y, b.height / 2);
   if (el.type === 'ellipse') return Math.hypot(rx, ry);
   if (el.type === 'diamond') return rx + ry;
@@ -32,13 +32,13 @@ export function outlineGauge(el: CanvasElement, offset: Point): number {
 }
 
 /** `slack` counts points this far past the outline (as a fraction of the shape) as inside, so a point on it stays inside despite rounding. */
-export function pointInsideOutline(el: CanvasElement, p: Point, slack = 0): boolean {
+export function pointInsideOutline(el: WhiteboardElement, p: Point, slack = 0): boolean {
   const c = outlineCenter(el);
   return outlineGauge(el, { x: p.x - c.x, y: p.y - c.y }) <= 1 + slack;
 }
 
 /** Where the ray from the centre through `toward` meets the outline; the centre when that ray has no direction or never meets it. */
-export function outlineAlong(el: CanvasElement, toward: Point): Point {
+export function outlineAlong(el: WhiteboardElement, toward: Point): Point {
   const c = outlineCenter(el), d = { x: toward.x - c.x, y: toward.y - c.y };
   const gauge = outlineGauge(el, d);
   if (!(gauge > 0) || !Number.isFinite(gauge)) return c;
@@ -66,7 +66,7 @@ function nearestOnEllipse(c: Point, a: number, b: number, p: Point): Point {
   return { x: c.x + (p.x < c.x ? -a : a) * tx, y: c.y + (p.y < c.y ? -b : b) * ty };
 }
 
-export function nearestOutlinePoint(el: CanvasElement, p: Point): Point {
+export function nearestOutlinePoint(el: WhiteboardElement, p: Point): Point {
   const b = elementBounds(el), c = outlineCenter(el);
   if (el.type === 'ellipse') return nearestOnEllipse(c, b.width / 2, b.height / 2, p);
   if (el.type === 'diamond') {
@@ -86,12 +86,12 @@ export function nearestOutlinePoint(el: CanvasElement, p: Point): Point {
 }
 
 /** An outline point stored relative to the bounds, so it stays on the outline as the shape moves or resizes. */
-export function outlineAnchor(el: CanvasElement, p: Point): Point {
+export function outlineAnchor(el: WhiteboardElement, p: Point): Point {
   const b = elementBounds(el);
   return { x: b.width > 0 ? clamp((p.x - b.x) / b.width, 0, 1) : 0.5, y: b.height > 0 ? clamp((p.y - b.y) / b.height, 0, 1) : 0.5 };
 }
 
-export function anchorPoint(el: CanvasElement, anchor: Point): Point {
+export function anchorPoint(el: WhiteboardElement, anchor: Point): Point {
   const b = elementBounds(el);
   return outlineAlong(el, { x: b.x + anchor.x * b.width, y: b.y + anchor.y * b.height });
 }

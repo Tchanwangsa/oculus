@@ -3,13 +3,13 @@ import {
   adoptElementStyle, colorLabel, DEFAULT_DRAWING_STYLE, inspectorSections, inspectorTarget, inspectorValues, newElementStyle, patchDrawingStyle,
   patchElementStyle,
   type InspectorTarget,
-} from '../../../src/lib/canvas/style';
-import type { CanvasElement } from '../../../src/lib/canvas/model';
+} from '../../../src/lib/whiteboard/style';
+import type { WhiteboardElement } from '../../../src/lib/whiteboard/model';
 
 const base = { stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
-const rect: CanvasElement = { id: 'r', type: 'rectangle', x: 0, y: 0, width: 200, height: 60, ...base };
-const text: CanvasElement = { id: 't', type: 'text', x: 0, y: 0, width: 50, height: 28, ...base, text: 'abc', fontSize: 20, fontFamily: 'serif' };
-const tool = (type: CanvasElement['type']): InspectorTarget => ({ type, label: false });
+const rect: WhiteboardElement = { id: 'r', type: 'rectangle', x: 0, y: 0, width: 200, height: 60, ...base };
+const text: WhiteboardElement = { id: 't', type: 'text', x: 0, y: 0, width: 50, height: 28, ...base, text: 'abc', fontSize: 20, fontFamily: 'serif' };
+const tool = (type: WhiteboardElement['type']): InspectorTarget => ({ type, label: false });
 
 describe('inspector sections', () => {
   test('follow the element type', () => {
@@ -72,13 +72,13 @@ describe('drawing defaults', () => {
 });
 
 describe('roundness', () => {
-  const diamond: CanvasElement = { ...rect, id: 'd', type: 'diamond' };
+  const diamond: WhiteboardElement = { ...rect, id: 'd', type: 'diamond' };
   test('applies to rectangles and diamonds only, and a patch that changes nothing returns the element', () => {
     expect(patchElementStyle(rect, { roundness: 'sharp' })).toMatchObject({ roundness: 'sharp' });
     expect(patchElementStyle(rect, { roundness: 'round' })).toBe(rect);
     expect(patchElementStyle(diamond, { roundness: 'sharp' })).toBe(diamond);
     expect(patchElementStyle(diamond, { roundness: 'round' })).toMatchObject({ roundness: 'round' });
-    const ellipse: CanvasElement = { ...rect, type: 'ellipse' };
+    const ellipse: WhiteboardElement = { ...rect, type: 'ellipse' };
     expect(patchElementStyle(ellipse, { roundness: 'sharp' })).toBe(ellipse);
   });
   test('reads each type default and is written only where it differs', () => {

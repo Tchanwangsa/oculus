@@ -1,8 +1,8 @@
-import type { CanvasStrokeStyle } from '@/lib/canvas/model';
+import type { WhiteboardStrokeStyle } from '@/lib/whiteboard/model';
 import { InspectorSection, type SectionProps } from './InspectorSection';
 import { Segmented } from './Segmented';
 
-const STYLES: [CanvasStrokeStyle, string, string | undefined][] = [['solid', 'Solid', undefined], ['dashed', 'Dashed', '5 3.5'], ['dotted', 'Dotted', '0 3.5']];
+const STYLES: [WhiteboardStrokeStyle, string, string | undefined][] = [['solid', 'Solid', undefined], ['dashed', 'Dashed', '5 3.5'], ['dotted', 'Dotted', '0 3.5']];
 
 export function StrokeStyleSection({ values, onChange }: SectionProps) {
   return <InspectorSection label="Stroke style">

@@ -1,41 +1,41 @@
 import { describe, expect, test } from 'bun:test';
-import { routeElbow } from '../../../src/lib/canvas/elbow';
-import { elbowEnds, type RouteEnd } from '../../../src/lib/canvas/elbow/ends';
-import { elbowRoute, fallbackRoute, routeObstacles } from '../../../src/lib/canvas/elbow/route';
-import { boxOf, segmentEntersBox } from '../../../src/lib/canvas/elbow/grid';
-import { DOWN, LEFT, RIGHT, UP, flip, vectorHeading, type Heading } from '../../../src/lib/canvas/elbow/headings';
-import { bindArrowEnd, followBindings, moveElements } from '../../../src/lib/canvas/bindings';
-import { movePoint, worldPoints } from '../../../src/lib/canvas/arrow/points';
-import { stylePatchChanges } from '../../../src/lib/canvas/labels';
-import { cloneCanvasElements } from '../../../src/lib/canvas/renderClipboard';
-import { resizeElements } from '../../../src/lib/canvas/resize';
-import { elementBounds } from '../../../src/lib/canvas/geometry';
-import type { CanvasBinding, CanvasElement, Point } from '../../../src/lib/canvas/model';
+import { routeElbow } from '../../../src/lib/whiteboard/elbow';
+import { elbowEnds, type RouteEnd } from '../../../src/lib/whiteboard/elbow/ends';
+import { elbowRoute, fallbackRoute, routeObstacles } from '../../../src/lib/whiteboard/elbow/route';
+import { boxOf, segmentEntersBox } from '../../../src/lib/whiteboard/elbow/grid';
+import { DOWN, LEFT, RIGHT, UP, flip, vectorHeading, type Heading } from '../../../src/lib/whiteboard/elbow/headings';
+import { bindArrowEnd, followBindings, moveElements } from '../../../src/lib/whiteboard/bindings';
+import { movePoint, worldPoints } from '../../../src/lib/whiteboard/arrow/points';
+import { stylePatchChanges } from '../../../src/lib/whiteboard/labels';
+import { cloneWhiteboardElements } from '../../../src/lib/whiteboard/renderClipboard';
+import { resizeElements } from '../../../src/lib/whiteboard/resize';
+import { elementBounds } from '../../../src/lib/whiteboard/geometry';
+import type { WhiteboardBinding, WhiteboardElement, Point } from '../../../src/lib/whiteboard/model';
 
 const base = { stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
-const shape = (id: string, x: number, y: number, width = 100, height = 60, type: CanvasElement['type'] = 'rectangle'): CanvasElement =>
+const shape = (id: string, x: number, y: number, width = 100, height = 60, type: WhiteboardElement['type'] = 'rectangle'): WhiteboardElement =>
   ({ id, type, x, y, width, height, ...base });
-const elbow = (start?: CanvasBinding, end?: CanvasBinding, a: Point = { x: 0, y: 0 }, b: Point = { x: 1, y: 1 }, extra: Partial<CanvasElement> = {}): CanvasElement => ({
+const elbow = (start?: WhiteboardBinding, end?: WhiteboardBinding, a: Point = { x: 0, y: 0 }, b: Point = { x: 1, y: 1 }, extra: Partial<WhiteboardElement> = {}): WhiteboardElement => ({
   id: 'a', type: 'arrow', x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y, points: [{ x: 0, y: 0 }, { x: b.x - a.x, y: b.y - a.y }],
   ...base, arrowType: 'elbow', ...(start ? { startBinding: start } : {}), ...(end ? { endBinding: end } : {}), ...extra,
 });
-const center = (elementId: string): CanvasBinding => ({ elementId, mode: 'center' });
-const edge = (elementId: string, x: number, y: number): CanvasBinding => ({ elementId, mode: 'edge', anchor: { x, y } });
-const lookupOf = (elements: readonly CanvasElement[]) => {
+const center = (elementId: string): WhiteboardBinding => ({ elementId, mode: 'center' });
+const edge = (elementId: string, x: number, y: number): WhiteboardBinding => ({ elementId, mode: 'edge', anchor: { x, y } });
+const lookupOf = (elements: readonly WhiteboardElement[]) => {
   const index = new Map(elements.map(el => [el.id, el]));
   return (id: string) => index.get(id);
 };
-const routed = (elements: readonly CanvasElement[], arrow: CanvasElement) => routeElbow(arrow, lookupOf(elements));
-const route = (elements: readonly CanvasElement[], arrow: CanvasElement) => worldPoints(routed(elements, arrow));
+const routed = (elements: readonly WhiteboardElement[], arrow: WhiteboardElement) => routeElbow(arrow, lookupOf(elements));
+const route = (elements: readonly WhiteboardElement[], arrow: WhiteboardElement) => worldPoints(routed(elements, arrow));
 const direction = (a: Point, b: Point) => vectorHeading(b.x - a.x, b.y - a.y);
-const finite = (arrow: CanvasElement) => [arrow.x, arrow.y, arrow.width, arrow.height, ...arrow.points!.flatMap(p => [p.x, p.y])].every(Number.isFinite);
+const finite = (arrow: WhiteboardElement) => [arrow.x, arrow.y, arrow.width, arrow.height, ...arrow.points!.flatMap(p => [p.x, p.y])].every(Number.isFinite);
 
 function expectOrthogonal(points: readonly Point[]) {
   for (let i = 1; i < points.length; i++) expect(points[i].x === points[i - 1].x || points[i].y === points[i - 1].y).toBe(true);
 }
 
 /** First and last segments follow the headings; no segment enters a target, and none but the stubs enters a padded box. */
-function expectGoodRoute(elements: readonly CanvasElement[], arrow: CanvasElement) {
+function expectGoodRoute(elements: readonly WhiteboardElement[], arrow: WhiteboardElement) {
   const points = route(elements, arrow), [start, end] = elbowEnds(arrow, lookupOf(elements));
   expectOrthogonal(points);
   expect(points[0]).toEqual(start.point);
@@ -54,7 +54,7 @@ function expectGoodRoute(elements: readonly CanvasElement[], arrow: CanvasElemen
 const A = shape('A', 0, 0);
 
 describe('elbow headings', () => {
-  const ends = (elements: CanvasElement[], arrow: CanvasElement) => elbowEnds(arrow, lookupOf(elements));
+  const ends = (elements: WhiteboardElement[], arrow: WhiteboardElement) => elbowEnds(arrow, lookupOf(elements));
   test('an edge binding heads out of the side its anchor is on, pulled out by the gap', () => {
     const [start, end] = ends([A, shape('B', 300, 200)], elbow(edge('A', 1, 0.25), edge('B', 0.5, 1)));
     expect(start).toMatchObject({ heading: RIGHT, point: { x: 105, y: 15 } });
@@ -192,7 +192,7 @@ describe('elbow routes', () => {
   });
   test('nothing is NaN for zero-size or inverted targets, coincident ends, or both centres on one shape', () => {
     const zero = shape('Z', 50, 50, 0, 0), flat = shape('F', 200, 0, 100, 0), inverted = shape('I', 300, 200, -100, -60);
-    const arrows: [CanvasElement[], CanvasElement][] = [
+    const arrows: [WhiteboardElement[], WhiteboardElement][] = [
       [[zero], elbow(center('Z'), edge('Z', 0.5, 0.5))],
       [[zero, flat], elbow(center('Z'), center('F'))],
       [[A, inverted], elbow(center('A'), edge('I', 1, 1))],
@@ -269,22 +269,22 @@ describe('elbow arrows in the editor', () => {
     expect(worldPoints(alone)).toEqual(worldPoints(bound).map(p => ({ x: p.x + 40, y: p.y + 25 })));
   });
   test('switching to elbow routes the arrow; a bound one to its targets', () => {
-    const sharp: CanvasElement = { ...elbow(center('A'), center('B'), { x: 50, y: 30 }, { x: 350, y: 130 }), arrowType: 'sharp' };
+    const sharp: WhiteboardElement = { ...elbow(center('A'), center('B'), { x: 50, y: 30 }, { x: 350, y: 130 }), arrowType: 'sharp' };
     const switched = stylePatchChanges([A, B, sharp], new Set(['a']), { arrowType: 'elbow' }).get('a')!;
     expect(switched.arrowType).toBe('elbow');
     expect(worldPoints(switched)).toEqual(worldPoints(bound));
-    const zigzag: CanvasElement = { ...elbow(undefined, undefined, { x: 0, y: 0 }, { x: 100, y: 50 }), arrowType: 'curved', points: [{ x: 0, y: 0 }, { x: 70, y: -40 }, { x: 100, y: 50 }] };
+    const zigzag: WhiteboardElement = { ...elbow(undefined, undefined, { x: 0, y: 0 }, { x: 100, y: 50 }), arrowType: 'curved', points: [{ x: 0, y: 0 }, { x: 70, y: -40 }, { x: 100, y: 50 }] };
     expect(worldPoints(stylePatchChanges([zigzag], new Set(['a']), { arrowType: 'elbow' }).get('a')!))
       .toEqual([{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 50 }, { x: 100, y: 50 }]);
   });
   test('paste and duplicate route clones bound to cloned targets and keep the rest translated', () => {
     let n = 0;
-    const clones = cloneCanvasElements(scene, { x: 24, y: 24 }, () => `c${n++}`);
+    const clones = cloneWhiteboardElements(scene, { x: 24, y: 24 }, () => `c${n++}`);
     const changes = followBindings(scene, new Map(clones.map(el => [el.id, el])));
     const arrow = changes.get('c2')!;
     expect(arrow.startBinding).toEqual(center('c0'));
     expect(worldPoints(arrow)).toEqual(route(clones, arrow));
-    const lone = cloneCanvasElements([bound], { x: 24, y: 24 }, () => 'x')[0];
+    const lone = cloneWhiteboardElements([bound], { x: 24, y: 24 }, () => 'x')[0];
     const kept = followBindings(scene, new Map([['x', lone]])).get('x')!;
     expect(kept.startBinding).toBeUndefined();
     expect(worldPoints(kept)).toEqual(worldPoints(bound).map(p => ({ x: p.x + 24, y: p.y + 24 })));

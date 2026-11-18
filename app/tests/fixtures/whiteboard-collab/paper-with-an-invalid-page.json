@@ -1,7 +1,7 @@
 {
   "name": "paper with an invalid page",
   "document": {
-    "type": "oculus-canvas",
+    "type": "oculus-whiteboard",
     "version": 1,
     "elements": [],
     "viewport": {

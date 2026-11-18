@@ -3,7 +3,7 @@ import { Folder, FolderSimple, LockSimple, Warning, X } from "@phosphor-icons/re
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { DropOverlay } from "@/components/ui/layout/DropOverlay";
 import { SkeletonRows } from "@/components/ui/layout/PageParts";
-import { NotebookDialog } from "@/components/canvas/NotebookDialog";
+import { NotebookDialog } from "@/components/whiteboard/NotebookDialog";
 import { useSubjects } from "@/hooks/data/useSubjects";
 import { useWindowEvent } from "@/hooks/backend/useEvents";
 import { useDriveDrop } from "@/hooks/drive/useDriveDrop";

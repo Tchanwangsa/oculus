@@ -4,7 +4,7 @@ import type { ChatScope } from "./scope";
 import type { RunRow } from "./runs";
 import type { BridgeHealth, HarnessItem, HarnessRequest, QuestionAnswer, PermissionMode, QueuedMessage } from "./types";
 import type { StudioSend } from "@/lib/studio/videos";
-import { openNotebookContext } from "@/lib/canvas/openNotebooks";
+import { openNotebookContext } from "@/lib/whiteboard/openNotebooks";
 import { takePickedSkills } from "./skills";
 import { useProposalStore } from "@/stores/chat/proposalStore";
 

@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import { DropdownMenu } from 'radix-ui';
 import { ArrowLineDownIcon, ArrowLineUpIcon, CaretRightIcon, CheckIcon, CopyIcon, DotsThreeIcon, FrameCornersIcon, GridFourIcon, StackIcon, TrashIcon } from '@phosphor-icons/react';
-import { A4, PAPER_TEMPLATES, templateOf, type PaperPage, type PaperTemplate } from '@/lib/canvas/paper';
-import type { PageSize } from '@/lib/canvas/pages';
+import { A4, PAPER_TEMPLATES, templateOf, type PaperPage, type PaperTemplate } from '@/lib/whiteboard/paper';
+import type { PageSize } from '@/lib/whiteboard/pages';
 import { cn } from '@/lib/utils';
 import { PaperThumb, TEMPLATE_LABELS } from './PaperThumb';
 

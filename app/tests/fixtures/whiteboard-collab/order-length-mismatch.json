@@ -1,7 +1,7 @@
 {
   "name": "order length mismatch",
   "document": {
-    "type": "oculus-canvas",
+    "type": "oculus-whiteboard",
     "version": 1,
     "elements": [
       {

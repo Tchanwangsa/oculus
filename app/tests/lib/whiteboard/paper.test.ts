@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'bun:test';
-import type { CanvasElement } from '../../../src/lib/canvas/model';
-import { reorderElements } from '../../../src/lib/canvas/layers';
+import type { WhiteboardElement } from '../../../src/lib/whiteboard/model';
+import { reorderElements } from '../../../src/lib/whiteboard/layers';
 import {
   A4, createPaper, nextPageId, pageAt, pageOfElement, pageRects, paperBounds, paperProblem, selectableElements, withAddedPage,
   type Paper,
-} from '../../../src/lib/canvas/paper';
+} from '../../../src/lib/whiteboard/paper';
 
 const base = { stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
-const box = (id: string, extra: Partial<CanvasElement> = {}): CanvasElement => ({ id, type: 'rectangle', x: 0, y: 0, width: 50, height: 50, ...base, ...extra });
+const box = (id: string, extra: Partial<WhiteboardElement> = {}): WhiteboardElement => ({ id, type: 'rectangle', x: 0, y: 0, width: 50, height: 50, ...base, ...extra });
 
 describe('pageRects', () => {
   const paper: Paper = { gap: 10, pages: [{ id: 'a', width: 600, height: 800 }, { id: 'b', width: 400, height: 500, template: 'grid' }] };
 
-  test('pages stack down the canvas, each centred on x = 0', () => {
+  test('pages stack down the whiteboard, each centred on x = 0', () => {
     expect(pageRects(paper)).toEqual([
       { id: 'a', index: 0, x: -300, y: 0, width: 600, height: 800, template: 'blank' },
       { id: 'b', index: 1, x: -200, y: 810, width: 400, height: 500, template: 'grid' },

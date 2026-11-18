@@ -1,10 +1,10 @@
 import { isBindable, anchorPoint, outlineCenter, outlineMidpoints } from '../outline';
 import { elementBounds, type Bounds } from '../geometry';
-import type { CanvasBinding, CanvasElement, Point } from '../model';
+import type { WhiteboardBinding, WhiteboardElement, Point } from '../model';
 import { worldPoints } from '../arrow/points';
 import { STEP, sideHeading, vectorHeading, type Heading } from './headings';
 
-export type Lookup = (id: string) => CanvasElement | null | undefined;
+export type Lookup = (id: string) => WhiteboardElement | null | undefined;
 
 /** Where a route starts or ends, the direction it leaves that point in, and the bound target's bounds (absent for a free end). */
 export interface RouteEnd { point: Point; heading: Heading; box?: Bounds }
@@ -15,26 +15,26 @@ export interface RouteEnd { point: Point; heading: Heading; box?: Bounds }
  * the side facing the other end, or, when the other end has an edge on the same shape, the next side clockwise (facing
  * it would put both ends on one point). A free end stays where it is and heads along the dominant axis toward the other end.
  */
-const bindingTarget = (binding: CanvasBinding | undefined, lookup: Lookup) => {
+const bindingTarget = (binding: WhiteboardBinding | undefined, lookup: Lookup) => {
   const el = binding ? lookup(binding.elementId) : undefined;
   return el && isBindable(el) ? el : undefined;
 };
 
 /** A bound end on `heading`'s side of `el`, from `raw` on its outline, pulled out by the arrow's gap. */
-const place = (arrow: CanvasElement, el: CanvasElement, raw: Point, heading: Heading): RouteEnd => {
+const place = (arrow: WhiteboardElement, el: WhiteboardElement, raw: Point, heading: Heading): RouteEnd => {
   const gap = 4 + arrow.strokeWidth / 2;
   return { point: { x: raw.x + STEP[heading].x * gap, y: raw.y + STEP[heading].y * gap }, heading, box: elementBounds(el) };
 };
 
-export function elbowEnds(arrow: CanvasElement, lookup: Lookup): [RouteEnd, RouteEnd] {
+export function elbowEnds(arrow: WhiteboardElement, lookup: Lookup): [RouteEnd, RouteEnd] {
   const free = worldPoints(arrow);
-  const target = (binding?: CanvasBinding) => bindingTarget(binding, lookup);
+  const target = (binding?: WhiteboardBinding) => bindingTarget(binding, lookup);
   const startTarget = target(arrow.startBinding), endTarget = target(arrow.endBinding);
-  const sideOf = (el: CanvasElement, p: Point) => {
+  const sideOf = (el: WhiteboardElement, p: Point) => {
     const c = outlineCenter(el);
     return sideHeading(elementBounds(el), p.x - c.x, p.y - c.y);
   };
-  const bound = (binding: CanvasBinding, el: CanvasElement, other: { binding?: CanvasBinding; el?: CanvasElement; point: Point }): RouteEnd => {
+  const bound = (binding: WhiteboardBinding, el: WhiteboardElement, other: { binding?: WhiteboardBinding; el?: WhiteboardElement; point: Point }): RouteEnd => {
     if (binding.mode === 'edge') {
       const raw = anchorPoint(el, binding.anchor);
       return place(arrow, el, raw, sideOf(el, raw));
@@ -61,9 +61,9 @@ export function elbowEnds(arrow: CanvasElement, lookup: Lookup): [RouteEnd, Rout
  * The ends a route may use: what `elbowEnds` places, then, for a centre binding, its other three sides clockwise.
  * With fixed segments the facing side can be the wrong one (a fixed line on the far side), so routing tries them all.
  */
-export function elbowEndChoices(arrow: CanvasElement, lookup: Lookup): [RouteEnd[], RouteEnd[]] {
+export function elbowEndChoices(arrow: WhiteboardElement, lookup: Lookup): [RouteEnd[], RouteEnd[]] {
   const ends = elbowEnds(arrow, lookup);
-  const choices = (chosen: RouteEnd, binding: CanvasBinding | undefined, other: RouteEnd): RouteEnd[] => {
+  const choices = (chosen: RouteEnd, binding: WhiteboardBinding | undefined, other: RouteEnd): RouteEnd[] => {
     const el = binding?.mode === 'center' ? bindingTarget(binding, lookup) : undefined;
     if (!el || !chosen.box) return [chosen];
     const sides = [1, 2, 3].map(k => ((chosen.heading + k) % 4) as Heading);

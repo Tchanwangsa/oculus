@@ -1,4 +1,4 @@
-import { arrowTypeOf, type CanvasElement, type Point } from '../model';
+import { arrowTypeOf, type WhiteboardElement, type Point } from '../model';
 import { catmullRomCubics, flattenCubics, type Cubic } from './curve';
 
 /**
@@ -18,9 +18,9 @@ export interface LinePath {
 
 /** How far the flattened polyline may stray from the curve, in world units. */
 const FLATNESS = 0.25;
-const cache = new WeakMap<CanvasElement, LinePath>();
+const cache = new WeakMap<WhiteboardElement, LinePath>();
 
-export const polylinePoints = (el: CanvasElement): Point[] => el.points?.length ? el.points : [{ x: 0, y: 0 }, { x: el.width, y: el.height }];
+export const polylinePoints = (el: WhiteboardElement): Point[] => el.points?.length ? el.points : [{ x: 0, y: 0 }, { x: el.width, y: el.height }];
 
 export const polylineLength = (points: readonly Point[]) => {
   let length = 0;
@@ -28,7 +28,7 @@ export const polylineLength = (points: readonly Point[]) => {
   return length;
 };
 
-export function linePath(el: CanvasElement): LinePath {
+export function linePath(el: WhiteboardElement): LinePath {
   let path = cache.get(el);
   if (path) return path;
   const points = polylinePoints(el);
@@ -39,7 +39,7 @@ export function linePath(el: CanvasElement): LinePath {
 }
 
 /** The visual polyline in element-local coordinates. */
-export const arrowPath = (el: CanvasElement): readonly Point[] => linePath(el).polyline;
+export const arrowPath = (el: WhiteboardElement): readonly Point[] => linePath(el).polyline;
 
 /** An end's tip and the direction the path arrives at it. */
 export interface PathEnd { tip: Point; angle: number }
@@ -60,7 +60,7 @@ export const polylineEnd = (points: readonly Point[], end: 'start' | 'end'): Pat
   endFrom(end === 'end' ? points[points.length - 1] : points[0], backward(points, end));
 
 /** The path's end tangent: a curve's control points, not its last flattened segment. */
-export function pathEnd(el: CanvasElement, end: 'start' | 'end'): PathEnd {
+export function pathEnd(el: WhiteboardElement, end: 'start' | 'end'): PathEnd {
   const { points, curves } = linePath(el);
   if (!curves.length) return polylineEnd(points, end);
   if (end === 'start') return endFrom(points[0], [curves[0].c1, curves[0].c2, curves[0].to]);

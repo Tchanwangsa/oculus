@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'bun:test';
-import { applyElementChanges } from '../../../src/lib/canvas/changes';
-import { commitTextEdit } from '../../../src/lib/canvas/labels';
-import { exportCanvasSvg } from '../../../src/lib/canvas/renderSvg';
-import type { CanvasDocument, CanvasElement } from '../../../src/lib/canvas/model';
+import { applyElementChanges } from '../../../src/lib/whiteboard/changes';
+import { commitTextEdit } from '../../../src/lib/whiteboard/labels';
+import { exportWhiteboardSvg } from '../../../src/lib/whiteboard/renderSvg';
+import type { WhiteboardDocument, WhiteboardElement } from '../../../src/lib/whiteboard/model';
 
 const appearance = { stroke: '#292b32', fill: 'transparent', strokeWidth: 2, style: 'sketch' as const };
-const shape: CanvasElement = { id: 'shape', type: 'rectangle', x: 10, y: 20, width: 90, height: 60, ...appearance, seed: 9 };
-const label: CanvasElement = { ...shape, id: 'label', type: 'text', text: 'Original label', fontSize: 24, futureMetadata: { link: 'lecture-1' } };
+const shape: WhiteboardElement = { id: 'shape', type: 'rectangle', x: 10, y: 20, width: 90, height: 60, ...appearance, seed: 9 };
+const label: WhiteboardElement = { ...shape, id: 'label', type: 'text', text: 'Original label', fontSize: 24, futureMetadata: { link: 'lecture-1' } };
 
-function document(elements: CanvasElement[]): CanvasDocument {
-  return { type: 'oculus-canvas', version: 1, elements, viewport: { x: 0, y: 0, zoom: 1 }, background: '#ffffff' };
+function document(elements: WhiteboardElement[]): WhiteboardDocument {
+  return { type: 'oculus-whiteboard', version: 1, elements, viewport: { x: 0, y: 0, zoom: 1 }, background: '#ffffff' };
 }
 
-describe('canvas text edits', () => {
+describe('whiteboard text edits', () => {
   const measure = (line: string, size: number) => line.length * size * 0.5;
   test('editing existing text re-measures it in place without changing its layer or extension data', () => {
     const front = { ...shape, id: 'front' };
@@ -42,11 +42,11 @@ describe('canvas text edits', () => {
   });
 });
 
-describe('canvas vector export', () => {
+describe('whiteboard vector export', () => {
   test('exports the entire drawing independently of the current pan and zoom', () => {
     const content = document([shape, { ...label, x: -140, text: '<concept> & "connections"' }]);
-    const exported = exportCanvasSvg(content);
-    expect(exportCanvasSvg({ ...content, viewport: { x: 9999, y: -8000, zoom: 8 } })).toBe(exported);
+    const exported = exportWhiteboardSvg(content);
+    expect(exportWhiteboardSvg({ ...content, viewport: { x: 9999, y: -8000, zoom: 8 } })).toBe(exported);
     expect(exported).toContain('&lt;concept&gt; &amp; &quot;connections&quot;');
     expect(exported).not.toContain('<concept>');
     expect(exported).toContain('viewBox="-172 -12 304 124"');
@@ -55,7 +55,7 @@ describe('canvas vector export', () => {
   test('supports all tools, reversed dimensions, and attribute escaping with finite geometry', () => {
     const types = ['rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text'] as const;
     const elements = types.map((type, i) => ({ ...shape, id: String(i), type, x: i * 100, width: -80, height: -40, points: [{ x: 0, y: 0 }, { x: -30, y: -50 }, { x: -80, y: -40 }], text: 'A\nB' }));
-    const exported = exportCanvasSvg({ ...document(elements), background: '#fff" onload="bad' });
+    const exported = exportWhiteboardSvg({ ...document(elements), background: '#fff" onload="bad' });
     expect(exported).toContain('<ellipse');
     expect(exported).toContain('<polygon');
     expect(exported).toContain('<path');
@@ -68,7 +68,7 @@ describe('canvas vector export', () => {
   test('writes opacity, dashes, fonts and label alignment', () => {
     const measure = (line: string) => line.length * 10;
     const labelled = { ...shape, width: 160, height: 100, text: 'one two three four', fontSize: 20, fontFamily: 'serif' as const, textAlign: 'right' as const, strokeStyle: 'dashed' as const, opacity: 0.5 };
-    const exported = exportCanvasSvg(document([labelled, { ...label, id: 't', fontFamily: 'mono', textAlign: 'center', strokeStyle: 'dotted' }, { ...shape, id: 'f', type: 'freedraw', strokeStyle: 'dashed', points: [{ x: 0, y: 0 }, { x: 5, y: 5 }] }]), measure);
+    const exported = exportWhiteboardSvg(document([labelled, { ...label, id: 't', fontFamily: 'mono', textAlign: 'center', strokeStyle: 'dotted' }, { ...shape, id: 'f', type: 'freedraw', strokeStyle: 'dashed', points: [{ x: 0, y: 0 }, { x: 5, y: 5 }] }]), measure);
     expect(exported).toContain('opacity="0.5"');
     expect(exported).toContain('stroke-dasharray="8 6"');
     expect(exported.match(/stroke-dasharray/g)).toHaveLength(2);
@@ -81,8 +81,8 @@ describe('canvas vector export', () => {
   });
 
   test('draws each arrowhead type solid and filled where closed', () => {
-    const arrow: CanvasElement = { ...shape, id: 'a', type: 'arrow', style: 'clean', strokeStyle: 'dashed', points: [{ x: 0, y: 0 }, { x: 100, y: 0 }] };
-    const svg = (patch: Partial<CanvasElement>) => exportCanvasSvg(document([{ ...arrow, ...patch }]));
+    const arrow: WhiteboardElement = { ...shape, id: 'a', type: 'arrow', style: 'clean', strokeStyle: 'dashed', points: [{ x: 0, y: 0 }, { x: 100, y: 0 }] };
+    const svg = (patch: Partial<WhiteboardElement>) => exportWhiteboardSvg(document([{ ...arrow, ...patch }]));
     const heads = (text: string) => text.match(/<(?:path|circle)[^>]*>/g)!.slice(1);
     expect(heads(svg({}))).toEqual([expect.stringMatching(/^<path d="M [^Z]+" fill="none"/)]);
     expect(heads(svg({ startArrowhead: 'triangle', endArrowhead: 'diamond' }))).toEqual([
@@ -97,13 +97,13 @@ describe('canvas vector export', () => {
 
 describe('roundness in SVG', () => {
   const clean = { ...shape, style: 'clean' as const, x: 0, y: 0, width: 100, height: 60 };
-  const svg = (el: CanvasElement) => exportCanvasSvg(document([el]));
+  const svg = (el: WhiteboardElement) => exportWhiteboardSvg(document([el]));
   test('a rectangle is round by default and sharp without a radius', () => {
     expect(svg(clean)).toContain('rx="7.5"');
     expect(svg({ ...clean, roundness: 'sharp' })).toMatch(/<rect x="0" y="0" width="100" height="60" fill/);
   });
   test('a diamond is a polygon when sharp and curves at each corner when round', () => {
-    const diamond: CanvasElement = { ...clean, type: 'diamond' };
+    const diamond: WhiteboardElement = { ...clean, type: 'diamond' };
     expect(svg(diamond)).toContain('<polygon points="50,0 100,30 50,60 0,30"');
     const round = svg({ ...diamond, roundness: 'round' });
     expect(round).not.toContain('<polygon');

@@ -1,10 +1,10 @@
-import type { CanvasArrowhead } from '@/lib/canvas/model';
-import { arrowheadShape } from '@/lib/canvas/geometry';
+import type { WhiteboardArrowhead } from '@/lib/whiteboard/model';
+import { arrowheadShape } from '@/lib/whiteboard/geometry';
 
 const SHAFT = [{ x: 3, y: 7 }, { x: 21, y: 7 }];
 
-/** Drawn by the canvas's own arrowhead geometry, so a preview matches what the arrow gets. */
-export function ArrowheadGlyph({ type, end }: { type: CanvasArrowhead; end: 'start' | 'end' }) {
+/** Drawn by the whiteboard's own arrowhead geometry, so a preview matches what the arrow gets. */
+export function ArrowheadGlyph({ type, end }: { type: WhiteboardArrowhead; end: 'start' | 'end' }) {
   const head = arrowheadShape(SHAFT, end, type);
   return <svg width="22" height="13" viewBox="0 0 24 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M3 7H21" />

@@ -3,19 +3,19 @@ import { CaretDownIcon, CircleNotchIcon, NotebookIcon, PencilSimpleIcon, Scribbl
 import { DropdownMenu } from 'radix-ui';
 import { Button } from '@/components/ui/button';
 import { getSubjects, type DbFile } from '@/lib/db';
-import { createNotebookFromPdf } from '@/lib/canvas/notebook';
-import { createCanvasFromPdf } from '@/lib/canvas/pdfCopy';
-import type { DrawingKind } from '@/lib/canvas/drawingKinds';
+import { createNotebookFromPdf } from '@/lib/whiteboard/notebook';
+import { createWhiteboardFromPdf } from '@/lib/whiteboard/pdfCopy';
+import type { DrawingKind } from '@/lib/whiteboard/drawingKinds';
 import { filePagePath, fileTitle } from '@/lib/files/openFile';
 import { openBeside } from '@/lib/shell/tabRouters';
 
 const CHOICES: { kind: DrawingKind; icon: Icon; title: string; body: string }[] = [
   { kind: 'notebook', icon: NotebookIcon, title: 'Notebook', body: 'Write on the pages, like a paper notebook. Each PDF page becomes a page.' },
-  { kind: 'canvas', icon: ScribbleIcon, title: 'Canvas', body: 'An infinite board with the pages laid out to sketch around.' },
+  { kind: 'whiteboard', icon: ScribbleIcon, title: 'Whiteboard', body: 'An infinite board with the pages laid out to sketch around.' },
 ];
 
 /**
- * A PDF's header button: a copy of its pages to draw on, as a notebook or a canvas, opened beside it.
+ * A PDF's header button: a copy of its pages to draw on, as a notebook or a whiteboard, opened beside it.
  * The PDF itself is never changed.
  */
 export function DrawOnCopy({ file }: { file: DbFile }) {
@@ -30,7 +30,7 @@ export function DrawOnCopy({ file }: { file: DbFile }) {
       const title = `${fileTitle(file).replace(/\.pdf$/i, '')} (${kind})`;
       const copy = kind === 'notebook'
         ? await createNotebookFromPdf(subject, file.relative_path, title)
-        : await createCanvasFromPdf(subject, file.relative_path, title);
+        : await createWhiteboardFromPdf(subject, file.relative_path, title);
       openBeside(filePagePath(copy.subject_id, copy.relative_path));
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : String(problem));

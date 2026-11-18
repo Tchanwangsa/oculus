@@ -1,4 +1,4 @@
-import type { CanvasViewport, Point } from './model';
+import type { WhiteboardViewport, Point } from './model';
 import { clampZoom, type ZoomLimits } from './zoom';
 
 const midpoint = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
@@ -7,18 +7,18 @@ const distance = (a: Point, b: Point) => Math.hypot(b.x - a.x, b.y - a.y);
 /** After two fingers navigate, remaining fingers stay navigation-only until all lift. */
 export class TouchViewportGesture {
   private contacts = new Map<number, Point>();
-  private baseline: { ids: number[]; center: Point; distance: number; viewport: CanvasViewport } | null = null;
+  private baseline: { ids: number[]; center: Point; distance: number; viewport: WhiteboardViewport } | null = null;
   active = false;
   get count() { return this.contacts.size; }
   has(id: number) { return this.contacts.has(id); }
 
-  private rebase(viewport: CanvasViewport) {
+  private rebase(viewport: WhiteboardViewport) {
     const pair = [...this.contacts.entries()].slice(0, 2);
     if (pair.length < 2) { this.baseline = null; return; }
     this.baseline = { ids: pair.map(([id]) => id), center: midpoint(pair[0][1], pair[1][1]), distance: Math.max(1, distance(pair[0][1], pair[1][1])), viewport };
   }
 
-  down(id: number, point: Point, viewport: CanvasViewport) {
+  down(id: number, point: Point, viewport: WhiteboardViewport) {
     this.contacts.set(id, point);
     if (this.contacts.size === 2) { this.active = true; this.rebase(viewport); }
     return this.active;
@@ -43,7 +43,7 @@ export class TouchViewportGesture {
    * midpoint stays under their midpoint. iPadOS reports each finger in its own event, so a caller applies this once a frame
    * rather than per event, or the zoom wobbles between one finger's update and the other's.
    */
-  view(limits?: ZoomLimits): CanvasViewport | null {
+  view(limits?: ZoomLimits): WhiteboardViewport | null {
     const base = this.baseline;
     if (!base) return null;
     const a = this.contacts.get(base.ids[0]), b = this.contacts.get(base.ids[1]);
@@ -58,11 +58,11 @@ export class TouchViewportGesture {
   }
 
   /** `update` then `view`. */
-  move(id: number, point: Point, limits?: ZoomLimits): CanvasViewport | null {
+  move(id: number, point: Point, limits?: ZoomLimits): WhiteboardViewport | null {
     return this.update(id, point) ? this.view(limits) : null;
   }
 
-  up(id: number, viewport: CanvasViewport) {
+  up(id: number, viewport: WhiteboardViewport) {
     this.contacts.delete(id);
     if (this.baseline?.ids.includes(id)) this.rebase(viewport);
     if (!this.contacts.size) this.reset();

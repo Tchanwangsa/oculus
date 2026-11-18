@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { createCanvasDocument, type CanvasElement } from '@/lib/canvas/model';
+import { createWhiteboardDocument, type WhiteboardElement } from '@/lib/whiteboard/model';
 import { createHarness, key, pointer, type Harness } from './harness';
 
-const shape: CanvasElement = { id: 'shape', type: 'rectangle', x: 100, y: 100, width: 40, height: 30, stroke: '#000', fill: 'transparent', strokeWidth: 2, style: 'clean', seed: 1 };
-const page: CanvasElement = { ...shape, id: 'page', type: 'image', x: 0, y: 0, width: 500, height: 700, naturalWidth: 1, naturalHeight: 1, dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=' };
-const ink: CanvasElement = { ...shape, id: 'ink', type: 'freedraw', x: 180, y: 100, width: 40, height: 30, points: [{ x: 0, y: 0 }, { x: 40, y: 30 }] };
-function setup(elements: CanvasElement[] = [page, shape, ink]) {
+const shape: WhiteboardElement = { id: 'shape', type: 'rectangle', x: 100, y: 100, width: 40, height: 30, stroke: '#000', fill: 'transparent', strokeWidth: 2, style: 'clean', seed: 1 };
+const page: WhiteboardElement = { ...shape, id: 'page', type: 'image', x: 0, y: 0, width: 500, height: 700, naturalWidth: 1, naturalHeight: 1, dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=' };
+const ink: WhiteboardElement = { ...shape, id: 'ink', type: 'freedraw', x: 180, y: 100, width: 40, height: 30, points: [{ x: 0, y: 0 }, { x: 40, y: 30 }] };
+function setup(elements: WhiteboardElement[] = [page, shape, ink]) {
   const h = createHarness();
-  h.render({ ...createCanvasDocument(), elements });
+  h.render({ ...createWhiteboardDocument(), elements });
   return h;
 }
 function drag(h: Harness, from: [number, number], to: [number, number], shiftKey = false) {
@@ -90,23 +90,23 @@ describe('the box previews what its release selects', () => {
   });
 });
 
-test('a canvas press clears the chat selection before giving the drawing focus', () => {
+test('a whiteboard press clears the chat selection before giving the drawing focus', () => {
   const previousWindow = globalThis.window;
   const calls: string[] = [];
   Object.assign(globalThis, { window: { getSelection: () => ({ removeAllRanges: () => calls.push('clear caret') }) } });
   try {
     const h = setup();
-    h.editor.root.current = { focus: () => calls.push('focus canvas') } as unknown as HTMLDivElement;
+    h.editor.root.current = { focus: () => calls.push('focus whiteboard') } as unknown as HTMLDivElement;
     h.editor.pointerDown(pointer(1, 'mouse', 300, 300));
-    expect(calls).toEqual(['clear caret', 'focus canvas']);
+    expect(calls).toEqual(['clear caret', 'focus whiteboard']);
     h.editor.pointerUp(pointer(1, 'mouse', 300, 300));
   } finally { Object.assign(globalThis, { window: previousWindow }); }
 });
 
 
 describe('moving from inside the selection frame', () => {
-  const a: CanvasElement = { ...ink, id: 'a', x: 100, y: 100, width: 100, height: 100, points: [{ x: 0, y: 0 }, { x: 100, y: 100 }] };
-  const b: CanvasElement = { ...a, id: 'b', x: 300 };
+  const a: WhiteboardElement = { ...ink, id: 'a', x: 100, y: 100, width: 100, height: 100, points: [{ x: 0, y: 0 }, { x: 100, y: 100 }] };
+  const b: WhiteboardElement = { ...a, id: 'b', x: 300 };
   function selectedGroup(backdrop = true) {
     const h = setup(backdrop ? [page, a, b] : [a, b]);
     drag(h, [80, 80], [420, 220]);
@@ -137,7 +137,7 @@ describe('moving from inside the selection frame', () => {
     expect(h.editor.documentRef.current.elements[1]).toMatchObject({ id: 'a', x: 130, y: 120 });
   });
   test('a single hollow stroke can be moved from its empty middle', () => {
-    const hollow: CanvasElement = { ...a, width: 200, points: [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 100 }, { x: 0, y: 100 }] };
+    const hollow: WhiteboardElement = { ...a, width: 200, points: [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 100 }, { x: 0, y: 100 }] };
     const h = setup([hollow]);
     drag(h, [80, 80], [320, 220]);
     drag(h, [200, 150], [230, 170]);
@@ -178,7 +178,7 @@ describe('moving from inside the selection frame', () => {
     expect(h.published).toHaveLength(0);
   });
   test('a single line keeps point editing rather than an invisible rectangular drag area', () => {
-    const line: CanvasElement = { ...a, type: 'line', width: 200, height: 200, points: [{ x: 0, y: 0 }, { x: 200, y: 200 }] };
+    const line: WhiteboardElement = { ...a, type: 'line', width: 200, height: 200, points: [{ x: 0, y: 0 }, { x: 200, y: 200 }] };
     const h = setup([line]);
     h.editor.keyDown(key('a', { meta: true })); h.render();
     expect(h.editor.selection).toEqual(['a']);

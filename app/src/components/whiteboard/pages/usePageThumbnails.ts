@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { CanvasDocument } from '@/lib/canvas/model';
-import { pageRects } from '@/lib/canvas/paper';
-import { renderPagePng } from '@/lib/canvas/render';
-import { pageFingerprints } from '@/lib/canvas/pageFingerprints';
+import type { WhiteboardDocument } from '@/lib/whiteboard/model';
+import { pageRects } from '@/lib/whiteboard/paper';
+import { renderPagePng } from '@/lib/whiteboard/render';
+import { pageFingerprints } from '@/lib/whiteboard/pageFingerprints';
 
 /** CSS pixels across a thumbnail's widest page. */
 export const THUMB_WIDTH = 148;
@@ -28,7 +28,7 @@ export function staleThumbnails(keys: ReadonlyMap<string, string>, cached: Reado
  * fingerprint changes (its size, template, number or anything touching it), one page at a time once the document has
  * rested, so drawing never waits on them. A pan or zoom keeps the same elements and paper and redraws nothing.
  */
-export function usePageThumbnails(document: CanvasDocument, enabled: boolean, current: number): ReadonlyMap<string, string> {
+export function usePageThumbnails(document: WhiteboardDocument, enabled: boolean, current: number): ReadonlyMap<string, string> {
   const [urls, setUrls] = useState<ReadonlyMap<string, string>>(new Map());
   const cache = useRef(new Map<string, Cached>());
   const latest = useRef({ document, current });

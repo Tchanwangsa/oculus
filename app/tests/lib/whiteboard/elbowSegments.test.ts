@@ -1,29 +1,29 @@
 import { describe, expect, test } from 'bun:test';
-import { routeElbow } from '../../../src/lib/canvas/elbow';
-import { moveSegment, releaseSegment } from '../../../src/lib/canvas/elbow/segments';
-import { elementLanes, runsAlong, type Lane } from '../../../src/lib/canvas/elbow/lanes';
-import { pointHandleAt } from '../../../src/lib/canvas/arrow/handles';
-import { worldPoints } from '../../../src/lib/canvas/arrow/points';
-import { bindArrowEnd, followBindings, moveElements } from '../../../src/lib/canvas/bindings';
-import { stylePatchChanges } from '../../../src/lib/canvas/labels';
-import { cloneCanvasElements } from '../../../src/lib/canvas/renderClipboard';
-import { resizeElements } from '../../../src/lib/canvas/resize';
-import { selectionFrame } from '../../../src/lib/canvas/render';
-import { createCanvasDocument, parseCanvasDocument, serializeCanvasDocument, type CanvasBinding, type CanvasElement, type Point } from '../../../src/lib/canvas/model';
+import { routeElbow } from '../../../src/lib/whiteboard/elbow';
+import { moveSegment, releaseSegment } from '../../../src/lib/whiteboard/elbow/segments';
+import { elementLanes, runsAlong, type Lane } from '../../../src/lib/whiteboard/elbow/lanes';
+import { pointHandleAt } from '../../../src/lib/whiteboard/arrow/handles';
+import { worldPoints } from '../../../src/lib/whiteboard/arrow/points';
+import { bindArrowEnd, followBindings, moveElements } from '../../../src/lib/whiteboard/bindings';
+import { stylePatchChanges } from '../../../src/lib/whiteboard/labels';
+import { cloneWhiteboardElements } from '../../../src/lib/whiteboard/renderClipboard';
+import { resizeElements } from '../../../src/lib/whiteboard/resize';
+import { selectionFrame } from '../../../src/lib/whiteboard/render';
+import { createWhiteboardDocument, parseWhiteboardDocument, serializeWhiteboardDocument, type WhiteboardBinding, type WhiteboardElement, type Point } from '../../../src/lib/whiteboard/model';
 
 const base = { stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
-const shape = (id: string, x: number, y: number, width = 100, height = 60): CanvasElement => ({ id, type: 'rectangle', x, y, width, height, ...base });
-const elbow = (start?: CanvasBinding, end?: CanvasBinding, a: Point = { x: 0, y: 0 }, b: Point = { x: 1, y: 1 }): CanvasElement => ({
+const shape = (id: string, x: number, y: number, width = 100, height = 60): WhiteboardElement => ({ id, type: 'rectangle', x, y, width, height, ...base });
+const elbow = (start?: WhiteboardBinding, end?: WhiteboardBinding, a: Point = { x: 0, y: 0 }, b: Point = { x: 1, y: 1 }): WhiteboardElement => ({
   id: 'a', type: 'arrow', x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y, points: [{ x: 0, y: 0 }, { x: b.x - a.x, y: b.y - a.y }],
   ...base, arrowType: 'elbow', ...(start ? { startBinding: start } : {}), ...(end ? { endBinding: end } : {}),
 });
-const center = (elementId: string): CanvasBinding => ({ elementId, mode: 'center' });
-const edge = (elementId: string, x: number, y: number): CanvasBinding => ({ elementId, mode: 'edge', anchor: { x, y } });
-const lookupOf = (elements: readonly CanvasElement[]) => {
+const center = (elementId: string): WhiteboardBinding => ({ elementId, mode: 'center' });
+const edge = (elementId: string, x: number, y: number): WhiteboardBinding => ({ elementId, mode: 'edge', anchor: { x, y } });
+const lookupOf = (elements: readonly WhiteboardElement[]) => {
   const index = new Map(elements.map(el => [el.id, el]));
   return (id: string) => index.get(id);
 };
-const finite = (arrow: CanvasElement) => [arrow.x, arrow.y, arrow.width, arrow.height, ...arrow.points!.flatMap(p => [p.x, p.y])].every(Number.isFinite);
+const finite = (arrow: WhiteboardElement) => [arrow.x, arrow.y, arrow.width, arrow.height, ...arrow.points!.flatMap(p => [p.x, p.y])].every(Number.isFinite);
 const runsOn = (points: readonly Point[], lane: Lane) => points.slice(1).some((p, i) => runsAlong(lane, points[i], p));
 function expectOrthogonal(points: readonly Point[]) {
   for (let i = 1; i < points.length; i++) expect(points[i].x === points[i - 1].x || points[i].y === points[i - 1].y).toBe(true);
@@ -139,14 +139,14 @@ describe('fixed segments when the ends move', () => {
     expectOrthogonal(points);
   });
   test('paste and resize carry fixed segments with the arrow', () => {
-    const [clone] = cloneCanvasElements([dragged], { x: 24, y: 24 }, () => 'c');
+    const [clone] = cloneWhiteboardElements([dragged], { x: 24, y: 24 }, () => 'c');
     expect(elementLanes(clone)).toEqual([{ horizontal: false, at: 194 }]);
     const resized = resizeElements([dragged], new Set(['a']), { x: 105, y: 30, width: 190, height: 100 }, { x: 105, y: 30, width: 380, height: 100 }).get('a')!;
     expect(elementLanes(resized)).toEqual([{ horizontal: false, at: 235 }]);
   });
   test('nothing is NaN with fixed segments on zero-size targets, coincident ends or far lanes', () => {
     const zero = shape('Z', 50, 50, 0, 0);
-    const cases: [CanvasElement[], CanvasElement][] = [
+    const cases: [WhiteboardElement[], WhiteboardElement][] = [
       [[zero, B], { ...elbow(center('Z'), center('B')), fixedSegments: [{ x: 10 }, { y: -400 }] }],
       [[A], { ...elbow(center('A'), edge('A', 1, 0.5)), fixedSegments: [{ y: 1e5 }] }],
       [[], { ...elbow(undefined, undefined, { x: 5, y: 5 }, { x: 5, y: 5 }), fixedSegments: [{ x: 3 }] }],
@@ -197,20 +197,20 @@ describe('clearing fixed segments', () => {
 describe('fixed segments in the format', () => {
   const arrow = { ...elbow(), id: 'arrow', fixedSegments: [{ x: 12.5 }, { y: -40 }] };
   test('round-trips as an optional field', () => {
-    const doc = { ...createCanvasDocument(), elements: [arrow] };
-    expect(parseCanvasDocument(serializeCanvasDocument(doc))).toEqual(doc);
+    const doc = { ...createWhiteboardDocument(), elements: [arrow] };
+    expect(parseWhiteboardDocument(serializeWhiteboardDocument(doc))).toEqual(doc);
   });
   test.each([
     ['not an array', { x: 1 }], ['an empty entry', [{}]], ['both axes', [{ x: 1, y: 2 }]], ['a string', [{ x: '1' }]],
     ['an unknown key', [{ z: 1 }]], ['null', [null]], ['a non-finite value', [{ y: null }]],
   ])('refuses %s', (_, value) => {
-    expect(() => parseCanvasDocument(JSON.stringify({ ...createCanvasDocument(), elements: [{ ...arrow, fixedSegments: value }] }))).toThrow('invalid fixed segments');
+    expect(() => parseWhiteboardDocument(JSON.stringify({ ...createWhiteboardDocument(), elements: [{ ...arrow, fixedSegments: value }] }))).toThrow('invalid fixed segments');
   });
 });
 
 describe('a selected line or arrow', () => {
-  const line: CanvasElement = { ...elbow(), id: 'l', type: 'line', arrowType: undefined };
-  const stroke: CanvasElement = { ...line, id: 'f', type: 'freedraw' };
+  const line: WhiteboardElement = { ...elbow(), id: 'l', type: 'line', arrowType: undefined };
+  const stroke: WhiteboardElement = { ...line, id: 'f', type: 'freedraw' };
   test('has no selection frame on its own; a group with it, a stroke or a shape does', () => {
     expect(selectionFrame([dragged])).toBeNull();
     expect(selectionFrame([line])).toBeNull();

@@ -1,5 +1,5 @@
 import { indexedDraftStorage } from "./indexedStorage";
-import { secureId } from "@/lib/canvas/ids";
+import { secureId } from "@/lib/whiteboard/ids";
 import type { FetchLike } from "./api";
 
 /** Everything the share client takes from the page, injected so tests drive it

@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { createCanvasDocument, type CanvasElement } from '@/lib/canvas/model';
+import { createWhiteboardDocument, type WhiteboardElement } from '@/lib/whiteboard/model';
 import { createHarness, pointer, type Harness } from './harness';
 
 const look = { stroke: '#111111', fill: 'transparent', strokeWidth: 2, style: 'clean' as const, seed: 1 };
 /** A diagonal stroke 60 by 30, so its selection frame has room inside clear of the resize handles. */
-const stroke = (id: string, x: number, y: number): CanvasElement => ({ id, type: 'freedraw', x, y, width: 60, height: 30, ...look, points: [{ x: 0, y: 0 }, { x: 30, y: 15 }, { x: 60, y: 30 }] });
-const scene = () => ({ ...createCanvasDocument(), elements: [stroke('near', 20, 20), stroke('far', 300, 300)] });
+const stroke = (id: string, x: number, y: number): WhiteboardElement => ({ id, type: 'freedraw', x, y, width: 60, height: 30, ...look, points: [{ x: 0, y: 0 }, { x: 30, y: 15 }, { x: 60, y: 30 }] });
+const scene = () => ({ ...createWhiteboardDocument(), elements: [stroke('near', 20, 20), stroke('far', 300, 300)] });
 
 function lassoed() {
   const h = createHarness();

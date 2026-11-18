@@ -1,16 +1,16 @@
-export interface CanvasImportedImage { dataUrl: string; width: number; height: number; name: string }
-export interface CanvasImportPdf {
+export interface WhiteboardImportedImage { dataUrl: string; width: number; height: number; name: string }
+export interface WhiteboardImportPdf {
   name: string;
   pages: { width: number; height: number }[];
   /** PDF page numbers start at 1. */
-  renderPage(page: number, thumbnail?: boolean): Promise<CanvasImportedImage>;
+  renderPage(page: number, thumbnail?: boolean): Promise<WhiteboardImportedImage>;
   close(): Promise<void>;
 }
-export const CANVAS_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
-export const MAX_CANVAS_IMPORT_BYTES = 64 * 1024 * 1024;
-export const MAX_CANVAS_IMPORT_IMAGES = 100;
-export function assertCanvasImportSize(images: CanvasImportedImage[]): void {
-  if (images.length > MAX_CANVAS_IMPORT_IMAGES || images.reduce((sum, image) => sum + image.dataUrl.length, 0) > MAX_CANVAS_IMPORT_BYTES) {
+export const WHITEBOARD_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
+export const MAX_WHITEBOARD_IMPORT_BYTES = 64 * 1024 * 1024;
+export const MAX_WHITEBOARD_IMPORT_IMAGES = 100;
+export function assertWhiteboardImportSize(images: WhiteboardImportedImage[]): void {
+  if (images.length > MAX_WHITEBOARD_IMPORT_IMAGES || images.reduce((sum, image) => sum + image.dataUrl.length, 0) > MAX_WHITEBOARD_IMPORT_BYTES) {
     throw new Error("Add up to 100 images and 64 MB at a time. Choose fewer images or PDF pages.");
   }
 }
@@ -19,7 +19,7 @@ function aborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("Image import cancelled", "AbortError");
 }
 /** Detect raster content rather than trusting filenames or browser MIME types. */
-export function canvasImageMime(bytes: Uint8Array): string | null {
+export function whiteboardImageMime(bytes: Uint8Array): string | null {
   const starts = (...prefix: number[]) => prefix.every((value, i) => bytes[i] === value);
   if (starts(137, 80, 78, 71, 13, 10, 26, 10)) return "image/png";
   if (starts(255, 216, 255)) return "image/jpeg";
@@ -65,15 +65,15 @@ function dimensions(blob: Blob, signal?: AbortSignal): Promise<{ width: number; 
   });
 }
 /** Decode one file at a time to keep a multi-selection bounded in memory. */
-export async function readCanvasImages(files: File[], signal?: AbortSignal): Promise<CanvasImportedImage[]> {
-  if (files.length > MAX_CANVAS_IMPORT_IMAGES || files.reduce((sum, file) => sum + file.size, 0) > MAX_CANVAS_IMPORT_BYTES * 3 / 4) {
+export async function readWhiteboardImages(files: File[], signal?: AbortSignal): Promise<WhiteboardImportedImage[]> {
+  if (files.length > MAX_WHITEBOARD_IMPORT_IMAGES || files.reduce((sum, file) => sum + file.size, 0) > MAX_WHITEBOARD_IMPORT_BYTES * 3 / 4) {
     throw new Error("Add up to 100 images and 64 MB at a time");
   }
-  const images: CanvasImportedImage[] = [];
+  const images: WhiteboardImportedImage[] = [];
   for (const file of files) {
     aborted(signal);
     if (file.size === 0 || file.size > MAX_IMAGE_BYTES) throw new Error(`${file.name}: choose an image between 1 byte and 24 MB`);
-    const mime = canvasImageMime(new Uint8Array(await file.slice(0, 16).arrayBuffer()));
+    const mime = whiteboardImageMime(new Uint8Array(await file.slice(0, 16).arrayBuffer()));
     if (!mime) throw new Error(`${file.name}: choose a PNG, JPEG, WebP or GIF image`);
     const blob = new Blob([file], { type: mime });
     const size = await dimensions(blob, signal);
@@ -81,11 +81,11 @@ export async function readCanvasImages(files: File[], signal?: AbortSignal): Pro
     const dataUrl = await asDataUrl(blob, signal);
     aborted(signal);
     images.push({ dataUrl, ...size, name: file.name });
-    assertCanvasImportSize(images);
+    assertWhiteboardImportSize(images);
   }
   return images;
 }
-export function canvasPdfRasterSize(width: number, height: number, thumbnail = false): { width: number; height: number } {
+export function whiteboardPdfRasterSize(width: number, height: number, thumbnail = false): { width: number; height: number } {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) throw new Error("This PDF has an invalid page size");
   const side = thumbnail ? 240 : 2400;
   const scale = Math.min(side / width, side / height, Math.sqrt(4_000_000 / (width * height)));
