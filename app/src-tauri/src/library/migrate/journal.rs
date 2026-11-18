@@ -51,6 +51,11 @@ pub enum Kind {
     Partial,
     /// An old folder left empty, or a stale link, removed.
     Cleanup,
+    /// A `.canvas` drawing renamed to `.whiteboard` (`whiteboard`).
+    Whiteboard,
+    /// A drawing's page pictures or recovery drafts, to their folder's
+    /// whiteboard name (`whiteboard`).
+    DrawingRecords,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -229,11 +234,14 @@ pub struct DoneLog(std::fs::File);
 
 impl DoneLog {
     pub fn open(data_dir: &Path) -> Result<Self, String> {
-        let path = done_log_path(data_dir);
+        Self::open_at(&done_log_path(data_dir))
+    }
+
+    pub fn open_at(path: &Path) -> Result<Self, String> {
         std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&path)
+            .open(path)
             .map(Self)
             .map_err(|e| format!("open {}: {e}", path.display()))
     }

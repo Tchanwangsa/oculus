@@ -28,7 +28,7 @@ pub struct DbCounts {
     pub already: bool,
 }
 
-type Tx<'c> = Transaction<'c, Sqlite>;
+pub(in crate::library::migrate) type Tx<'c> = Transaction<'c, Sqlite>;
 
 fn err(what: &str) -> impl Fn(sqlx::Error) -> String + '_ {
     move |e| format!("{what}: {e}")
@@ -144,7 +144,12 @@ async fn files(
 }
 
 /// A path column, one UPDATE per distinct value that moved.
-async fn column(tx: &mut Tx<'_>, rules: &Rules, table: &str, col: &str) -> Result<usize, String> {
+pub(in crate::library::migrate) async fn column(
+    tx: &mut Tx<'_>,
+    rules: &Rules,
+    table: &str,
+    col: &str,
+) -> Result<usize, String> {
     let values: Vec<String> = sqlx::query_scalar(&format!(
         "SELECT DISTINCT {col} FROM {table} WHERE {col} IS NOT NULL"
     ))
@@ -195,7 +200,7 @@ pub(in crate::library::migrate) fn remap_json(value: &mut Value, rules: &Rules) 
 }
 
 /// A JSON column (a proposal's state, an undo snapshot) with its paths.
-async fn json_column(
+pub(in crate::library::migrate) async fn json_column(
     tx: &mut Tx<'_>,
     rules: &Rules,
     table: &str,

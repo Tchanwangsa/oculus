@@ -8,7 +8,7 @@ mod schema;
 pub use read::{is_video, rows, Rows};
 #[cfg(test)]
 pub(super) use rewrite::lecture_path;
-pub(super) use rewrite::remap_json;
+pub(super) use rewrite::{column, json_column, remap_json, Tx};
 pub use rewrite::{rewrite, DbCounts};
 pub use schema::ensure;
 #[cfg(test)]
