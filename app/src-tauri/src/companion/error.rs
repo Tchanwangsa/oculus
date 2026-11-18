@@ -4,7 +4,7 @@ use serde::Serialize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Code {
-    /// The whiteboard has no live authority session: the pane attaches first.
+    /// The drawing has no live authority session: the pane attaches first.
     NotLive,
     /// No port could be bound, or the server could not start.
     Server,
@@ -26,10 +26,11 @@ impl CompanionError {
         }
     }
 
+    /// Without a live session the file's kind is unknown, so it says "drawing".
     pub fn not_live() -> Self {
         Self::new(
             Code::NotLive,
-            "This whiteboard is not open for sharing. Open it and try again.",
+            "This drawing is not open for sharing. Open it and try again.",
         )
     }
 }

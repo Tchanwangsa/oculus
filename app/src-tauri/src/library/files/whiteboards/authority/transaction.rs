@@ -66,7 +66,7 @@ fn invalid(message: &str) -> AuthorityError {
 /// order that is a permutation of its own IDs, string backgrounds.
 pub fn validate(value: &Value) -> Result<(), AuthorityError> {
     let Some(tx) = value.as_object() else {
-        return Err(invalid("Invalid whiteboard transaction."));
+        return Err(invalid("Invalid drawing transaction."));
     };
     let edits = tx.get("edits").and_then(Value::as_array);
     if tx
@@ -74,7 +74,7 @@ pub fn validate(value: &Value) -> Result<(), AuthorityError> {
         .any(|k| !matches!(k.as_str(), "edits" | "order" | "background" | "paper"))
         || edits.is_none_or(|e| e.len() > MAX_EDITS)
     {
-        return Err(invalid("Invalid whiteboard transaction fields."));
+        return Err(invalid("Invalid drawing transaction fields."));
     }
     let mut ids = HashSet::new();
     for edit in edits.into_iter().flatten() {
@@ -161,8 +161,13 @@ pub fn validate(value: &Value) -> Result<(), AuthorityError> {
 
 /// The document after `transaction`, and the part of it that changed
 /// something (skipped edits, an order already in place and an unchanged
-/// background are left out). Callers pass a valid document.
-pub fn apply(document: &Value, transaction: &Value) -> Result<(Value, Value), AuthorityError> {
+/// background are left out). Callers pass a valid document; `noun` names its
+/// kind in a conflict's message.
+pub fn apply(
+    document: &Value,
+    transaction: &Value,
+    noun: &str,
+) -> Result<(Value, Value), AuthorityError> {
     validate(transaction)?;
     let edits: &[Value] = transaction["edits"].as_array().map_or(&[], Vec::as_slice);
     let order = Some(&transaction["order"]).filter(|o| truthy(Some(o)));
@@ -193,7 +198,7 @@ pub fn apply(document: &Value, transaction: &Value) -> Result<(Value, Value), Au
         if !same_value(current, &edit["before"]) {
             return Err(AuthorityError::new(
                 Code::ConflictShape,
-                "A collaborator changed the same shape. Your draft is kept; download it or use the shared whiteboard.",
+                format!("A collaborator changed the same shape. Your draft is kept; download it or use the shared {noun}."),
             ));
         }
         if edit["after"].is_null() {

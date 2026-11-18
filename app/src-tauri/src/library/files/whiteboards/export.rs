@@ -15,7 +15,7 @@ fn extension(format: &str) -> Result<&'static str, String> {
         "png" => Ok("png"),
         "svg" => Ok("svg"),
         "pdf" => Ok("pdf"),
-        _ => Err("Whiteboard export supports PNG, SVG and PDF".into()),
+        _ => Err("Drawing export supports PNG, SVG and PDF".into()),
     }
 }
 
@@ -28,14 +28,14 @@ fn validate(format: &str, bytes: &[u8]) -> Result<(), String> {
         return Ok(());
     }
     if bytes.is_empty() || bytes.len() > MAX_EXPORT_BYTES {
-        return Err("Whiteboard image must be between 1 byte and 64 MB".into());
+        return Err("Drawing image must be between 1 byte and 64 MB".into());
     }
     if format == "png" {
         let decoder = image::codecs::png::PngDecoder::new(Cursor::new(bytes))
             .map_err(|e| format!("Invalid PNG image: {e}"))?;
         let (width, height) = decoder.dimensions();
         if width == 0 || height == 0 || width > 8192 || height > 8192 {
-            return Err("Whiteboard PNG dimensions must be between 1 and 8192 pixels".into());
+            return Err("Drawing PNG dimensions must be between 1 and 8192 pixels".into());
         }
     } else {
         let svg = std::str::from_utf8(bytes)
@@ -54,7 +54,7 @@ fn validate(format: &str, bytes: &[u8]) -> Result<(), String> {
 
 fn decode(format: &str, data: &str) -> Result<Vec<u8>, String> {
     if data.len() > MAX_EXPORT_BYTES.div_ceil(3) * 4 {
-        return Err("Whiteboard image exceeds 64 MB".into());
+        return Err("Drawing image exceeds 64 MB".into());
     }
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data)
@@ -103,11 +103,13 @@ pub(super) fn write_chosen(path: &Path, format: &str, bytes: &[u8]) -> Result<Pa
     Ok(path)
 }
 
+/// `kind` names the dialog and the default file: "Export notebook", `Notebook.png`.
 #[tauri::command]
 pub async fn export_whiteboard_image(
     app: tauri::AppHandle,
     format: String,
     data: String,
+    kind: super::DrawingKind,
 ) -> Result<Option<String>, String> {
     crate::runtime::blocking::run(move || {
         let bytes = decode(&format, &data)?;
@@ -115,8 +117,8 @@ pub async fn export_whiteboard_image(
         let picked = app
             .dialog()
             .file()
-            .set_title("Export whiteboard")
-            .set_file_name(format!("Whiteboard.{ext}"))
+            .set_title(format!("Export {}", kind.noun()))
+            .set_file_name(format!("{}.{ext}", kind.title()))
             .add_filter(
                 if ext == "png" {
                     "PNG image"

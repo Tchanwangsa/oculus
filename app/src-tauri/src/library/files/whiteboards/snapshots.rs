@@ -35,7 +35,7 @@ fn unsafe_folder() -> String {
 /// The notebook's folder, created on demand; a symlink anywhere on the way is refused.
 fn dir_at(root: &Path, file_id: i64, create: bool) -> Result<Option<PathBuf>, String> {
     if file_id <= 0 {
-        return Err("Invalid whiteboard file ID".into());
+        return Err("Invalid drawing file ID".into());
     }
     let mut path = root.to_path_buf();
     for part in [PAGES_DIR.to_string(), file_id.to_string()] {

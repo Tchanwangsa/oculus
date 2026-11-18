@@ -6,6 +6,7 @@
 use super::http::{error, session_ended, Reply};
 use crate::companion::core::Core;
 use crate::companion::grants::{Access, Share};
+use crate::library::files::whiteboards::DrawingKind;
 use hyper::header::{HeaderValue, AUTHORIZATION, WWW_AUTHENTICATE};
 use hyper::{HeaderMap, StatusCode};
 use std::net::IpAddr;
@@ -86,7 +87,7 @@ pub fn authenticate(
     }
     match core.grants.authorize(id, secret) {
         Access::Granted(share) => Ok(share),
-        Access::Ended(_) => Err(Box::new(session_ended())),
+        Access::Ended(_) => Err(Box::new(session_ended(DrawingKind::noun_of(None)))),
         Access::Denied => Err(forbidden()),
     }
 }

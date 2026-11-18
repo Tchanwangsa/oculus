@@ -31,7 +31,7 @@ export function loadWhiteboardEngine(): Promise<void> {
   }).catch(error => {
     status = 'javascript';
     console.error('[whiteboard] Rust engine could not load; using JavaScript geometry.', error);
-    throw new Error('Rust whiteboard engine could not load. Drawing is using JavaScript geometry.');
+    throw new Error('Rust drawing engine could not load. Drawing is using JavaScript geometry.');
   });
 }
 

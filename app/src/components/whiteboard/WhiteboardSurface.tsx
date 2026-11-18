@@ -124,7 +124,7 @@ export function WhiteboardSurface({ document, onChange, onViewportChange, onPage
       const options = { notebook: editor.notebook };
       const blob = format === 'png' ? await exportWhiteboardPng(editor.documentRef.current, options) : new Blob([exportWhiteboardSvg(editor.documentRef.current, undefined, options)], { type: 'image/svg+xml' });
       if (!blob) throw new Error(`Add something to the ${kindNoun(kind)} before exporting.`);
-      await platform.saveExport(blob, format, kindTitle(kind));
+      await platform.saveExport(blob, format, kind);
     } catch (error) { setExportError(error instanceof Error ? error.message : String(error)); }
     finally { setExporting(false); }
   };

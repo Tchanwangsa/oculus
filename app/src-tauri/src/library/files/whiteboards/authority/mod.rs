@@ -19,6 +19,7 @@ pub mod transaction;
 #[cfg(test)]
 mod tests;
 
+use crate::library::files::whiteboards::DrawingKind;
 use crate::library::files::ImportedFile;
 use error::AuthorityError;
 use events::{Phase, Subscribers};
@@ -70,7 +71,7 @@ impl Authority {
         self.registry()
             .get(&file_id)
             .cloned()
-            .ok_or_else(AuthorityError::ended)
+            .ok_or_else(|| AuthorityError::ended(DrawingKind::noun_of(None)))
     }
 
     fn forget(&self, file_id: i64, session: &Arc<Session>) {
@@ -97,10 +98,10 @@ impl Authority {
             .values()
             .any(|session| session.lock().owns(&root, rel))
         {
-            return Err(
-                "This whiteboard is shared. Save, rename or delete it through its shared session."
-                    .into(),
-            );
+            return Err(format!(
+                "This {} is shared. Save, rename or delete it through its shared session.",
+                DrawingKind::noun_of(DrawingKind::of(rel))
+            ));
         }
         mutation()
     }
@@ -141,9 +142,10 @@ impl Authority {
             let state = existing.lock();
             if state.phase() != Phase::Ended {
                 if !state.owns(&root, rel) {
-                    return Err(AuthorityError::invalid(
-                        "This whiteboard is shared under another path.",
-                    ));
+                    return Err(AuthorityError::invalid(format!(
+                        "This {} is shared under another path.",
+                        state.noun()
+                    )));
                 }
                 return state.snapshot();
             }
@@ -152,9 +154,10 @@ impl Authority {
             .values()
             .any(|session| session.lock().owns(&root, rel))
         {
-            return Err(AuthorityError::invalid(
-                "This whiteboard already has a shared session under another file id.",
-            ));
+            return Err(AuthorityError::invalid(format!(
+                "This {} already has a shared session under another file id.",
+                DrawingKind::noun_of(DrawingKind::of(rel))
+            )));
         }
         let session = Arc::new(Session::open(file_id, &root, rel, text)?);
         let snapshot = session.lock().snapshot()?;

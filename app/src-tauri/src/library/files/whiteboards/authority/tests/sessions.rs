@@ -420,6 +420,17 @@ fn a_notebook_shares_commits_and_renames_like_a_whiteboard() {
     assert_eq!(ids(&text), ["a", "b", "c"]);
     let value: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(value["paper"]["pages"][0]["template"], "ruled");
+    let stale =
+        json!({"edits": [{"id": "a", "before": shape("a", 9.0), "after": shape("a", 5.0)}]});
+    let refused = f.authority.commit(FILE, op("ipad", 3, stale)).unwrap_err();
+    assert!(
+        refused.message.ends_with("use the shared notebook."),
+        "{}",
+        refused.message
+    );
+    f.authority.close(FILE);
+    let ended = f.authority.snapshot(FILE).unwrap_err().message;
+    assert_eq!(ended, "This drawing is no longer shared.");
 }
 
 #[test]

@@ -6,14 +6,14 @@ pub(crate) const DIR: &str = "recovery/whiteboards";
 
 fn path_at(root: &Path, file_id: i64, create: bool) -> Result<Option<PathBuf>, String> {
     if file_id <= 0 {
-        return Err("Invalid whiteboard file ID".into());
+        return Err("Invalid drawing file ID".into());
     }
     let mut path = root.to_path_buf();
     for part in DIR.split('/') {
         path.push(part);
         match std::fs::symlink_metadata(&path) {
             Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
-                return Err("Unsafe whiteboard recovery folder".into());
+                return Err("Unsafe drawing recovery folder".into());
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound && create => {
@@ -26,7 +26,7 @@ fn path_at(root: &Path, file_id: i64, create: bool) -> Result<Option<PathBuf>, S
     path.push(format!("{file_id}.json"));
     match std::fs::symlink_metadata(&path) {
         Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
-            return Err("Unsafe whiteboard recovery file".into());
+            return Err("Unsafe drawing recovery file".into());
         }
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}

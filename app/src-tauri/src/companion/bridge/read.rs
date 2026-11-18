@@ -32,16 +32,16 @@ pub async fn snapshot(core: &Arc<Core>, share: &Arc<Share>) -> Reply {
             return error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "io",
-                "The whiteboard could not be read.",
+                &format!("The {} could not be read.", share.noun()),
             )
         }
     };
-    if share.epoch().as_deref() != Some(snapshot.epoch.as_str()) {
-        return session_ended();
-    }
     // The page's notebook mode follows the file's kind (its path), never the
     // document: `paper` in a whiteboard means nothing.
     let kind = DrawingKind::of(&snapshot.relative_path).unwrap_or_default();
+    if share.epoch().as_deref() != Some(snapshot.epoch.as_str()) {
+        return session_ended(kind.noun());
+    }
     let body = streamed(Bytes::from(snapshot.text), share.cancel.clone());
     let mut reply = no_store(respond(StatusCode::OK, "text/plain; charset=utf-8", body));
     let headers = reply.headers_mut();
@@ -82,7 +82,10 @@ pub fn changes(share: &Share, query: Option<&str>) -> Reply {
         return error(
             StatusCode::GONE,
             "gone",
-            "These changes are no longer kept. Reload the whiteboard.",
+            &format!(
+                "These changes are no longer kept. Reload the {}.",
+                share.noun()
+            ),
         );
     };
     let size = entries.iter().map(|e| e.json.len() + 1).sum::<usize>() + 2;

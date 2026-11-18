@@ -48,6 +48,27 @@ impl DrawingKind {
         }
     }
 
+    /// The word a message uses for a drawing of this kind.
+    pub fn noun(self) -> &'static str {
+        match self {
+            Self::Whiteboard => "whiteboard",
+            Self::Notebook => "notebook",
+        }
+    }
+
+    /// `noun`, capitalised to start a sentence or a name.
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Whiteboard => "Whiteboard",
+            Self::Notebook => "Notebook",
+        }
+    }
+
+    /// `noun` when the kind is known, else "drawing".
+    pub fn noun_of(kind: Option<Self>) -> &'static str {
+        kind.map_or("drawing", Self::noun)
+    }
+
     /// The kind a library path names: an own file of either kind
     /// (`layout::own_file_ok`), and nothing else.
     pub fn of(rel: &str) -> Option<Self> {
@@ -59,10 +80,6 @@ impl DrawingKind {
 
 const EXPECTED: &str =
     "Expected one of your whiteboards (<title>.whiteboard) or notebooks (<title>.notebook)";
-
-pub(super) fn is_whiteboard_rel(rel: &str) -> bool {
-    DrawingKind::of(rel).is_some()
-}
 
 fn name(kind: DrawingKind, title: &str) -> String {
     let ext = kind.extension();
@@ -81,9 +98,8 @@ fn name(kind: DrawingKind, title: &str) -> String {
 // Reject symlinks even when they point inside the root: a drawing must never
 // alias a different library file.
 fn checked(root: &Path, rel: &str, create_parents: bool) -> Result<PathBuf, String> {
-    if !is_whiteboard_rel(rel) {
-        return Err(EXPECTED.into());
-    }
+    let kind = DrawingKind::of(rel).ok_or(EXPECTED)?;
+    let title = kind.title();
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let mut path = root.clone();
     let parts: Vec<_> = rel.split('/').collect();
@@ -92,20 +108,20 @@ fn checked(root: &Path, rel: &str, create_parents: bool) -> Result<PathBuf, Stri
         path.push(part);
         match std::fs::symlink_metadata(&path) {
             Ok(meta) if meta.file_type().is_symlink() => {
-                return Err("Whiteboard paths cannot contain symlinks".into())
+                return Err(format!("{title} paths cannot contain symlinks"))
             }
             Ok(meta) if i < last && !meta.is_dir() => {
-                return Err("Whiteboard parent is not a folder".into())
+                return Err(format!("{title} parent is not a folder"))
             }
             Ok(meta) if i == last && !meta.is_file() => {
-                return Err("Whiteboard is not a file".into())
+                return Err(format!("{title} is not a file"))
             }
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && i < last && create_parents => {
                 std::fs::create_dir(&path).map_err(|e| e.to_string())?;
                 let meta = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
                 if meta.file_type().is_symlink() || !meta.is_dir() {
-                    return Err("Unsafe whiteboard folder".into());
+                    return Err(format!("Unsafe {} folder", kind.noun()));
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && i == last => {}
@@ -117,7 +133,7 @@ fn checked(root: &Path, rel: &str, create_parents: bool) -> Result<PathBuf, Stri
                 .map_err(|e| e.to_string())?
                 .starts_with(&root)
         {
-            return Err("Whiteboard path is outside the library".into());
+            return Err(format!("{title} path is outside the library"));
         }
     }
     Ok(path)
@@ -135,7 +151,7 @@ fn validated_content(kind: DrawingKind, content: &str) -> Result<Cow<'_, str>, S
         || !value.get("elements").is_some_and(|v| v.is_array())
         || !value.get("viewport").is_some_and(|v| v.is_object())
     {
-        return Err("Unsupported whiteboard document".into());
+        return Err("Unsupported drawing document".into());
     }
     if kind == DrawingKind::Notebook {
         let paper = value.get("paper").ok_or("A notebook needs pages")?;
@@ -149,10 +165,11 @@ fn validated_content(kind: DrawingKind, content: &str) -> Result<Cow<'_, str>, S
 }
 
 pub(super) fn write_at(root: &Path, rel: &str, content: &str) -> Result<u64, String> {
-    let content = validated_content(DrawingKind::of(rel).ok_or(EXPECTED)?, content)?;
+    let kind = DrawingKind::of(rel).ok_or(EXPECTED)?;
+    let content = validated_content(kind, content)?;
     let path = checked(root, rel, false)?;
     if !path.is_file() {
-        return Err("Whiteboard no longer exists".into());
+        return Err(format!("{} no longer exists", kind.title()));
     }
     let tmp = super::documents::note_temp_path(&path)?;
     crate::runtime::atomic_write::write(&path, &tmp, content.as_bytes())?;

@@ -62,11 +62,12 @@ pub fn error(status: StatusCode, code: &str, message: &str) -> Reply {
     no_store(respond(status, "application/json", full(body)))
 }
 
-pub fn session_ended() -> Reply {
+/// `noun` names the shared file's kind, or "drawing" when it is unknown.
+pub fn session_ended(noun: &str) -> Reply {
     error(
         StatusCode::GONE,
         "session-ended",
-        "This whiteboard is no longer shared.",
+        &format!("This {noun} is no longer shared."),
     )
 }
 

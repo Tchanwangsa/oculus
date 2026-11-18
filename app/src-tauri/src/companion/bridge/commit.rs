@@ -45,7 +45,7 @@ pub async fn commit(core: &Arc<Core>, share: &Arc<Share>, request: Request<Incom
     );
     let bytes = tokio::select! {
         read = read => read,
-        _ = share.cancel.cancelled() => return closing(session_ended()),
+        _ = share.cancel.cancelled() => return closing(session_ended(share.noun())),
     };
     let bytes = match bytes {
         Ok(bytes) => bytes,
