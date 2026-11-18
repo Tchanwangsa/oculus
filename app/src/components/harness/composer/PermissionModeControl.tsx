@@ -4,19 +4,9 @@ import type { Icon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  harnessSetPermissionMode,
-  MODE_LABEL,
-  modeChoices,
-  threadMode,
-  type Capabilities,
-  type PermissionMode,
-  type Provider,
-} from "@/lib/harness";
-import { useCapabilities } from "@/hooks/agents/useCapabilities";
-import { useHarnessStore } from "@/stores/chat/harnessStore";
+import { MODE_LABEL, modeChoices, type Capabilities, type PermissionMode, type Provider } from "@/lib/harness";
 import { cn } from "@/lib/utils";
-import { useRunCommand } from "./useRunCommand";
+import { usePermissionMode } from "./usePermissionMode";
 
 const MODE_ICON: Record<PermissionMode, Icon> = {
   ask: ShieldCheck,
@@ -33,31 +23,16 @@ const MODE_ICON: Record<PermissionMode, Icon> = {
  * its sentence shows at the top of the open menu.
  */
 export function PermissionModeControl({ threadId, provider }: { threadId: number | null; provider: Provider }) {
-  const caps = useCapabilities(provider);
-  const stored = useHarnessStore((s) => (threadId == null ? undefined : s.threads.find((t) => t.id === threadId)?.permission_mode));
-  // A chat outside the thread list (Studio's) hears no `permission_mode`
-  // event, so a saved pick is kept here too.
-  const [saved, setSaved] = useState<{ thread: number; mode: PermissionMode } | null>(null);
-  const save = useRunCommand();
+  const permission = usePermissionMode(threadId, provider);
   const [open, setOpen] = useState(false);
-  if (threadId == null) return null;
-  const mode = threadMode(stored ?? (saved?.thread === threadId ? saved.mode : undefined));
-  const pick = (next: PermissionMode) => {
-    if (next === mode) return setOpen(false);
-    void save
-      .run(() => harnessSetPermissionMode(threadId, next))
-      .then((ok) => {
-        if (!ok) return;
-        setSaved({ thread: threadId, mode: next });
-        setOpen(false);
-      });
-  };
+  const { mode } = permission;
+  if (mode == null) return null;
   return (
     <Popover
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) save.clear();
+        if (!next) permission.clear();
       }}
     >
       <PopoverTrigger asChild>
@@ -77,19 +52,28 @@ export function PermissionModeControl({ threadId, provider }: { threadId: number
         sideOffset={6}
         collisionPadding={8}
         className="w-72 max-w-[calc(100vw-16px)] p-0"
-        // Radix would focus the header's warning icon first and open its tooltip.
-        onOpenAutoFocus={(e) => {
-          e.preventDefault();
-          (e.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus();
-        }}
+        onOpenAutoFocus={focusPickedMode}
       >
-        <PermissionModeMenu caps={caps} mode={mode} busy={save.pending} refused={save.error} onPick={pick} />
+        <PermissionModeMenu
+          caps={permission.caps}
+          mode={mode}
+          busy={permission.busy}
+          refused={permission.refused}
+          onPick={(next) => permission.pick(next, () => setOpen(false))}
+        />
       </PopoverContent>
     </Popover>
   );
 }
 
-function ModeIcon({ mode }: { mode: PermissionMode }) {
+/** A mode menu's `onOpenAutoFocus`: the chosen mode takes focus, since Radix
+ *  would focus the header's warning icon first and open its tooltip. */
+export function focusPickedMode(e: Event) {
+  e.preventDefault();
+  (e.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus();
+}
+
+export function ModeIcon({ mode }: { mode: PermissionMode }) {
   const IconC = MODE_ICON[mode];
   return <IconC className="size-3.5 shrink-0" aria-hidden />;
 }

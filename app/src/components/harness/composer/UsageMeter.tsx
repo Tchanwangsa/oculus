@@ -24,7 +24,7 @@ export function usageTint(percent: number) {
 }
 
 /** A 16px donut for the control row. */
-function Ring({ percent }: { percent: number }) {
+export function Ring({ percent }: { percent: number }) {
   const r = 6.5;
   const circumference = 2 * Math.PI * r;
   const p = Math.max(0, Math.min(100, percent));
@@ -85,6 +85,25 @@ function Meter({
 }
 
 /**
+ * What a thread's usage reads as: the context share for the ring, the
+ * figures to name it by, and whether there is anything to show at all.
+ */
+export function usageSummary(usage: ThreadUsage | null, rateLimits: RateWindow[]) {
+  const used = usage?.contextTokens ?? null;
+  const limit = usage?.contextWindow ?? null;
+  const contextPercent = used && limit ? (used / limit) * 100 : 0;
+  const parts = [
+    used != null && limit
+      ? `${Math.round(contextPercent)}% of context`
+      : used != null
+        ? `${fmtTokens(used)} context tokens`
+        : null,
+    ...rateLimits.map((w) => `${w.label} ${Math.round(w.used_percent)}%`),
+  ].filter((p): p is string => p != null);
+  return { used, limit, contextPercent, parts, empty: used == null && rateLimits.length === 0 };
+}
+
+/**
  * The ring is this thread's context usage only (never the worst of several
  * numbers); the popover adds the account's rate-limit windows. No spend shown:
  * subscription CLIs report a notional price nobody is billed.
@@ -96,20 +115,8 @@ export function UsageMeter({
   usage: ThreadUsage | null;
   rateLimits: RateWindow[];
 }) {
-  const used = usage?.contextTokens ?? null;
-  const limit = usage?.contextWindow ?? null;
-  const contextPercent = used && limit ? (used / limit) * 100 : 0;
-
-  if (used == null && rateLimits.length === 0) return null;
-
-  const summary = [
-    used != null && limit
-      ? `${Math.round(contextPercent)}% of context`
-      : used != null
-        ? `${fmtTokens(used)} context tokens`
-        : null,
-    ...rateLimits.map((w) => `${w.label} ${Math.round(w.used_percent)}%`),
-  ].filter(Boolean);
+  const summary = usageSummary(usage, rateLimits);
+  if (summary.empty) return null;
 
   return (
     <Popover>
@@ -118,37 +125,50 @@ export function UsageMeter({
           type="button"
           variant="ghost"
           size="icon-xs"
-          aria-label={`Usage — ${summary.join(", ")}`}
-          title={summary.join(" · ")}
+          aria-label={`Usage — ${summary.parts.join(", ")}`}
+          title={summary.parts.join(" · ")}
           className="shrink-0 text-muted-foreground hover:text-foreground"
         >
-          <Ring percent={contextPercent} />
+          <Ring percent={summary.contextPercent} />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" side="top" className="w-64 p-3">
-        <div className="flex flex-col gap-3">
-          {used != null && (
-            <Meter
-              label="Context window"
-              value={limit ? `${fmtTokens(used)} / ${fmtTokens(limit)}` : fmtTokens(used)}
-              percent={contextPercent}
-            />
-          )}
-          {rateLimits.length > 0 && (
-            <div className="flex flex-col gap-2.5">
-              <div className="text-[10.5px] text-muted-foreground">Plan usage limits</div>
-              {rateLimits.map((w) => (
-                <Meter
-                  key={w.label}
-                  label={w.label}
-                  note={fmtResets(w.resets_at)}
-                  percent={w.used_percent}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+        <UsageDetails summary={summary} rateLimits={rateLimits} />
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** The meters inside a usage popover: the context window, then each rate window. */
+export function UsageDetails({
+  summary: { used, limit, contextPercent },
+  rateLimits,
+}: {
+  summary: ReturnType<typeof usageSummary>;
+  rateLimits: RateWindow[];
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      {used != null && (
+        <Meter
+          label="Context window"
+          value={limit ? `${fmtTokens(used)} / ${fmtTokens(limit)}` : fmtTokens(used)}
+          percent={contextPercent}
+        />
+      )}
+      {rateLimits.length > 0 && (
+        <div className="flex flex-col gap-2.5">
+          <div className="text-[10.5px] text-muted-foreground">Plan usage limits</div>
+          {rateLimits.map((w) => (
+            <Meter
+              key={w.label}
+              label={w.label}
+              note={fmtResets(w.resets_at)}
+              percent={w.used_percent}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
