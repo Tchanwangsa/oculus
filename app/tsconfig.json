@@ -25,13 +25,5 @@
     }
   },
   "include": ["src", "widget-kit", "src-tauri/templates/skills/oculus-widgets"],
-  /* Pen and preset files that need the pen model, not in yet; wiring them removes this. */
-  "exclude": [
-    "src/lib/canvas/pens.ts",
-    "src/lib/canvas/inkPresets.ts",
-    "src/components/canvas/inspector/PenSection.tsx",
-    "src/components/canvas/CanvasPresetBar.tsx",
-    "src/components/canvas/PaperThumb.tsx"
-  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -27,11 +27,11 @@ import { CAPTURE_LIFT_DELAY_MS, type CaptureHoldIndicator, copyRegionImage, rast
 import { asDataUrl } from '@/lib/canvas/importMedia';
 import { secureId } from '@/lib/canvas/ids';
 import {
-  clampCamera, isLocked, keepOnPage, notebookPaper, pageContaining, pageInView, pageView, selectableElements, visiblePageCentre, zoomLimits, type CanvasKind, type PaperTemplate,
+  clampCamera, isLocked, keepOnPage, notebookPaper, pageContaining, pageInView, pageView, selectableElements, templateOf, visiblePageCentre, zoomLimits, type CanvasKind, type PaperTemplate,
 } from '@/lib/canvas/paper';
 import { CANVAS_ZOOM_LIMITS } from '@/lib/canvas/zoom';
 import {
-  addPage as addNotebookPage, duplicatePage, insertPage, insertPdfPages, movePage, removePage as removeNotebookPage, setPageSize, setPageTemplate, type PageSize,
+  addPage as addNotebookPage, duplicatePage, insertPage, insertPdfPages, movePage, removePage as removeNotebookPage, setAllPageTemplates, setPageSize, setPageTemplate, type PageSize,
 } from '@/lib/canvas/pages';
 import { elementsAtPage } from '@/lib/canvas/pageHits';
 import type { CanvasImportedImage } from '@/lib/canvas/importMedia';
@@ -733,6 +733,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   };
   const pointerDown = (event: PointerEvent<HTMLCanvasElement>, recoveringContact = false) => {
     traceCanvas('gesture.down', { tool, pointerId: event.pointerId, pointerType: event.pointerType, contactWidth: Math.round(event.width || 0), contactHeight: Math.round(event.height || 0), recoveringContact, gesture: gesture.current?.mode ?? 'none', penSeen: penSeen.current, touches: touchViewport.current.count });
+    if (tool === 'highlighter' || tool === 'lasso') return;
     if (!recoveringContact && event.button !== 0 && event.button !== 1) return;
     if (!recoveringContact) refusedPointer.current = null;
     // A contact during a glide stops it; a finger then holds the page, so lifting it does nothing and dragging scrolls on.
@@ -1141,6 +1142,10 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     duplicate: (index: number) => editPages(current => duplicatePage(current, index), () => index + 1),
     move: (from: number, to: number) => editPages(current => movePage(current, from, to), () => to),
     setTemplate: (index: number, template: PaperTemplate) => editPages(current => setPageTemplate(current, index, template), () => index),
+    applyTemplateToAll: (index: number) => editPages(current => {
+      const page = boundPaper()?.pages[index];
+      return page ? setAllPageTemplates(current, templateOf(page)) : current;
+    }, () => index),
     setSize: (index: number, size: PageSize) => editPages(current => setPageSize(current, index, size), () => index),
     /** PDF pages, each on a new page of its own size, after page `index`. */
     insertPdfPages: (index: number, sizes: readonly PageSize[], images: readonly CanvasImportedImage[]) =>

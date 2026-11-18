@@ -1,3 +1,4 @@
+import { polylineLength, polylinePoints } from './arrow/path';
 import { CANVAS_DEFAULTS, type CanvasElement, type CanvasPen, type Point } from './model';
 
 /**
@@ -89,11 +90,15 @@ const n = (value: number) => Math.round(value * 100) / 100;
  * wound the same way so a nonzero fill is their union. Empty for a line pen.
  */
 export function nibOutline(element: CanvasElement): string {
-  const pen = penOf(element), points = element.points;
-  if (penLine(element) || !points || points.length < 2) return '';
-  const base = element.strokeWidth;
-  let step = Math.max(0.6, base / 4), samples = strokeSamples(points, step);
-  while (samples.length > MAX_SAMPLES) samples = strokeSamples(points, step *= 2);
+  if (penLine(element)) return '';
+  const pen = penOf(element), base = element.strokeWidth, points = polylinePoints(element);
+  if (points.length === 1) return disc(points[0], base / 2);
+
+  // Keep room for interpolated samples and preserve the stroke's two ends.
+  const stride = Math.ceil((points.length - 1) / (MAX_SAMPLES / 2 - 1));
+  const controls = stride === 1 ? points : points.filter((_, i) => i % stride === 0 || i === points.length - 1);
+  const step = Math.max(0.6, base / 4, polylineLength(controls) / (MAX_SAMPLES - controls.length));
+  const samples = strokeSamples(controls, step);
   const lengths = [0];
   for (let i = 1; i < samples.length; i++) lengths.push(lengths[i - 1] + Math.hypot(samples[i].x - samples[i - 1].x, samples[i].y - samples[i - 1].y));
   const total = lengths[lengths.length - 1];

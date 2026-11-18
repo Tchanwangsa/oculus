@@ -3,7 +3,7 @@ import { CANVAS_DEFAULTS, LABELLED_TYPES, roundnessOf, type CanvasElement, type 
 /** Appearance fields the inspector edits; everything else on an element is geometry or content. */
 export const STYLE_KEYS = [
   'stroke', 'fill', 'strokeWidth', 'style', 'opacity', 'strokeStyle',
-  'fontFamily', 'fontSize', 'textAlign', 'verticalAlign', 'startArrowhead', 'endArrowhead', 'roundness', 'arrowType',
+  'fontFamily', 'fontSize', 'textAlign', 'verticalAlign', 'startArrowhead', 'endArrowhead', 'roundness', 'arrowType', 'pen',
 ] as const;
 export type StyleKey = typeof STYLE_KEYS[number];
 export type StylePatch = Partial<Pick<CanvasElement, StyleKey>>;
@@ -17,7 +17,7 @@ export const DEFAULT_DRAWING_STYLE: DrawingStyle = {
   strokeStyle: CANVAS_DEFAULTS.strokeStyle, fontFamily: CANVAS_DEFAULTS.fontFamily, fontSize: CANVAS_DEFAULTS.fontSize,
   textAlign: CANVAS_DEFAULTS.textAlign, labelAlign: CANVAS_DEFAULTS.labelAlign, verticalAlign: CANVAS_DEFAULTS.verticalAlign,
   startArrowhead: CANVAS_DEFAULTS.startArrowhead, endArrowhead: CANVAS_DEFAULTS.endArrowhead, roundness: CANVAS_DEFAULTS.roundness,
-  arrowType: CANVAS_DEFAULTS.arrowType,
+  arrowType: CANVAS_DEFAULTS.arrowType, pen: CANVAS_DEFAULTS.pen,
 };
 
 const ALL: ElementType[] = ['rectangle', 'ellipse', 'diamond', 'line', 'arrow', 'freedraw', 'text'];
@@ -27,7 +27,7 @@ const TEXTUAL: ElementType[] = ['text', ...SHAPES];
 const KEY_TYPES: Record<StyleKey, readonly ElementType[]> = {
   stroke: ALL, opacity: [...ALL, 'image'], fill: SHAPES, strokeWidth: ALL.filter(type => type !== 'text'), strokeStyle: OUTLINED, style: OUTLINED,
   fontFamily: TEXTUAL, fontSize: TEXTUAL, textAlign: TEXTUAL, verticalAlign: SHAPES, startArrowhead: ['arrow'], endArrowhead: ['arrow'],
-  roundness: ['rectangle', 'diamond'], arrowType: ['arrow'],
+  roundness: ['rectangle', 'diamond'], arrowType: ['arrow'], pen: ['freedraw'],
 };
 const LABEL_KEYS: ReadonlySet<StyleKey> = new Set(['fontFamily', 'fontSize', 'textAlign', 'verticalAlign']);
 
@@ -91,9 +91,9 @@ export function patchElementStyle(el: CanvasElement, patch: StylePatch): CanvasE
   return next;
 }
 
-export type InspectorSection = 'stroke' | 'fill' | 'text' | 'verticalAlign' | 'strokeWidth' | 'strokeStyle' | 'sketch' | 'roundness' | 'arrowType' | 'arrowheads' | 'opacity';
+export type InspectorSection = 'stroke' | 'pen' | 'fill' | 'text' | 'verticalAlign' | 'strokeWidth' | 'strokeStyle' | 'sketch' | 'roundness' | 'arrowType' | 'arrowheads' | 'opacity';
 const SECTION_KEYS: [InspectorSection, StyleKey][] = [
-  ['stroke', 'stroke'], ['fill', 'fill'], ['text', 'fontSize'], ['verticalAlign', 'verticalAlign'], ['strokeWidth', 'strokeWidth'],
+  ['stroke', 'stroke'], ['pen', 'pen'], ['fill', 'fill'], ['text', 'fontSize'], ['verticalAlign', 'verticalAlign'], ['strokeWidth', 'strokeWidth'],
   ['strokeStyle', 'strokeStyle'], ['sketch', 'style'], ['roundness', 'roundness'], ['arrowType', 'arrowType'], ['arrowheads', 'endArrowhead'], ['opacity', 'opacity'],
 ];
 

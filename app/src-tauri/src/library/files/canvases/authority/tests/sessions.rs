@@ -120,6 +120,35 @@ fn ids(text: &str) -> Vec<String> {
 }
 
 #[test]
+fn documents_without_a_pen_open_unchanged() {
+    for (kind, text) in [
+        (
+            DrawingKind::Canvas,
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../tests/fixtures/canvas-model/valid/every-type.json"
+            )),
+        ),
+        (
+            DrawingKind::Notebook,
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../tests/fixtures/canvas-model/valid/notebook-paper.json"
+            )),
+        ),
+    ] {
+        let root = Scratch::new("authority-legacy-drawing");
+        let rel = super::super::super::create_at(&root, kind, "TEST", "Shared", text)
+            .unwrap()
+            .relative_path;
+        let authority = Authority::new(Arc::new(Rows::default()));
+        let opened = authority.open(FILE, &root, &rel, text).unwrap();
+        assert_eq!(opened.text, text);
+        assert_eq!(std::fs::read_to_string(root.join(rel)).unwrap(), text);
+    }
+}
+
+#[test]
 fn a_commit_persists_bumps_the_revision_and_broadcasts() {
     let f = Fixture::new("authority-commit");
     let opened = f.open();

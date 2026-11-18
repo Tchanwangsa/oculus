@@ -28,6 +28,9 @@ page.
 | Device-local drawing preferences (the eraser's settings) | `app/src/lib/canvas/toolPreferences.ts` |
 | Partial erasing: cutting strokes along the eraser's sweep | `app/src/lib/canvas/erase.ts` |
 | What a selection box selects (release and live preview) | `app/src/lib/canvas/boxSelect.ts` |
+| Selection by a closed lasso loop | `app/src/lib/canvas/lasso.ts` |
+| Freehand pen geometry and device-local ink presets | `app/src/lib/canvas/pens.ts`, `app/src/lib/canvas/inkPresets.ts` |
+| Builders for matrix and coordinate axes | `app/src/lib/canvas/templates.ts` |
 | Native selection, callout and touch defaults kept off the canvas | `app/src/lib/canvas/browserSelectionGuard.ts` |
 | Canvas2D drawing and image export | `app/src/lib/canvas/render.ts`, `app/src/lib/canvas/renderSvg.ts` |
 | Text fonts, measuring, wrapping and label layout | `app/src/lib/canvas/renderText.ts` |
@@ -129,6 +132,7 @@ version stays 1, and an absent field means its default (`CANVAS_DEFAULTS` in
 | Field | Values (default) | Applies to |
 | --- | --- | --- |
 | `opacity` | 0..1 (1) | every element |
+| `pen` | `ball` `fountain` `pencil` `brush` `sketch` `chinese` `dashed` `dotted` `roundMarker` `flatMarker` (ball) | freehand strokes |
 | `strokeStyle` | `solid` `dashed` `dotted` (solid) | shapes, line, arrow |
 | `fontFamily` | `sans` `serif` `mono` (sans) | text, labelled shapes |
 | `textAlign` | `left` `center` `right` (left for text, center for labels) | text, labelled shapes |
@@ -152,6 +156,15 @@ layer, so ink is never sent beneath a page image. `selectableElements` hands
 the hit test the unlocked elements, returning the same array when none is
 locked so a whiteboard's cached geometry is reused.
 
+## Freehand ink shares its pen geometry across exports
+
+A freehand element keeps its path, style and optional pen. The ball pen uses
+the regular smoothed stroke, including when the field is absent. Canvas2D and
+SVG use the same pen definitions. Fountain and brush pens fill an outline
+with varying width, while pencil and sketch use overlapping passes.
+Highlighter marks are freehand strokes with a round or flat marker pen and
+an element opacity.
+
 ## Pages exist only in a notebook
 
 A notebook has a top-level `paper`: fixed-size pages stacked down the board.
@@ -168,8 +181,8 @@ A notebook has a top-level `paper`: fixed-size pages stacked down the board.
   element); clipping, page operations and pictures all use that owner.
 - **Fields.** `pages` has 1 to 500 entries with unique non-empty `id`s and a
   `width` and `height` above 0 and up to 14400. `template` is `blank` (the
-  default), `grid`, `ruled` or `dotted`; `gap` is 0 to 1000. Other fields are
-  kept. `paperProblem` and `validate_paper` in `authority/model.rs` apply the
+  default), `grid`, `ruled`, `dotted`, `graph`, `cornell`, `music` or
+  `isometric`. `gap` is 0 to 1000. Other fields are kept. `paperProblem` and `validate_paper` in `authority/model.rs` apply the
   same rule, and the model fixtures hold them together.
 - **A canvas ignores `paper`.** A `.canvas` that holds one keeps it: the model
   validates and saves it back as written, and the file is never rewritten for
@@ -190,10 +203,12 @@ A notebook has a top-level `paper`: fixed-size pages stacked down the board.
   shadow on the desk (the document's `background`, `NOTEBOOK_DESK` grey for a
   new notebook), then its template, then the elements, each clipped to its own
   page; a run of elements on one page shares one clip. The whiteboard's dot
-  grid and its toggle are off. Templates are a line or dot every 14 points
-  (ruled: 23, below a 60-point top margin); `templateMarks` is the one geometry
-  for the screen, the SVG export (`paperSvg`) and the thumbnails, and a pattern
-  finer than 4 screen pixels a step is skipped.
+  grid and its toggle are off. `templateMarks` supplies the geometry for the
+  screen, rendered page thumbnails and SVG export (`paperSvg`). Graph paper
+  adds bold lines to a regular grid, Cornell adds cue and summary divisions
+  to ruled paper, music uses five-line staves, and isometric uses upright and
+  angled lines. Canvas2D skips patterns with less than 4 screen pixels between
+  marks. The template pickers use coarser drawings in `PaperThumb.tsx`.
 - **Camera.** A notebook opens fitted to its page width (up to 140%) once,
   while its camera is still the untouched default; Fit (1) and the page
   controls use `pageView`. Every camera write goes through `setView`, which
@@ -243,7 +258,8 @@ template and size, or pages from a library PDF (`CanvasImageDialog` with
 `pdfPages`); the companion has no library, so there it adds the page straight
 away. Each thumbnail's ⋯ menu adds a page before or after, duplicates,
 changes the template or size (A4 and Letter, portrait or landscape) and
-deletes. Dragging a thumbnail reorders the pages on pointer
+deletes. **Apply to every page** copies that page's template to the whole
+notebook as one undo step. Dragging a thumbnail reorders the pages on pointer
 events, so a mouse lifts after a few pixels and a finger or Pencil after a
 short hold, and the list scrolls near its edges (`usePageReorder`). On a
 narrow canvas the sidebar lies over the drawing like a drawer, behind it a dim

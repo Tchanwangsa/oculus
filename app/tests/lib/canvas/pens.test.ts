@@ -21,6 +21,17 @@ describe('pens', () => {
     expect(exportCanvasSvg(document([stroke()]))).toContain('<path d="M 0 0 Q 20 0 30 10 Q 40 20 50 20 L 60 20" fill="none" stroke="#123456" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>');
   });
 
+  test('a stroke with no saved points still exports its bounds as a ball pen line', () => {
+    const ink = stroke();
+    delete ink.points;
+    expect(exportCanvasSvg(document([ink]))).toContain('<path d="M 0 0 L 60 20"');
+  });
+
+  test('a translucent pencil applies opacity to each pass', () => {
+    const svg = exportCanvasSvg(document([{ ...stroke('pencil'), opacity: 0.5 }]));
+    expect(svg.match(/ opacity="[^"]+"/g)).toEqual([' opacity="0.275"', ' opacity="0.25"']);
+  });
+
   test('line pens differ by dash, ends and passes', () => {
     expect(penLine(stroke('dashed'))!.dash).toEqual([16, 12]);
     expect(penLine(stroke('dotted'))!.dash).toEqual([0, 10]);
@@ -64,6 +75,14 @@ describe('pens', () => {
     expect(exportCanvasSvg(document([stroke('brush')]))).toMatch(/<path d="M[^"]+Z" fill="#123456" fill-rule="nonzero"\/>/);
     expect(discs(nibOutline(stroke('fountain', [{ x: 0, y: 0 }, { x: 0, y: 0 }])))).toEqual([[0, 0, 2]]);
     expect(nibOutline(stroke('dashed'))).toBe('');
+  });
+
+  test('a long nib stroke keeps both ends within the sample budget', () => {
+    const points = Array.from({ length: 8000 }, (_, x) => ({ x: x * 10, y: 0 }));
+    const samples = discs(nibOutline(stroke('fountain', points)));
+    expect(samples.length).toBeLessThanOrEqual(6000);
+    expect(samples[0][0]).toBeCloseTo(0);
+    expect(samples.at(-1)![0]).toBeCloseTo(79990);
   });
 
   test('the pen is a style of freehand strokes only', () => {

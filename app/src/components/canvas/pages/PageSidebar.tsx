@@ -47,6 +47,7 @@ export function PageSidebar({ pages, document, onClose }: { pages: NotebookPages
           insert: side => pages.insert(index, side),
           duplicate: () => pages.duplicate(index),
           setTemplate: template => pages.setTemplate(index, template),
+          applyTemplateToAll: () => pages.applyTemplateToAll(index),
           setSize: size => pages.setSize(index, size),
           remove: () => setRemoving(index),
         }} />)}

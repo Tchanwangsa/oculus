@@ -9,6 +9,7 @@ import { visibleElements } from './engine';
 import { outlineCenter, outlineMidpoints } from './outline';
 import type { BindingSnap } from './bindings';
 import { drawCanvasImage, loadCanvasImages } from './renderImages';
+import { nibOutline, penLine } from './pens';
 
 export interface CanvasPaintOptions {
   width: number;
@@ -18,6 +19,8 @@ export interface CanvasPaintOptions {
   selected: Set<string>;
   selectionColor: string;
   marquee?: Bounds;
+  /** A lasso loop being drawn, in world units. */
+  lasso?: readonly Point[];
   cropSource?: Bounds;
   captureSelection?: boolean;
   captureGhost?: { snapshot: CanvasDocument; from: Bounds; to: Bounds };
@@ -86,6 +89,29 @@ function elementPaths(element: CanvasElement): ElementPaths {
   return paths;
 }
 
+const nibCache = new WeakMap<CanvasElement, Path2D>();
+/** A freehand stroke in its pen: a nib pen's filled outline, or a line pen's passes over the smoothed path. */
+function drawInk(context: CanvasRenderingContext2D, element: CanvasElement, opacity: number) {
+  const line = penLine(element);
+  if (!line) {
+    let outline = nibCache.get(element);
+    if (!outline) nibCache.set(element, outline = new Path2D(nibOutline(element)));
+    context.fillStyle = element.stroke;
+    context.fill(outline, 'nonzero');
+    return;
+  }
+  const { body } = elementPaths(element);
+  context.lineCap = line.cap; context.lineJoin = line.join;
+  context.setLineDash(line.dash);
+  for (const pass of line.passes) {
+    context.globalAlpha = opacity * pass.alpha;
+    context.lineWidth = pass.width;
+    if (pass.dx || pass.dy) { context.save(); context.translate(pass.dx, pass.dy); context.stroke(body); context.restore(); }
+    else context.stroke(body);
+  }
+  context.setLineDash([]);
+}
+
 function strokeOutline(context: CanvasRenderingContext2D, element: CanvasElement, paths: ElementPaths) {
   context.setLineDash(strokeDash(element)); context.stroke(paths.body); context.setLineDash([]);
   if (paths.heads) context.stroke(paths.heads);
@@ -116,12 +142,13 @@ export function drawElement(context: CanvasRenderingContext2D, element: CanvasEl
   context.lineJoin = 'round';
   if (element.type === 'image') drawCanvasImage(context, element);
   else if (element.type === 'text') drawLines(context, element, layoutTextElement(element));
+  else if (element.type === 'freedraw') drawInk(context, element, opacity);
   else {
     const paths = elementPaths(element);
     if (element.fill !== 'transparent' && LABELLED_TYPES.has(element.type)) context.fill(paths.body);
     if (paths.filledHeads) { context.fillStyle = element.stroke; context.fill(paths.filledHeads); }
     strokeOutline(context, element, paths);
-    if (element.style === 'sketch' && element.type !== 'freedraw') {
+    if (element.style === 'sketch') {
       context.save();
       context.translate(Math.sin(element.seed * 1.618) * 1.1, Math.cos(element.seed) * 0.9);
       context.rotate(Math.sin(element.seed) * 0.003);
@@ -286,6 +313,13 @@ export function paintCanvas(context: CanvasRenderingContext2D, document: CanvasD
     context.globalAlpha = 0.55;
     for (const b of options.pendingSelection) context.strokeRect(b.x - pad, b.y - pad, b.width + pad * 2, b.height + pad * 2);
     context.globalAlpha = 1;
+  }
+  if (options.lasso && options.lasso.length > 1) {
+    context.beginPath();
+    options.lasso.forEach((point, i) => i ? context.lineTo(point.x, point.y) : context.moveTo(point.x, point.y));
+    context.closePath();
+    context.globalAlpha = 0.08; context.fillStyle = selectionColor; context.fill('evenodd');
+    context.globalAlpha = 1; context.setLineDash([5 / zoom, 4 / zoom]); context.stroke(); context.setLineDash([]);
   }
   if (options.eraser) paintEraser(context, options.eraser.center, options.eraser.radius, zoom);
   if (options.captureGhost) {

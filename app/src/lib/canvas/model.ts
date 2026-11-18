@@ -8,6 +8,8 @@ export type CanvasTextAlign = 'left' | 'center' | 'right';
 export type CanvasVerticalAlign = 'top' | 'middle' | 'bottom';
 export type CanvasArrowhead = 'none' | 'arrow' | 'triangle' | 'dot' | 'bar' | 'diamond';
 export type CanvasRoundness = 'sharp' | 'round';
+/** What a freehand stroke is drawn with (`pens.ts`); the two markers are the highlighter's. */
+export type CanvasPen = 'ball' | 'fountain' | 'pencil' | 'brush' | 'sketch' | 'chinese' | 'dashed' | 'dotted' | 'roundMarker' | 'flatMarker';
 /** How an arrow's path runs through its points: straight segments, a smooth curve, or right angles. */
 export type CanvasArrowType = 'sharp' | 'curved' | 'elbow';
 /** An edge anchor is normalised 0..1 within the target's bounds. */
@@ -46,6 +48,7 @@ export interface CanvasElement {
   endArrowhead?: CanvasArrowhead;
   roundness?: CanvasRoundness;
   arrowType?: CanvasArrowType;
+  pen?: CanvasPen;
   startBinding?: CanvasBinding;
   endBinding?: CanvasBinding;
   /** An elbow arrow's placed segments in path order (`elbow/lanes.ts`). */
@@ -59,7 +62,7 @@ export interface CanvasElement {
 export const CANVAS_DEFAULTS = {
   opacity: 1, strokeStyle: 'solid', fontFamily: 'sans', fontSize: 24, textAlign: 'left', labelAlign: 'center',
   verticalAlign: 'middle', startArrowhead: 'none', endArrowhead: 'arrow', roundness: 'round', diamondRoundness: 'sharp',
-  arrowType: 'sharp',
+  arrowType: 'sharp', pen: 'ball',
 } as const satisfies Record<string, string | number>;
 
 export const LABELLED_TYPES: ReadonlySet<CanvasElement['type']> = new Set(['rectangle', 'ellipse', 'diamond']);
@@ -71,7 +74,8 @@ export const arrowTypeOf = (el: CanvasElement): CanvasArrowType => el.arrowType 
 export const arrowheadOf = (el: CanvasElement, end: 'start' | 'end'): CanvasArrowhead =>
   end === 'start' ? el.startArrowhead ?? CANVAS_DEFAULTS.startArrowhead : el.endArrowhead ?? CANVAS_DEFAULTS.endArrowhead;
 
-export type CanvasTool = Exclude<CanvasElement['type'], 'image'> | 'select' | 'hand' | 'eraser' | 'capture' | 'crop';
+/** The highlighter draws freehand strokes with a marker pen. */
+export type CanvasTool = Exclude<CanvasElement['type'], 'image'> | 'highlighter' | 'select' | 'lasso' | 'hand' | 'eraser' | 'capture' | 'crop';
 
 export interface CanvasDocument {
   type: 'oculus-canvas';
@@ -97,6 +101,7 @@ const CHOICES: Record<string, readonly string[]> = {
   strokeStyle: ['solid', 'dashed', 'dotted'], fontFamily: ['sans', 'serif', 'mono'], textAlign: ['left', 'center', 'right'],
   verticalAlign: ['top', 'middle', 'bottom'], startArrowhead: ARROWHEADS, endArrowhead: ARROWHEADS, roundness: ['sharp', 'round'],
   arrowType: ['sharp', 'curved', 'elbow'],
+  pen: ['ball', 'fountain', 'pencil', 'brush', 'sketch', 'chinese', 'dashed', 'dotted', 'roundMarker', 'flatMarker'],
 };
 /** Target IDs are not checked here: a dangling binding must not block loading. */
 const binding = (v: unknown) => record(v) && typeof v.elementId === 'string' && v.elementId !== ''

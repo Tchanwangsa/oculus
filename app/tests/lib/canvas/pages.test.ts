@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { createCanvasDocument, type CanvasDocument, type CanvasElement } from '../../../src/lib/canvas/model';
-import { addPage, removePage } from '../../../src/lib/canvas/pages';
-import { createPaper, pageRects, pageView, type Paper } from '../../../src/lib/canvas/paper';
+import { addPage, removePage, setAllPageTemplates, setPageTemplate } from '../../../src/lib/canvas/pages';
+import { applyCanvasTransaction, diffCanvasContent } from '../../../src/lib/canvas/collaboration';
+import { createPaper, pageRects, pageView, type Paper, type PaperTemplate } from '../../../src/lib/canvas/paper';
 import { exportBounds, paperSvg, templateMarks } from '../../../src/lib/canvas/renderPaper';
 import { exportCanvasSvg } from '../../../src/lib/canvas/renderSvg';
 import { parseCanvasDocument, serializeCanvasDocument } from '../../../src/lib/canvas/model';
@@ -71,10 +72,10 @@ describe('pageView', () => {
 });
 
 describe('page templates', () => {
-  const rect = (template: 'blank' | 'grid' | 'ruled' | 'dotted') => ({ ...pageRects({ pages: [{ id: 'p', width: 140, height: 280, template }] })[0] });
+  const rect = (template: PaperTemplate) => ({ ...pageRects({ pages: [{ id: 'p', width: 140, height: 280, template }] })[0] });
 
   test('blank paper has no marks', () => {
-    expect(templateMarks(rect('blank'))).toEqual({ lines: [], dots: [] });
+    expect(templateMarks(rect('blank'))).toEqual({ lines: [], bold: [], dots: [] });
   });
   test('grid paper has a line every 14 points each way, inside the page', () => {
     const { lines, dots } = templateMarks(rect('grid'));
@@ -92,6 +93,40 @@ describe('page templates', () => {
     const { lines, dots } = templateMarks(rect('dotted'));
     expect(lines).toEqual([]);
     expect(dots.length / 2).toBe(11 * 21);
+  });
+  test('graph paper is a grid with every fifth line bold', () => {
+    const { lines, bold } = templateMarks(rect('graph'));
+    expect(lines).toEqual(templateMarks(rect('grid')).lines);
+    expect(bold.length / 4).toBe(5 + 3);
+    expect(bold.slice(0, 4)).toEqual([-70, 0, 70, 0]);
+    expect(bold.slice(4, 8)).toEqual([-70, 70, 70, 70]);
+  });
+  test('cornell paper is ruled, with a header, a cue column and a summary that starts on a ruled line', () => {
+    const { lines, bold } = templateMarks(rect('cornell'));
+    expect(lines).toEqual(templateMarks(rect('ruled')).lines);
+    // 280 high: the summary takes the last 18%, snapped up to the ruled line at 60 + 23 * 7.
+    expect(bold).toEqual([-70, 60, 70, 60, -70, 221, 70, 221, -31, 60, -31, 221]);
+  });
+  test('music paper has staves of five lines inside its margins', () => {
+    const { lines, bold, dots } = templateMarks(rect('music'));
+    expect([bold, dots]).toEqual([[], []]);
+    // Staves start at 60, 132 and 204; each is 28 high and must end 40 above the page's foot.
+    expect(lines.length / 4).toBe(5 * 3);
+    expect(lines.slice(0, 8)).toEqual([-34, 60, 34, 60, -34, 67, 34, 67]);
+    expect(lines.at(-1)).toBe(232);
+  });
+  test('isometric paper has upright lines and two slanted families, all inside the page', () => {
+    const page = rect('isometric'), { lines } = templateMarks(page);
+    const slopes = new Set<string>();
+    for (let i = 0; i < lines.length; i += 4) {
+      const [x1, y1, x2, y2] = lines.slice(i, i + 4);
+      for (const [x, y] of [[x1, y1], [x2, y2]]) {
+        expect(x).toBeGreaterThanOrEqual(page.x - 1e-9); expect(x).toBeLessThanOrEqual(page.x + page.width + 1e-9);
+        expect(y).toBeGreaterThanOrEqual(page.y - 1e-9); expect(y).toBeLessThanOrEqual(page.y + page.height + 1e-9);
+      }
+      slopes.add(x1 === x2 ? 'upright' : ((y2 - y1) / (x2 - x1)).toFixed(3));
+    }
+    expect([...slopes].sort()).toEqual(['-0.577', '0.577', 'upright']);
   });
   test('only the visible region is generated', () => {
     const all = templateMarks(rect('grid'));
@@ -119,5 +154,43 @@ describe('notebook export', () => {
     expect(svg.indexOf('stroke="#cfd8ea"')).toBeGreaterThan(-1);
     expect(svg.indexOf('stroke="#cfd8ea"')).toBeLessThan(svg.indexOf('<g transform'));
     expect(paperSvg(createPaper('blank'))).not.toContain('<path');
+  });
+});
+
+describe('changing a page template', () => {
+  const doc = (): CanvasDocument => ({
+    ...createCanvasDocument(),
+    elements: [{ id: 'ink', type: 'freedraw', x: 0, y: 900, width: 10, height: 10, stroke: '#000', fill: 'transparent', strokeWidth: 2, style: 'clean', seed: 1, points: [{ x: 0, y: 0 }, { x: 10, y: 10 }] }],
+    paper: { pages: [{ id: 'p1', width: 595, height: 842, template: 'grid' }, { id: 'p2', width: 595, height: 842 }] },
+  });
+  test('one page changes and nothing drawn moves', () => {
+    const before = doc(), after = setPageTemplate(before, 1, 'cornell');
+    expect(after.paper!.pages.map(page => page.template)).toEqual(['grid', 'cornell']);
+    expect(after.elements).toBe(before.elements);
+    expect(before.paper!.pages[1].template).toBeUndefined();
+  });
+  test('applying a template to all pages keeps the layout, ink and pages that already match', () => {
+    const before = doc(), after = setAllPageTemplates(before, 'grid');
+    expect(after.paper!.pages.map(page => page.template)).toEqual(['grid', 'grid']);
+    expect(after.paper!.pages[0]).toBe(before.paper!.pages[0]);
+    expect(after.elements).toBe(before.elements);
+    expect(setAllPageTemplates(after, 'grid')).toBe(after);
+  });
+  test('a template the page already has, an unknown page and a whiteboard change nothing', () => {
+    const before = doc();
+    expect(setPageTemplate(before, 0, 'grid')).toBe(before);
+    expect(setPageTemplate(before, 1, 'blank')).toBe(before);
+    expect(setPageTemplate(before, 2, 'ruled')).toBe(before);
+    const board = createCanvasDocument();
+    expect(setPageTemplate(board, 0, 'ruled')).toBe(board);
+    expect(setAllPageTemplates(board, 'ruled')).toBe(board);
+  });
+  test('the change travels as a paper edit and undoes', () => {
+    const before = doc(), after = setAllPageTemplates(before, 'isometric');
+    const redo = diffCanvasContent(before, after), undo = diffCanvasContent(after, before);
+    expect(redo.edits).toEqual([]);
+    expect(redo.paper?.after?.pages.map(page => page.template)).toEqual(['isometric', 'isometric']);
+    expect(applyCanvasTransaction(before, redo).paper).toEqual(after.paper);
+    expect(applyCanvasTransaction(after, undo).paper).toEqual(before.paper);
   });
 });
