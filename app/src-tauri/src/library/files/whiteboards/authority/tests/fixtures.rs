@@ -24,9 +24,12 @@ fn fixtures(dir: &str) -> Vec<(String, String)> {
     files
 }
 
+/// As a session parses a file (`session::parse`) and the TypeScript
+/// `parseWhiteboardDocument` does: the legacy type is read as the current one.
 fn parse(text: &str) -> Result<Value, String> {
-    let value: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let mut value: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
     model::validate(&value)?;
+    model::normalize_type(&mut value);
     Ok(value)
 }
 
