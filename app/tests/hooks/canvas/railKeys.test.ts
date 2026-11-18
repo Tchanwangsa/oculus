@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import type { CanvasTool } from '@/lib/canvas/model';
 import { createHarness, key } from './harness';
 
-describe('the rail shortcuts are each tool\'s first letter', () => {
+describe('the rail shortcuts are each tool\'s letter', () => {
   const tools: [string, CanvasTool][] = [
-    ['s', 'select'], ['l', 'lasso'], ['g', 'hand'], ['p', 'freedraw'], ['h', 'highlighter'], ['e', 'eraser'], ['t', 'text'],
+    ['s', 'select'], ['l', 'lasso'], ['g', 'hand'], ['c', 'capture'], ['p', 'freedraw'], ['h', 'highlighter'], ['e', 'eraser'], ['t', 'text'],
     ['r', 'rectangle'], ['o', 'ellipse'], ['d', 'diamond'], ['a', 'arrow'], ['n', 'line'],
   ];
   for (const [letter, tool] of tools) {
@@ -20,6 +20,26 @@ describe('the rail shortcuts are each tool\'s first letter', () => {
     h.editor.keyDown(key('g', { shift: true })); h.render();
     expect(h.editor.grid).toBe(!before);
     expect(h.editor.tool).toBe('select');
+    h.editor.keyDown(key('G', { shift: true })); h.render();
+    expect(h.editor.grid).toBe(before);
+  });
+  test('G alone is Grab and leaves the grid alone', () => {
+    const h = createHarness();
+    const before = h.editor.grid;
+    h.editor.keyDown(key('g')); h.render();
+    expect(h.editor.tool).toBe('hand');
+    expect(h.editor.grid).toBe(before);
+  });
+  test('the copy shortcut is not the Capture key', () => {
+    const h = createHarness();
+    h.editor.keyDown(key('c', { meta: true })); h.render();
+    expect(h.editor.tool).toBe('select');
+  });
+  test('V is not a tool key', () => {
+    const h = createHarness();
+    h.editor.setTool('freedraw'); h.render();
+    h.editor.keyDown(key('v')); h.render();
+    expect(h.editor.tool).toBe('freedraw');
   });
   test('I asks the host for the image picker', () => {
     let opened = 0;

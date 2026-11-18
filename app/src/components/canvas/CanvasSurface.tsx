@@ -75,11 +75,19 @@ function CanvasEmpty({ onStart }: { onStart: () => void }) {
   </div>;
 }
 
+/** The shortcuts popover's rows; the tools' own keys are on the rail. */
+const shortcuts = (notebook: boolean): [string, string][] => [
+  ['Pan', 'Space + drag'], ['Zoom', `${shortcut('mod')} + scroll`], ['Multiple selection', 'Shift + click'], ['Write in a shape', 'Enter'], ['Constrain shape', 'Shift + drag'],
+  ['Scale selection', 'Drag a corner'], ['Stretch selection', 'Drag an edge'], ['Scale from an edge', 'Shift + drag edge'], ['Place arrow freely', `${shortcut('mod')} + drag`],
+  ['Duplicate', shortcut('mod+D')], ['Layer up / down', `${shortcut('mod+]')} / ${shortcut('mod+[')}`], ['Layer to front / back', `${shortcut('mod+shift+]')} / ${shortcut('mod+shift+[')}`],
+  ['Undo', shortcut('mod+Z')], ...(notebook ? [['Fit page width', '1']] as [string, string][] : [['Fit drawing', '1'], ['Toggle grid', shortcut('shift+G')]] as [string, string][]),
+];
+
 const hints: Record<string, string> = {
-  select: 'Drag to select · Double-click an image to crop', capture: 'Drag an area · Adjust its edges · ' + shortcut('mod+C') + ' to copy', crop: 'Drag edges or corners to crop · Enter to apply · Escape to cancel', hand: 'Drag to move around',
+  select: 'Drag to select · Double-click an image to crop', lasso: 'Draw a loop round what you want · Drag inside the selection to move it', capture: 'Drag an area · Adjust its edges · ' + shortcut('mod+C') + ' to copy', crop: 'Drag edges or corners to crop · Enter to apply · Escape to cancel', hand: 'Drag to move around',
   rectangle: 'Drag to draw · Hold Shift for a square', ellipse: 'Drag to draw · Hold Shift for a circle',
   diamond: 'Drag to draw · Hold Shift to constrain', line: 'Drag to draw · Hold Shift to snap angle',
-  arrow: `Drag to connect · Hold Shift to snap angle · Hold ${shortcut('mod')} to place freely`, freedraw: 'Draw freely · Escape to select',
+  arrow: `Drag to connect · Hold Shift to snap angle · Hold ${shortcut('mod')} to place freely`, freedraw: 'Draw freely · Escape to select', highlighter: 'Highlight freely · Escape to select',
   text: `Click anywhere or on a shape to write · Escape or ${shortcut('mod+Enter')} to finish`, eraser: 'Drag over ink and shapes to erase · Escape to cancel · Select an image and use the trash to delete it',
 };
 
@@ -90,8 +98,9 @@ const hints: Record<string, string> = {
 export function CanvasSurface({ document, onChange, onViewportChange, onPageChange, title, kind = 'canvas', suppressNativeGestures = false, cameraKey }: { document: CanvasDocument; onChange: (document: CanvasDocument) => void; onViewportChange?: (viewport: CanvasDocument['viewport']) => void; onPageChange?: (index: number) => void; title?: string; kind?: CanvasKind; suppressNativeGestures?: boolean; cameraKey?: string }) {
   const platform = useCanvasPlatform();
   const [toolPreferences, setToolPreferences] = useState(loadCanvasToolPreferences);
-  const editor = useCanvasInteraction(document, onChange, { onViewportChange, ...toolPreferences, kind, cameraKey });
-  const media = useCanvasMediaDrop(editor.root, editor.documentRef, editor.insertImages, editor.notebook);
+  const [imageDialogOpen, setImageDialogOpen] = useState(false);
+  const editor = useCanvasInteraction(document, onChange, { onViewportChange, ...toolPreferences, kind, cameraKey, onInsertImage: () => setImageDialogOpen(true) });
+  const media = useCanvasMediaDrop(editor.root, editor.canvas, editor.documentRef, editor.insertImages, editor.notebook);
   // Saved on this device only; collaborators never see them.
   const changeToolPreferences = (patch: Partial<CanvasToolPreferences>) => {
     const next = { ...toolPreferences, ...patch };
@@ -101,7 +110,6 @@ export function CanvasSurface({ document, onChange, onViewportChange, onPageChan
   const [engineError, setEngineError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  const [imageDialogOpen, setImageDialogOpen] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(false);
   useEffect(() => subscribeCanvasImages(editor.redraw), [editor.redraw]);
   const pageInView = editor.pages?.index;
@@ -135,61 +143,71 @@ export function CanvasSurface({ document, onChange, onViewportChange, onPageChan
     } catch (error) { setExportError(error instanceof Error ? error.message : String(error)); }
     finally { setExporting(false); }
   };
-  // The page sidebar sits beside the editor, outside its root, so the drawing's size and keys stay its own.
-  return <div className="canvas-frame relative flex h-full min-h-0 w-full">
+  const focusEditor = () => editor.root.current?.focus({ preventScroll: true });
+  const showStyle = editor.inspector.sections.length > 0 || editor.tool === 'eraser' || !!editor.inkPresets;
+  const divider = <span aria-hidden="true" className="h-5 w-px shrink-0 bg-border-subtle" />;
+  // The rail and the page sidebar sit beside the editor root, so its keys, clipboard and focus stay the drawing's.
+  return <div className="canvas-frame relative flex h-full min-h-0 w-full bg-card">
+    <CanvasToolbar tool={editor.tool} onTool={tool => { editor.setTool(tool); focusEditor(); }} onAddImage={() => setImageDialogOpen(true)} onInsert={template => { editor.insertTemplate(template); focusEditor(); }} />
     {editor.pages && pagesOpen ? <PageSidebar pages={editor.pages} document={current} onClose={() => setPagesOpen(false)} /> : null}
     {/* Shown only where the sidebar lies over the drawing (`canvas.css`), so it closes like a drawer. */}
     {editor.pages && pagesOpen ? <div aria-hidden="true" className="canvas-page-scrim" onPointerDown={() => setPagesOpen(false)} /> : null}
-    <div ref={editor.root} data-canvas-editor="true" tabIndex={0} aria-label="Infinite canvas editor" className="canvas-editor relative h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-card outline-none"
+    <div ref={editor.root} data-canvas-editor="true" tabIndex={0} aria-label="Infinite canvas editor" className="canvas-editor relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card outline-none"
       onKeyDown={editor.keyDown} onKeyUp={editor.keyUp} onBlur={event => {
         editor.blur();
         // Inspector fields and their portaled pickers belong to the open text edit.
         if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.canvas-text-input, [data-canvas-inspector]'))) editor.commitText();
       }} onCopy={editor.copy} onCut={editor.cut} onPaste={event => { media.paste(event); if (!event.defaultPrevented) editor.paste(event); }}>
-      <canvas ref={editor.canvas} draggable={false} aria-label="Drawing canvas" className="absolute inset-0 block h-full w-full" style={{ cursor: editor.cursor }}
-        onDragEnter={media.dragOver} onDragOver={media.dragOver} onDragLeave={media.dragLeave} onDrop={media.drop}
-        onPointerDown={editor.pointerDown} onPointerMove={editor.pointerMove} onPointerUp={editor.pointerUp} onPointerCancel={editor.pointerCancel} onPointerLeave={editor.pointerLeave} onDoubleClick={editor.doubleClick} onContextMenu={event => event.preventDefault()} />
-      {media.preview ? <div className="pointer-events-none absolute inset-0 z-20" aria-label="Image drop preview">
-        {media.boxes.length ? media.boxes.map((box, index) => <div key={index} className="absolute border-2 border-dashed border-brand bg-brand/10" style={{ left: box.x * current.viewport.zoom + current.viewport.x, top: box.y * current.viewport.zoom + current.viewport.y, width: box.width * current.viewport.zoom, height: box.height * current.viewport.zoom }}><img src={box.dataUrl} alt="" className="h-full w-full opacity-50" /></div>)
-          : <div className="absolute flex h-28 w-44 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-xl border-2 border-dashed border-brand bg-card/90 text-xs text-brand shadow-sm" style={{ left: media.preview.at.x, top: media.preview.at.y }}>Drop images here</div>}
-      </div> : null}
-      {current.elements.length === 0 && !editor.notebook && editor.tool === 'select' && !editor.textDraft ? <CanvasEmpty onStart={() => { editor.setTool('freedraw'); editor.root.current?.focus(); }} /> : null}
-      <CanvasToolbar tool={editor.tool} onTool={tool => { editor.setTool(tool); editor.root.current?.focus({ preventScroll: true }); }} onAddImage={() => setImageDialogOpen(true)} />
-      <CanvasImageDialog open={imageDialogOpen} onOpenChange={setImageDialogOpen} onImport={editor.insertImages} />
-      {editor.region && !editor.captureHold ? <CanvasRegionActions key={JSON.stringify(editor.region.bounds)} region={editor.region} viewport={current.viewport} onCopy={editor.copyRegion} onDuplicate={editor.duplicateRegion} copyState={editor.regionCopyState} copyError={editor.regionError} /> : null}
-      {editor.captureHold ? <CanvasCaptureHold hold={editor.captureHold} viewport={current.viewport} /> : null}
-      {editor.inspector.sections.length || editor.tool === 'eraser' ? <CanvasStyleBar {...editor.inspector} onChange={editor.changeStyle} onPreview={editor.previewStyle} selectionCount={editor.selection.length} onDelete={editor.deleteSelected} onCrop={editor.canCrop ? () => editor.startCrop() : undefined} layerMoves={editor.layerMoves} onReorder={editor.reorder}
-        eraser={editor.tool === 'eraser' ? { preferences: toolPreferences, onChange: changeToolPreferences } : undefined} /> : null}
-      {editor.textDraft ? <CanvasTextInput key={editor.textDraft.element.id} draft={editor.textDraft} viewport={current.viewport} onInput={editor.editText} onCommit={editor.commitText} /> : null}
-      <div className="canvas-bottom absolute bottom-4 left-4 z-10 flex items-center gap-2">
-        <div className="canvas-chrome flex items-center rounded-xl border border-border-subtle p-1 shadow-xs" role="group" aria-label="Canvas zoom">
-          <CanvasIconButton label="Zoom out (−)" onClick={() => editor.zoom(1 / 1.2)} disabled={!editor.canZoomOut}><MinusIcon size={15} /></CanvasIconButton>
-          <Tooltip><TooltipTrigger asChild><button type="button" className="min-w-12 cursor-pointer rounded-md px-1 py-1.5 text-[12px] tabular-nums text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-brand" aria-label={`Zoom ${editor.zoomPercent} percent; reset to 100 percent`} onClick={editor.resetZoom}>{editor.zoomPercent}%</button></TooltipTrigger><TooltipContent side="top" sideOffset={8}>Reset zoom (0)</TooltipContent></Tooltip>
-          <CanvasIconButton label="Zoom in (+)" onClick={() => editor.zoom(1.2)} disabled={!editor.canZoomIn}><PlusIcon size={15} /></CanvasIconButton>
-          <div className="canvas-reset-view ml-1 border-l border-border-subtle pl-1"><CanvasIconButton label={editor.notebook ? 'Fit page width (1)' : 'Fit drawing (1)'} onClick={editor.fit}><ArrowsInSimpleIcon size={17} /></CanvasIconButton></div>
+      <div className="canvas-bar flex h-12 shrink-0 items-center gap-2.5 border-b border-border-subtle bg-card px-2.5">
+        {showStyle ? <CanvasStyleBar {...editor.inspector} onChange={editor.changeStyle} onPreview={editor.previewStyle} selectionCount={editor.selection.length} onDelete={editor.deleteSelected} onCrop={editor.canCrop ? () => editor.startCrop() : undefined} layerMoves={editor.layerMoves} onReorder={editor.reorder}
+          presets={editor.inkPresets ? { items: editor.inkPresets.items, active: editor.inkPresets.active, onSelect: editor.inkPresets.select, label: editor.tool === 'highlighter' ? 'Highlighter' : 'Pen' } : null}
+          eraser={editor.tool === 'eraser' ? { preferences: toolPreferences, onChange: changeToolPreferences } : undefined} /> : null}
+        <div className="ml-auto flex shrink-0 items-center gap-2.5" role="toolbar" aria-label="History and view">
+          <CanvasHistory undo={() => editor.history()} redo={() => editor.history(true)} canUndo={editor.canUndo} canRedo={editor.canRedo} />
+          {divider}
+          <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label="Canvas zoom">
+            <CanvasIconButton label="Zoom out (−)" onClick={() => editor.zoom(1 / 1.2)} disabled={!editor.canZoomOut}><MinusIcon size={15} /></CanvasIconButton>
+            <Tooltip><TooltipTrigger asChild><button type="button" className="canvas-bar-zoom min-w-12 cursor-pointer rounded-md px-1 py-1.5 text-[12px] tabular-nums text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-brand" aria-label={`Zoom ${editor.zoomPercent} percent; reset to 100 percent`} onClick={editor.resetZoom}>{editor.zoomPercent}%</button></TooltipTrigger><TooltipContent side="bottom" sideOffset={8}>Reset zoom (0)</TooltipContent></Tooltip>
+            <CanvasIconButton label="Zoom in (+)" onClick={() => editor.zoom(1.2)} disabled={!editor.canZoomIn}><PlusIcon size={15} /></CanvasIconButton>
+            <CanvasIconButton label={editor.notebook ? 'Fit page width (1)' : 'Fit drawing (1)'} onClick={editor.fit} className="canvas-bar-zoom"><ArrowsInSimpleIcon size={17} /></CanvasIconButton>
+          </div>
+          {divider}
+          <div className="flex shrink-0 items-center gap-0.5">
+            {editor.notebook ? null : <CanvasIconButton label={`Toggle grid (${shortcut('shift+G')})`} active={editor.grid} aria-pressed={editor.grid} onClick={() => editor.setGrid(value => !value)}><GridFourIcon size={17} /></CanvasIconButton>}
+            <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Export drawing" disabled={(!current.elements.length && !editor.notebook) || exporting} className="rounded-lg text-muted-foreground">{exporting ? <SpinnerGapIcon className="animate-spin" /> : <DownloadSimpleIcon size={17} />}</Button></PopoverTrigger>
+              <PopoverContent side="bottom" align="end" className="w-52 p-1.5"><div className="px-2.5 py-2 text-xs font-medium">Export drawing</div>
+                <Button variant="ghost" className="w-full justify-start rounded-md text-xs" disabled={exporting} onClick={() => void exportImage('png')}><FileImageIcon />PNG image<ArrowSquareOutIcon className="ml-auto text-muted-foreground" /></Button>
+                <Button variant="ghost" className="w-full justify-start rounded-md text-xs" disabled={exporting} onClick={() => void exportImage('svg')}><FileSvgIcon />SVG vector<ArrowSquareOutIcon className="ml-auto text-muted-foreground" /></Button>
+                {editor.notebook && platform.exportPdf ? <Button variant="ghost" className="w-full justify-start rounded-md text-xs" disabled={exporting} onClick={() => void exportPdf()}><FilePdfIcon />PDF document<ArrowSquareOutIcon className="ml-auto text-muted-foreground" /></Button> : null}
+                <p className="px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">{editor.notebook ? 'Exports every page, without the selection. The PDF has one page for each notebook page.' : 'Exports the whole drawing without the grid or selection.'}</p>
+              </PopoverContent>
+            </Popover>
+            <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Canvas shortcuts" className="canvas-bar-help rounded-lg text-muted-foreground"><QuestionIcon size={17} /></Button></PopoverTrigger>
+              <PopoverContent side="bottom" align="end" className="w-64"><div className="mb-3 text-[13px] font-medium">A little room to move</div><dl className="space-y-2 text-xs text-muted-foreground">
+                {shortcuts(editor.notebook).map(([label, key]) => <div key={label} className="flex justify-between gap-4"><dt>{label}</dt><dd className="text-foreground">{key}</dd></div>)}
+              </dl></PopoverContent>
+            </Popover>
+          </div>
         </div>
-        <CanvasHistory undo={() => editor.history()} redo={() => editor.history(true)} canUndo={editor.canUndo} canRedo={editor.canRedo} />
       </div>
-      {editor.pages ? <div className="canvas-pages absolute left-1/2 z-10 -translate-x-1/2"><NotebookPageBar pages={editor.pages} sidebarOpen={pagesOpen} onToggleSidebar={() => setPagesOpen(open => !open)} /></div> : null}
-      <div key={hint} className="canvas-short-hint pointer-events-none absolute right-0 bottom-[4.7rem] left-0 text-center text-[11px] text-muted-foreground/65">{hint}</div>
-      <div className="canvas-utilities canvas-chrome absolute right-4 bottom-4 z-10 flex items-center gap-1.5 rounded-xl border border-border-subtle p-1 shadow-xs">
-        {editor.notebook ? null : <CanvasIconButton label="Toggle grid (G)" active={editor.grid} aria-pressed={editor.grid} onClick={() => editor.setGrid(value => !value)}><GridFourIcon size={17} /></CanvasIconButton>}
-        <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Export drawing" disabled={(!current.elements.length && !editor.notebook) || exporting} className="rounded-lg text-muted-foreground">{exporting ? <SpinnerGapIcon className="animate-spin" /> : <DownloadSimpleIcon size={17} />}</Button></PopoverTrigger>
-          <PopoverContent side="top" align="end" className="w-52 p-1.5"><div className="px-2.5 py-2 text-xs font-medium">Export drawing</div>
-            <Button variant="ghost" className="w-full justify-start rounded-md text-xs" disabled={exporting} onClick={() => void exportImage('png')}><FileImageIcon />PNG image<ArrowSquareOutIcon className="ml-auto text-muted-foreground" /></Button>
-            <Button variant="ghost" className="w-full justify-start rounded-md text-xs" disabled={exporting} onClick={() => void exportImage('svg')}><FileSvgIcon />SVG vector<ArrowSquareOutIcon className="ml-auto text-muted-foreground" /></Button>
-            {editor.notebook && platform.exportPdf ? <Button variant="ghost" className="w-full justify-start rounded-md text-xs" disabled={exporting} onClick={() => void exportPdf()}><FilePdfIcon />PDF document<ArrowSquareOutIcon className="ml-auto text-muted-foreground" /></Button> : null}
-            <p className="px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">{editor.notebook ? 'Exports every page, without the selection. The PDF has one page for each notebook page.' : 'Exports the whole drawing without the grid or selection.'}</p>
-          </PopoverContent>
-        </Popover>
-        <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Canvas shortcuts" className="rounded-lg text-muted-foreground"><QuestionIcon size={17} /></Button></PopoverTrigger>
-          <PopoverContent side="top" align="end" className="w-64"><div className="mb-3 text-[13px] font-medium">A little room to move</div><dl className="space-y-2 text-xs text-muted-foreground">
-            {[["Pan", 'Space + drag'], ['Zoom', `${shortcut('mod')} + scroll`], ['Multiple selection', 'Shift + click'], ['Write in a shape', 'Enter'], ['Constrain shape', 'Shift + drag'], ['Scale selection', 'Drag a corner'], ['Stretch selection', 'Drag an edge'], ['Scale from an edge', 'Shift + drag edge'], ['Place arrow freely', `${shortcut('mod')} + drag`], ['Duplicate', shortcut('mod+D')], ['Layer up / down', `${shortcut('mod+]')} / ${shortcut('mod+[')}`], ['Layer to front / back', `${shortcut('mod+shift+]')} / ${shortcut('mod+shift+[')}`], ['Undo', shortcut('mod+Z')], ['Fit drawing', '1']].map(([label, key]) => <div key={label} className="flex justify-between gap-4"><dt>{label}</dt><dd className="text-foreground">{key}</dd></div>)}
-          </dl></PopoverContent>
-        </Popover>
+      <div className="canvas-stage relative min-h-0 flex-1 overflow-hidden">
+        <canvas ref={editor.canvas} draggable={false} aria-label="Drawing canvas" className="absolute inset-0 block h-full w-full" style={{ cursor: editor.cursor }}
+          onDragEnter={media.dragOver} onDragOver={media.dragOver} onDragLeave={media.dragLeave} onDrop={media.drop}
+          onPointerDown={editor.pointerDown} onPointerMove={editor.pointerMove} onPointerUp={editor.pointerUp} onPointerCancel={editor.pointerCancel} onPointerLeave={editor.pointerLeave} onDoubleClick={editor.doubleClick} onContextMenu={event => event.preventDefault()} />
+        {media.preview ? <div className="pointer-events-none absolute inset-0 z-20" aria-label="Image drop preview">
+          {media.boxes.length ? media.boxes.map((box, index) => <div key={index} className="absolute border-2 border-dashed border-brand bg-brand/10" style={{ left: box.x * current.viewport.zoom + current.viewport.x, top: box.y * current.viewport.zoom + current.viewport.y, width: box.width * current.viewport.zoom, height: box.height * current.viewport.zoom }}><img src={box.dataUrl} alt="" className="h-full w-full opacity-50" /></div>)
+            : <div className="absolute flex h-28 w-44 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-xl border-2 border-dashed border-brand bg-card/90 text-xs text-brand shadow-sm" style={{ left: media.preview.at.x, top: media.preview.at.y }}>Drop images here</div>}
+        </div> : null}
+        {current.elements.length === 0 && !editor.notebook && editor.tool === 'select' && !editor.textDraft ? <CanvasEmpty onStart={() => { editor.setTool('freedraw'); focusEditor(); }} /> : null}
+        {editor.region && !editor.captureHold ? <CanvasRegionActions key={JSON.stringify(editor.region.bounds)} region={editor.region} viewport={current.viewport} onCopy={editor.copyRegion} onDuplicate={editor.duplicateRegion} copyState={editor.regionCopyState} copyError={editor.regionError} /> : null}
+        {editor.captureHold ? <CanvasCaptureHold hold={editor.captureHold} viewport={current.viewport} /> : null}
+        {editor.textDraft ? <CanvasTextInput key={editor.textDraft.element.id} draft={editor.textDraft} viewport={current.viewport} onInput={editor.editText} onCommit={editor.commitText} /> : null}
+        {editor.pages ? <div className="canvas-pages absolute left-1/2 z-10 -translate-x-1/2"><NotebookPageBar pages={editor.pages} sidebarOpen={pagesOpen} onToggleSidebar={() => setPagesOpen(open => !open)} /></div> : null}
+        <div key={hint} className={cn('canvas-short-hint pointer-events-none absolute right-0 left-0 text-center text-[11px] text-muted-foreground/65', editor.pages ? 'bottom-[calc(var(--canvas-bottom-edge)+3.4rem)]' : 'bottom-(--canvas-bottom-edge)')}>{hint}</div>
+        {engineError || exportError || editor.historyError || media.error ? <div role="alert" className="absolute top-3 right-3 z-30 max-w-80 rounded-xl border border-destructive/20 bg-card p-3 text-xs text-destructive shadow-sm">{engineError ?? exportError ?? editor.historyError ?? media.error}<button type="button" className="mt-2 block cursor-pointer text-foreground underline" onClick={() => { setEngineError(null); setExportError(null); editor.clearHistoryError(); media.clearError(); }}>Dismiss</button></div> : null}
       </div>
-      {engineError || exportError || editor.historyError || media.error ? <div role="alert" className="canvas-alert absolute right-4 z-30 max-w-80 rounded-xl border border-destructive/20 bg-card p-3 text-xs text-destructive shadow-sm">{engineError ?? exportError ?? editor.historyError ?? media.error}<button type="button" className="mt-2 block cursor-pointer text-foreground underline" onClick={() => { setEngineError(null); setExportError(null); editor.clearHistoryError(); media.clearError(); }}>Dismiss</button></div> : null}
     </div>
+    <CanvasImageDialog open={imageDialogOpen} onOpenChange={setImageDialogOpen} onImport={editor.insertImages} />
   </div>;
 }
 

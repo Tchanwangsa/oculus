@@ -12,6 +12,9 @@ import { CANVAS_CLIPBOARD_MIME, serializeCanvasClipboard, parseCanvasClipboard, 
 import { applyElementChanges, type ElementChanges, type StackedAdditions } from '@/lib/canvas/changes';
 import { cutAlong, cutPieces, ERASER_SIZES, startCut, sweepTouches, type EraserMode, type EraserSize, type StrokeCut } from '@/lib/canvas/erase';
 import { boxBounds, boxSelection } from '@/lib/canvas/boxSelect';
+import { lassoSelection } from '@/lib/canvas/lasso';
+import { activePreset, loadInkPresets, patchPreset, saveInkPresets, selectPreset, toolPresets, type InkPresets, type InkTool } from '@/lib/canvas/inkPresets';
+import { buildTemplate, type CanvasTemplate } from '@/lib/canvas/templates';
 import { elementPage } from '@/lib/canvas/renderPaper';
 import { canReorder, reorderElements, type LayerMove } from '@/lib/canvas/layers';
 import { bindArrowEnd, findBindingSnap, followBindings, moveElements, sameSnap, sceneLookup, type BindingSnap } from '@/lib/canvas/bindings';
@@ -58,10 +61,12 @@ export interface CanvasInteractionOptions {
    * on one and is clipped to it. `canvas` (the default) is a whiteboard; any `paper` it holds is kept and never used.
    */
   kind?: CanvasKind;
+  /** Opens the host's image picker, which the I key asks for. */
+  onInsertImage?: () => void;
 }
 type Gesture = {
   /** `write` is a touch tap with the Text tool, which opens the overlay on release so a second finger can still start navigating. */
-  mode: 'pan' | 'draw' | 'move' | 'resize' | 'point' | 'segment' | 'marquee' | 'erase' | 'write' | 'capture' | 'crop' | 'capture-copy' | 'crop-confirm';
+  mode: 'pan' | 'draw' | 'move' | 'resize' | 'point' | 'segment' | 'marquee' | 'lasso' | 'erase' | 'write' | 'capture' | 'crop' | 'capture-copy' | 'crop-confirm';
   start: Point;
   screen: Point;
   original: CanvasDocument;
@@ -101,7 +106,18 @@ type HistoryEntry = { undo: CanvasTransaction; redo: CanvasTransaction; undoOrde
 const normalize = (a: Point, b: Point): Bounds => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y) });
 const newId = secureId;
 const newSeed = () => Math.floor(Math.random() * 100000);
-const NON_DRAWING = new Set<CanvasTool>(['select', 'hand', 'eraser', 'capture', 'crop']);
+const NON_DRAWING = new Set<CanvasTool>(['select', 'lasso', 'hand', 'eraser', 'capture', 'crop']);
+/** Tools that stay chosen after a stroke, rather than selecting what they drew. */
+const INK_TOOLS = new Set<CanvasTool>(['freedraw', 'highlighter']);
+/** The element type a drawing tool makes: the highlighter draws freehand strokes with a marker pen. */
+const toolType = (tool: CanvasTool) => (tool === 'highlighter' ? 'freedraw' : tool) as CanvasElement['type'];
+const inkTool = (tool: CanvasTool): InkTool | null => tool === 'freedraw' || tool === 'highlighter' ? tool : null;
+/** Rail keys, each its tool's first letter (`CanvasToolbar`); Shift+G is the grid, since G is Grab. */
+const TOOL_KEYS: Record<string, CanvasTool> = {
+  s: 'select', l: 'lasso', g: 'hand', c: 'capture', p: 'freedraw', h: 'highlighter', e: 'eraser', t: 'text',
+  r: 'rectangle', o: 'ellipse', d: 'diamond', a: 'arrow', n: 'line',
+};
+const TEMPLATE_KEYS: Record<string, CanvasTemplate> = { m: 'matrix', y: 'axes2', z: 'axes3' };
 const sameContent = (a: CanvasDocument, b: CanvasDocument) => sameValue({ ...a, viewport: null }, { ...b, viewport: null });
 const removes = (transaction: CanvasTransaction) => transaction.edits.some(edit => edit.after === null);
 
@@ -149,6 +165,15 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   const penSeen = useRef(false);
   const [style, setStyle] = useState<DrawingStyle>(resumed.style);
   useEffect(() => { saveToolState({ tool, style }); }, [tool, style]);
+  /** The pens and highlighters this device keeps ready; the one in use is what its tool draws with (`inkPresets.ts`). */
+  const [presets, setPresets] = useState<InkPresets>(loadInkPresets);
+  const changePresets = (change: (current: InkPresets) => InkPresets) => setPresets(current => {
+    const next = change(current);
+    if (next !== current) saveInkPresets(next);
+    return next;
+  });
+  /** What a tool's next element is drawn with: an ink tool's preset in use over the shared defaults. */
+  const toolStyle = (of: CanvasTool): DrawingStyle => { const ink = inkTool(of); return ink ? { ...style, ...activePreset(presets, ink) } : style; };
   const [grid, setGrid] = useState(true);
   const [selection, setSelection] = useState<string[]>([]);
   const [revision, setRevision] = useState(0);
@@ -196,6 +221,8 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   const marquee = useRef<Bounds | undefined>(undefined);
   /** What releasing the selection box now would select, and the bounds painted for the elements it would add. */
   const marqueePreview = useRef<{ ids: Set<string>; boxes: Bounds[] } | null>(null);
+  /** The loop the lasso has drawn so far, in world units. */
+  const lasso = useRef<Point[] | undefined>(undefined);
   const erasing = useRef<EraseState | null>(null);
   /** The whole-stroke eraser's targets: what a point can reach minus what this erase already took; rebuilt only when either changes. */
   const eraseTargets = useRef<{ owner: EraseState; source: readonly CanvasElement[]; taken: number; targets: CanvasElement[] } | null>(null);
@@ -277,7 +304,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       paintCanvas(context, documentRef.current, {
         ...size.current, ...paintOptions.current, selected: selected.current, ghosts: erase?.ghostList, eraser, pendingSelection: marqueePreview.current?.boxes,
         selectionColor: getComputedStyle(root.current!).getPropertyValue('--color-brand').trim() || '#5e6ad2',
-        marquee: marquee.current ?? regionRef.current?.bounds, captureSelection: regionRef.current?.kind === 'capture' || gesture.current?.mode === 'capture', captureGhost: captureGhost.current, cropSource: regionRef.current?.source ? elementBounds(regionRef.current.source) : undefined, overrides: overrides.current, bindingHint: bindHint.current,
+        marquee: marquee.current ?? regionRef.current?.bounds, lasso: lasso.current, captureSelection: regionRef.current?.kind === 'capture' || gesture.current?.mode === 'capture', captureGhost: captureGhost.current, cropSource: regionRef.current?.source ? elementBounds(regionRef.current.source) : undefined, overrides: overrides.current, bindingHint: bindHint.current,
       });
     }, { elements: documentRef.current.elements.length, overrides: overrides.current.size }));
   }, []);
@@ -454,10 +481,10 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   useEffect(() => { redraw(); }, [grid, textDraft, redraw]);
   useEffect(() => {
     const element = canvas.current;
-    const container = root.current;
-    if (!element || !container) return;
+    if (!element) return;
+    // The canvas fills the drawing area beside the editor's bars; its CSS box is that area's size.
     const resize = () => {
-      const rect = container.getBoundingClientRect();
+      const rect = element.getBoundingClientRect();
       const pixelRatio = window.devicePixelRatio || 1;
       if (Math.round(rect.width) !== Math.round(size.current.width) || Math.round(rect.height) !== Math.round(size.current.height)) {
         traceCanvas('canvas.resize', { fromWidth: Math.round(size.current.width), fromHeight: Math.round(size.current.height), width: Math.round(rect.width), height: Math.round(rect.height) });
@@ -480,7 +507,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       redraw();
     };
     const observer = new ResizeObserver(resize);
-    observer.observe(container);
+    observer.observe(element);
     resize();
     return () => {
       observer.disconnect();
@@ -636,7 +663,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     if (regionRef.current) { cancelGesture(); updateRegion(null); }
     if (next === 'eraser' && tool !== 'eraser') previousTool.current = tool;
     if (next !== 'eraser' && eraserHover.current) { eraserHover.current = null; redraw(); }
-    setTool(next); bindHint.current = null; if (next !== 'select') choose([]);
+    setTool(next); bindHint.current = null; if (next !== 'select' && next !== 'lasso') choose([]);
   };
   /** Binds an arrow end at the pointer (⌘/Ctrl places it freely) and shows the target it binds to. */
   const bindEnd = (arrow: CanvasElement, end: 'start' | 'end', point: Point, event: { metaKey: boolean; ctrlKey: boolean }) => {
@@ -654,7 +681,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   /** Drops the gesture's preview without committing it; the scene was never changed during the gesture. */
   const dropGesture = () => {
     traceCanvas('gesture.drop', { gesture: gesture.current?.mode ?? 'none' });
-    clearCaptureHold(); captureGhost.current = undefined; gesture.current = null; overrides.current.clear(); marquee.current = undefined; bindHint.current = null;
+    clearCaptureHold(); captureGhost.current = undefined; gesture.current = null; overrides.current.clear(); marquee.current = undefined; lasso.current = undefined; bindHint.current = null;
     marqueePreview.current = null; erasing.current = null; eraseTargets.current = null;
   };
   /** Commits the preview unchanged so lifting the pointer preserves the ink already drawn; a cut stroke's pieces stay where it was. */
@@ -733,7 +760,6 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   };
   const pointerDown = (event: PointerEvent<HTMLCanvasElement>, recoveringContact = false) => {
     traceCanvas('gesture.down', { tool, pointerId: event.pointerId, pointerType: event.pointerType, contactWidth: Math.round(event.width || 0), contactHeight: Math.round(event.height || 0), recoveringContact, gesture: gesture.current?.mode ?? 'none', penSeen: penSeen.current, touches: touchViewport.current.count });
-    if (tool === 'highlighter' || tool === 'lasso') return;
     if (!recoveringContact && event.button !== 0 && event.button !== 1) return;
     if (!recoveringContact) refusedPointer.current = null;
     // A contact during a glide stops it; a finger then holds the page, so lifting it does nothing and dragging scrolls on.
@@ -804,7 +830,8 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       initial.mode = 'erase';
       startErase(current.elements, point);
       choose([]);
-    } else if (tool === 'select') {
+    } else if (tool === 'select' || tool === 'lasso') {
+      // The lasso moves and resizes what it has selected as Select does; anywhere else it starts a new loop.
       const bounds = selectedBounds(current, selected.current);
       const selectedElements = current.elements.filter(element => selected.current.has(element.id));
       const handle = bounds ? elementResizeHandles(selectedElements, bounds).findIndex(p => Math.hypot(p.x - point.x, p.y - point.y) < 10 / current.viewport.zoom) : -1;
@@ -816,6 +843,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
         else { initial.mode = 'point'; Object.assign(initial, pointDrag(editing, pointHandle)); }
       } else if (handle >= 0 && bounds) { initial.mode = 'resize'; initial.bounds = bounds; initial.handle = handle; }
       else if (!event.shiftKey && bounds && !editing && pointInBounds(point, bounds, 5 / current.viewport.zoom)) initial.mode = 'move';
+      else if (tool === 'lasso' && !(id && selected.current.has(id))) { initial.mode = 'lasso'; lasso.current = [point]; if (!event.shiftKey) choose([]); }
       else if (id) {
         const found = current.elements.find(element => element.id === id);
         // A page is a backdrop for annotations: drag on an unselected page to
@@ -831,14 +859,16 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
           if (ids.has(id)) ids.delete(id); else ids.add(id);
           choose(ids);
         } else if (!selected.current.has(id)) choose([id]);
-        if (found) setStyle(current => adoptElementStyle(current, found));
+        // Ink keeps to its presets: selecting a stroke changes neither a pen nor the look of the next shape.
+        if (found && found.type !== 'freedraw') setStyle(current => adoptElementStyle(current, found));
       } else { initial.mode = 'marquee'; if (!event.shiftKey) choose([]); }
     } else {
       if (offPage(point)) { refusedPointer.current = event.pointerId; releasePointer(event); return; }
+      const type = toolType(tool);
       let element: CanvasElement = {
-        id: newId(), type: tool, x: point.x, y: point.y, width: 0, height: 0,
-        ...newElementStyle(tool, style), seed: newSeed(),
-        ...(['freedraw', 'line', 'arrow'].includes(tool) ? { points: [{ x: 0, y: 0 }, { x: 0, y: 0 }] } : {}),
+        id: newId(), type, x: point.x, y: point.y, width: 0, height: 0,
+        ...newElementStyle(type, toolStyle(tool)), seed: newSeed(),
+        ...(['freedraw', 'line', 'arrow'].includes(type) ? { points: [{ x: 0, y: 0 }, { x: 0, y: 0 }] } : {}),
       };
       if (tool === 'arrow') element = bindEnd(element, 'start', point, event);
       initial.id = element.id;
@@ -876,7 +906,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
         setResizeCursor(handle === undefined ? inside ? 'move' : 'default' : ['nwse-resize', 'nesw-resize', 'nwse-resize', 'nesw-resize', 'ns-resize', 'ew-resize', 'ns-resize', 'ew-resize'][handle]);
         return;
       }
-      if (tool === 'select') {
+      if (tool === 'select' || tool === 'lasso') {
         const { point } = coordinates(event), current = documentRef.current;
         const bounds = selectedBounds(current, selected.current);
         const elements = current.elements.filter(element => selected.current.has(element.id));
@@ -895,7 +925,7 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     event.preventDefault();
     const { point, screen } = coordinates(event);
     const distance = Math.hypot(screen.x - active.screen.x, screen.y - active.screen.y);
-    const selectionGesture = ['marquee', 'move', 'resize', 'point', 'segment', 'crop-confirm'].includes(active.mode) || (active.mode === 'capture' && !!active.bounds);
+    const selectionGesture = ['marquee', 'lasso', 'move', 'resize', 'point', 'segment', 'crop-confirm'].includes(active.mode) || (active.mode === 'capture' && !!active.bounds);
     const threshold = selectionGesture || active.mode === 'capture-copy' ? active.pointerType === 'mouse' ? 4 : 10 : 2;
     if (distance > threshold && captureHoldTimer.current !== null) clearCaptureHold();
     active.moved ||= distance > threshold;
@@ -960,6 +990,10 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     } else if (active.mode === 'marquee') {
       marquee.current = normalize(active.start, point);
       previewBox(active, marquee.current);
+    } else if (active.mode === 'lasso') {
+      // Safari batches pen samples into one event; the coalesced ones keep the loop's curve.
+      const coalesced = event.nativeEvent?.getCoalescedEvents?.() ?? [];
+      for (const sample of [...coalesced, event]) lasso.current?.push(coordinates(sample).point);
     } else if (active.mode === 'erase') {
       // Safari batches pen samples into one event; each coalesced one is a step of the sweep.
       const coalesced = event.nativeEvent?.getCoalescedEvents?.() ?? [];
@@ -1022,13 +1056,18 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       const target = writableAt(active.start);
       if (target) startWriting(active.start, target); else if (!offPage(active.start)) startText(active.start);
     } else if (active.mode === 'marquee' && marquee.current) choose(boxResult(active, marquee.current));
+    else if (active.mode === 'lasso') {
+      const ids = active.shift ? new Set(selected.current) : new Set<string>();
+      if (active.moved && lasso.current) for (const id of lassoSelection(active.original.elements, lasso.current)) ids.add(id);
+      choose(ids);
+    }
     else if (overrides.current.size && (active.moved || active.mode === 'erase' || (active.mode === 'draw' && overrides.current.get(active.id!)?.type === 'freedraw'))) {
       // A freedraw tap is a dot, so it commits without moving.
       commitGesture();
-      if (active.mode === 'draw' && active.id && tool !== 'freedraw') { choose([active.id]); setTool('select'); }
+      if (active.mode === 'draw' && active.id && !INK_TOOLS.has(tool)) { choose([active.id]); setTool('select'); }
     }
     if (active.mode === 'erase' && optionsRef.current.eraserAutoReturn) chooseTool(previousTool.current);
-    overrides.current.clear(); marquee.current = undefined; marqueePreview.current = null; erasing.current = null; eraseTargets.current = null;
+    overrides.current.clear(); marquee.current = undefined; lasso.current = undefined; marqueePreview.current = null; erasing.current = null; eraseTargets.current = null;
     setRevision(value => value + 1);
     redraw();
   };
@@ -1074,6 +1113,17 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
     choose(elements.map(element => element.id));
     setTool('select');
   };
+  /** Drops a ready-made figure (`templates.ts`) at the centre of the view, on a page in a notebook, and selects it. */
+  const insertTemplate = (kind: CanvasTemplate) => {
+    if (gesture.current || touchViewport.current.active) return;
+    flushDraft();
+    if (regionRef.current) cancelRegion();
+    const centre = screenToWorld({ x: size.current.width / 2, y: size.current.height / 2 }, documentRef.current.viewport);
+    const elements = placeOnPage(buildTemplate(kind, centre, style), true);
+    commitChanges(new Map(elements.map(element => [element.id, element])));
+    choose(elements.map(element => element.id));
+    setTool('select');
+  };
   const selectedTypes = () => documentRef.current.elements.filter(element => selected.current.has(element.id)).map(element => element.type);
   /** While writing, a style change restyles the draft (and its shape or text, if they exist) and the overlay follows; commit re-measures. */
   const restyleDraft = (draft: TextDraft, patch: StylePatch, preview = false) => {
@@ -1089,7 +1139,10 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   const changeStyle = (patch: StylePatch) => {
     const draft = draftRef.current;
     const types = draft ? [draft.element.type] : selectedTypes();
-    setStyle(current => patchDrawingStyle(current, patch, types.length ? types : NON_DRAWING.has(tool) ? [] : [tool as CanvasElement['type']]));
+    const ink = draft || types.length ? null : inkTool(tool);
+    // With an ink tool and nothing selected the change is to its preset in use; otherwise to the shared defaults.
+    if (ink) changePresets(current => patchPreset(current, ink, patch));
+    else setStyle(current => patchDrawingStyle(current, patch, types.length ? types : NON_DRAWING.has(tool) ? [] : [toolType(tool)]));
     overrides.current.clear();
     if (draft) restyleDraft(draft, patch);
     else if (!commitChanges(stylePatchChanges(documentRef.current.elements, selected.current, patch))) redraw();
@@ -1195,9 +1248,10 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       const delta = moveDelta(documentRef.current.elements, dx, dy);
       commitChanges(moveElements(documentRef.current.elements, selected.current, delta.x, delta.y));
     } else if (!mod && !event.altKey) {
-      const tools: Record<string, CanvasTool> = { v: 'select', h: 'hand', r: 'rectangle', o: 'ellipse', d: 'diamond', l: 'line', a: 'arrow', p: 'freedraw', t: 'text', e: 'eraser', s: 'capture' };
-      if (tools[key]) { event.preventDefault(); chooseTool(tools[key]); }
-      else if (key === 'g') setGrid(value => !value);
+      if (key === 'g' && event.shiftKey) { event.preventDefault(); setGrid(value => !value); }
+      else if (TOOL_KEYS[key]) { event.preventDefault(); chooseTool(TOOL_KEYS[key]); }
+      else if (TEMPLATE_KEYS[key]) { event.preventDefault(); insertTemplate(TEMPLATE_KEYS[key]); }
+      else if (key === 'i' && optionsRef.current.onInsertImage) { event.preventDefault(); optionsRef.current.onInsertImage(); }
       else if (key === '1') fit();
       else if (key === '0') zoomTo(1);
       else if (key === '+' || key === '=') zoom(1.2);
@@ -1249,8 +1303,9 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
   void revision;
   const targets: InspectorTarget[] = textDraft ? [inspectorTarget(textDraft.element, textDraft.kind === 'label')]
     : selection.length ? documentRef.current.elements.filter(element => selected.current.has(element.id)).map(element => inspectorTarget(element))
-    : NON_DRAWING.has(tool) ? [] : [{ type: tool as CanvasElement['type'], label: false }];
-  const inspector = { sections: inspectorSections(targets), values: inspectorValues(targets, style), colorLabel: colorLabel(targets) };
+    : NON_DRAWING.has(tool) ? [] : [{ type: toolType(tool), label: false }];
+  const inspector = { sections: inspectorSections(targets), values: inspectorValues(targets, !textDraft && !selection.length ? toolStyle(tool) : style), colorLabel: colorLabel(targets) };
+  const ink = inkTool(tool);
   const zoomPercent = Math.round(documentRef.current.viewport.zoom * 100), range = zoomRange(), paper = boundPaper();
   const layerMoves = (['front', 'forward', 'backward', 'back'] as const).filter(move => canReorder(documentRef.current.elements, selected.current, move));
   return {
@@ -1266,11 +1321,13 @@ export function useCanvasInteraction(document: CanvasDocument, onChange: (docume
       if (!gesture.current && (bindHint.current || eraserHover.current)) { bindHint.current = null; eraserHover.current = null; redraw(); }
     }, doubleClick, keyDown, copy, cut: (event: ClipboardEvent<HTMLDivElement>) => copy(event, true), paste,
     keyUp: (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === ' ') setSpace(false); },
-    blur: () => setSpace(false), cursor: space || tool === 'hand' ? 'grab' : tool === 'select' || tool === 'crop' || (tool === 'capture' && region) ? resizeCursor ?? 'default' : tool === 'text' ? 'text' : 'crosshair',
+    blur: () => setSpace(false), cursor: space || tool === 'hand' ? 'grab' : tool === 'select' || tool === 'crop' || (tool === 'capture' && region) ? resizeCursor ?? 'default' : tool === 'lasso' ? resizeCursor ?? 'crosshair' : tool === 'text' ? 'text' : 'crosshair',
     /** What releasing the selection box being dragged would select, as its preview paints it; empty without one. */
     previewSelection: () => [...marqueePreview.current?.ids ?? []],
     history, canUndo: past.current.length > 0, canRedo: future.current.length > 0, historyError, clearHistoryError: () => setHistoryError(null),
-    deleteSelected, insertImages, reorder, layerMoves, fit, zoom, resetZoom: () => zoomTo(1), redraw,
+    deleteSelected, insertImages, insertTemplate, reorder, layerMoves, fit, zoom, resetZoom: () => zoomTo(1), redraw,
+    /** The pen's or highlighter's presets while it is chosen with nothing selected or being written; otherwise null. */
+    inkPresets: ink && !selection.length && !textDraft ? { ...toolPresets(presets, ink), select: (at: number) => changePresets(current => selectPreset(current, ink, at)) } : null,
     zoomPercent, canZoomOut: zoomPercent > Math.round(range.min * 100), canZoomIn: zoomPercent < Math.round(range.max * 100), notebook,
     /** A notebook's page controls and the page at the centre of the view; null on a canvas. */
     pages: paper ? {

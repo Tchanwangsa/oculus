@@ -15,5 +15,5 @@ export type Part =
   | { kind: 'group'; transform: string; parts: readonly Part[] };
 
 export type ToolArtName =
-  | 'select' | 'lasso' | 'grab' | 'pen' | 'highlighter' | 'eraser' | 'text' | 'image' | 'matrix'
+  | 'select' | 'lasso' | 'grab' | 'capture' | 'pen' | 'highlighter' | 'eraser' | 'text' | 'image' | 'matrix'
   | 'rectangle' | 'oval' | 'diamond' | 'arrow' | 'line' | 'xy' | 'xyz';

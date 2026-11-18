@@ -4,7 +4,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn } from '@/lib/utils';
 import type { CanvasElement, CanvasPen } from '@/lib/canvas/model';
 import { MARKERS, PEN_LABELS, PENS, isMarker, nibOutline, penLine } from '@/lib/canvas/pens';
-import { InspectorSection, type SectionProps } from './InspectorSection';
+import type { SectionProps } from './InspectorSection';
 import { inspectorPopoverProps } from './popoverGuards';
 
 const SAMPLE_POINTS = Array.from({ length: 13 }, (_, i) => ({ x: 4 + i * 4, y: 10 + Math.sin(i / 1.9) * 5 }));
@@ -22,7 +22,7 @@ function PenSample({ pen }: { pen: CanvasPen }) {
 }
 
 /** The pens a stroke can change to: the highlighter's markers for a marker, the writing pens for any other. */
-export function PenChoices({ values, onChange, className }: SectionProps & { className?: string }) {
+function PenChoices({ values, onChange, className }: SectionProps & { className?: string }) {
   const pens = isMarker(values.pen) ? MARKERS : PENS;
   return <div role="group" aria-label="Pen" className={cn('grid grid-cols-1 gap-0.5', className)}>
     {pens.map(pen => {
@@ -36,7 +36,7 @@ export function PenChoices({ values, onChange, className }: SectionProps & { cla
   </div>;
 }
 
-/** The top bar's pen picker: the current pen's sample and name, opening the choices. */
+/** The style bar's pen picker: the current pen's sample and name, opening the choices; narrow panes drop the name (`canvas.css`). */
 export function PenMenu(props: SectionProps) {
   const [open, setOpen] = useState(false);
   return <Popover open={open} onOpenChange={setOpen}>
@@ -47,8 +47,4 @@ export function PenMenu(props: SectionProps) {
     </PopoverTrigger>
     <PopoverContent {...inspectorPopoverProps} side="bottom" align="start" className="w-52 p-1.5"><PenChoices {...props} onChange={patch => { props.onChange(patch); setOpen(false); }} /></PopoverContent>
   </Popover>;
-}
-
-export function PenSection(props: SectionProps) {
-  return <InspectorSection label={isMarker(props.values.pen) ? 'Marker' : 'Pen'}><PenChoices {...props} /></InspectorSection>;
 }

@@ -11,7 +11,7 @@ const CAMERA_KEY = 'oculus-canvas-cameras-v1';
 const CAMERA_LIMIT = 60;
 
 /** Crop needs an image chosen in this session, so it resumes as Select. */
-const RESUMABLE: ReadonlySet<CanvasTool> = new Set(['select', 'capture', 'hand', 'rectangle', 'ellipse', 'diamond', 'arrow', 'line', 'freedraw', 'text', 'eraser']);
+const RESUMABLE: ReadonlySet<CanvasTool> = new Set(['select', 'lasso', 'capture', 'hand', 'rectangle', 'ellipse', 'diamond', 'arrow', 'line', 'freedraw', 'highlighter', 'text', 'eraser']);
 
 const read = (key: string): unknown => { try { return JSON.parse(localStorage.getItem(key) ?? 'null'); } catch { return null; } };
 const write = (key: string, value: unknown) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage unavailable */ } };

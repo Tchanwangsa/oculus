@@ -14,6 +14,16 @@ export const lasso: Part[] = [
   { kind: 'shape', d: 'M270 228V433L321 385L356 458L395 440L360 370H432Z', fill: '#ffffff', shades: [[right(340), WHITE_SHADE]] },
 ];
 
+const CORNER = '#5b8def';
+const CORNER_SHADE = '#3f6fd1';
+const corner = (d: string): Part => ({ kind: 'rope', d, width: 56, fill: CORNER, shades: [[right(256), CORNER_SHADE]] });
+
+/** A dashed area inside four corner brackets, as a screen capture frames what it takes. */
+export const capture: Part[] = [
+  { kind: 'marquee', d: 'M150 150H362V362H150V150', fill: '#d6e9ff' },
+  corner('M64 168V64H168'), corner('M344 64H448V168'), corner('M448 344V448H344'), corner('M168 448H64V344'),
+];
+
 export const grab: Part[] = [
   { kind: 'trace', silhouette: GRAB_SILHOUETTE, outline: GRAB_OUTLINE, fill: '#ffd2b0', shades: [[GRAB_SHADE, '#eab088']] },
 ];

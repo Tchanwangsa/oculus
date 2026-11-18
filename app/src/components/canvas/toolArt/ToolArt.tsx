@@ -1,12 +1,12 @@
 import { Fragment, useId, type ReactNode } from 'react';
 import { arrow, diamond, oval, rectangle, line } from './shapes';
 import { eraser, highlighter, pen } from './ink';
-import { grab, lasso, select } from './pointer';
+import { capture, grab, lasso, select } from './pointer';
 import { image, matrix, text } from './insert';
 import { xy, xyz } from './graphs';
 import type { Part, Shade, ToolArtName } from './types';
 
-const ART: Record<ToolArtName, readonly Part[]> = { select, lasso, grab, pen, highlighter, eraser, text, image, matrix, rectangle, oval, diamond, arrow, line, xy, xyz };
+const ART: Record<ToolArtName, readonly Part[]> = { select, lasso, grab, capture, pen, highlighter, eraser, text, image, matrix, rectangle, oval, diamond, arrow, line, xy, xyz };
 /** The outline of coloured art. Resting art draws in `currentColor` over `--tool-fill`, so the button's hover colour shows through overlaps. */
 const INK = '#1a1a1a';
 const RESTING_FILL = 'var(--tool-fill, var(--color-card))';

@@ -42,7 +42,7 @@ export interface Harness {
   wheel: (event: { deltaX?: number; deltaY?: number; ctrlKey?: boolean; clientX?: number; clientY?: number }) => void;
   /** With a `size`: lays the editor out again at `size`, as its resize observer would. */
   resize: (size: { width: number; height: number }) => void;
-  options: { eraserAutoReturn: boolean; eraserMode?: EraserMode; eraserSize?: EraserSize; localViewport: boolean; kind?: CanvasKind; size?: { width: number; height: number } };
+  options: { eraserAutoReturn: boolean; eraserMode?: EraserMode; eraserSize?: EraserSize; localViewport: boolean; kind?: CanvasKind; size?: { width: number; height: number }; onInsertImage?: () => void };
 }
 
 /** Runs `effect` with a stand-in `window` when the test runtime has none, so DOM-sizing code can read it. */
@@ -86,6 +86,7 @@ export function createHarness(options: Partial<Harness['options']> = {}, initial
           eraserMode: harness.options.eraserMode,
           eraserSize: harness.options.eraserSize,
           kind: harness.options.kind,
+          onInsertImage: harness.options.onInsertImage,
         });
       } finally { rendering = false; }
       harness.editor.canvas.current = canvas as unknown as HTMLCanvasElement;

@@ -14,8 +14,11 @@ const imageUrl = (data: DataTransfer) => {
   return src && /^(data:image\/(png|jpeg|webp|gif);base64,|asset:\/\/|https?:\/\/asset\.localhost\/)/i.test(src) ? src : null;
 };
 
-/** Drops and pastes use the modal's decoder, placement and one-step insertion; a `notebook` previews them where its placement puts them. */
-export function useCanvasMediaDrop(root: RefObject<HTMLDivElement | null>, documentRef: RefObject<CanvasDocument>, insert: (images: CanvasImportedImage[], at?: Point) => void, notebook = false) {
+/**
+ * Drops and pastes use the modal's decoder, placement and one-step insertion; a `notebook` previews them where its placement
+ * puts them. `area` is the drawing, whose box drops are measured in; `root` takes focus after one.
+ */
+export function useCanvasMediaDrop(root: RefObject<HTMLDivElement | null>, area: RefObject<HTMLElement | null>, documentRef: RefObject<CanvasDocument>, insert: (images: CanvasImportedImage[], at?: Point) => void, notebook = false) {
   const platform = useCanvasPlatform();
   const [preview, setPreview] = useState<{ at: Point; images: CanvasImportedImage[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +43,7 @@ export function useCanvasMediaDrop(root: RefObject<HTMLDivElement | null>, docum
     }
   };
   useEffect(() => {
-    const target = root.current;
+    const target = area.current;
     if (!target || !platform.watchFileDrop || !platform.readDroppedImages) return;
     const prepare = (paths: string[]) => {
       const key = JSON.stringify(paths);
@@ -68,7 +71,7 @@ export function useCanvasMediaDrop(root: RefObject<HTMLDivElement | null>, docum
       void finish(prepare(paths), world(at));
       native.current = null;
     });
-  }, [root, platform]);
+  }, [root, area, platform]);
   const position = (event: DragEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
@@ -102,7 +105,7 @@ export function useCanvasMediaDrop(root: RefObject<HTMLDivElement | null>, docum
     abort.current?.abort(); abort.current = new AbortController();
     void finish(read(files, abort.current.signal));
   };
-  const rect = root.current?.getBoundingClientRect();
+  const rect = area.current?.getBoundingClientRect();
   const boxes = preview?.images.length && rect ? placeImagesIn(documentRef.current, notebook, preview.images, rect, world(preview.at)) : [];
   return { preview, boxes, error, clearError: () => setError(null), dragOver, drop, paste, dragLeave: () => setPreview(null) };
 }
