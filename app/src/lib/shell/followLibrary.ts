@@ -10,7 +10,7 @@ import { getFileByRelativePath, getSubjects } from "@/lib/db";
 import { subjectForFolder } from "@/lib/drive/paths";
 import { courseFileHasContent } from "@/lib/files/courseFiles";
 import { COURSES_DIR } from "@/lib/files/libraryLayout";
-import { resolveMoved } from "@/lib/files/pathMoves";
+import { forgetPathMoves, resolveMoved } from "@/lib/files/pathMoves";
 import { followPath, followRoute, type PathChange, type SubjectIdOf } from "@/lib/shell/pathFollow";
 import { useRecentTabsStore } from "@/stores/shell/recentTabsStore";
 import { panesOf, useTabStore } from "@/stores/shell/tabStore";
@@ -33,8 +33,10 @@ function followRoutes(change: PathChange, idOf: SubjectIdOf): void {
   useRecentTabsStore.getState().follow(follow);
 }
 
-/** Everything path-keyed follows one `drive-changed`. */
+/** Everything path-keyed follows one `drive-changed`, and a move may have
+ *  added `path_moves` rules (a renamed `.canvas`). */
 export async function followLibraryChange(change: PathChange): Promise<void> {
+  if (change.moved.length) forgetPathMoves();
   if (!change.moved.length && !change.removed.length) return;
   const idOf = await subjectIdOf();
   followRoutes(change, idOf);

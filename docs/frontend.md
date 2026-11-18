@@ -370,11 +370,22 @@ Before that it renames each Oculus drawing still named `.canvas` (its JSON
 `type` is a drawing type, `whiteboards/legacy.rs`; another app's `.canvas`
 stays an upload) to `<stem>.whiteboard`, or `<stem> (2).whiteboard`… when
 the folder or a row holds the name, compared as the volume compares names
-(`reconcile/drawings.rs`). A row the `.canvas` had follows by id
-(`apply_moves`), announced as `moved`; `path_moves` keeps the old path, never
-replacing a rule a rowless `.canvas` path already has. A file that does not
-read as whole JSON (still being copied) gets no row and waits for a later
-pass; a failed rename is logged and left. `import_uploads` gives a picked
+(`reconcile/drawings.rs`). A row the `.canvas` had, found as the volume
+finds names (a row in another Unicode form or case than the disk is the
+file's), follows by id (`apply_moves`), announced as `moved`; `path_moves` keeps the old path, and
+every older path that led to it (`record_moves`,
+[library-move.md](./library-move.md#drawings-named-canvas)), never replacing
+a rule a rowless `.canvas` path already has. A file that does not
+read as whole JSON gets no row and waits for a later pass while it was
+written in the last 30 s (`LANDING`: still being copied); after that it is
+not a drawing and gets an upload row like another app's. A drawing that
+lands slower than that is renamed with its upload row by id on the next
+pass. A failed rename is logged and left. A pass cut short after a rename,
+before the row followed, leaves a row on a `.canvas` that is gone; the next
+pass puts it back on its drawing by id when exactly one rowless
+`<stem>.whiteboard` or `<stem> (n).whiteboard` in that folder still holds
+the old `oculus-canvas` type (a save writes the new one) and no other such
+row claims it, and leaves it otherwise. `import_uploads` gives a picked
 `.canvas` drawing the `.whiteboard` name as it lands. `reconcileOwnFiles`
 (`app/src/lib/drive/reconcile.ts`) kicks each new file's parse as an
 upload's is kicked, then brings notes and drawings in line
@@ -413,6 +424,9 @@ prefix wins.
   render, `followSavedPaths` checks each saved tab, side item, closed tab
   and Recent row on a file with no row and no file on disk against
   `path_moves` (`resolveMoved`) and applies what it finds as one move.
+  `resolveMoved` reads the table once and again after any `drive-changed`
+  move (`forgetPathMoves`), since a reconcile renaming a `.canvas` adds
+  rules.
 - **Left as written.** Chat drafts, pastes, scopes, shelves, attachment
   names and question drafts (`app/src/stores/chat/draftStore.ts`,
   `app/src/stores/chat/stashStore.ts`, `app/src/stores/chat/attachmentNames.ts`,

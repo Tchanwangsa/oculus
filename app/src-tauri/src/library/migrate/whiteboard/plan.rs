@@ -128,11 +128,11 @@ fn records(data_dir: &Path, plan: &mut Plan, old: &str, new: &str) {
 /// A row for a drawing that is not on disk any more keeps a rule, so its row
 /// and old citations follow the rename as the others do.
 fn stale_rows(data_dir: &Path, plan: &mut Plan, names: &mut Names, rows: &Rows) {
-    let renamed: HashSet<String> = plan.rules.iter().map(|r| r.old.clone()).collect();
+    let renamed: HashSet<String> = plan.rules.iter().map(|r| name_key(&r.old)).collect();
     for (_, rel, category) in &rows.drawings {
         if category.as_deref() != Some(LEGACY_CATEGORY)
             || !rel.ends_with(LEGACY_EXTENSION)
-            || renamed.contains(rel)
+            || renamed.contains(&name_key(rel))
             || std::fs::symlink_metadata(data_dir.join(rel)).is_ok()
         {
             continue;

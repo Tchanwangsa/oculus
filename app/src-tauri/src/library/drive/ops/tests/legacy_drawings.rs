@@ -228,3 +228,129 @@ async fn an_imported_canvas_drawing_lands_as_a_whiteboard() {
     assert_eq!(lib.read(&own(CODE, "Sketch (2).whiteboard")), DRAWING);
     assert_eq!(lib.read(&own(CODE, "Sketch.whiteboard")), "another");
 }
+
+#[tokio::test]
+async fn an_old_path_through_the_drive_moves_folder_rule_reaches_the_renamed_drawing() {
+    let lib = renamed_library("drive-legacy-chain").await;
+    for (old, new) in [
+        (own(CODE, "canvases"), course_rel(CODE)),
+        (own(CODE, "uploads/b.canvas"), own(CODE, "b (2).canvas")),
+    ] {
+        sqlx::query("INSERT INTO path_moves (old_prefix, new_prefix) VALUES (?1, ?2)")
+            .bind(old)
+            .bind(new)
+            .execute(&lib.pool)
+            .await
+            .unwrap();
+    }
+    lib.file(&own(CODE, "a.canvas"), DRAWING.as_bytes()).await;
+    lib.put(&own(CODE, "b.canvas"), DRAWING.as_bytes());
+
+    reconcile(&lib).await;
+    assert!(lib.exists(&own(CODE, "a.whiteboard")));
+    assert_eq!(
+        moved_to(&lib, &own(CODE, "canvases/a.canvas#x")).await,
+        Some(own(CODE, "a.whiteboard#x"))
+    );
+    assert_eq!(
+        moved_to(&lib, &own(CODE, "canvases/b.canvas")).await,
+        Some(own(CODE, "b.whiteboard"))
+    );
+    // A file renamed on a clash keeps its own rule.
+    assert_eq!(
+        moved_to(&lib, &own(CODE, "uploads/b.canvas")).await,
+        Some(own(CODE, "b (2).canvas"))
+    );
+    assert_eq!(
+        moved_to(&lib, &own(CODE, "canvases/c.pdf")).await,
+        Some(own(CODE, "c.pdf"))
+    );
+}
+
+#[tokio::test]
+async fn a_canvas_that_is_not_json_and_not_landing_is_an_upload() {
+    let lib = renamed_library("drive-legacy-text").await;
+    let rel = own(CODE, "notes.canvas");
+    lib.put(&rel, b"plain text, not JSON");
+    let an_hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    std::fs::File::options()
+        .write(true)
+        .open(lib.path(&rel))
+        .unwrap()
+        .set_modified(an_hour_ago)
+        .unwrap();
+
+    let (inserted, moved) = reconcile(&lib).await;
+    assert!(moved.is_empty());
+    let got: Vec<(&str, &str)> = inserted
+        .iter()
+        .map(|f| (f.relative_path.as_str(), f.category.as_str()))
+        .collect();
+    assert_eq!(got, [(rel.as_str(), "upload")]);
+    assert!(lib.exists(&rel) && !lib.exists(&own(CODE, "notes.whiteboard")));
+
+    let (again, moved) = reconcile(&lib).await;
+    assert!(again.is_empty() && moved.is_empty());
+}
+
+#[tokio::test]
+async fn a_row_spelled_in_another_unicode_form_keeps_its_id() {
+    let lib = renamed_library("drive-legacy-nfd").await;
+    let (on_disk, in_row) = (
+        own(CODE, "Re\u{301}sume\u{301}.canvas"),
+        own(CODE, "R\u{e9}sum\u{e9}.canvas"),
+    );
+    lib.put(&on_disk, DRAWING.as_bytes());
+    let id = lib.row(&in_row).await;
+    let to = own(CODE, "Re\u{301}sume\u{301}.whiteboard");
+
+    let (inserted, moved) = reconcile(&lib).await;
+    assert!(inserted.is_empty(), "no second row: {inserted:?}");
+    assert_eq!(moved, [(in_row.clone(), to.clone())]);
+    assert_eq!(lib.row_of(id).await.unwrap().1, to);
+    assert_eq!(moved_to(&lib, &in_row).await, Some(to.clone()));
+    assert_eq!(moved_to(&lib, &on_disk).await, Some(to.clone()));
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM files")
+        .fetch_one(&lib.pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 1);
+}
+
+#[tokio::test]
+async fn a_pass_cut_short_after_the_rename_puts_the_row_back_on_its_drawing() {
+    let lib = renamed_library("drive-legacy-cut").await;
+    // The last pass renamed `Board.canvas` (taking ` (2)`, beside the
+    // student's own), then stopped before its row followed.
+    let gone = own(CODE, "Board.canvas");
+    let id = lib.row(&gone).await;
+    lib.file(
+        &own(CODE, "Board.whiteboard"),
+        b"{\"type\":\"oculus-whiteboard\"}",
+    )
+    .await;
+    let to = own(CODE, "Board (2).whiteboard");
+    lib.put(&to, DRAWING.as_bytes());
+
+    let (inserted, moved) = reconcile(&lib).await;
+    assert!(inserted.is_empty(), "no second row: {inserted:?}");
+    assert_eq!(moved, [(gone.clone(), to.clone())]);
+    assert_eq!(lib.row_of(id).await, Some(whiteboard_row(&to)));
+    assert_eq!(moved_to(&lib, &gone).await, Some(to.clone()));
+}
+
+#[tokio::test]
+async fn a_gone_canvas_row_with_two_possible_drawings_is_left() {
+    let lib = renamed_library("drive-legacy-cut-two").await;
+    let gone = own(CODE, "Board.canvas");
+    let id = lib.row(&gone).await;
+    // Saved since (the new type), or a sibling the row could equally be.
+    lib.put(&own(CODE, "Board.whiteboard"), DRAWING.as_bytes());
+    lib.put(&own(CODE, "Board (3).whiteboard"), DRAWING.as_bytes());
+    lib.put(&own(CODE, "Other.whiteboard"), DRAWING.as_bytes());
+
+    let (inserted, moved) = reconcile(&lib).await;
+    assert!(moved.is_empty());
+    assert_eq!(inserted.len(), 3);
+    assert_eq!(lib.row_of(id).await.unwrap().1, gone);
+}

@@ -88,8 +88,9 @@ moving at once: the second waits, then finds the marker.
    brought up with the app's own migration list (the plugin's conversion, so
    the frontend's `Database.load` finds nothing to do). Rows are UPDATEd,
    never deleted and re-inserted, so `pages`, versions and task links stay on
-   their `files` row: `files.relative_path`, `category` (`category_of`) and a
-   renamed `filename`; `sync_run_files`, `echo_embeds`, `inbox_item_entries`,
+   their `files` row: `files.relative_path`, `category` (`category_of`; a
+   drawing's `canvas` stays for the whiteboard rename, which reads it to
+   find a drawing whose file is gone) and a renamed `filename`; `sync_run_files`, `echo_embeds`, `inbox_item_entries`,
    `revision_notes.source_ref`; every path string inside `chat_proposals`
    and `agent_changes` JSON; `lectures.folder_rel` and its media paths; the
    links in a moved note's `document_versions`. The `library_layout` setting
@@ -140,7 +141,17 @@ Right after the Drive move and under its lock,
 `library::migrate::whiteboard` renames every `.canvas` drawing among the
 student's own files to `.whiteboard`, `canvas-pages/` and
 `recovery/canvases/` to their new names, and the rows, `path_moves`, page
-manifests and the notes that link to a renamed drawing with them, with its own journal and marker (`.library-move/whiteboard`). A
+manifests and the notes that link to a renamed drawing with them, with its own journal and marker (`.library-move/whiteboard`).
+A rename's rules go through `record_moves` (`library/migrate/resolve.rs`):
+the drawing's own rule, plus every old path the rules already kept resolve
+to the drawing's old path, mapped straight to its new one, since a lookup
+takes one step. An old path is derived only when the kept rules really send
+it there, so a file renamed on a clash (`uploads/a.canvas` → `a (2).canvas`)
+keeps its own rule rather than taking its folder's (`uploads` → the subject
+root) to another drawing named `a`. Drive's reconcile records its renames
+the same way. A drawing's row is found as the volume finds the file
+(`name_key`: one Unicode form, no case), and a row spelled other than the
+disk gets a rule for its own spelling too. A
 `.canvas` drawing that reaches the library later (a backup, another Mac, an
 agent) is renamed by Drive's reconcile and imports
 ([frontend.md](./frontend.md#own-files-written-outside-the-app-get-rows)), with
