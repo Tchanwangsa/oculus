@@ -376,3 +376,47 @@ fn an_old_librarys_gone_drawing_keeps_a_rule_through_both_steps() {
     );
     assert_eq!(moved(&d, &s("board.canvas")), Some(s("board.whiteboard")));
 }
+
+#[test]
+fn a_row_spelled_in_another_unicode_form_follows_its_drawing() {
+    // The disk holds the name decomposed (NFD), the row composed (NFC).
+    let (nfd, nfc) = ("Re\u{301}sume\u{301}.canvas", "R\u{e9}sum\u{e9}.canvas");
+    let d = Scratch::new("whiteboard-nfd");
+    file(&d, ".library-move/done", "drive");
+    file(&d, &s(nfd), DRAWING);
+    block(async {
+        let pool = pool(&d).await;
+        crate::library::migrate::db::ensure(&pool).await.unwrap();
+        sqlx::raw_sql(&format!(
+            "INSERT INTO subjects (id, code, name) VALUES (1, '{CODE}', 'One');
+             INSERT INTO files (id, subject_id, filename, relative_path, file_type, category)
+               VALUES (1, 1, '{nfc}', '{S}/{nfc}', 'canvas', 'canvas');
+             INSERT INTO revision_notes (subject_id, title, source_kind, source_ref)
+               VALUES (1, 'CV', 'file', '{S}/{nfc}');"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+    });
+    run(&d, &Hooks::default()).unwrap();
+    let to = s("Re\u{301}sume\u{301}.whiteboard");
+    assert_eq!(
+        files_row(&d, 1),
+        (
+            to.clone(),
+            "Re\u{301}sume\u{301}.whiteboard".into(),
+            "whiteboard".into(),
+            "whiteboard".into()
+        )
+    );
+    assert_eq!(moved(&d, &s(nfc)), Some(to.clone()));
+    assert_eq!(moved(&d, &s(nfd)), Some(to.clone()));
+    let source: String = block(async {
+        sqlx::query_scalar("SELECT source_ref FROM revision_notes")
+            .fetch_one(&pool(&d).await)
+            .await
+            .unwrap()
+    });
+    assert_eq!(source, to);
+}

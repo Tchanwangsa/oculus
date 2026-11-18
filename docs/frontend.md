@@ -337,8 +337,9 @@ Before that it renames each Oculus drawing still named `.canvas` (its JSON
 `type` is a drawing type, `whiteboards/legacy.rs`; another app's `.canvas`
 stays an upload) to `<stem>.whiteboard`, or `<stem> (2).whiteboard`… when
 the folder or a row holds the name, compared as the volume compares names
-(`reconcile/drawings.rs`). A row the `.canvas` had follows by id
-(`apply_moves`), announced as `moved`; `path_moves` keeps the old path, and
+(`reconcile/drawings.rs`). A row the `.canvas` had, found as the volume
+finds names (a row in another Unicode form or case than the disk is the
+file's), follows by id (`apply_moves`), announced as `moved`; `path_moves` keeps the old path, and
 every older path that led to it (`record_moves`,
 [library-move.md](./library-move.md#drawings-named-canvas)), never replacing
 a rule a rowless `.canvas` path already has. A file that does not

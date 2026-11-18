@@ -149,7 +149,9 @@ takes one step. An old path is derived only when the kept rules really send
 it there, so a file renamed on a clash (`uploads/a.canvas` → `a (2).canvas`)
 keeps its own rule rather than taking its folder's (`uploads` → the subject
 root) to another drawing named `a`. Drive's reconcile records its renames
-the same way. A
+the same way. A drawing's row is found as the volume finds the file
+(`name_key`: one Unicode form, no case), and a row spelled other than the
+disk gets a rule for its own spelling too. A
 `.canvas` drawing that reaches the library later (a backup, another Mac, an
 agent) is renamed by Drive's reconcile and imports
 ([frontend.md](./frontend.md#own-files-written-outside-the-app-get-rows)), with

@@ -168,7 +168,7 @@ async fn run_async(data_dir: &Path, hooks: &Hooks) -> Result<Outcome, String> {
     let rules = Rules::new(&plan.rules);
     let linker = super::links::Linker::new(data_dir, &rules);
     let db_counts = match &pool {
-        Some(pool) => Some(db::rewrite(pool, &plan, &rules, &linker).await?),
+        Some(pool) => Some(db::rewrite(pool, &plan, &linker).await?),
         None => None,
     };
     let content_counts = contents::rewrite(data_dir, &plan, &linker)?;

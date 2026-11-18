@@ -292,3 +292,27 @@ async fn a_canvas_that_is_not_json_and_not_landing_is_an_upload() {
     let (again, moved) = reconcile(&lib).await;
     assert!(again.is_empty() && moved.is_empty());
 }
+
+#[tokio::test]
+async fn a_row_spelled_in_another_unicode_form_keeps_its_id() {
+    let lib = renamed_library("drive-legacy-nfd").await;
+    let (on_disk, in_row) = (
+        own(CODE, "Re\u{301}sume\u{301}.canvas"),
+        own(CODE, "R\u{e9}sum\u{e9}.canvas"),
+    );
+    lib.put(&on_disk, DRAWING.as_bytes());
+    let id = lib.row(&in_row).await;
+    let to = own(CODE, "Re\u{301}sume\u{301}.whiteboard");
+
+    let (inserted, moved) = reconcile(&lib).await;
+    assert!(inserted.is_empty(), "no second row: {inserted:?}");
+    assert_eq!(moved, [(in_row.clone(), to.clone())]);
+    assert_eq!(lib.row_of(id).await.unwrap().1, to);
+    assert_eq!(moved_to(&lib, &in_row).await, Some(to.clone()));
+    assert_eq!(moved_to(&lib, &on_disk).await, Some(to.clone()));
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM files")
+        .fetch_one(&lib.pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 1);
+}

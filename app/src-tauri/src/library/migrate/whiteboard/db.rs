@@ -12,6 +12,7 @@ use crate::library::files::whiteboards::DrawingKind;
 use crate::library::layout;
 use crate::library::migrate::db::{column, json_column, Tx};
 use crate::library::migrate::links::Linker;
+use crate::library::migrate::plan::name_key;
 use crate::library::migrate::rules::{Rule, Rules};
 use crate::library::migrate::{record_moves, OwnRule};
 
@@ -58,12 +59,14 @@ fn err(what: &str) -> impl Fn(sqlx::Error) -> String + '_ {
 pub async fn rewrite(
     pool: &SqlitePool,
     plan: &Plan,
-    rules: &Rules,
     linker: &Linker<'_>,
 ) -> Result<DbCounts, String> {
     let mut tx = pool.begin().await.map_err(err("begin"))?;
+    let (files, spellings) = files(&mut tx, &plan.rules).await?;
+    let all: Vec<Rule> = plan.rules.iter().cloned().chain(spellings).collect();
+    let rules = &Rules::new(&all);
     let mut counts = DbCounts {
-        files: files(&mut tx, &plan.rules).await?,
+        files,
         ..DbCounts::default()
     };
     recategorize(&mut tx).await?;
@@ -82,24 +85,39 @@ pub async fn rewrite(
         }
     }
     counts.versions = versions(&mut tx, linker).await?;
-    counts.path_moves = path_moves(&mut tx, &plan.rules).await?;
+    counts.path_moves = path_moves(&mut tx, &all).await?;
     tx.commit().await.map_err(err("commit"))?;
     Ok(counts)
 }
 
 /// Each renamed drawing's row: its path, its name when it was the file's,
-/// and the kind its new name gives it.
-async fn files(tx: &mut Tx<'_>, rules: &[Rule]) -> Result<usize, String> {
+/// and the kind its new name gives it. A row is found as the volume finds
+/// the file (`drawing_row`); one spelled other than the disk comes back as a
+/// rule of its own, so what holds its spelling follows too.
+async fn files(tx: &mut Tx<'_>, rules: &[Rule]) -> Result<(usize, Vec<Rule>), String> {
+    let rows: Vec<(i64, String, String)> = sqlx::query_as(
+        "SELECT id, relative_path, filename FROM files
+          WHERE category = ?1 OR relative_path LIKE '%' || ?2",
+    )
+    .bind(LEGACY_CATEGORY)
+    .bind(LEGACY_EXTENSION)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(err("read files"))?;
     let mut changed = 0;
+    let mut spellings = Vec::new();
     for rule in rules {
-        let row = sqlx::query("SELECT id, filename FROM files WHERE relative_path = ?1")
-            .bind(&rule.old)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(err("read files"))?;
-        let Some(row) = row else { continue };
-        let (id, filename): (i64, String) = (row.get("id"), row.get("filename"));
-        let old_base = rule.old.rsplit('/').next().unwrap_or_default();
+        let Some((id, path, filename)) = drawing_row(&rows, &rule.old) else {
+            continue;
+        };
+        if *path != rule.old {
+            spellings.push(Rule {
+                old: path.clone(),
+                new: rule.new.clone(),
+            });
+        }
+        let (id, filename) = (*id, filename.clone());
+        let old_base = path.rsplit('/').next().unwrap_or_default();
         let new_base = rule.new.rsplit('/').next().unwrap_or_default();
         let filename = if filename == old_base {
             new_base.to_string()
@@ -132,7 +150,22 @@ async fn files(tx: &mut Tx<'_>, rules: &[Rule]) -> Result<usize, String> {
             Ok(_) => changed += 1,
         }
     }
-    Ok(changed)
+    Ok((changed, spellings))
+}
+
+/// The row for the file at `rel`: by exact spelling, else the one row with
+/// its `name_key` (one Unicode form, no case).
+fn drawing_row<'r>(
+    rows: &'r [(i64, String, String)],
+    rel: &str,
+) -> Option<&'r (i64, String, String)> {
+    if let Some(row) = rows.iter().find(|(_, path, _)| path == rel) {
+        return Some(row);
+    }
+    let key = name_key(rel);
+    let mut folded = rows.iter().filter(|(_, path, _)| name_key(path) == key);
+    let row = folded.next()?;
+    folded.next().is_none().then_some(row)
 }
 
 /// A row still saying `canvas` is a `.canvas` from another app, now an

@@ -170,9 +170,9 @@ async fn convert_drawings(
     let row_moves: Vec<RowMove> = pass
         .converted
         .iter()
-        .filter(|c| c.row.is_some())
-        .map(|c| RowMove {
-            from: c.from.clone(),
+        .filter_map(|c| c.row.as_ref().map(|(_, path)| (path, c)))
+        .map(|(path, c)| RowMove {
+            from: path.clone(),
             to: c.to.clone(),
             dir: false,
             relink: None,
@@ -198,20 +198,24 @@ async fn convert_drawings(
         }
     }
     // A rule already there for a rowless path is an earlier drawing's (the
-    // launch rename's), which old citations meant.
+    // launch rename's), which old citations meant. A row spelled other than
+    // the disk keeps a rule for its spelling too.
     let renames: Vec<(Rule, OwnRule)> = pass
         .converted
         .iter()
-        .map(|c| {
-            let rule = Rule {
-                old: c.from.clone(),
+        .flat_map(|c| {
+            let rule = |old: &str| Rule {
+                old: old.to_string(),
                 new: c.to.clone(),
             };
-            let own = match c.row {
-                Some(_) => OwnRule::Replace,
-                None => OwnRule::KeepOlder,
-            };
-            (rule, own)
+            match &c.row {
+                Some((_, path)) if *path != c.from => vec![
+                    (rule(&c.from), OwnRule::Replace),
+                    (rule(path), OwnRule::Replace),
+                ],
+                Some(_) => vec![(rule(&c.from), OwnRule::Replace)],
+                None => vec![(rule(&c.from), OwnRule::KeepOlder)],
+            }
         })
         .collect();
     if !renames.is_empty() {
@@ -221,11 +225,11 @@ async fn convert_drawings(
     }
     let mut moved = Vec::new();
     for c in &pass.converted {
-        if c.row.is_some() {
-            known.remove(&c.from);
+        if let Some((_, path)) = &c.row {
+            known.remove(path);
             known.insert(c.to.clone());
             moved.push(Moved {
-                from: c.from.clone(),
+                from: path.clone(),
                 to: c.to.clone(),
             });
         }
