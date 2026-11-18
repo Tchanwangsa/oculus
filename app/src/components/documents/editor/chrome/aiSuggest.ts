@@ -2,7 +2,7 @@
  * Inline AI suggestions ("ghost text"). `SUGGEST_DELAY_MS` after the last
  * edit, with one empty caret outside code and frontmatter and no completion
  * list open, the text around the caret goes to `SuggestConfig.fetch`; the
- * answer shows as a muted widget at the caret. Tab takes all of it, Mod-→ the
+ * answer shows as a muted widget at the caret. Tab and → take all of it, Mod-→ the
  * next word, Esc drops it. Typing what the ghost says eats it from the front;
  * any other edit, a caret move or a blur drops it.
  *
@@ -29,6 +29,7 @@ import {
   ViewPlugin,
   WidgetType,
   keymap,
+  type KeyBinding,
   type ViewUpdate,
 } from "@codemirror/view";
 import { ancestorAt } from "../syntax/syntax";
@@ -71,7 +72,7 @@ interface Ghost {
   text: string;
 }
 
-const setGhost = StateEffect.define<Ghost | null>();
+export const setGhost = StateEffect.define<Ghost | null>();
 const redrawGhost = StateEffect.define<null>();
 
 /** The ghost after an edit: kept, shorter, only when the edit typed its
@@ -130,7 +131,7 @@ class GhostWidget extends WidgetType {
   }
 }
 
-const ghostField = StateField.define<Ghost | null>({
+export const ghostField = StateField.define<Ghost | null>({
   create: () => null,
   update(ghost, tr) {
     for (const e of tr.effects) if (e.is(setGhost)) return e.value;
@@ -291,9 +292,9 @@ const nextWord = (text: string) => /^\s*\S+/.exec(text)?.[0] ?? text;
 // Prec.highest: above noteKeymap's Tab (high) and the snippet-field keymap,
 // also highest but appended to the config later. Every binding passes without
 // a ghost or under an open completion list, so those keep their keys then.
-const ghostKeymap = Prec.highest(
-  keymap.of([
+export const ghostBindings: KeyBinding[] = [
     { key: "Tab", run: (view) => accept(view, (text) => text) },
+    { key: "ArrowRight", run: (view) => accept(view, (text) => text) },
     { key: "Mod-ArrowRight", run: (view) => accept(view, nextWord) },
     {
       key: "Escape",
@@ -303,8 +304,8 @@ const ghostKeymap = Prec.highest(
         return true;
       },
     },
-  ]),
-);
+];
+const ghostKeymap = Prec.highest(keymap.of(ghostBindings));
 
 const ghostTheme = EditorView.theme({
   ".cm-ghost": {

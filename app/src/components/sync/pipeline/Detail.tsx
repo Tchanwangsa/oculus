@@ -1,11 +1,12 @@
-import { Play, SidebarSimple, SkipForward } from "@phosphor-icons/react";
+import { ArrowLineUp, Play, SidebarSimple, SkipForward } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { isSheetFile } from "@/lib/files/fileTypes";
 import { fmtClock } from "@/lib/format/format";
 import { filePagePath } from "@/lib/files/openFile";
 import { fmtMb, type PipelineItem, type StageState } from "@/stores/sync/pipelineStore";
-import { openItem, type RowActions } from "@/components/sync/pipeline/actions";
+import { openItem } from "@/components/sync/pipeline/actions";
+import type { RowActions } from "@/components/sync/pipeline/rowActions";
 import { HATCH } from "@/components/sync/pipeline/constants";
 import { uploadWaiting } from "@/components/sync/pipeline/facts";
 
@@ -126,12 +127,14 @@ export function Detail({
   actions,
   onRun,
   onSkip,
+  onPrioritise,
 }: {
   item: PipelineItem;
   embedStage: boolean;
   actions: RowActions;
   onRun?: () => void;
   onSkip?: () => void;
+  onPrioritise?: () => void;
 }) {
   const steps = detailSteps(item, embedStage);
   const note = noteOf(item);
@@ -174,6 +177,11 @@ export function Detail({
         <span className="mr-auto min-w-0 truncate text-[11px] text-muted-foreground/70">
           {item.relativePath}
         </span>
+        {actions.prioritise && onPrioritise && (
+          <Button variant="secondary" size="xs" data-tab-skip onClick={onPrioritise}>
+            <ArrowLineUp /> Prioritise
+          </Button>
+        )}
         {actions.run && onRun && (
           <Button variant="secondary" size="xs" data-tab-skip onClick={onRun}>
             <Play weight="fill" /> {actions.run.label}

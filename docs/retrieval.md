@@ -220,7 +220,10 @@ the direct path, because keyd talks only to Voyage's fixed origin.
   Activity retry enqueues one. Stop is polled between files, never mid-file (a
   mid-file abort re-pays its pages). After a failure it asks `embed_blocked`
   whether the ledger has latched (spent allowance or spend limit) and stops,
-  rather than reporting one fact as a hundred errors.
+  rather than reporting one fact as a hundred errors. A queued file can be
+  pushed to the front (`prioritise`, over `lib/pipeline/queueOrder.ts`): the
+  worker takes it after the file being embedded and after files pushed before
+  it. Memory only; a restored queue is unordered.
 - **The queue is drawn in File Activity**: Rust says `queued` only when the
   worker reaches a file, so `enqueue` marks the rest itself, and every way out
   of the queue unrun (Stop, a latch, a thrown run) hands them back as pending.

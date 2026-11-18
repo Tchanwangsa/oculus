@@ -316,10 +316,18 @@ impl Ctx {
             return Ok(());
         };
 
+        // The written files that `oculus index` would take: PDF-backed, Office
+        // documents included (`index_pdfs` parses the derived sibling PDF), and
+        // not skipped by the user.
+        let eligible: std::collections::HashSet<(i64, String)> = self
+            .rt
+            .block_on(store::pdf_files(p, &[]))?
+            .into_iter()
+            .collect();
         let pdfs: Vec<(i64, String)> = written
             .iter()
-            .filter(|f| f.relative_path.to_lowercase().ends_with(".pdf"))
             .map(|f| (f.subject_id, f.relative_path.clone()))
+            .filter(|key| eligible.contains(key))
             .collect();
         self.index_pdfs(p, &pdfs, !args.no_embed, false)
     }

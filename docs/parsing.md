@@ -23,6 +23,7 @@ either. MinerU is ~100× faster than docling with formula enrichment, with 1% vs
 | Call site; one thread per PDF; LibreOffice conversion | `app/src-tauri/src/sync/parse.rs`, `app/src-tauri/src/sync/phases/output.rs`, `app/src-tauri/src/sync/office.rs` |
 | Spreadsheets to text: conversion, page rows, startup reconcile | `app/src-tauri/src/pages/sheets/` |
 | Skipping a file: the `parse_skip` command and its marks | `app/src-tauri/src/sync/scrape/mod.rs`, `app/src-tauri/src/parse/skips.rs` (`Skips`) |
+| Prioritising a waiting file: the `parse_prioritise` command, the ranks, the local engine's gate | `app/src-tauri/src/sync/scrape/mod.rs`, `app/src-tauri/src/parse/priority.rs` (`Priority`), `app/src-tauri/src/parse/mineru/local/gate.rs` |
 | Artifact names and purging | `app/src-tauri/src/library/layout/derived.rs`, `app/src-tauri/src/library/paths/course.rs` |
 | MinerU token commands (through `oculus-keyd`, else the keychain) + the pre-store token probe | `app/src-tauri/src/providers/mineru.rs`, `app/src-tauri/src/providers/credentials/` (`CloudKey`) |
 | Engine selection, endpoint override, local probe | `app/src-tauri/src/parse/commands.rs` |
@@ -169,6 +170,27 @@ can and without artifacts always:
   for a fresh parse cannot revive it.
 - **Local**: a blocking `/file_parse` cannot be aborted cleanly, so the mark is
   checked before and after taking `PARSE_GATE` and after the request returns.
+
+## A waiting parse can be pushed to the front
+
+`parse_prioritise(relativePath)` gives the PDF the next `parse::Priority`
+rank. Ranks are taken in press order, so several pushed files keep it, and a
+file never pushed sorts after every pushed one in arrival order. Pressing
+again moves a file behind the others pushed. Only *who goes next* changes:
+
+- **Cloud batcher**: a batch is chosen only once an in-flight slot is free
+  (`await_window`, then `take_batch`), so a press made while every slot is busy
+  still counts. The batch is filled best-ranked first, a pushed large file
+  leaves alone first, and the window's key is the first job's.
+- **Upload order**: `run_batch` takes the next file to upload one at a time
+  (`take_next_upload`): pushed files by rank, then smallest first. A file whose
+  upload is waiting behind another is therefore still movable.
+- **Local engine**: `PARSE_GATE` is a `Gate` that seats the best-ranked waiter
+  when the server frees.
+
+A running batch, upload or request is never interrupted. The rank is dropped
+when the file's parse ends, however it ends, and lives in memory only. It adds
+no timeout, no billed call and no engine fallback.
 
 ## `.pages.json` is the only evidence a parse finished
 

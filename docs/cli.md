@@ -85,7 +85,8 @@ which brings an existing database's schema up before rewriting its paths
   skips the back-off between automatic attempts but not the minute between any
   two, and it cannot lift a lockout or rejected-password pause (the app's
   Connect or a new `auth setup` does).
-- `run -s` scrapes, then parses and embeds each written PDF one file at a time,
+- `run -s` scrapes, then parses and embeds each written PDF-backed file (PDFs
+  and Office documents, through their converted PDF) one file at a time,
   then replaces each subject's `calendar_events` — always, since there are no
   sync options to gate it ([calendar.md](./calendar.md)).
 - Subject codes match on prefix (`MULT20015` finds `MULT20015_2026_SM2`),

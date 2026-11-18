@@ -10,6 +10,7 @@ export const SYNC_PHASE: Record<string, string> = {
   home: "overview",
   announcements: "announcements",
   modules: "modules",
+  files: "files",
   assignments: "assignments",
   ed: "Ed threads",
   ed_lessons: "Ed lessons",

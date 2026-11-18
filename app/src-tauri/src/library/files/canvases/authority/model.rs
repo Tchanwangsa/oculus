@@ -19,11 +19,20 @@ const TYPES: [&str; 8] = [
     "image",
 ];
 const ARROWHEADS: &[&str] = &["none", "arrow", "triangle", "dot", "bar", "diamond"];
-const PAPER_TEMPLATES: [&str; 4] = ["blank", "grid", "ruled", "dotted"];
+const PAPER_TEMPLATES: [&str; 8] = [
+    "blank",
+    "grid",
+    "ruled",
+    "dotted",
+    "graph",
+    "cornell",
+    "music",
+    "isometric",
+];
 const MAX_PAGES: usize = 500;
 const MAX_SIDE: f64 = 14400.0;
 const MAX_GAP: f64 = 1000.0;
-const CHOICES: [(&str, &[&str]); 8] = [
+const CHOICES: [(&str, &[&str]); 9] = [
     ("strokeStyle", &["solid", "dashed", "dotted"]),
     ("fontFamily", &["sans", "serif", "mono"]),
     ("textAlign", &["left", "center", "right"]),
@@ -32,6 +41,21 @@ const CHOICES: [(&str, &[&str]); 8] = [
     ("endArrowhead", ARROWHEADS),
     ("roundness", &["sharp", "round"]),
     ("arrowType", &["sharp", "curved", "elbow"]),
+    (
+        "pen",
+        &[
+            "ball",
+            "fountain",
+            "pencil",
+            "brush",
+            "sketch",
+            "chinese",
+            "dashed",
+            "dotted",
+            "roundMarker",
+            "flatMarker",
+        ],
+    ),
 ];
 
 /// serde_json cannot hold NaN or infinity, so every number is finite.

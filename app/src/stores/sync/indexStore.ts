@@ -13,6 +13,7 @@ import {
   embedReady,
   getUnembeddedPdfs,
 } from "@/lib/pipeline/retrieval";
+import { prioritiseJob } from "@/lib/pipeline/queueOrder";
 import { usePipelineStore } from "@/stores/sync/pipelineStore";
 import type { FollowedPath } from "@/lib/shell/pathFollow";
 
@@ -27,6 +28,10 @@ import type { FollowedPath } from "@/lib/shell/pathFollow";
  * Nothing is queued until a Voyage key is stored (`ready`), and saving a key
  * does not sweep up the backlog: that is metered work the settings page's
  * estimate is meant to be read before.
+ *
+ * A queued file can be pushed to the front (`prioritise`); the worker takes it
+ * next, behind a file already being embedded and behind files pushed before
+ * it. The order is memory only: a restart restores the queue unordered.
  *
  * The queue is persisted as `files.embed_status = 'queued'`: set on enqueue,
  * cleared when a job leaves unrun or once it has run, and left in place by a
@@ -75,6 +80,9 @@ export interface IndexState {
   /** Append files (skipping queued and in-flight paths); start the worker if
    *  idle. Refused while a stop is pending. */
   enqueue: (jobs: IndexJob[]) => void;
+  /** Move a queued file to the front, behind those already pushed. `false`
+   *  when it is not waiting here (not queued, or already running). */
+  prioritise: (relativePath: string) => boolean;
   /** The pipeline table's retry. */
   enqueueFile: (file: DbFile) => void;
   /** The Index button: queue the whole backlog. */
@@ -86,6 +94,8 @@ export interface IndexState {
  *  a snapshot would drain a copy and miss files appended mid-run. */
 let queue: IndexJob[] = [];
 let inFlight: string | null = null;
+/** Paths pushed to the front, oldest press first (see `prioritiseJob`). */
+let pushed: string[] = [];
 
 /** The DB marks, written in order so a clear never lands before the mark it
  *  undoes; the worker waits on it so Rust's `done` cannot be overwritten. */
@@ -112,6 +122,7 @@ function markQueued(jobs: IndexJob[]): void {
 function dropQueue(): void {
   const dropped = queue;
   queue = [];
+  pushed = [];
   const ids = dropped.map((job) => job.fileId);
   persist(() => clearEmbedQueued(ids));
   const { items, touch } = usePipelineStore.getState();
@@ -166,6 +177,14 @@ export const useIndexStore = create<IndexState>((set, get) => ({
       progress: { ...blankProgress(), total },
     });
     void drain();
+  },
+
+  prioritise: (relativePath) => {
+    const next = prioritiseJob(queue, pushed, relativePath);
+    if (!next) return false;
+    queue = next.queue;
+    pushed = next.pushed;
+    return true;
   },
 
   enqueueFile: (file) => {
@@ -241,6 +260,7 @@ async function drain(): Promise<void> {
       }
       const job = queue.shift();
       if (!job) break;
+      pushed = pushed.filter((path) => path !== job.relativePath);
 
       inFlight = job.relativePath;
       const progress = useIndexStore.getState().progress ?? blankProgress();
