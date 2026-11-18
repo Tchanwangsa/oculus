@@ -41,7 +41,7 @@ const LEGACY = [
   "lectures",
   "uploads",
   "documents",
-  "whiteboards",
+  "canvases",
   "notebooks",
   "files",
   "lessons",
