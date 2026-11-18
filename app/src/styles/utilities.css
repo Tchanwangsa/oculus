@@ -97,3 +97,23 @@
     background-position: 167% 0;
   }
 }
+
+/* A rail item's busy dot: only opacity moves, on its own layer from the
+   start, so the icon beside it never steps half a pixel (docs/ui.md). */
+@utility pulse-dot {
+  will-change: opacity;
+  animation: pulse-dot 1.6s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
