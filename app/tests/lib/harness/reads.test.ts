@@ -1,10 +1,10 @@
 import { afterAll, expect, test } from "bun:test";
 import { Database as SQLite } from "bun:sqlite";
-import { flattenPreview, previewsSql, questionsSql, THREADS_SQL } from "@/lib/harness/reads";
+import { flattenPreview, previewsSql, questionsSql, SUBJECT_THREADS_SQL, THREADS_SQL } from "@/lib/harness/reads";
 
 /** The columns the two reads touch, as the migrations leave them. */
 const sqlite = new SQLite(":memory:");
-sqlite.run(`CREATE TABLE harness_threads (id INTEGER PRIMARY KEY, title TEXT, completed_at TEXT, updated_at TEXT NOT NULL DEFAULT '2026-11-15 00:00:00')`);
+sqlite.run(`CREATE TABLE harness_threads (id INTEGER PRIMARY KEY, title TEXT, subject_id INTEGER, updated_at TEXT NOT NULL DEFAULT '2026-11-15 00:00:00')`);
 sqlite.run(`CREATE TABLE harness_items (id INTEGER PRIMARY KEY, thread_id INTEGER, kind TEXT, content TEXT, run_id INTEGER)`);
 sqlite.run(`CREATE TABLE harness_runs (id INTEGER PRIMARY KEY, thread_id INTEGER, execution_status TEXT,
   initiating_item_id INTEGER, answer_item_id INTEGER, requested_at TEXT, started_at TEXT, ended_at TEXT)`);
@@ -12,7 +12,7 @@ sqlite.run(`CREATE TABLE harness_requests (id INTEGER PRIMARY KEY, thread_id INT
   responder TEXT NOT NULL DEFAULT 'live', kind TEXT NOT NULL DEFAULT 'approval', payload TEXT NOT NULL DEFAULT '{}')`);
 afterAll(() => sqlite.close());
 
-const all = <T,>(sql: string, bindings: number[]) => sqlite.query(sql.replace(/\$(\d+)/g, "?$1")).all(...bindings) as T[];
+const all = <T,>(sql: string, bindings: (number | null)[]) => sqlite.query(sql.replace(/\$(\d+)/g, "?$1")).all(...bindings) as T[];
 
 test("a thread settles when a run that ran ends, never for one that waits or left the queue", () => {
   sqlite.run(`INSERT INTO harness_threads (id, title) VALUES (1, 'ran'), (2, 'only waiting'), (3, 'cancelled')`);
@@ -84,11 +84,20 @@ test("a preview reads as one plain line", () => {
   expect(flattenPreview("## Plan\n- **Read** [week 7](/x.pdf)\n\n```py\nx\n```\nthen `run` it")).toBe("Plan Read week 7 then run it");
 });
 
-test("open reads exclude completed chats and an unlimited read reaches beyond 100", () => {
-  sqlite.run("UPDATE harness_threads SET completed_at = '2026-11-16' WHERE id = 1");
-  for (let id = 1000; id <= 1106; id++) sqlite.run("INSERT INTO harness_threads(id, title) VALUES (?1, 'open')", [id]);
-  const threads = all<{ id: number }>(THREADS_SQL, [-1]);
-  expect(threads.filter((t) => t.id >= 1000)).toHaveLength(107);
-  expect(threads.some((t) => t.id === 1)).toBe(false);
-  expect(threads[0].id).toBe(1106);
+test("the list reads every thread newest first, one past a limit to tell there are more", () => {
+  for (let id = 1000; id <= 1106; id++) sqlite.run("INSERT INTO harness_threads(id, title) VALUES (?1, 'chat')", [id]);
+  const first = all<{ id: number }>(THREADS_SQL, [101]);
+  expect(first).toHaveLength(101);
+  expect(first[0].id).toBe(1106);
+  const every = all<{ id: number }>(THREADS_SQL, [-1]);
+  expect(every.filter((t) => t.id >= 1000)).toHaveLength(107);
+  expect(every.some((t) => t.id === 1)).toBe(true);
+});
+
+test("a subject's threads page newest first, General as null", () => {
+  sqlite.run("UPDATE harness_threads SET subject_id = 7 WHERE id BETWEEN 1000 AND 1004");
+  const first = all<{ id: number }>(SUBJECT_THREADS_SQL, [7, 3, 0]);
+  expect(first.map((t) => t.id)).toEqual([1004, 1003, 1002]);
+  expect(all<{ id: number }>(SUBJECT_THREADS_SQL, [7, 3, 3]).map((t) => t.id)).toEqual([1001, 1000]);
+  expect(all<{ id: number }>(SUBJECT_THREADS_SQL, [null, -1, 0]).some((t) => t.id === 1000)).toBe(false);
 });

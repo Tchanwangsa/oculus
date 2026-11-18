@@ -42,7 +42,7 @@ LEFT JOIN subjects s ON s.id = t.subject_id
 WHERE best.position = 1
 ORDER BY best.score, julianday(t.updated_at) DESC, t.id DESC LIMIT 50`;
 
-/** Includes completed threads. Empty/punctuation-only queries read nothing. */
+/** Empty/punctuation-only queries read nothing. */
 export async function searchThreads(q: string): Promise<ThreadSearchResult[]> {
   const bindings = threadSearchBindings(q);
   if (!bindings) return [];

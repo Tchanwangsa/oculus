@@ -49,7 +49,7 @@ export function useSubjectOverview(subjectId: number, weekKey: number | null = n
     comingUp: deriveComingUp(subjectId, rows.calendar, rows.tasks,
       rows.metadata.flatMap((row) => row.task ? [row.task] : []), now),
     events: deriveEvents(subjectId, weeks, key, weeksData.classes, weeksData.lectures, now),
-    yours: deriveYours(subjectId, weeks, key, files, live, rows.completed),
+    yours: deriveYours(subjectId, weeks, key, files, live, rows.subjectThreads),
     behind: deriveBehind(subjectId, weeks, weeksData.lectures, weeksData.classes, now),
     progress: deriveProgress(subjectId, weeks, weeksData.lectures),
     revisionDue: subjectRevisionDue(rows.revision, subjectId, now.getTime()),

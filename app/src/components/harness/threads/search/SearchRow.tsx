@@ -9,8 +9,8 @@ import { cn } from "@/lib/utils";
 import { ROW_META, ROW_PREVIEW, ROW_TITLE, TITLE_READ, TITLE_READ_ACTIVE } from "../rowType";
 import { Snippet } from "./Snippet";
 
-/** A search result as a thread row's three lines: subject and age (or
- *  "Completed · age"), title, and the matching line with its hits bold. */
+/** A search result as a thread row's three lines: subject and age, title,
+ *  and the matching line with its hits bold. */
 export const SearchRow = memo(function SearchRow({
   result: r,
   active,
@@ -40,9 +40,7 @@ export const SearchRow = memo(function SearchRow({
         </span>
         <span className="min-w-0 truncate font-medium">{r.subject_code ? displayCode(r.subject_code) : "General"}</span>
         <span className="flex-1" />
-        {age && (
-          <span className="shrink-0 tabular-nums">{r.completed_at ? `Completed · ${age}` : age}</span>
-        )}
+        {age && <span className="shrink-0 tabular-nums">{age}</span>}
       </span>
       <span className={cn("flex h-[21px] w-full min-w-0 items-center", ROW_TITLE)}>
         <span className={cn("min-w-0 flex-1 truncate", active ? TITLE_READ_ACTIVE : TITLE_READ)}>

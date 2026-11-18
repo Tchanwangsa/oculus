@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { DropdownMenu } from "radix-ui";
-import { ArrowSquareOut, CheckCircle, DotsThree, Trash } from "@phosphor-icons/react";
+import { ArrowSquareOut, DotsThree, Trash } from "@phosphor-icons/react";
 import { shortcut } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
@@ -34,21 +34,16 @@ function Item({
   );
 }
 
-/** A thread row's ⋯ menu: open it in a new tab, complete it, or delete it
- *  (which arms the row's inline confirm rather than deleting at once). ⌘E
- *  shows beside Complete on the open chat, the one it acts on. */
+/** A thread row's ⋯ menu: open it in a new tab, or delete it (which arms the
+ *  row's inline confirm rather than deleting at once). */
 export function RowMenu({
   title,
-  active,
   onNewTab,
-  onComplete,
   onDelete,
   className,
 }: {
   title: string;
-  active: boolean;
   onNewTab: () => void;
-  onComplete: () => void;
   onDelete: () => void;
   className?: string;
 }) {
@@ -79,9 +74,6 @@ export function RowMenu({
         >
           <Item icon={<ArrowSquareOut size={14} />} hint={`${shortcut("mod")} click`} onSelect={onNewTab}>
             Open in new tab
-          </Item>
-          <Item icon={<CheckCircle size={14} />} hint={active ? shortcut("mod+e") : undefined} onSelect={onComplete}>
-            Complete
           </Item>
           <DropdownMenu.Separator className="mx-1 my-1 h-px bg-border-subtle" />
           <Item icon={<Trash size={14} />} destructive onSelect={onDelete}>

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { deriveYours } from "@/hooks/data/overview/yours";
-import { loadCompletedThreads } from "@/hooks/data/overview/rows";
+import { loadSubjectThreads } from "@/hooks/data/overview/rows";
 import { date, file, first, second, sqlite, strip, thread } from "./fixtures";
 
 test("Yours includes creation and edits in their own weeks using UTC local-row stamps", () => {
@@ -14,13 +14,13 @@ test("Yours includes creation and edits in their own weeks using UTC local-row s
   expect(deriveYours(1, { ...strip, weeks: [], current: -1 }, null, files, [thread()], [])).toEqual([]);
 });
 
-test("completed chats load beyond the initial fold and deduplicate moving pages", async () => {
+test("a subject's chats load page by page and deduplicate moving pages", async () => {
   const offsets: number[] = [];
-  const rows = await loadCompletedThreads(1, async (subjectId, offset = 0) => {
+  const rows = await loadSubjectThreads(1, async (subjectId, offset = 0) => {
     expect(subjectId).toBe(1);
     offsets.push(offset);
-    return offset === 0 ? { threads: [thread()], total: 2, nextOffset: 1 }
-      : { threads: [thread(), thread({ id: 2 })], total: 2, nextOffset: null };
+    return offset === 0 ? { threads: [thread()], nextOffset: 1 }
+      : { threads: [thread(), thread({ id: 2 })], nextOffset: null };
   });
   expect(offsets).toEqual([0, 1]);
   expect(rows.map((row) => row.id)).toEqual([1, 2]);

@@ -3,10 +3,10 @@ import { getThreadsByIds, type HarnessThread } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 
 /**
- * The thread a Chat tab's route names. The store lists open threads, so a
- * completed one (a restored tab, a ⌘-click from Completed or search) is read
- * by id and kept; `missing` only once that read finds nothing, so the page
- * walks back to a new chat for a deleted thread and never for a completed one.
+ * The thread a Chat tab's route names. The store lists the newest threads,
+ * so an older one (a restored tab, a ⌘-click from search) is read by id and
+ * kept; `missing` only once that read finds nothing, so the page walks back
+ * to a new chat for a deleted thread and never for an old one.
  */
 export function useRouteThread(activeId: number | null): { thread: HarnessThread | null; missing: boolean } {
   const thread = useHarnessStore((s) => (activeId == null ? null : s.threads.find((t) => t.id === activeId) ?? null));

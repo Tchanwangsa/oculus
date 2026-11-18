@@ -12,7 +12,7 @@ function latestInWeek(strip: SubjectWeeks, key: number | null, created: string |
   return dates.sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
 }
 
-export function deriveYours(subjectId: number, strip: SubjectWeeks, key: number | null, files: DbFile[], live: HarnessThread[], completed: HarnessThread[]): YoursItem[] {
+export function deriveYours(subjectId: number, strip: SubjectWeeks, key: number | null, files: DbFile[], live: HarnessThread[], subjectThreads: HarnessThread[]): YoursItem[] {
   const out: YoursItem[] = [];
   for (const file of files) {
     if (file.subject_id !== subjectId) continue;
@@ -22,7 +22,8 @@ export function deriveYours(subjectId: number, strip: SubjectWeeks, key: number 
     if (!date) continue;
     out.push({ id: `file:${file.id}`, kind, title: fileTitle(file), date, href: filePagePath(subjectId, file.relative_path) });
   }
-  const threads = new Map([...completed, ...live].map((thread) => [thread.id, thread]));
+  // The store's copy is the fresher: a live run touches it before any read.
+  const threads = new Map([...subjectThreads, ...live].map((thread) => [thread.id, thread]));
   for (const thread of threads.values()) {
     if (thread.subject_id !== subjectId) continue;
     const date = latestInWeek(strip, key, thread.created_at, thread.updated_at);

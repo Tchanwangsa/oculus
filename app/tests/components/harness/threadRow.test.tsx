@@ -4,7 +4,7 @@ import type { HarnessItem, HarnessThread } from "@/lib/harness";
 import type { Subject } from "@/lib/db";
 import { useHarnessStore } from "@/stores/chat/harnessStore";
 import { ThreadRow } from "@/components/harness/threads/ThreadRow";
-import { splitWorking } from "@/components/harness/threads/list/StatusBody";
+import { RecentsBody } from "@/components/harness/threads/list/RecentsBody";
 import { activityLine } from "@/lib/harness/activity";
 
 // A server render reads a zustand store's initial state, so live rows go there.
@@ -38,7 +38,6 @@ const render = (patch: Partial<HarnessThread>, props: Partial<Parameters<typeof 
     <ThreadRow
       thread={thread(patch)}
       subject={subject}
-      showSubject
       preview="So P(D | +) is about 0.09"
       question={undefined}
       active={false}
@@ -46,7 +45,6 @@ const render = (patch: Partial<HarnessThread>, props: Partial<Parameters<typeof 
       confirming={false}
       onOpen={() => {}}
       onNewTab={() => {}}
-      onComplete={() => {}}
       onArm={() => {}}
       onDelete={() => {}}
       {...props}
@@ -120,12 +118,6 @@ describe("ThreadRow", () => {
     }
   });
 
-  test("the Subject view drops the subject line and keeps the status on the title's line", () => {
-    const html = render({ settled_at: sqlite(60_000) }, { showSubject: false });
-    expect(html).not.toContain("COMP30024");
-    expect(html).toMatch(/Alpha-beta pruning walkthrough<\/span>.*Done/);
-  });
-
   test("a general thread reads General", () => {
     expect(render({ subject_id: null }, { subject: undefined })).toContain("General");
   });
@@ -134,13 +126,12 @@ describe("ThreadRow", () => {
     const html = render({}, { confirming: true });
     expect(html).toContain(">Delete<");
     expect(html).not.toContain("Actions for");
-    expect(html).not.toContain("Complete thread");
   });
 
-  test("hover offers Complete beside the menu", () => {
+  test("hover offers the menu alone", () => {
     const html = render({});
-    expect(html).toContain('title="Complete thread"');
     expect(html).toContain("Actions for Alpha-beta pruning walkthrough");
+    expect(html).not.toContain("Complete");
   });
 });
 
@@ -159,16 +150,32 @@ describe("activityLine", () => {
   });
 });
 
-describe("Status view", () => {
-  test("working threads go to their section; waiting and failed ones stay in place, newest first", () => {
-    const list = [
-      thread({ id: 1, updated_at: sqlite(30_000), status: "running" }),
-      thread({ id: 2, updated_at: sqlite(20_000), status: "running", pending_requests: 1 }),
-      thread({ id: 3, updated_at: sqlite(60_000), status: "error" }),
-      thread({ id: 4, updated_at: sqlite(2_000) }),
-    ];
-    const { working, rest } = splitWorking(list, new Set([1, 2]));
-    expect(working.map((t) => t.id)).toEqual([1]);
-    expect(rest.map((t) => t.id)).toEqual([4, 2, 3]);
+describe("Recents", () => {
+  const list = [
+    thread({ id: 1, updated_at: sqlite(30_000), status: "running" }),
+    thread({ id: 2, updated_at: sqlite(20_000), pending_requests: 1 }),
+    thread({ id: 3, updated_at: sqlite(60_000), status: "error" }),
+    thread({ id: 4, updated_at: sqlite(2_000) }),
+  ];
+  const body = (more: boolean) =>
+    renderToStaticMarkup(
+      <RecentsBody
+        threads={list}
+        more={more}
+        onMore={() => {}}
+        collapsed={false}
+        row={(t) => <div key={t.id} data-row={t.id} />}
+      />,
+    );
+
+  test("every thread newest first under one heading, working ones in place", () => {
+    const html = body(false);
+    expect(html).toContain(">Recents<");
+    expect([...html.matchAll(/data-row="(\d+)"/g)].map((m) => Number(m[1]))).toEqual([4, 2, 1, 3]);
+    expect(html).not.toContain("Show more");
+  });
+
+  test("Show more follows the rows while older threads exist", () => {
+    expect(body(true)).toMatch(/data-row="3"><\/div><button[^>]*>Show more<\/button>/);
   });
 });

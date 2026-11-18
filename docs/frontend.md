@@ -395,7 +395,8 @@ replies and have no one-hour gate. `parseEdThread` counts rendered reply
 headers, including nested comments; a file without a known count says
 Replies. Announcements use creation only. Student documents, canvases,
 notebooks and uploads appear in Yours, by creation or content change; chats
-merge live harness rows and every page of the subject's completed threads.
+merge live harness rows and every page of the subject's threads
+(`getSubjectThreads`), so a week's chats older than the store's newest show.
 All comparisons use parsed instants. Weekly sections use `weekOf`, including
 its folding of early activity into week 1 and late activity into +3.
 

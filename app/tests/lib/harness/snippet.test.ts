@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { completeChatTarget, HIT_CLOSE, HIT_OPEN, openThreads, snippetParts, type HarnessThread } from "@/lib/harness";
+import { HIT_CLOSE, HIT_OPEN, snippetParts } from "@/lib/harness";
 
 describe("snippetParts", () => {
   const hit = (t: string) => `${HIT_OPEN}${t}${HIT_CLOSE}`;
@@ -46,22 +46,5 @@ describe("snippetParts", () => {
       { text: "x", hit: true },
       { text: "</b>", hit: false },
     ]);
-  });
-});
-
-const thread = (patch: Partial<HarnessThread> = {}) =>
-  ({ id: 4, title: "t", subject_id: null, provider: "claude", status: "idle", updated_at: "2026-11-16 00:00:00", ...patch }) as HarnessThread;
-
-describe("⌘E and the open list", () => {
-  test("⌘E completes the open chat only in the focused pane, and only while it is open", () => {
-    expect(completeChatTarget(true, thread())).toBe(4);
-    expect(completeChatTarget(false, thread())).toBeNull();
-    expect(completeChatTarget(true, null)).toBeNull();
-    expect(completeChatTarget(true, thread({ completed_at: "2026-11-16 01:00:00" }))).toBeNull();
-  });
-
-  test("openThreads leaves out completed threads a view keeps", () => {
-    const open = thread({ id: 1 });
-    expect(openThreads([open, thread({ id: 2, completed_at: "2026-11-16 01:00:00" })])).toEqual([open]);
   });
 });

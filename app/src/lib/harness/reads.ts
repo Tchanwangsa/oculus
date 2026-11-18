@@ -27,16 +27,32 @@ const RUN_STARTED_AT =
 
 const THREAD_COLUMNS = `t.*, ${SETTLED_AT}, ${PENDING_REQUESTS}, ${PENDING_QUESTIONS}, ${RUN_STARTED_AT}`;
 
-/** Open threads, newest first; `$1` is the limit (-1 reads every open thread). */
-export const THREADS_SQL = `SELECT ${THREAD_COLUMNS} FROM harness_threads t WHERE t.completed_at IS NULL ORDER BY t.updated_at DESC, t.id DESC LIMIT $1`;
+/** Every thread, newest first; `$1` is the limit (-1 reads them all). */
+export const THREADS_SQL = `SELECT ${THREAD_COLUMNS} FROM harness_threads t ORDER BY t.updated_at DESC, t.id DESC LIMIT $1`;
 
-export async function getHarnessThreads(limit = -1): Promise<HarnessThread[]> {
+export async function getHarnessThreads(limit = 100): Promise<HarnessThread[]> {
   const db = await getDb();
   return db.select<HarnessThread[]>(THREADS_SQL, [limit]);
 }
 
-/** These threads, open or completed: the chats a view holds on screen
- *  after they left the open list (`harnessStore.loadThreads`). */
+/** One page of a subject's threads (null is General), newest first. */
+export interface ThreadPage {
+  threads: HarnessThread[];
+  /** Where the next page starts; null once this one came back short. */
+  nextOffset: number | null;
+}
+
+export const SUBJECT_THREADS_SQL = `SELECT ${THREAD_COLUMNS} FROM harness_threads t WHERE t.subject_id IS $1
+  ORDER BY t.updated_at DESC, t.id DESC LIMIT $2 OFFSET $3`;
+
+export async function getSubjectThreads(subjectId: number | null, offset = 0, limit = 100): Promise<ThreadPage> {
+  const db = await getDb();
+  const threads = await db.select<HarnessThread[]>(SUBJECT_THREADS_SQL, [subjectId, limit, offset]);
+  return { threads, nextOffset: threads.length === limit ? offset + limit : null };
+}
+
+/** These threads by id: the chats a view holds on screen beyond the
+ *  store's newest (`harnessStore.loadThreads`). */
 export async function getThreadsByIds(ids: number[]): Promise<HarnessThread[]> {
   if (!ids.length) return [];
   const db = await getDb();

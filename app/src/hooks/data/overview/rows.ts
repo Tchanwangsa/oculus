@@ -1,4 +1,4 @@
-import { getSubjectCompletedThreads } from "@/lib/harness/completedReads";
+import { getSubjectThreads } from "@/lib/harness/reads";
 import type { HarnessThread } from "@/lib/harness/types";
 import type { DbFile } from "@/lib/db";
 import { parseEdThread, type EdThread } from "@/lib/ed/threads";
@@ -16,10 +16,11 @@ export function parseOverviewFile(markdown: string, file: DbFile): FileMetadata 
   };
 }
 
-/** Read every page: the selected week may contain chats beyond the first fold. */
-export async function loadCompletedThreads(
+/** Every page of the subject's threads: the selected week may hold chats
+ *  older than the store's newest. */
+export async function loadSubjectThreads(
   subjectId: number,
-  read: typeof getSubjectCompletedThreads = getSubjectCompletedThreads,
+  read: typeof getSubjectThreads = getSubjectThreads,
 ): Promise<HarnessThread[]> {
   const threads = new Map<number, HarnessThread>();
   let offset: number | null = 0;

@@ -47,11 +47,17 @@ const EMPTY: HarnessItem[] = [];
 const NO_RUNS: Record<number, HarnessRun> = {};
 const NO_REQUESTS: Record<number, HarnessRequest> = {};
 
+/** Threads the first read lists, and how many each Show more adds. */
+export const THREAD_PAGE = 100;
+
 interface HarnessState {
-  /** Open threads newest first, plus any completed one a view holds on
-   *  screen (`completed_at` set), so a chat completed while open, or opened
-   *  from Completed or search, stays readable. Lists take `openThreads`. */
+  /** The newest `threadLimit` threads, plus any older one a view holds on
+   *  screen (a restored tab, a search hit), so it stays readable. */
   threads: HarnessThread[];
+  /** How many of the newest threads `loadThreads` reads. */
+  threadLimit: number;
+  /** Older threads exist beyond `threadLimit`. */
+  moreThreads: boolean;
   /** Whether `threads` has been read once. Until then a route's thread id
    *  can't be told from a deleted one, so the page must not give up on it. */
   threadsLoaded: boolean;
@@ -89,8 +95,11 @@ interface HarnessState {
   clearQuestionDraft: (thread: number, request: number) => void;
 
   loadThreads: () => Promise<void>;
-  /** A completed thread about to open (from Completed or search): listed
-   *  now, so the page finds it before `hold` and the next `loadThreads`. */
+  /** Reads `THREAD_PAGE` more of the older threads. */
+  showMoreThreads: () => Promise<void>;
+  /** A thread about to open that may be older than those read (a search
+   *  hit, a route): listed now, so the page finds it before `hold` and the
+   *  next `loadThreads`. */
   keep: (thread: HarnessThread) => void;
   /** A view put this thread on screen: count it, and read its rows if nobody
    *  else was. `borrowFrom` is the thread the view showed a moment ago. */
@@ -173,6 +182,8 @@ function rowFrom(env: HarnessEnvelope, kind: HarnessItem["kind"], content: strin
 
 export const useHarnessStore = create<HarnessState>((set, get) => ({
   threads: [],
+  threadLimit: THREAD_PAGE,
+  moreThreads: false,
   threadsLoaded: false,
   holds: {},
   items: {},
@@ -197,19 +208,27 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   ...defaultSelectionFor(DEFAULT_CHAT_PROVIDER),
 
   loadThreads: async () => {
-    const open = await getHarnessThreads();
-    // A held thread missing from the open list completed, or was opened
-    // completed: read it by id so its view keeps it. A deleted one reads nothing.
-    const listed = new Set(open.map((t) => t.id));
+    const limit = get().threadLimit;
+    // One past the limit says whether there are more.
+    const read = await getHarnessThreads(limit + 1);
+    const newest = read.slice(0, limit);
+    // A held thread older than those read: read it by id so its view keeps
+    // it. A deleted one reads nothing.
+    const listed = new Set(newest.map((t) => t.id));
     const held = Object.keys(get().holds).map(Number).filter((id) => !listed.has(id));
-    const threads = held.length ? [...open, ...(await getThreadsByIds(held))] : open;
+    const threads = held.length ? [...newest, ...(await getThreadsByIds(held))] : newest;
     set((s) => {
       const live = { ...s.live };
       for (const t of threads) {
         if (t.status === "running" && !live[t.id]) live[t.id] = { ...IDLE, running: true };
       }
-      return { threads, live, threadsLoaded: true };
+      return { threads, live, threadsLoaded: true, moreThreads: read.length > limit };
     });
+  },
+
+  showMoreThreads: async () => {
+    set((s) => ({ threadLimit: s.threadLimit + THREAD_PAGE }));
+    await get().loadThreads();
   },
 
   keep: (thread) =>
