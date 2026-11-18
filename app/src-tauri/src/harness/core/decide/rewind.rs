@@ -104,7 +104,6 @@ mod tests {
         State {
             thread: Some(ThreadRow {
                 id: 4,
-                completed_at: None,
                 provider: Provider::Codex,
                 model: Some("gpt".into()),
                 effort: Some("high".into()),

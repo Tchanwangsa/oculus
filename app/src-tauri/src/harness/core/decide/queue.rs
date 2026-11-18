@@ -100,7 +100,6 @@ mod tests {
         State {
             thread: Some(ThreadRow {
                 id: 4,
-                completed_at: None,
                 provider: Provider::Claude,
                 model: None,
                 effort: None,

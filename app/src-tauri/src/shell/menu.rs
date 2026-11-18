@@ -16,7 +16,6 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 #[cfg(any(target_os = "windows", test))]
 pub(crate) mod windows;
 
-const COMPLETE_CHAT: &str = "complete-chat";
 const SEARCH: &str = "search";
 const NEW_TAB: &str = "new-tab";
 const SIDE_PANEL: &str = "side-panel";
@@ -54,7 +53,6 @@ const TAB_SLOT: &str = "tab-slot-";
 const TAB_SLOTS: usize = 8;
 
 /// Events the frontend listens for.
-pub const COMPLETE_CHAT_EVENT: &str = "menu-complete-chat";
 pub const SEARCH_EVENT: &str = "menu-search";
 pub const NEW_TAB_EVENT: &str = "menu-new-tab";
 pub const SIDE_PANEL_EVENT: &str = "menu-side-panel";
@@ -115,14 +113,6 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &item(app, SEARCH, "Search…", true, Some("CmdOrCtrl+K"))?,
             &PredefinedMenuItem::separator(app)?,
             &item(app, NEW_TAB, "New Tab", true, Some("CmdOrCtrl+T"))?,
-            // The frontend owns page selection, as for Open Location.
-            &item(
-                app,
-                COMPLETE_CHAT,
-                "Complete Chat",
-                true,
-                Some("CmdOrCtrl+E"),
-            )?,
             // The side panel of the tab in front, not a second tab.
             &item(app, SIDE_PANEL, "Side Panel", true, Some(SIDE_PANEL_KEY))?,
             &item(app, CLOSE_TAB, "Close Tab", true, Some("CmdOrCtrl+W"))?,
@@ -301,9 +291,6 @@ pub fn handle<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
     match event.id().as_ref() {
         #[cfg(target_os = "windows")]
         EXIT => app.exit(0),
-        COMPLETE_CHAT => {
-            app.emit(COMPLETE_CHAT_EVENT, ()).ok();
-        }
         SEARCH => {
             app.emit(SEARCH_EVENT, ()).ok();
         }

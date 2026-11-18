@@ -47,8 +47,6 @@ pub(in crate::harness) enum Kind {
         model: Option<String>,
         effort: Option<String>,
     },
-    CompleteThread,
-    ReopenThread,
     DeleteThread,
     /// Rewrite a message that still waits.
     EditQueued {
@@ -106,8 +104,6 @@ impl Kind {
             Kind::Rewind { .. } => "rewind",
             Kind::EditResend { .. } => "edit_resend",
             Kind::SelectModel { .. } => "select_model",
-            Kind::CompleteThread => "complete_thread",
-            Kind::ReopenThread => "reopen_thread",
             Kind::DeleteThread => DELETE_THREAD,
             Kind::EditQueued { .. } => "edit_queued",
             Kind::RemoveQueued { .. } => "remove_queued",

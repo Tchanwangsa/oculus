@@ -4,7 +4,6 @@
 
 mod apply;
 pub mod bindings;
-pub mod completed;
 mod items;
 mod naming;
 pub mod queue;

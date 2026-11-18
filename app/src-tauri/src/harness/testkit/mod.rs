@@ -7,7 +7,6 @@ mod assertions;
 mod claude_requests;
 mod codex_requests;
 mod commands;
-mod completed;
 mod continuation;
 mod driver;
 mod fixture;

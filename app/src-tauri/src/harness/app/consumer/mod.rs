@@ -63,7 +63,6 @@ pub(in crate::harness) trait ConsumerIo {
     /// Carry out a provider call a commit left to be made
     /// (`core::effect::run`), off this thread: a CLI can take a minute.
     fn perform(&mut self, effect: Effect);
-    fn threads_changed(&mut self, _threads: Vec<i64>) {}
     fn emit(&mut self, envelope: Envelope);
 }
 

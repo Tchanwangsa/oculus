@@ -1012,6 +1012,16 @@ CREATE TABLE IF NOT EXISTS path_moves (
                         "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 65,
+            description: "chats: drop completed_at",
+            // The index goes first: SQLite will not drop an indexed column.
+            sql: r#"
+DROP INDEX IF EXISTS idx_harness_threads_completed_updated;
+ALTER TABLE harness_threads DROP COLUMN completed_at;
+                        "#,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -1043,6 +1053,53 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(row, (None, None, "first".into()));
+    }
+
+    /// 65 drops the column 60 added, and the index on it, keeping every chat.
+    #[tokio::test]
+    async fn chats_lose_their_completion_column_and_keep_their_rows() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let (before, after): (Vec<_>, Vec<_>) = super::all()
+            .into_iter()
+            .partition(|migration| migration.version < 65);
+        for migration in before {
+            sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+        }
+        sqlx::raw_sql(
+            "INSERT INTO harness_threads (id, provider) VALUES (1, 'claude'), (2, 'codex');
+             UPDATE harness_threads SET completed_at = '2026-11-01' WHERE id = 2;",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for migration in after {
+            sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+        }
+        let columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('harness_threads')")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert!(
+            !columns.iter().any(|c| c.starts_with("completed")),
+            "{columns:?}"
+        );
+        let indexes: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND tbl_name = 'harness_threads' AND sql LIKE '%completed%'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(indexes, 0);
+        let chats: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM harness_threads")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(chats, 2);
     }
 
     #[test]

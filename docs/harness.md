@@ -954,43 +954,33 @@ writes it into the draft once and drops it from the route.
   the dock's `release` cannot empty rows a Chat tab is reading. `hold` borrows
   the outgoing thread's rows until the read lands, or every switch flashes an
   empty timeline.
-- A route naming a thread missing from the list walks back to bare `/chat` —
-  only after the list has loaded, or a restored tab drops its thread.
+- A route naming a thread the store has not read (older than its newest, a
+  restored tab, a ⌘-click from search) is read by id and kept
+  (`useRouteThread`); one that read finds nothing walks back to bare
+  `/chat` — only after the list has loaded, or a restored tab drops its
+  thread.
 - The conversations column (`ThreadList`, its bodies in `threads/list/`) is
   a `SideNav`, the subject page's column ([ui.md](./ui.md)), 284px by
   default. Its header is the search field (`SideNavSearch`) with the
-  new-chat button at its right, lit while no thread is open, and under them
-  the view switch, two tabs with icons (Status, pulse; Subject, book)
-  remembered per device (`oculus-chat-list-view`). It lists open threads
-  only (`openThreads`; the store also keeps a completed chat a view holds,
-  see [Completed](#completed-chats-leave-the-open-list-and-remain-searchable)). It
-  resizes, and ⌘⌥B or the toggle in the page header beside the title
-  (`ChatPage` owns the panel state) folds it away entirely. The chord acts
-  only in the tab in front, since the subject column answers it too. Its
-  resize handle goes with it, so it can't clash with a side panel's; the
-  toggle or ⌘⌥B brings it back.
-- **Status view** (T3's frame, `StatusBody`): every thread not at work,
-  newest first by `updated_at` with no headings (Approval, Question and
-  Failed in place by time; nothing jumps to the top), then "Working" with
-  its count, folding, in a `margin-top: auto` block of `SideNav`'s `fill`
-  column, so it rests at the column's foot while the list is short and
-  follows it when long. Under it, "Completed" with its count folds open onto
-  grey one-line rows (the subject glyph in grey, title, age; on hover the
-  age gives way to a Reopen icon with a tooltip, and the title fades out
-  under it as a tab's title does under its ×), ten then Show 25 more. Folds are kept with the subject groups'
-  (`oculus-chat-groups-collapsed`); the Completed folds start closed, so
-  their keys there mean open (`order.ts`).
-  **Subject view** (`SubjectBody`): threads grouped by subject, groups in
-  dragged order, each folding, five rows then Show more; a group header is
-  the subject's glyph and short code, so its rows drop their subject line.
-  Each group ends with "n completed", folding open in place onto that
-  subject's completed rows (its own paged read); a subject whose threads are
-  all completed keeps a group for it.
-- **Search** replaces the view while the field holds text: debounced
-  150 ms (`debouncedSearch`, a stale answer never lands), the view switch
-  steps aside, Esc or × clears, Enter opens the first result. No ⌘ key:
-  ⌘K is the app's Search. A result is a row's three lines: subject and age
-  ("Completed · 4d" for a completed chat), title, and the snippet. FTS
+  new-chat button at its right, lit while no thread is open. It resizes,
+  and ⌘⌥B or the toggle in the page header beside the title (`ChatPage`
+  owns the panel state) folds it away entirely. The chord acts only in the
+  tab in front, since the subject column answers it too. Its resize handle
+  goes with it, so it can't clash with a side panel's; the toggle or ⌘⌥B
+  brings it back.
+- **The list is one section, "Recents"** (`RecentsBody`, its label a
+  `SideNavGroupLabel`): every thread newest first by `updated_at`, with no
+  other headings, so Working, Approval, Question and Failed stay in place
+  by time and nothing jumps to the top. The store reads the newest 100
+  (`THREAD_PAGE`) plus one, which says whether older ones exist; while they
+  do, Show more at the foot raises the limit by another 100
+  (`showMoreThreads`). A thread a view holds that is older than those read
+  is read by id and kept in the store (`loadThreads`, `getThreadsByIds`), and
+  opening a search hit lists it at once (`keep`).
+- **Search** replaces the list while the field holds text: debounced
+  150 ms (`debouncedSearch`, a stale answer never lands), Esc or × clears,
+  Enter opens the first result. No ⌘ key: ⌘K is the app's Search. A
+  result is a row's three lines: subject and age, title, and the snippet. FTS
   wraps hits in private-use markers (`HIT_OPEN`/`HIT_CLOSE`), so a
   message's own `**bold**` is never a hit; `snippetParts` turns the pairs
   into bold spans and drops markdown marks (never HTML). None is one muted
@@ -999,20 +989,19 @@ writes it into the draft once and drops it from the route.
   `displayCode` (General for none) with the status or the age at the right
   ("25m", `shortAge`); the title, with the lecture glyph; and the newest
   message from either side, flattened, with the provider mark at the
-  right. The Subject view moves the right slot onto the title's line. Line
-  three is the thread's question while it asks one (`getPendingQuestions`),
+  right. Line three is the thread's question while it asks one (`getPendingQuestions`),
   and while it works, what the run is doing if a view holds its rows
   (`activityLine`: "Reading week-7.pdf", "Thinking"). Previews are one read
   for the list (`useThreadPreviews`), redone when a listed thread's
   `updated_at` or waiting-question count changes, never per token. A
   title is bright and medium while the thread is Done, Approval, Question
   or Failed, dimmed otherwise, and always a step brighter and larger than
-  the preview (`threads/rowType.ts`, [ui.md](./ui.md)). Hover shows "✓
-  Complete" and a ⋯ menu (open in a new tab, Complete, with ⌘E beside it on
-  the open chat, and delete, which arms the row's inline confirm). They have
-  no surface of their own: the line under them fades out at its end and
-  hides its status or age while they show (`UNDER_ACTIONS`). While the column folds,
-  the subject glyph stays longest with the status dot on its corner.
+  the preview (`threads/rowType.ts`, [ui.md](./ui.md)). Hover shows a ⋯
+  menu (open in a new tab, and delete, which arms the row's inline
+  confirm). It has no surface of its own: the subject line under it fades
+  out at its end and hides its status or age while it shows
+  (`UNDER_ACTIONS`). While the column folds, the subject glyph stays
+  longest with the status dot on its corner.
 - Bare `/chat` is a new thread: the composer docked at the bottom as in a
   thread, and above it the headline that names the subject (`DraftHero`) over
   the three latest threads (`RecentThreads`) — provider mark, title, a chip
@@ -1061,46 +1050,17 @@ writes it into the draft once and drops it from the route.
 Deleting a thread drops its retained live output, view holds and context-drift
 marker as well as rows and queue, so removed turns cannot leave the sidebar busy.
 
-## Completed chats leave the open list and remain searchable
-
-Completion is display state: `completed_at` on `harness_threads` never changes
-or releases a provider session. Complete and Reopen use the serialized command
-path and receipts (`app/src-tauri/src/harness/app/completed.rs`). Reopen clears
-the stamp and refreshes `updated_at`; an accepted send clears it in its own
-transaction, including queued and steered sends.
-
-A launch task waits for startup repair, then sweeps hourly
-(`app/src-tauri/src/harness/store/completed.rs`). It stamps open threads older
-than three days, excluding running threads, starting/running/queued runs,
-pending requests (questions included), and failures. Reads never complete a
-thread. Sweeps preserve `updated_at`, so the last activity still orders chats.
-
-`app/src/lib/harness/completedReads.ts` pages completed chats newest first,
-10 initially and 25 thereafter, with `COUNT(*)`, subject counts and a subject
-page (null is General). `getHarnessThreads` reads every open chat by default;
-`getLectureThreads` includes completed ones. Both commands and a sweep that
-changed rows emit `harness-threads-changed` with the changed ids;
-`watchThreadsChanged` (one listener however many thread columns are mounted)
-re-reads the open list and every completed fold at the length it shows
-(`app/src/stores/chat/completedStore.ts`). The menu emits
-`menu-complete-chat` on ⌘E; as for Open Location, it is always enabled
-because Rust does not track the current page, so `ChatPage` acts only in the
-focused pane on an open chat (`completeChatTarget`).
-
-A completed chat stays on screen. `loadThreads` reads any thread a view
-holds that the open list lacks by id (`getThreadsByIds`) and keeps it in the
-store with `completed_at` set; opening one from Completed or search lists it
-first (`keep`), and a route naming one (a restored tab, a ⌘-click) is read by
-id before the page gives up on it (`useRouteThread`).
+## Search reads titles and message text
 
 `app/src/lib/harness/searchThreads.ts` combines title `LIKE` hits and the
 external-content FTS5 index `harness_items_fts`, maintained by insert, edit and
 delete triggers over user and assistant message text. Migration 61 backfills
 it; `unicode61 remove_diacritics 2` matches accents. Search quotes user tokens
 and adds prefix operators itself, so typed FTS syntax is literal input.
-Results include completed chats, one best hit per thread, title matches first,
-then message relevance and newest activity, capped at 50. Snippets are plain
-text with `**` around hits, for the UI to render as text and bold spans.
+Results are one best hit per thread, title matches first, then message
+relevance and newest activity, capped at 50. Snippets are plain text with
+hits between `HIT_OPEN` and `HIT_CLOSE`, for the UI to render as text and
+bold spans.
 
 ## One turn at a time
 

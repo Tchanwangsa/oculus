@@ -13,7 +13,7 @@ async fn pool_before_search() -> SqlitePool {
         sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
     }
     sqlx::raw_sql("PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = OFF;
-        INSERT INTO harness_threads(id,provider,completed_at) VALUES (1,'claude',NULL), (2,'claude','2000-01-01');
+        INSERT INTO harness_threads(id,provider) VALUES (1,'claude'), (2,'claude');
         INSERT INTO harness_items(id,thread_id,kind,content) VALUES (1,1,'user','eigenvalues café'),(2,2,'assistant','eigenvectors'),(3,1,'tool','eigenignored');")
         .execute(&pool).await.unwrap();
     sqlx::raw_sql(include_str!("search.sql"))
@@ -34,13 +34,10 @@ async fn hits(pool: &SqlitePool, query: &str) -> Vec<i64> {
 }
 
 #[tokio::test]
-async fn backfill_and_prefix_search_include_completed_chats_and_strip_diacritics() {
+async fn backfill_and_prefix_search_strip_diacritics() {
     let pool = pool_before_search().await;
     assert_eq!(hits(&pool, "\"eigen\"*").await, vec![1, 2]);
     assert_eq!(hits(&pool, "cafe").await, vec![1]);
-    let done: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM harness_items_fts JOIN harness_items i ON i.id = harness_items_fts.rowid JOIN harness_threads t ON t.id = i.thread_id WHERE harness_items_fts MATCH 'eigen*' AND t.completed_at IS NOT NULL")
-        .fetch_one(&pool).await.unwrap();
-    assert_eq!(done, 1);
 }
 
 #[tokio::test]

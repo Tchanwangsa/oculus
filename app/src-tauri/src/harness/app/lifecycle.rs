@@ -100,10 +100,6 @@ impl ConsumerIo for AppIo {
         tauri::async_runtime::spawn(async move { effect::run(&runtime, effect).await });
     }
 
-    fn threads_changed(&mut self, threads: Vec<i64>) {
-        let _ = self.handle.emit("harness-threads-changed", threads);
-    }
-
     fn emit(&mut self, envelope: Envelope) {
         let _ = self.handle.emit("harness-event", envelope);
     }
@@ -137,7 +133,6 @@ pub fn reconcile(app: &AppHandle) {
             let _ = startup.ready(crate::db::store::open_pool).await;
         }
     });
-    super::completed::start_sweep(app);
     tauri::async_runtime::spawn(forget_antigravity_rules());
 }
 

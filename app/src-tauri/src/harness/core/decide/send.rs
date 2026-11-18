@@ -31,9 +31,6 @@ pub(super) fn decide(
             }
             let (model, effort) = (options.model.as_ref(), options.reasoning_effort.as_ref());
             changes.extend(select::change(row, provider, model, effort));
-            if row.completed_at.is_some() {
-                changes.push(Change::SetCompleted { completed: false });
-            }
         }
         None => changes.push(Change::CreateThread {
             provider,
@@ -120,7 +117,6 @@ mod tests {
     fn thread(provider: Provider) -> ThreadRow {
         ThreadRow {
             id: 4,
-            completed_at: None,
             provider,
             model: None,
             effort: None,
@@ -169,35 +165,6 @@ mod tests {
             Decision::Commit(plan) => plan.changes,
             Decision::Ask(_) => panic!("a send asks the provider nothing"),
         }
-    }
-
-    #[test]
-    fn every_delivery_to_a_completed_thread_reopens_before_writing_the_message() {
-        let mut done = state(Some(thread(Provider::Codex)), false);
-        done.thread.as_mut().unwrap().completed_at = Some("2000-01-01".into());
-        for busy in [false, true] {
-            done.open = state(None, busy).open;
-            let changes = decided(&done, Mode::Auto, "new message");
-            assert!(matches!(
-                changes.first(),
-                Some(Change::SetCompleted { completed: false })
-            ));
-        }
-        done.live.steering = crate::harness::core::state::Steering::read(|p| {
-            crate::harness::providers::capabilities::Capabilities {
-                active_steering: true,
-                ..crate::harness::providers::capabilities::of(p)
-            }
-        });
-        done.live.accepted = true;
-        let changes = decided(&done, Mode::Auto, "correction");
-        assert!(matches!(
-            changes.as_slice(),
-            [
-                Change::SetCompleted { completed: false },
-                Change::Steer { .. }
-            ]
-        ));
     }
 
     #[test]
