@@ -1,4 +1,5 @@
-import { parseAck, parseChange, parseKind, type ShareAck, type ShareChange, type ShareOp, type ShareSnapshot } from "./protocol";
+import { drawingNoun } from "@/lib/whiteboard/kindWords";
+import { parseAck, parseChange, parseKind, type ShareAck, type ShareChange, type ShareKind, type ShareOp, type ShareSnapshot } from "./protocol";
 
 /** HTTP side of the share protocol. The secret travels only in the
  * Authorization header; no URL, error message or log line carries it. */
@@ -23,21 +24,24 @@ export const MAX_SNAPSHOT_BYTES = 260 * 1024 * 1024;
 
 const STATUS_CODE: Record<number, ShareErrorCode> = { 401: "unauthorized", 403: "unauthorized", 404: "not-found", 410: "gone", 413: "too-large", 423: "external-edit" };
 const KNOWN = new Set<string>(["conflict-shape", "conflict-order", "conflict-background", "invalid", "stale-op", "session-ended", "too-large", "external-edit", "io", "gone"]);
-const FALLBACK: Partial<Record<ShareErrorCode, string>> = {
+/** What a refusal without a message says; `noun` is the shared file's kind, or "drawing" before the first snapshot. */
+const fallback = (code: ShareErrorCode, noun: string): string | undefined => ({
   unauthorized: "This share link is no longer valid.",
-  "not-found": "This whiteboard is no longer shared.",
-  gone: "This whiteboard is no longer shared.",
-  "session-ended": "This whiteboard is no longer shared.",
-  "external-edit": "The whiteboard changed on the Mac outside Oculus. Saving resumes once it is resolved there.",
+  "not-found": `This ${noun} is no longer shared.`,
+  gone: `This ${noun} is no longer shared.`,
+  "session-ended": `This ${noun} is no longer shared.`,
+  "external-edit": `The ${noun} changed on the Mac outside Oculus. Saving resumes once it is resolved there.`,
   "too-large": "This change is too large to share.",
   server: "The Mac could not save this change.",
-};
+} as Partial<Record<ShareErrorCode, string>>)[code];
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export class ShareApi {
   private readonly base: string;
   private readonly authorization: string;
+  /** The shared file's kind once a snapshot has named it; its messages say "drawing" until then. */
+  private kind: ShareKind | null = null;
   constructor(origin: string, shareId: string, secret: string, private readonly fetchImpl: FetchLike) {
     this.base = `${origin}/api/s/${shareId}`;
     this.authorization = `Bearer ${shareId}.${secret}`;
@@ -61,26 +65,27 @@ export class ShareApi {
     try { body = await response.json(); } catch { /* not JSON */ }
     const named = typeof body?.code === "string" && KNOWN.has(body.code) ? body.code as ShareErrorCode : undefined;
     const code = named ?? STATUS_CODE[response.status] ?? (response.status >= 500 ? "server" : "bad-response");
-    const message = typeof body?.message === "string" && body.message ? body.message : FALLBACK[code] ?? `The Mac answered ${response.status}.`;
+    const message = typeof body?.message === "string" && body.message ? body.message : fallback(code, drawingNoun(this.kind)) ?? `The Mac answered ${response.status}.`;
     throw new ShareHttpError(response.status, code, message);
   }
 
   /** The whiteboard file text, read as a stream so its size is bounded before it is held. */
   async snapshot(signal?: AbortSignal): Promise<ShareSnapshot> {
     const response = await this.request("/snapshot", { signal });
+    const kind = this.kind = parseKind(response.headers.get("X-Oculus-Kind"));
     const epoch = response.headers.get("X-Oculus-Epoch");
     const revision = Number(response.headers.get("X-Oculus-Revision"));
-    if (!epoch || !Number.isSafeInteger(revision) || revision < 0) throw new ShareHttpError(response.status, "bad-response", "The Mac sent an incomplete whiteboard.");
+    if (!epoch || !Number.isSafeInteger(revision) || revision < 0) throw new ShareHttpError(response.status, "bad-response", `The Mac sent an incomplete ${kind}.`);
     const declared = response.headers.get("Content-Length");
     const length = declared === null ? null : Number(declared);
-    if (length !== null && length > MAX_SNAPSHOT_BYTES) throw new ShareHttpError(response.status, "too-large", "This whiteboard is too large to open here.");
+    if (length !== null && length > MAX_SNAPSHOT_BYTES) throw new ShareHttpError(response.status, "too-large", `This ${kind} is too large to open here.`);
     let text: string;
-    try { text = await readText(response, length); }
+    try { text = await readText(response, length, kind); }
     catch (error) {
       if (error instanceof ShareHttpError) throw error;
-      throw new ShareNetworkError("The whiteboard stopped downloading.");
+      throw new ShareNetworkError(`The ${kind} stopped downloading.`);
     }
-    return { epoch, revision, text, kind: parseKind(response.headers.get("X-Oculus-Kind")) };
+    return { epoch, revision, text, kind };
   }
 
   async commit(op: ShareOp, signal?: AbortSignal): Promise<ShareAck> {
@@ -109,7 +114,7 @@ export class ShareApi {
   }
 }
 
-async function readText(response: Response, length: number | null): Promise<string> {
+async function readText(response: Response, length: number | null, kind: ShareKind): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) return response.text();
   const decoder = new TextDecoder();
@@ -121,11 +126,11 @@ async function readText(response: Response, length: number | null): Promise<stri
     received += value.byteLength;
     if (received > MAX_SNAPSHOT_BYTES) {
       void reader.cancel().catch(() => {});
-      throw new ShareHttpError(response.status, "too-large", "This whiteboard is too large to open here.");
+      throw new ShareHttpError(response.status, "too-large", `This ${kind} is too large to open here.`);
     }
     parts.push(decoder.decode(value, { stream: true }));
   }
   parts.push(decoder.decode());
-  if (length !== null && received !== length) throw new ShareNetworkError("The whiteboard stopped downloading.");
+  if (length !== null && received !== length) throw new ShareNetworkError(`The ${kind} stopped downloading.`);
   return parts.join("");
 }

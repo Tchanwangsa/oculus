@@ -1,6 +1,8 @@
 import { Button } from "@/components/ui/button";
 import type { WhiteboardAuthorityPhase } from "@/lib/whiteboard/authority";
 import type { ShareView } from "@/lib/sharing/controller";
+import type { DrawingKind } from "@/lib/whiteboard/drawingKinds";
+import { kindNoun } from "@/lib/whiteboard/kindWords";
 import { pickEndpoint, shareStatusLine } from "@/lib/sharing/view";
 import { AddressList } from "./AddressList";
 import { ShareLink } from "./ShareLink";
@@ -18,12 +20,14 @@ export interface ShareDialogActions {
 const TONE = { muted: "bg-muted-foreground/50", live: "bg-success", warning: "bg-warning" } as const;
 
 /** What the share dialog shows for a controller view; state lives in the
- * caller, so this renders the same on the server in tests. */
-export function ShareDialogBody({ view, authority, confirmingStop, ...actions }: ShareDialogActions & {
+ * caller, so this renders the same on the server in tests. `kind` names the drawing in the text. */
+export function ShareDialogBody({ view, authority, confirmingStop, kind, ...actions }: ShareDialogActions & {
   view: ShareView;
   authority: WhiteboardAuthorityPhase;
   confirmingStop: boolean;
+  kind: DrawingKind;
 }) {
+  const noun = kindNoun(kind);
   const line = shareStatusLine(view, authority);
   const share = view.status === "sharing" ? view.share : null;
   const endpoint = share ? pickEndpoint(share.endpoints, view.preferred) : null;
@@ -51,7 +55,7 @@ export function ShareDialogBody({ view, authority, confirmingStop, ...actions }:
       {share ? (
         <>
           {authority === "paused" || share.phase === "paused" ? (
-            <p className="text-xs text-muted-foreground">The file changed outside Oculus. Devices can look but not save until you choose a version in the whiteboard.</p>
+            <p className="text-xs text-muted-foreground">The file changed outside Oculus. Devices can look but not save until you choose a version in the {noun}.</p>
           ) : null}
           <div className="flex min-w-0 flex-wrap items-start gap-4">
             {endpoint?.url ? <ShareQr link={endpoint.url} /> : null}
@@ -60,7 +64,7 @@ export function ShareDialogBody({ view, authority, confirmingStop, ...actions }:
             </div>
           </div>
           {endpoint?.url ? <ShareLink link={endpoint.url} /> : null}
-          <ShareLimits />
+          <ShareLimits kind={kind} />
           <StopShare confirming={confirmingStop} stopping={false} onConfirm={actions.onConfirmStop} onStop={actions.onStop} />
         </>
       ) : view.status === "stopping" ? (
@@ -70,10 +74,10 @@ export function ShareDialogBody({ view, authority, confirmingStop, ...actions }:
           <p className="text-xs leading-relaxed text-muted-foreground">
             {view.status === "ended"
               ? "Devices can no longer open the old link. Sharing again makes a new link and code."
-              : "Open this whiteboard in a browser on an iPad or phone and draw on it together. You get a link and a QR code."}
+              : `Open this ${noun} in a browser on an iPad or phone and draw on it together. You get a link and a QR code.`}
           </p>
           {noAddress && <p className="text-xs text-muted-foreground">This Mac has no address another device could use. Join a Wi‑Fi network or a VPN first.</p>}
-          <ShareLimits />
+          <ShareLimits kind={kind} />
           <div>
             <Button size="sm" disabled={view.status === "starting" || view.status === "unknown"} onClick={actions.onStart}>
               {view.status === "starting" ? "Starting…" : view.status === "ended" ? "Share again" : "Start sharing"}
@@ -86,11 +90,11 @@ export function ShareDialogBody({ view, authority, confirmingStop, ...actions }:
 }
 
 /** What sharing can and cannot do, said once here and in Settings. */
-export function ShareLimits() {
+export function ShareLimits({ kind }: { kind: DrawingKind }) {
   return (
     <ul className="flex list-disc flex-col gap-1 pl-4 text-[11px] leading-relaxed text-muted-foreground">
       <li>Works on the same network or over your VPN. Public and guest Wi‑Fi often keep devices apart, so a device there may not open the link.</li>
-      <li>Anyone with the link can edit this whiteboard until you stop sharing.</li>
+      <li>Anyone with the link can edit this {kindNoun(kind)} until you stop sharing.</li>
       <li>If this Mac’s address changes, the link and code here update; a device that only has the old link has to open the new one.</li>
     </ul>
   );

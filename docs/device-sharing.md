@@ -281,7 +281,9 @@ operates independently of canvas recovery and the sharing server.
   and the device rejoins under a new origin, whose drafts do not follow.
 - The device's page opens a notebook in notebook mode only when the snapshot's
   `X-Oculus-Kind` says `notebook` (anything else is a canvas, whatever the
-  document holds), and a downloaded draft keeps that kind's extension. A page
+  document holds), and a downloaded draft keeps that kind's extension. Its
+  text names that kind too; before the first snapshot names it (a failed first
+  load, the opening spinner, the tab title) it says "drawing". A page
   added, moved or deleted on the device reaches the Mac through the same
   commits. Creating a notebook, inserting PDF pages and exporting a PDF are
   desktop-only: the device's page has no library and no save dialog.

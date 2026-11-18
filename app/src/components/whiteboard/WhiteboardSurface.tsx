@@ -6,6 +6,7 @@ import { installBrowserSelectionGuard } from '@/lib/whiteboard/browserSelectionG
 import { loadWhiteboardToolPreferences, saveWhiteboardToolPreferences, type WhiteboardToolPreferences } from '@/lib/whiteboard/toolPreferences';
 import { exportWhiteboardPng, renderPagePng } from '@/lib/whiteboard/render';
 import { notebookPaper, pageRects, type WhiteboardKind } from '@/lib/whiteboard/paper';
+import { kindNoun, kindTitle } from '@/lib/whiteboard/kindWords';
 import { exportWhiteboardSvg } from '@/lib/whiteboard/renderSvg';
 import { subscribeWhiteboardImages } from '@/lib/whiteboard/renderImages';
 import { WHITEBOARD_FONT_STACKS, labelBox } from '@/lib/whiteboard/renderText';
@@ -27,7 +28,7 @@ import { WhiteboardImageDialog } from './WhiteboardImageDialog';
 import './whiteboard.css';
 
 /** Standalone text grows with its content; a label is fixed to its shape's label box, wraps, and sits per its vertical alignment. */
-function WhiteboardTextInput({ draft, viewport, onInput, onCommit }: { draft: TextDraft; viewport: WhiteboardDocument['viewport']; onInput: (text: string) => void; onCommit: (text: string) => void }) {
+function WhiteboardTextInput({ draft, viewport, kind, onInput, onCommit }: { draft: TextDraft; viewport: WhiteboardDocument['viewport']; kind: WhiteboardKind; onInput: (text: string) => void; onCommit: (text: string) => void }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const finished = useRef(false);
   const { element } = draft, zoom = viewport.zoom;
@@ -50,7 +51,7 @@ function WhiteboardTextInput({ draft, viewport, onInput, onCommit }: { draft: Te
   const position = box
     ? { left: (element.x + box.x) * zoom + viewport.x, width: Math.max(box.width * zoom, 1) }
     : { left: element.x * zoom + viewport.x, top: element.y * zoom + viewport.y };
-  return <textarea ref={input} aria-label={box ? 'Shape label' : 'Whiteboard text'} data-selectable="true" className={cn('whiteboard-text-input absolute z-20', box && 'whiteboard-label-input')} rows={1} defaultValue={draft.text}
+  return <textarea ref={input} aria-label={box ? 'Shape label' : `${kindTitle(kind)} text`} data-selectable="true" className={cn('whiteboard-text-input absolute z-20', box && 'whiteboard-label-input')} rows={1} defaultValue={draft.text}
     onInput={event => { resize(); onInput(event.currentTarget.value); }}
     style={{ ...position, color: element.stroke, opacity: element.opacity ?? WHITEBOARD_DEFAULTS.opacity, fontFamily: WHITEBOARD_FONT_STACKS[element.fontFamily ?? WHITEBOARD_DEFAULTS.fontFamily], fontSize: (element.fontSize ?? WHITEBOARD_DEFAULTS.fontSize) * zoom, textAlign: textAlignOf(element) }}
     onKeyDown={event => {
@@ -122,8 +123,8 @@ export function WhiteboardSurface({ document, onChange, onViewportChange, onPage
     try {
       const options = { notebook: editor.notebook };
       const blob = format === 'png' ? await exportWhiteboardPng(editor.documentRef.current, options) : new Blob([exportWhiteboardSvg(editor.documentRef.current, undefined, options)], { type: 'image/svg+xml' });
-      if (!blob) throw new Error('Add something to the whiteboard before exporting.');
-      await platform.saveExport(blob, format);
+      if (!blob) throw new Error(`Add something to the ${kindNoun(kind)} before exporting.`);
+      await platform.saveExport(blob, format, kindTitle(kind));
     } catch (error) { setExportError(error instanceof Error ? error.message : String(error)); }
     finally { setExporting(false); }
   };
@@ -152,7 +153,7 @@ export function WhiteboardSurface({ document, onChange, onViewportChange, onPage
     {editor.pages && pagesOpen ? <PageSidebar pages={editor.pages} document={current} onClose={() => setPagesOpen(false)} /> : null}
     {/* Shown only where the sidebar lies over the drawing (`whiteboard.css`), so it closes like a drawer. */}
     {editor.pages && pagesOpen ? <div aria-hidden="true" className="whiteboard-page-scrim" onPointerDown={() => setPagesOpen(false)} /> : null}
-    <div ref={editor.root} data-whiteboard-editor="true" tabIndex={0} aria-label="Whiteboard editor" className="whiteboard-editor relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card outline-none"
+    <div ref={editor.root} data-whiteboard-editor="true" tabIndex={0} aria-label={`${kindTitle(kind)} editor`} className="whiteboard-editor relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card outline-none"
       onKeyDown={editor.keyDown} onKeyUp={editor.keyUp} onBlur={event => {
         editor.blur();
         // Inspector fields and their portaled pickers belong to the open text edit.
@@ -165,7 +166,7 @@ export function WhiteboardSurface({ document, onChange, onViewportChange, onPage
         <div className="ml-auto flex shrink-0 items-center gap-2.5" role="toolbar" aria-label="History and view">
           <WhiteboardHistory undo={() => editor.history()} redo={() => editor.history(true)} canUndo={editor.canUndo} canRedo={editor.canRedo} />
           {divider}
-          <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label="Whiteboard zoom">
+          <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label={`${kindTitle(kind)} zoom`}>
             <WhiteboardIconButton label="Zoom out (−)" onClick={() => editor.zoom(1 / 1.2)} disabled={!editor.canZoomOut}><MinusIcon size={15} /></WhiteboardIconButton>
             <Tooltip><TooltipTrigger asChild><button type="button" className="whiteboard-bar-zoom min-w-12 cursor-pointer rounded-md px-1 py-1.5 text-[12px] tabular-nums text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-brand" aria-label={`Zoom ${editor.zoomPercent} percent; reset to 100 percent`} onClick={editor.resetZoom}>{editor.zoomPercent}%</button></TooltipTrigger><TooltipContent side="bottom" sideOffset={8}>Reset zoom (0)</TooltipContent></Tooltip>
             <WhiteboardIconButton label="Zoom in (+)" onClick={() => editor.zoom(1.2)} disabled={!editor.canZoomIn}><PlusIcon size={15} /></WhiteboardIconButton>
@@ -182,7 +183,7 @@ export function WhiteboardSurface({ document, onChange, onViewportChange, onPage
                 <p className="px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">{editor.notebook ? 'Exports every page, without the selection. The PDF has one page for each notebook page.' : 'Exports the whole drawing without the grid or selection.'}</p>
               </PopoverContent>
             </Popover>
-            <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label="Whiteboard shortcuts" className="whiteboard-bar-help rounded-lg text-muted-foreground"><QuestionIcon size={17} /></Button></PopoverTrigger>
+            <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" aria-label={`${kindTitle(kind)} shortcuts`} className="whiteboard-bar-help rounded-lg text-muted-foreground"><QuestionIcon size={17} /></Button></PopoverTrigger>
               <PopoverContent side="bottom" align="end" className="w-64"><div className="mb-3 text-[13px] font-medium">A little room to move</div><dl className="space-y-2 text-xs text-muted-foreground">
                 {shortcuts(editor.notebook).map(([label, key]) => <div key={label} className="flex justify-between gap-4"><dt>{label}</dt><dd className="text-foreground">{key}</dd></div>)}
               </dl></PopoverContent>
@@ -203,15 +204,15 @@ export function WhiteboardSurface({ document, onChange, onViewportChange, onPage
             : <div className="absolute flex h-28 w-44 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-xl border-2 border-dashed border-brand bg-card/90 text-xs text-brand shadow-sm" style={{ left: media.preview.at.x, top: media.preview.at.y }}>Drop images here</div>}
         </div> : null}
         {current.elements.length === 0 && !editor.notebook && editor.tool === 'select' && !editor.textDraft ? <WhiteboardEmpty onStart={() => { editor.setTool('freedraw'); focusEditor(); }} /> : null}
-        {editor.region && !editor.captureHold ? <WhiteboardRegionActions key={JSON.stringify(editor.region.bounds)} region={editor.region} viewport={current.viewport} onCopy={editor.copyRegion} onDuplicate={editor.duplicateRegion} copyState={editor.regionCopyState} copyError={editor.regionError} /> : null}
+        {editor.region && !editor.captureHold ? <WhiteboardRegionActions key={JSON.stringify(editor.region.bounds)} region={editor.region} viewport={current.viewport} kind={kind} onCopy={editor.copyRegion} onDuplicate={editor.duplicateRegion} copyState={editor.regionCopyState} copyError={editor.regionError} /> : null}
         {editor.captureHold ? <WhiteboardCaptureHold hold={editor.captureHold} viewport={current.viewport} /> : null}
-        {editor.textDraft ? <WhiteboardTextInput key={editor.textDraft.element.id} draft={editor.textDraft} viewport={current.viewport} onInput={editor.editText} onCommit={editor.commitText} /> : null}
+        {editor.textDraft ? <WhiteboardTextInput key={editor.textDraft.element.id} draft={editor.textDraft} viewport={current.viewport} kind={kind} onInput={editor.editText} onCommit={editor.commitText} /> : null}
         {editor.pages ? <div className="whiteboard-pages absolute left-1/2 z-10 -translate-x-1/2"><NotebookPageBar pages={editor.pages} sidebarOpen={pagesOpen} onToggleSidebar={() => setPagesOpen(open => !open)} /></div> : null}
         <div key={hint} className={cn('whiteboard-short-hint pointer-events-none absolute right-0 left-0 text-center text-[11px] text-muted-foreground/65', editor.pages ? 'bottom-[calc(var(--whiteboard-bottom-edge)+3.4rem)]' : 'bottom-(--whiteboard-bottom-edge)')}>{hint}</div>
         {engineError || exportError || editor.historyError || media.error ? <div role="alert" className="absolute top-3 right-3 z-30 max-w-80 rounded-xl border border-destructive/20 bg-card p-3 text-xs text-destructive shadow-sm">{engineError ?? exportError ?? editor.historyError ?? media.error}<button type="button" className="mt-2 block cursor-pointer text-foreground underline" onClick={() => { setEngineError(null); setExportError(null); editor.clearHistoryError(); media.clearError(); }}>Dismiss</button></div> : null}
       </div>
     </div>
-    <WhiteboardImageDialog open={imageDialogOpen} onOpenChange={setImageDialogOpen} onImport={editor.insertImages} />
+    <WhiteboardImageDialog kind={kind} open={imageDialogOpen} onOpenChange={setImageDialogOpen} onImport={editor.insertImages} />
   </div>;
 }
 

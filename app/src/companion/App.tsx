@@ -1,11 +1,11 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { ArrowsInIcon, ArrowsOutIcon, SpinnerGapIcon } from "@phosphor-icons/react";
 import { WhiteboardSurface } from "@/components/whiteboard/WhiteboardSurface";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { downloadBlob } from "@/lib/whiteboard/platform";
 import type { ShareCredentials } from "@/lib/companion/link";
-import type { ShareClient, ShareClientState } from "@/lib/companion/shareClient";
+import { sharedNoun, type ShareClient, type ShareClientState } from "@/lib/companion/shareClient";
 import { ShareHeader } from "./ShareHeader";
 import { DebugToggle } from './DebugToggle';
 import { useShareClient } from "./useShareClient";
@@ -35,7 +35,7 @@ function Notices({ client, state }: { client: ShareClient; state: ShareClientSta
     {state.status === "conflict" ? <Notice tone="alert">
       <span className="mr-auto">{state.lastError} Your drawing here is kept until you choose.</span>
       <Button variant="outline" size="sm" onClick={download}>Download draft</Button>
-      <Button size="sm" onClick={() => client.useSharedWhiteboard()}>Use shared whiteboard</Button>
+      <Button size="sm" onClick={() => client.useSharedWhiteboard()}>Use shared {sharedNoun(state)}</Button>
     </Notice> : state.lastError && state.status !== "connected" && state.status !== "saving" ? <Notice tone={state.status === "ended" ? "alert" : "muted"}>{state.lastError}</Notice> : null}
     {state.storageWarning ? <Notice>{state.storageWarning}</Notice> : null}
     {state.recovery ? <Notice>
@@ -49,12 +49,14 @@ function Notices({ client, state }: { client: ShareClient; state: ShareClientSta
 function SharedWhiteboard({ credentials }: { credentials: ShareCredentials }) {
   const { client, state } = useShareClient(credentials);
   const focus = useWhiteboardFocus();
+  const noun = state ? sharedNoun(state) : "drawing";
+  useEffect(() => { document.title = `Oculus · Shared ${noun}`; }, [noun]);
   if (!client || !state) return null;
   const blocked = state.status === "conflict" || state.status === "ended";
   return <div ref={focus.root} data-whiteboard-focus={focus.focused} className={cn('companion-shell flex h-dvh flex-col bg-frame', focus.focused ? 'companion-focused' : 'gap-2 pt-[max(10px,env(safe-area-inset-top))] pr-[max(12px,env(safe-area-inset-right))] pb-[max(10px,env(safe-area-inset-bottom))] pl-[max(12px,env(safe-area-inset-left))]')}>
     {!focus.focused ? <ShareHeader state={state} onRetry={() => client.retry()} onDownloadDraft={() => saveDraft(client.draftText(), draftName(state))} /> : null}
     <main className={cn('relative min-h-0 flex-1 overflow-hidden bg-card', !focus.focused && 'rounded-2xl border border-border-subtle')}>
-      <Button variant="outline" size="icon" aria-label={focus.focused ? 'Exit expanded whiteboard' : 'Expand whiteboard'} title={focus.focused ? 'Exit expanded whiteboard' : 'Expand whiteboard'} className="whiteboard-expand absolute top-2 right-3 z-40 bg-card shadow-xs" onClick={() => void focus.toggle()}>{focus.focused ? <ArrowsInIcon size={17} /> : <ArrowsOutIcon size={17} />}</Button>
+      <Button variant="outline" size="icon" aria-label={focus.focused ? `Exit expanded ${noun}` : `Expand ${noun}`} title={focus.focused ? `Exit expanded ${noun}` : `Expand ${noun}`} className="whiteboard-expand absolute top-2 right-3 z-40 bg-card shadow-xs" onClick={() => void focus.toggle()}>{focus.focused ? <ArrowsInIcon size={17} /> : <ArrowsOutIcon size={17} />}</Button>
       <DebugToggle />
       {focus.focused && (state.status === 'reconnecting' || state.status === 'offline-unsaved' || state.status === 'paused') ? <div role="status" className="absolute top-[calc(env(safe-area-inset-top)+3.75rem)] left-16 z-40 rounded-full border border-warning/30 bg-card px-3 py-1.5 text-xs text-warning">{state.status === 'reconnecting' ? 'Reconnecting…' : 'Changes not saved yet'}<button className="ml-2 underline" onClick={() => client.retry()}>Retry</button></div> : null}
       <div className="pointer-events-none absolute inset-x-3 bottom-16 z-30 flex max-h-[45%] flex-col gap-2 overflow-y-auto [&>*]:pointer-events-auto" data-whiteboard-notices>
@@ -64,7 +66,7 @@ function SharedWhiteboard({ credentials }: { credentials: ShareCredentials }) {
       {state.document
         ? <div inert={blocked} className="h-full"><WhiteboardSurface suppressNativeGestures document={state.document} kind={state.kind} onChange={(document) => client.edit(document)} onViewportChange={keepCameraLocal} cameraKey={`share:${credentials.shareId}`} /></div>
         : <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-          {state.status === "ended" ? "This whiteboard is no longer shared." : <><SpinnerGapIcon className="animate-spin" aria-hidden />Opening the whiteboard from the Mac…</>}
+          {state.status === "ended" ? `This ${noun} is no longer shared.` : <><SpinnerGapIcon className="animate-spin" aria-hidden />Opening the {noun} from the Mac…</>}
         </div>}
     </main>
   </div>;

@@ -35,7 +35,7 @@ function imageEntry(element: WhiteboardElement): ImageEntry | undefined {
       for (const listener of listeners) listener();
     };
     image.onerror = () => {
-      reject(new Error(`Could not decode whiteboard image${element.sourceName ? ` “${element.sourceName}”` : ''}.`));
+      reject(new Error(`Could not decode image${element.sourceName ? ` “${element.sourceName}”` : ''}.`));
       for (const listener of listeners) listener();
     };
   });
@@ -52,7 +52,7 @@ function imageEntry(element: WhiteboardElement): ImageEntry | undefined {
 export async function loadWhiteboardImages(scene: readonly WhiteboardElement[]): Promise<void> {
   await Promise.all(scene.filter(element => element.type === 'image').map(element => {
     const entry = imageEntry(element);
-    if (!entry) throw new Error('Could not load the embedded whiteboard image.');
+    if (!entry) throw new Error('Could not load an embedded image.');
     return entry.loaded;
   }));
 }

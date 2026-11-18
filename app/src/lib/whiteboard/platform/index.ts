@@ -18,8 +18,8 @@ export interface WhiteboardLibraryPdf {
 export interface WhiteboardPlatform {
   watchFileDrop?(target: HTMLElement, onHover: (paths: string[], at: Point | null) => void, onDrop: (paths: string[], at: Point) => void): () => void;
   readDroppedImages?(paths: string[], signal?: AbortSignal): Promise<WhiteboardImportedImage[]>;
-  /** Saves an exported PNG or SVG. */
-  saveExport(blob: Blob, format: "png" | "svg"): Promise<void>;
+  /** Saves an exported PNG or SVG; `name` is the file name offered, without its extension. */
+  saveExport(blob: Blob, format: "png" | "svg", name: string): Promise<void>;
   /** Whether `searchPdfs` and `openPdf` reach a library; absent where they only say to open the desktop app. */
   libraryPdfs?: boolean;
   /** Searches library PDFs by filename and subject; an empty query lists recent files. */
@@ -43,7 +43,7 @@ export function downloadBlob(blob: Blob, name: string): void {
 }
 
 export const browserWhiteboardPlatform: WhiteboardPlatform = {
-  async saveExport(blob, format) { downloadBlob(blob, `Whiteboard.${format}`); },
+  async saveExport(blob, format, name) { downloadBlob(blob, `${name}.${format}`); },
   async searchPdfs() { throw new Error(PDF_NEEDS_DESKTOP); },
   async openPdf() { throw new Error(PDF_NEEDS_DESKTOP); },
 };

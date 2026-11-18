@@ -96,6 +96,21 @@ describe("ShareClient", () => {
     expect((await connected()).client.getState().kind).toBe("whiteboard");
   });
 
+  test("messages name the shared file's kind, and say drawing before a snapshot has named it", async () => {
+    for (const kind of ["whiteboard", "notebook"] as const) {
+      server.kind = kind;
+      const { client } = await connected();
+      [...server.sockets][0].deliver({ type: "session-ended", reason: "ended" });
+      await flush();
+      expect(client.getState().lastError).toStartWith(`The ${kind} was closed on the Mac.`);
+    }
+    const answers = [new Response(null, { status: 404 }), new Response("{}", { headers: { "X-Oculus-Kind": "notebook", "X-Oculus-Epoch": "e", "X-Oculus-Revision": "0" } }), new Response(null, { status: 404 })];
+    const api = new ShareApi("http://mac", "id", "secret", async () => answers.shift()!);
+    await expect(api.snapshot()).rejects.toThrow("This drawing is no longer shared.");
+    expect((await api.snapshot()).kind).toBe("notebook");
+    await expect(api.changes(0)).rejects.toThrow("This notebook is no longer shared.");
+  });
+
   test("successive edits to the same shape do not conflict with our own echo", async () => {
     server.doc = withElements(createWhiteboardDocument(), rect("x"));
     const { client: a } = await connected();

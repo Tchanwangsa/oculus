@@ -79,6 +79,17 @@ describe("whiteboard sessions", () => {
     expect(invalid.writes.length).toBe(0); expect(invalid.drafts.size).toBe(1);
   });
 
+  test("messages name the file's kind: notebook for a .notebook, whiteboard for a .whiteboard", async () => {
+    const h = harness("external");
+    const notebook: WhiteboardFileRef = { id: 2, relative_path: "courses/X/Week 3.notebook" };
+    h.files.set(notebook.relative_path, "external");
+    for (const id of [1, 2]) h.drafts.set(`oculus:whiteboard-draft:${id}`, JSON.stringify({ version: 1, base: "disk", text: "recovered" }));
+    const board = h.sessions.open(h.file), pages = h.sessions.open(notebook);
+    await board.load(); await pages.load();
+    await expect(board.flush()).rejects.toThrow("Choose which whiteboard version to keep before saving.");
+    await expect(pages.flush()).rejects.toThrow("Choose which notebook version to keep before saving.");
+  });
+
   test("matching-base recovery autosaves; deletion never recreates the file", async () => {
     const h = harness(); h.drafts.set("oculus:whiteboard-draft:1", JSON.stringify({ version: 1, base: "disk", text: "draft" }));
     const session = h.sessions.open(h.file); await session.load(); await tick();

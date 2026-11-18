@@ -1,4 +1,5 @@
 import { measureWhiteboard, traceWhiteboard } from "@/lib/whiteboard/diagnostics";
+import { drawingNoun } from "@/lib/whiteboard/kindWords";
 import { applyWhiteboardTransaction, diffWhiteboardContent, hasWhiteboardChanges, type WhiteboardTransaction } from "@/lib/whiteboard/collaboration";
 import { clientPendingTransactions, containsClientTransaction, reconcileClientDocument } from "@/lib/whiteboard/clientReconciliation";
 import { parseWhiteboardDocument, serializeWhiteboardDocument, type WhiteboardDocument } from "@/lib/whiteboard/model";
@@ -43,6 +44,9 @@ export interface ShareClientState {
   retryAt: number | null;
 }
 
+/** The shared file's kind as a word for the page: "drawing" until the first snapshot names it. */
+export const sharedNoun = (state: Pick<ShareClientState, "document" | "kind">) => drawingNoun(state.document ? state.kind : null);
+
 export interface ShareClientOptions {
   /** No frame for this long means the socket is dead (the server pings every 20 s). */
   deadManMs?: number;
@@ -52,12 +56,14 @@ export interface ShareClientOptions {
 
 const KEPT = "Your drawing here is kept: download it to keep your latest changes.";
 const ENDED = `Sharing was stopped on the Mac. ${KEPT}`;
-/** `session-ended` carries a reason code, never text to show. */
-const ENDED_BECAUSE: Record<string, string> = {
+/** `session-ended` carries a reason code, never text to show; `noun` names the shared file's kind. */
+const endedBecause = (reason: string, noun: string): string => ({
   stopped: ENDED,
-  ended: `The whiteboard was closed on the Mac. ${KEPT}`,
+  ended: `The ${noun} was closed on the Mac. ${KEPT}`,
   shutdown: `Oculus quit on the Mac. ${KEPT}`,
-};
+} as Record<string, string>)[reason] ?? ENDED;
+/** A snapshot that does not parse, named by the kind it came with. */
+const unreadable = (snapshot: ShareSnapshot, error: unknown) => `The Mac sent a ${snapshot.kind} this page cannot read: ${(error as Error).message}`;
 const NEW_SESSION = "The Mac started a new sharing session. Changes from before are not added to it.";
 const LOST = "Lost the connection to the Mac.";
 const SILENT = "No word from the Mac for a while.";
@@ -350,7 +356,7 @@ export class ShareClient {
       if (this.disposed || this.ended) return;
       let document: WhiteboardDocument;
       try { document = parseWhiteboardDocument(snapshot.text); }
-      catch (error) { this.trouble(`The Mac sent a whiteboard this page cannot read: ${(error as Error).message}`); return; }
+      catch (error) { this.trouble(unreadable(snapshot, error)); return; }
       this.adopt(snapshot, document);
       this.attempt = 0;
       this.setError(null);
@@ -524,7 +530,7 @@ export class ShareClient {
         if (this.paused) { this.paused = false; this.setError(null); this.publish(); void this.pump(); }
         return;
       case "session-ended":
-        this.end(ENDED_BECAUSE[frame.reason] ?? ENDED);
+        this.end(endedBecause(frame.reason, this.kind));
         return;
       case "ping":
         try { socket.send(JSON.stringify({ type: "pong" })); } catch { /* the close handler reconnects */ }
@@ -614,7 +620,7 @@ export class ShareClient {
       if (snapshot.revision < this.revision) return;
       let document: WhiteboardDocument;
       try { document = parseWhiteboardDocument(snapshot.text); }
-      catch (error) { this.trouble(`The Mac sent a whiteboard this page cannot read: ${(error as Error).message}`); return; }
+      catch (error) { this.trouble(unreadable(snapshot, error)); return; }
       const before = this.canonical!;
       this.canonical = document;
       this.revision = snapshot.revision;

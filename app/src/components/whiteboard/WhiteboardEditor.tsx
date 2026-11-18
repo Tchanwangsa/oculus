@@ -15,6 +15,7 @@ import { useSharing } from "@/lib/sharing/store";
 import { devices } from "@/lib/sharing/view";
 import { WhiteboardShareDialog } from "./WhiteboardShareDialog";
 import type { WhiteboardKind } from "@/lib/whiteboard/paper";
+import { kindNoun, kindTitle } from "@/lib/whiteboard/kindWords";
 import { WhiteboardSurface } from "./WhiteboardSurface";
 
 const SHARING: Partial<Record<WhiteboardSnapshot["authority"], string>> = { attaching: "Starting sharing", live: "Sharing", paused: "Sharing paused", ended: "Sharing ended" };
@@ -75,6 +76,7 @@ export default function WhiteboardEditor({ file, kind = "whiteboard" }: { file: 
   const sharing = SHARING[snapshot.authority] && `${SHARING[snapshot.authority]}${clients}`;
   const blocked = !!snapshot.recovery || !!snapshot.conflict;
   const notebook = kind === "notebook";
+  const noun = kindNoun(kind);
   const snapshotError = useNotebookSnapshots(session.file, notebook ? parsed.document : undefined);
   const pageCount = notebook ? parsed.document?.paper?.pages.length : undefined;
   const pageInView = useRef(0);
@@ -88,17 +90,17 @@ export default function WhiteboardEditor({ file, kind = "whiteboard" }: { file: 
   if (snapshot.text == null && snapshot.status !== "error") return <LoadingFill />;
   if (!parsed.document) return (
     <div className="p-6 text-xs text-destructive" role="alert">
-      <p>{parsed.error ?? snapshot.error ?? "Whiteboard could not be loaded."}</p>
+      <p>{parsed.error ?? snapshot.error ?? `${kindTitle(kind)} could not be loaded.`}</p>
       {snapshot.text == null && <Button className="mt-3" size="sm" variant="outline" onClick={() => void session.load().catch(() => {})}>Retry</Button>}
     </div>
   );
-  if (snapshot.status === "deleted") return <div className="p-6 text-xs text-muted-foreground">This whiteboard was deleted.</div>;
+  if (snapshot.status === "deleted") return <div className="p-6 text-xs text-muted-foreground">This {noun} was deleted.</div>;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-3 border-b border-border-subtle px-4 py-2">
         <input
-          aria-label="Whiteboard title" value={title} disabled={renaming}
+          aria-label={`${kindTitle(kind)} title`} value={title} disabled={renaming}
           onChange={(event) => setTitle(event.target.value)} onBlur={() => void rename()}
           onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setTitle(fileTitle(session.file)); event.preventDefault(); } }}
           className="min-w-0 flex-1 bg-transparent text-xs font-medium outline-none"
@@ -109,7 +111,7 @@ export default function WhiteboardEditor({ file, kind = "whiteboard" }: { file: 
         {snapshot.status === "error" && !blocked && snapshot.authority !== "paused" && <Button size="sm" variant="outline" onClick={() => void session.flush().catch(() => {})}>Retry save</Button>}
         <Button size="sm" variant="ghost" onClick={() => { setShareMounted(true); setShareOpen(true); }}><ShareNetworkIcon />Share</Button>
       </div>
-      {shareMounted && <WhiteboardShareDialog session={session} open={shareOpen} onOpenChange={setShareOpen} />}
+      {shareMounted && <WhiteboardShareDialog session={session} kind={kind} open={shareOpen} onOpenChange={setShareOpen} />}
       {(snapshot.error || renameError) && <p role="alert" className="shrink-0 border-b border-border-subtle px-4 py-2 text-xs text-destructive">{renameError ?? snapshot.error}</p>}
       {snapshotError && <p role="alert" className="shrink-0 border-b border-border-subtle px-4 py-2 text-xs text-destructive">The page pictures a chat agent reads could not be updated: {snapshotError}</p>}
       {notice && <p role={notice.failed ? "alert" : "status"} className={`shrink-0 border-b border-border-subtle px-4 py-2 text-xs ${notice.failed ? "text-destructive" : "text-muted-foreground"}`}>{notice.text}</p>}
@@ -118,7 +120,7 @@ export default function WhiteboardEditor({ file, kind = "whiteboard" }: { file: 
         <Button size="sm" variant="outline" onClick={() => session.discardDraft()}>Keep disk version</Button>
       </div>}
       {snapshot.conflict && <div className="flex shrink-0 gap-2 px-4 py-2">
-        <Button size="sm" variant="outline" onClick={() => act(() => session.useSharedWhiteboard())}>Use shared whiteboard</Button>
+        <Button size="sm" variant="outline" onClick={() => act(() => session.useSharedWhiteboard())}>Use shared {noun}</Button>
         <Button size="sm" variant="outline" onClick={keepDraftCopy}>Save draft as copy</Button>
       </div>}
       {snapshot.authority === "paused" && <div className="flex shrink-0 gap-2 px-4 py-2">

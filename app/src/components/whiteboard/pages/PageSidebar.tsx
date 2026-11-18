@@ -57,7 +57,7 @@ export function PageSidebar({ pages, document, onClose }: { pages: NotebookPages
     <ConfirmDialog open={removing !== null} onCancel={() => setRemoving(null)} title={`Delete page ${(removing ?? 0) + 1}?`}
       description="The page and everything drawn on it are removed, and the pages after it move up. Undo brings it back."
       confirmLabel="Delete page" onConfirm={() => { const index = removing; setRemoving(null); if (index !== null) pages.remove(index); }} />
-    {platform.libraryPdfs ? <WhiteboardImageDialog open={pdfAfter !== null} onOpenChange={open => { if (!open) setPdfAfter(null); }}
+    {platform.libraryPdfs ? <WhiteboardImageDialog kind="notebook" open={pdfAfter !== null} onOpenChange={open => { if (!open) setPdfAfter(null); }}
       pdfPages={{ after: (pdfAfter ?? 0) + 1, onInsert: (sizes, images) => { if (pdfAfter !== null) pages.insertPdfPages(pdfAfter, sizes, images); } }} /> : null}
   </aside>;
 }

@@ -12,6 +12,7 @@ import {
   type WhiteboardAuthorityAck, type WhiteboardAuthorityEvent, type WhiteboardAuthorityIO, type WhiteboardAuthorityOp,
   type WhiteboardAuthorityPhase, type WhiteboardAuthoritySnapshot, type WhiteboardExternalChoice,
 } from "./authority";
+import { kindNoun, kindOfFileName } from "./kindWords";
 
 export interface WhiteboardFileRef { id: number; relative_path: string }
 export interface WhiteboardSnapshot {
@@ -62,9 +63,7 @@ export interface WhiteboardSession<F extends WhiteboardFileRef> {
   resolveExternal(choice: WhiteboardExternalChoice): Promise<void>;
 }
 
-const PAUSED = "The whiteboard file changed outside Oculus. Choose which version to keep.";
 const ENDED = "Sharing ended.";
-const STALLED = "The shared whiteboard did not take this change. Your draft is kept.";
 
 interface Shared {
   epoch: string;
@@ -88,6 +87,10 @@ export function createWhiteboardSessions<F extends WhiteboardFileRef>(io: Whiteb
       const existing = sessions.get(file.id);
       if (existing) return existing;
       const key = `oculus:whiteboard-draft:${file.id}`;
+      // A rename keeps the extension, so the kind and its word hold for the session's life.
+      const noun = kindNoun(kindOfFileName(file.relative_path));
+      const PAUSED = `The ${noun} file changed outside Oculus. Choose which version to keep.`;
+      const STALLED = `The shared ${noun} did not take this change. Your draft is kept.`;
       const authority = io.authority;
       let state: WhiteboardSnapshot = { text: null, status: "loading", authority: "off" };
       let saved: string | null = null;
@@ -136,7 +139,7 @@ export function createWhiteboardSessions<F extends WhiteboardFileRef>(io: Whiteb
           .then(() => publish({ recoveryError: undefined }), recoveryFailed);
       };
       const writeFile = (text: string) => {
-        if (fenced) throw new Error("This whiteboard is shared; only its authority writes the file.");
+        if (fenced) throw new Error(`This ${noun} is shared; only its authority writes the file.`);
         return io.write(session.file, text);
       };
       const local = () => {
@@ -350,7 +353,7 @@ export function createWhiteboardSessions<F extends WhiteboardFileRef>(io: Whiteb
 
       const save = async () => {
         if (state.status === "deleted" || state.text == null) return;
-        if (state.recovery) throw new Error("Choose which whiteboard version to keep before saving.");
+        if (state.recovery) throw new Error(`Choose which ${noun} version to keep before saving.`);
         if (shared) return commitAll(shared);
         // Sharing is opening or closing; that step saves when it finishes.
         if (fenced) return;
@@ -458,14 +461,14 @@ export function createWhiteboardSessions<F extends WhiteboardFileRef>(io: Whiteb
             if (shared) return;
             await session.load();
             if (shared) return;
-            if (state.status === "deleted") throw new Error("This whiteboard was deleted.");
+            if (state.status === "deleted") throw new Error(`This ${noun} was deleted.`);
             const existing = await probeAuthority();
             if (existing) {
               joinAuthority(existing, parseWhiteboardDocument(saved!));
               void session.flush().catch(() => {});
               return;
             }
-            if (state.recovery) throw new Error("Choose which whiteboard version to keep before sharing.");
+            if (state.recovery) throw new Error(`Choose which ${noun} version to keep before sharing.`);
             publish({ authority: "attaching" });
             try {
               try { await save(); } catch (error) { failed(error); throw error; }
