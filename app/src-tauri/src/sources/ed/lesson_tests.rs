@@ -8,7 +8,7 @@ use super::lesson_md::{
 };
 use super::lessons::{order_lessons, slide_statuses_of, workspace_host};
 use super::threads::thread_url;
-use super::workspace::{unpack, MAX_ENTRY_BYTES};
+use super::workspace::{prune, resolve, unpack, Keep, Pruned, MAX_ENTRY_BYTES};
 use super::Ed;
 use crate::sync::slug;
 use crate::test_support::{FakeKeyd, Scratch};
@@ -147,7 +147,28 @@ fn slides_md(lesson: &Value, extras: HashMap<i64, SlideExtras>) -> String {
 /// Front matter read the way the frontend reads it (`frontmatter.ts`):
 /// `key: <json>`, or `key:` then `  - <json>` items.
 fn front_of(md: &str) -> (serde_json::Map<String, Value>, &str) {
-    super::front::read_front_matter(md).expect("front matter")
+    let rest = md.strip_prefix("---\n").expect("front matter");
+    let end = rest.find("\n---\n").expect("front matter's end");
+    let mut map = serde_json::Map::new();
+    let mut list: Option<&str> = None;
+    for line in rest[..end].lines() {
+        if let (Some(item), Some(key)) = (line.strip_prefix("  - "), list) {
+            map[key]
+                .as_array_mut()
+                .expect("a list")
+                .push(serde_json::from_str(item).expect(item));
+            continue;
+        }
+        let (key, value) = line.split_once(':').expect(line);
+        if value.is_empty() {
+            map.insert(key.into(), Value::Array(Vec::new()));
+            list = Some(key);
+        } else {
+            map.insert(key.into(), serde_json::from_str(value.trim()).expect(line));
+            list = None;
+        }
+    }
+    (map, &rest[end + "\n---\n".len()..])
 }
 
 fn fixture_extras() -> HashMap<i64, SlideExtras> {
@@ -797,46 +818,104 @@ fn the_workspace_host_and_web_links_follow_eds_region() {
 }
 
 #[test]
-fn a_workspace_sync_record_round_trips_beside_the_library() {
-    use super::workspace_state::{has_state, load, path, save, WorkspaceState};
+fn the_guard_keeps_every_path_inside_the_workspace() {
+    let dir = Scratch::new("ed-ws-guard");
+    let root = dir.join("ws");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("tally.py"), "x").unwrap();
 
-    let dir = Scratch::new("ed-workspace-state");
+    assert_eq!(resolve(&root, "tally.py").unwrap(), root.join("tally.py"));
     assert_eq!(
-        path(&dir, 267880),
-        dir.join("ed-workspaces").join("267880.json")
+        resolve(&root, "src/new/a.py").unwrap(),
+        root.join("src/new/a.py")
     );
-    assert!(!has_state(&dir, 267880));
-    assert_eq!(load(&dir, 267880), None);
+    for bad in [
+        "",
+        "/etc/passwd",
+        "../x.py",
+        "src/../../x",
+        "./a.py",
+        "a//b",
+        "src/",
+        ".env",
+        "src/.git/config",
+        "a\\b",
+        "C:x",
+        "a\0b",
+    ] {
+        assert!(resolve(&root, bad).is_err(), "{bad:?} was let through");
+    }
+    assert!(resolve(&dir.join("missing"), "a.py").is_err());
 
-    let state = WorkspaceState {
-        workspace_id: "W1".into(),
-        slide_dir: "courses/COMP30026/Course/Lessons/1-l/03-tally".into(),
-        base_commit: Some("abc123".into()),
-        files: [(
-            "tally.py".to_string(),
-            "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08".to_string(),
-        )]
-        .into_iter()
-        .collect(),
+    #[cfg(unix)]
+    {
+        let outside = dir.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.txt"), "s").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.txt"), root.join("s.txt")).unwrap();
+        std::os::unix::fs::symlink(root.join("tally.py"), root.join("inside.py")).unwrap();
+        assert!(resolve(&root, "link/secret.txt").is_err());
+        assert!(resolve(&root, "link/new.txt").is_err());
+        assert!(resolve(&root, "s.txt").is_err());
+        assert!(resolve(&root, "inside.py").is_ok());
+    }
+}
+
+#[test]
+fn a_prune_keeps_only_what_it_is_told_and_drops_emptied_folders() {
+    let dir = Scratch::new("ed-ws-prune");
+    let root = dir.join("ws");
+    for f in [
+        "keep.py",
+        "gone.py",
+        "src/a.py",
+        "old/deep/x.py",
+        "notes_images/p1.png",
+        ".DS_Store",
+        "clash/inner.py",
+    ] {
+        let path = root.join(f);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "x").unwrap();
+    }
+    #[cfg(unix)]
+    {
+        let outside = dir.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("t.txt"), "t").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+    }
+    let keep = Keep {
+        // `clash` is a file on Ed: the local folder of that name goes.
+        files: ["keep.py", "src/a.py", "clash"]
+            .iter()
+            .map(|p| root.join(p))
+            .collect(),
+        prefixes: vec![root.join("notes_images")],
     };
-    save(&dir, 267880, &state).unwrap();
-    assert!(has_state(&dir, 267880));
-    assert_eq!(load(&dir, 267880), Some(state.clone()));
-    let raw: Value = serde_json::from_slice(&std::fs::read(path(&dir, 267880)).unwrap()).unwrap();
-    assert_eq!(
-        raw.as_object().unwrap().keys().collect::<Vec<_>>(),
-        ["workspace_id", "slide_dir", "base_commit", "files"]
-    );
-    // A record from before Ed listed submissions still reads.
-    let mut older = raw.clone();
-    older["submissions"] = serde_json::json!([42]);
-    std::fs::write(path(&dir, 2), older.to_string()).unwrap();
-    assert_eq!(load(&dir, 2), Some(state.clone()));
 
-    // An unreadable record is still a record: the sync leaves the workspace be.
-    std::fs::write(path(&dir, 1), b"{not json").unwrap();
-    assert!(has_state(&dir, 1));
-    assert_eq!(load(&dir, 1), None);
+    let pruned = prune(&root, &keep);
+    let mut removed = vec![".DS_Store", "clash/inner.py", "gone.py", "old/deep/x.py"];
+    #[cfg(unix)]
+    removed.insert(3, "link");
+    assert_eq!(pruned.removed, removed);
+    assert!(pruned.failed.is_empty());
+    assert!(root.join("keep.py").is_file());
+    assert!(root.join("src/a.py").is_file());
+    assert!(root.join("notes_images/p1.png").is_file());
+    assert!(!root.join("old").exists());
+    assert!(!root.join("clash").exists());
+    #[cfg(unix)]
+    assert!(
+        dir.join("outside/t.txt").is_file(),
+        "a link is never followed"
+    );
+
+    // Nothing kept: the folder itself goes.
+    assert_eq!(prune(&root, &Keep::default()).removed.len(), 3);
+    assert!(!root.exists());
+    assert_eq!(prune(&root, &Keep::default()), Pruned::default());
 }
 
 #[test]

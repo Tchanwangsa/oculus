@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
-  upsertFile, finishSyncRun, addLog,
+  upsertFile, finishSyncRun, addLog, deleteFileRow, getFileByRelativePath,
   addSyncRunFile, getSyncOptions, markFileContentChanged, resetFilePipeline,
   upsertLectures,
   type LectureData, type SyncFileAction,
@@ -11,6 +11,7 @@ import type { SyncProgress } from "@/stores/sync/syncStore";
 import { isPdfBacked, isPipelineFile } from "@/lib/files/fileTypes";
 import { CALENDAR_UPDATED_EVENT, syncCalendar } from "@/lib/planning/calendar";
 import { FILE_SCRAPED_EVENT, type FileScraped } from "@/lib/pipeline/syncRunner";
+import { forgetPageSnapshots } from "@/lib/whiteboard/snapshots";
 import { useTauriEvent } from "@/hooks/backend/useEvents";
 import { NO_ERROR, parseStatuses, pipeline } from "./pipelineEvents";
 
@@ -48,10 +49,28 @@ export function useScrapeEvents() {
       });
     },
   );
-  useTauriEvent<{ subject_id: number; relative_path: string; size_bytes: number; category: string | null; canvas_id: number | null; source_url: string | null; source_created_at: string | null; source_updated_at: string | null; action: SyncFileAction }>(
+  useTauriEvent<{ subject_id: number; relative_path: string; size_bytes: number; category: string | null; canvas_id: number | null; source_url: string | null; source_created_at: string | null; source_updated_at: string | null; action: SyncFileAction | "removed" }>(
     "scrape-file",
     async (e) => {
       const { subject_id, relative_path, size_bytes, category, canvas_id, source_url, source_created_at, source_updated_at, action } = e.payload;
+      // A file the sync deleted from disk (Ed dropped it from a challenge's
+      // workspace) loses its row; one that never had a row is fine.
+      if (action === "removed") {
+        try {
+          await parseStatuses.mutate(subject_id, relative_path, async () => {
+            const row = await getFileByRelativePath(relative_path);
+            if (!row) return;
+            await deleteFileRow(row.id);
+            forgetPageSnapshots(row.id);
+          });
+        } catch (err) {
+          addLog(`${relative_path}: its row was not removed: ${err}`, "warning").catch(() => {});
+        }
+        window.dispatchEvent(
+          new CustomEvent<FileScraped>(FILE_SCRAPED_EVENT, { detail: { subject_id, canvas_id } }),
+        );
+        return;
+      }
       if (isPipelineFile(relative_path)) {
         if (action === "unchanged") {
           pipeline().confirmDownload(relative_path);

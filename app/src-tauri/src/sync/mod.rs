@@ -96,7 +96,9 @@ pub struct FileEvent {
     pub source_url: Option<String>,
     #[serde(flatten)]
     pub source_dates: SourceDates,
-    /// `"new"`, `"updated"`, or `"unchanged"` — feeds the per-run sync history.
+    /// `"new"`, `"updated"` or `"unchanged"`, which feed the per-run sync
+    /// history; or `"removed"`, a file the sync deleted from disk (only an Ed
+    /// challenge folder's prune), whose row goes.
     pub action: &'static str,
 }
 

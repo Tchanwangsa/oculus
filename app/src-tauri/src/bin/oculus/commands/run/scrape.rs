@@ -237,6 +237,12 @@ impl Ctx {
         if let Some(p) = &pool {
             self.rt.block_on(async {
                 for f in &written {
+                    if f.action == "removed" {
+                        if let Err(e) = remove_row(p, f.subject_id, &f.relative_path).await {
+                            eprintln!("{} {e}", paint("db:", YELLOW));
+                        }
+                        continue;
+                    }
                     let row = store::FileRow {
                         subject_id: f.subject_id,
                         relative_path: &f.relative_path,
@@ -330,5 +336,17 @@ impl Ctx {
             .filter(|key| eligible.contains(key))
             .collect();
         self.index_pdfs(p, &pdfs, !args.no_embed, false)
+    }
+}
+
+/// The row of a file the sync deleted from disk, if it has one.
+async fn remove_row(
+    pool: &sqlx::SqlitePool,
+    subject_id: i64,
+    relative_path: &str,
+) -> Result<(), String> {
+    match store::file_id(pool, subject_id, relative_path).await? {
+        Some(id) => store::delete_file_row(pool, id).await,
+        None => Ok(()),
     }
 }

@@ -131,7 +131,8 @@ impl Reporter for AppReporter {
 
     fn file(&self, f: &FileEvent) {
         elog!(
-            "[oculus] wrote {} ({} bytes)",
+            "[oculus] {} {} ({} bytes)",
+            f.action,
             f.relative_path,
             f.size_bytes
         );

@@ -1,9 +1,9 @@
 import { isMac, isWindows } from "@/lib/platform";
 
-/** "On this Mac…" / "On this PC…", as the Ed workspace names the machine. */
+/** "On this Mac…" / "On this PC…": the machine's name in the UI. */
 export const THIS_COMPUTER = isMac ? "Mac" : "PC";
 
-/** The file manager's reveal, as Studio's export and Ed's run files word it. */
+/** The file manager's reveal, as Studio's export words it. */
 export const REVEAL = isWindows ? "Show in Explorer" : "Show in Finder";
 
 /** A rejected command's message, for an inline error. */

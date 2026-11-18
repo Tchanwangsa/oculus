@@ -11,12 +11,10 @@ inside the app (on a plain thread, reporting through Tauri events) and in the
 | Canvas scrape engine (modules driver, link crawl, Office conversion) | `app/src-tauri/src/sync/` |
 | Canvas HTTP through keyd's `canvas` route: redirects, retries, pagination, streamed downloads | `app/src-tauri/src/sources/canvas/` |
 | Ed Discussion: courses, threads, XML→md; its requests through keyd's `ed` route | `app/src-tauri/src/sources/ed/` |
-| Ed Lessons: lessons, quiz questions, challenge settings, workspace zips, the index and slide renderers | `app/src-tauri/src/sources/ed/lessons.rs`, `app/src-tauri/src/sources/ed/workspace.rs`, `app/src-tauri/src/sources/ed/lesson_md/` |
-| A challenge workspace's local sync record | `app/src-tauri/src/sources/ed/workspace_state.rs` |
-| Reconcile of a recorded workspace with Ed: the decision table, conflict copies, resolve, live pulls, the sync's run | `app/src-tauri/src/sources/ed/workspace_session/reconcile/` |
-| A workspace opened in the app: its socket thread, frames, commands and `ed-workspace` events; the `/api` and workspace-server calls it makes | `app/src-tauri/src/sources/ed/workspace_session/`, `app/src-tauri/src/sources/ed/workspace_api.rs`, `app/src-tauri/src/sources/ed/sahara.rs`, `app/src-tauri/src/sources/ed/live.rs` |
+| Ed Lessons: lessons, quiz questions, challenge settings, workspace zips, the index and slide renderers | `app/src-tauri/src/sources/ed/lessons.rs`, `app/src-tauri/src/sources/ed/lesson_md/` |
+| A challenge workspace's download (connect, the live socket, the download ticket), unpack, path guard and prune | `app/src-tauri/src/sources/ed/workspace_api.rs`, `app/src-tauri/src/sources/ed/live.rs`, `app/src-tauri/src/sources/ed/workspace.rs` |
 | Front matter on Ed files; Ed's category colours | `app/src-tauri/src/sources/ed/front.rs`, `app/src-tauri/src/sources/ed/palette.rs` |
-| The Ed phase (one course resolve for threads and lessons) and the lessons phase | `app/src-tauri/src/sync/phases/ed.rs`, `app/src-tauri/src/sync/phases/ed_lessons.rs` |
+| The Ed phase (one course resolve for threads and lessons), the lessons phase, and the challenge folders' mirror | `app/src-tauri/src/sync/phases/ed.rs`, `app/src-tauri/src/sync/phases/ed_lessons.rs`, `app/src-tauri/src/sync/phases/ed_workspace.rs` |
 | Echo360 core | `app/src-tauri/src/sources/echo360/` |
 | Echo360 Tauri commands, session cache, downloads | `app/src-tauri/src/lectures/commands.rs`, `app/src-tauri/src/lectures/mod.rs`, `app/src-tauri/src/lectures/downloads.rs` |
 | Canvas HTML → Markdown | `app/src-tauri/src/pages/md/` |
@@ -480,25 +478,32 @@ leaves the last whole lesson.
   logged); directories, dotfiles, dot-directories and `__MACOSX` are dropped,
   and a file over 20 MB is skipped with a log line. Each file is stored at
   Ed's own workspace-relative path (no renaming, unlike other library files),
-  through the open session's guard (`workspace_session/paths.rs`), so the
-  sync and a session name every file alike; a path the guard refuses is
-  skipped with a log line. Text files up to 20 KB are
-  also shown inline as fenced code. A workspace is fetched every sync, since
-  Ed gives it no version; the byte compare keeps unchanged files unchanged.
-- A workspace with a sync record, `ed-workspaces/<challenge_id>.json` in the
-  data dir (`app/src-tauri/src/sources/ed/workspace_state.rs`), holds local
-  work, so the sync reconciles it with Ed instead of overwriting it
-  ([below](#reconcile-brings-a-recorded-workspace-in-step-with-ed)): it
-  connects and holds the workspace live itself, as for a download. It
-  leaves the folder alone, with an `info` line, while the challenge is open
-  in the app (its session reconciles it) or when the record names another
-  folder for the same lesson. A conflict is a `warning` line; a file
-  reconcile wrote is reported `updated`. The record is
-  `{"workspace_id", "slide_dir", "base_commit", "files"}`,
-  `files` mapping each path in the workspace to the SHA-256 (hex) of the
-  bytes last synced. The slide's Files list is then those paths, read from
-  the slide's folder on disk (one missing there is left out). A record that
-  cannot be read still counts, as an empty one.
+  through one guard (`workspace::resolve`: no empty, absolute, `.`/`..`,
+  hidden, `\`, `:` or NUL component, and nothing a symlink takes outside the
+  folder); a path it refuses is skipped with a log line. Text files up to
+  20 KB are also shown inline as fenced code.
+- The slide's folder is a read-only mirror of the student's workspace on Ed
+  (`app/src-tauri/src/sync/phases/ed_workspace.rs`), fetched every sync since
+  Ed gives a workspace no version. Once the zip has downloaded and unpacked,
+  every file in the folder that the zip lacks is deleted (an `info` line
+  each), hidden files and symlinks too, then every folder left empty; then
+  Ed's files are written, the byte compare keeping unchanged ones
+  `unchanged`. Kept besides the zip's files: a skipped one's old copy and
+  each file's parse artifacts. A deleted file's parse artifacts go with it.
+  A failed connect, socket, download or unpack is a `warning` and leaves the
+  folder untouched. An empty zip empties the folder, with an `info` line.
+  Local edits are never uploaded: the next sync replaces them.
+- Each deleted file is also a `scrape-file` event with action `removed`, the
+  only phase that sends one, and its `files` row goes with it: the app's
+  listener (`app/src/hooks/backend/useScrapeEvents.ts`) looks the row up by
+  path and deletes it with its pages and page pictures, and `oculus run`
+  deletes it the same way (`db::store::delete_file_row`). A file with no row
+  is no error, and a `removed` file never enters the run's sync history.
+- `ed-workspaces/<challenge_id>.json` in the data dir marks a challenge whose
+  folder may hold local edits. The mirror replaces them all the same; the
+  run counts them (changed files and deleted ones, not hidden files or
+  `*.ed-server*` copies), says so in one `info` line once it finishes, and
+  deletes the folder (`Engine::forget_edit_records`).
 - A PDF slide's `file_url` names its content, so `file-manifest.json` keeps it
   under `ed-slide-<id>`, and a match with the file on disk skips the
   download. The PDF is an ordinary library file: parsed and embedded.
@@ -513,237 +518,6 @@ leaves the last whole lesson.
 - A lesson Ed refuses (a password-gated quiz answers 403) is a warning and the
   course carries on; a slide whose PDF, questions or workspace fails is a
   warning and a note in the slide's file (in the index, for a PDF).
-
-## An open challenge workspace is a live session
-
-Opening a `code` slide's workspace in the app starts a session
-(`app/src-tauri/src/sources/ed/workspace_session/`): one per challenge, held in
-the managed `EdWorkspaces` state. The library copy under the slide's folder is
-the working copy; Ed gets each save as an upload.
-
-- `ed_workspace_open {challengeId}` finds the slide by the `ed_challenge_id`
-  in its front matter (the folder the sync record names first, else every
-  `courses/*/Course/Lessons/*/*.md`), lists the folder's files, reads the
-  `challenge` snapshot for `runCommand`, `features` and `dueAt`, starts the
-  socket thread and answers at once with status `connecting`. A second open
-  answers for the session already running; `ed_workspace_close` ends it and
-  is a no-op when none is open.
-- The thread owns the socket (`live.rs`'s TLS and handshake, shared with the
-  sync): `POST /challenges/<ch>/connect` for a ticket, `wss://sahara.<region>…/connect`,
-  `init`, then reads of at most 200 ms, between which it sends what the
-  commands queued and a `keep_alive` every 270 s. When the socket drops it
-  goes `offline` with the reason and connects again with a fresh ticket after
-  2, 4, 8 … seconds, at most a minute; nothing times out a live session on
-  top of Ed's server.
-- The first connect of a challenge with no sync record downloads the tree
-  (`"."` zip, unpacked as the sync does), writes it into the slide's folder,
-  and saves the record: `base_commit` is `init.last_commits[0]`, each file's
-  hash is of Ed's bytes. A save or delete made before that (offline, or while
-  connecting) is kept over Ed's copy, then uploaded or removed. Any other
-  file in the folder that Ed lacks is new here and is uploaded too, except
-  an earlier sync's rewritten name for one of Ed's files (`my_file.py` for
-  `my file.py`), which is deleted (logged). Every later connect reconciles
-  ([below](#reconcile-brings-a-recorded-workspace-in-step-with-ed)) before
-  the session goes online.
-- Every path is workspace-relative and goes through one guard
-  (`paths::resolve`): no empty, absolute, `.`/`..`, hidden (dot), `\`, `:` or
-  NUL component, and nothing a symlink takes outside the folder. The file list
-  leaves out hidden files and symlinks.
-- `ed_workspace_save {challengeId, path, text}` writes the file atomically,
-  then, while online, gets an upload ticket (`POST /workspaces/<w>/upload
-  {wid, path: "."}`) and posts the file as one multipart `file` part named by
-  its path to `sahara…/upload/<ticket>`. Every upload is a commit: the answer
-  is `{hash}`, which becomes `base_commit`, and the file's hash goes into the
-  record. The answer is `{saved: "ed", hash}`; offline it is `{saved:
-  "local", hash: null}`; a failed upload is an error, with the file already
-  written. Saves and deletes of one challenge run one at a time in the order
-  they were asked (`queue.rs`).
-- `ed_workspace_delete` removes the file or folder, and while online sends
-  `fsop {type: "remove", param1: <path>, param3: "file"|"folder"}` (the
-  server ignores a remove without `param3`). The record keeps the file until
-  a reconcile finds it gone from both sides, so a remove lost with the socket
-  is sent again; an offline delete is found the same way.
-  `ed_workspace_read` returns the library copy as UTF-8 (lossy).
-- One event, `ed-workspace`, to the main window: `{challengeId, kind}` with
-  `status {state: connecting|online|offline, reason}`, `commit {hash, ours}`,
-  `files {files}` (after the first download writes, after each reconcile,
-  and when a save or delete changes the list), `conflict {path, serverPath}`
-  (one per file in conflict, after each reconcile), `error {message}`
-  (Ed's `display_error`, or a pull that failed), `reset` (a reset or a
-  restore replaced the files, after their `files`), and the terminal and Run
-  kinds below.
-  Each upload makes two `new_commit` frames: a snapshot commit whose hash
-  the upload never returns, then its own, which can beat the HTTP answer.
-  So a frame is ours when its hash is one an upload of ours answered or when
-  it arrives while an upload of ours is in flight (`commits.rs`); another
-  client's commit hidden that way is caught by the next reconcile.
-  `ours: false` is another client, such as Ed's web app. The `list_reply` the
-  server sends after an upload is ignored.
-- Frames are `{type, data}` JSON (`frames.rs`); kinds the workspace does not
-  use (live editing, cursors, chat) are ignored.
-- Tickets are held in a `Ticket` whose `Debug` hides them, and the workspace
-  server's errors name a status or a transport kind, never the URL. `init`'s
-  `auth` is never read into a field. None of the three reaches a log, an
-  event, a result or an error.
-- Terminals (`terminal.rs`) run on the session socket. `ed_terminal_open
-  {cols, rows}` sends `program_open {id: "term-<u32>", command: "bash
-  --login", pty_size, start_if_stopped: true, persist: true}` and answers
-  `{id, resumed}`. A persisting terminal outlives the socket: `init`'s
-  `programs` and `program_state` list the ones the server still runs, and
-  opening one of those ids again attaches to it instead of starting a shell
-  (what Ed's web app does after a reload). The pane gets a listed terminal it
-  does not hold yet first (`resumed: true`), else a new id. Each connect
-  re-attaches every terminal the pane holds at its last size, and reports one
-  the server omits as `termState exited`, so the pane opens a
-  terminal once per session. `ed_terminal_input {id, data}` sends
-  `program_data` with the UTF-8 text in base64, `ed_terminal_resize` sends
-  `program_set_pty`, `ed_terminal_kill` sends `program_signal {signal:
-  "kill"}`. Incoming `program_data` becomes `term {id, data}` (base64 passed
-  through), `program_init`/`program_update`/`program_close` become
-  `termState {id, state: running|exited}`; programs whose id is not
-  `term-…` are not the pane's. Offline, each command is an error.
-- Run and Mark take a fresh commit (`snapshot.rs`), after the saves asked
-  before them have landed: `commit {id}` on the session socket, then the
-  `new_commit` whose `context.id` echoes it (announced as `commit {ours:
-  true}`); going offline ends the wait with an error. They need the whole
-  `<tree>:::<suffix>` id that answer carries: `init.last_commits` names the
-  tree half alone, and Ed's `/run` and `/mark` answer that with a 500.
-- Run (`run/`): `ed_workspace_run {cols, rows}` needs a `run_command` and
-  the session online, stops the challenge's run in progress, gets a ticket
-  (`POST /challenges/<ch>/run {pty_size, hash, command: run_command,
-  dump_files: true}`), opens `wss://sahara.<region>…/run?ticket=` with
-  `live.rs`'s TLS and handshake, and hands it to a thread of its own; it
-  answers `{runId}`. The thread streams `run_frame` stdout/stderr data as
-  `run {runId, data}` (base64), writes `status_built`'s output and, when
-  `ok` is false, ends with "The build failed"; `run_exit {exit_status: {type,
-  value}}` becomes `runExit {runId, code | signal | message}` (`normal` →
-  code, `signal` → signal, `killed`/`exec` → words); close code 1013 is "No
-  resources available". Ed sends `dump_files` after `run_exit`, so the
-  thread holds the exit until it arrives or the socket closes (no timer),
-  and only then sends `runExit`. Every run ends with exactly one `runExit`.
-- `dump_files` (`run/dump.rs`) names the files the program left: an object
-  keyed by file name, or a list of entries naming theirs. Ed's web app
-  hides dotfiles, names without a dot and sources (`.py`, `.c`, `.java`,
-  `.o`… its list, `shown`), and so does Oculus. A value is a string —
-  a `data:` URL; base64, taken when it decodes to a known binary format, the
-  extension is binary or it decodes to UTF-8 text; else the text itself — or
-  an object whose `data`, `content`, `contents` or `url` is one
-  (`encoding: "base64"` forces base64). A link is not fetched. Any other
-  shape is logged by file name and kind (an object's keys), never its
-  contents. The type is sniffed from the bytes (PNG, JPEG, GIF, WebP, PDF,
-  SVG), else the extension. A non-empty dump becomes `runFiles {runId,
-  files: [{name, mime, dataUrl, path}]}` just before `runExit`: pictures and
-  text up to 5 MB inline as a `data:` URL, anything else written to
-  `<temp>/oculus-ed-runs/<challenge>/<runId>/` (`path`).
-  `ed_run_input` sends `run_frame {pid: 0, type: "stdin", data}`,
-  `ed_run_resize` `run_set_size`, `ed_run_stop` closes the socket ("Stopped");
-  closing the workspace stops its run.
-- Mark (`mark/`): `ed_workspace_mark` (`POST /challenges/<ch>/mark {hash}`)
-  is a real submission. Only the workspace's Mark button calls it, after the
-  pane's confirm dialogs; a second Mark while one is in flight is refused,
-  nothing retries it, and no sync, reconnect, agent or CLI reaches it.
-  A submission whose `status` is `passed` or `submitted` then completes the
-  lesson slide as Ed's web app does (`PUT /lessons/slides/<s>/complete`,
-  `Ed::complete_slide`; `<s>` is the slide's `ed_slide_id`); a refused
-  completion is logged and never fails the Mark. The history read does not
-  complete anything.
-  The answer is the pane's `Submission`: camelCase, a testcase's
-  `run.output` as `output`, and `diffs`, the lines of every `check_diff`
-  check's `value.diff` in order. Ed writes a line as `[[sign], [sign|"=",
-  text]…]`; each element becomes a `[sign, text]` pair, so a line starts
-  with its sign (`-` observed, `+` expected) and empty text, and `["mn"]`
-  (missing newline) keeps its sign. `ed_workspace_submissions` reads Ed's
-  list of the student's submissions (`GET /users/<uid>/challenges/<ch>/submissions`,
-  each with its marked result) and shapes them alike, newest first.
-  `ed_challenge_standing` reads `GET /challenges/<ch>` live for `{score,
-  status, attemptsRemaining, dueAt}`, `dueAt` falling back to the slide's
-  front matter. Neither read needs the workspace open.
-- The user id those paths take is the `user` of the session's last
-  `connect` answer (an object with `id`, or the id; a `0` is no user), else
-  `GET /user`'s.
-- A submission's code (`mark/code.rs`): `ed_submission_files
-  {submissionId}` gets a ticket (`POST /challenges/submissions/<id>/connect
-  {}`), opens the session socket with it, takes `init.wid` (a temporary copy
-  Ed makes of the submission), downloads its `"."` zip, closes the socket and
-  unpacks it as a workspace. Nothing is ever uploaded to or removed from that
-  copy. The files are kept in memory per submission for the app's run and
-  answered as `[{path, text}]` (UTF-8, lossy).
-- Reset (`reset.rs`): `ed_workspace_reset` is Ed's "Reset attempt", `POST
-  /users/<uid>/challenges/<ch>/reset {}`. Only the pane's menu calls it,
-  after its confirm dialog. It takes its place in the save queue and keeps
-  its turn to the end, so no save lands after it, and needs the session
-  online. After Ed's reset it kills every terminal it knows (`termState
-  exited` for the held ones) and forgets them, deletes the conflict copies,
-  records every local file's hash as the base (`base_commit` none) and
-  reconciles with Ed's head changed: every difference then goes Ed's way —
-  Ed's files written, the ones Ed lacks deleted — and nothing is uploaded.
-  `files` and then `reset` follow. If the download fails, the record set up
-  that way makes the next connect's reconcile finish it, and the command
-  says so.
-- Restore (`restore.rs`): `ed_workspace_restore {submissionId}` makes the
-  workspace a submission's code (`mark/code.rs`). Only the Feedback tab's
-  Restore calls it, after its confirm dialog; it takes its turn in the save
-  queue and needs the session online. The library copy becomes the
-  submission's files and nothing else, conflict copies included; then each
-  file whose bytes the record does not hold is uploaded and recorded, and
-  each recorded file the submission lacks is removed on Ed (`fsop remove`,
-  kept in the record until a reconcile finds it gone). `files` and then
-  `reset` follow; an upload cut short is sent by the next connect's
-  reconcile.
-
-## Reconcile brings a recorded workspace in step with Ed
-
-`app/src-tauri/src/sources/ed/workspace_session/reconcile/` compares, per
-file, its bytes in the slide's folder, the record's hash (the base) and Ed's
-bytes (`download "."`), and acts on the decision table in `table.rs`:
-
-| Here | Ed | Action |
-| --- | --- | --- |
-| = base | changed | take Ed's |
-| changed | = base | upload |
-| changed | changed, same bytes | record |
-| changed | changed, different | **conflict** |
-| new | absent | upload |
-| absent | new | write here |
-| deleted | = base | `fsop remove` on Ed |
-| = base | deleted | delete here |
-| changed | deleted | upload |
-| deleted | changed | write here |
-
-- A conflict keeps the local file and writes Ed's beside it as
-  `<name>.ed-server.<ext>` (`server_copy.rs`: before the last extension,
-  `x.tar.gz` → `x.tar.ed-server.gz`; after a name with none,
-  `Makefile.ed-server`). The record keeps the old base, so each reconcile
-  calls it a conflict again and refreshes the copy; while the copy exists
-  reconcile never uploads the file. Names of that shape are reserved: never
-  uploaded by a save, removed on Ed by a delete, recorded, or taken from Ed.
-- `ed_workspace_resolve {challengeId, path, keep: "mine" | "ed"}` settles one,
-  in the save queue, online or not. `mine` records Ed's version as the base
-  (so the local edit is the only change), deletes the copy and, while
-  online, uploads the file. `ed` writes the copy over the file, drops it from
-  the record (recorded once Ed is found to agree, a conflict again if Ed has
-  moved on) and deletes the copy.
-- `init.last_commits[0]` naming the same tree as `base_commit` (the part
-  before `:::`, `compare::same_tree`) means Ed has not changed:
-  nothing is downloaded and only local changes go up. A pull that was owed
-  (below) turns that off for the next connect.
-- After a reconcile the record holds the new hashes and `base_commit` is the
-  last upload's commit, else Ed's head. Every step leaves the sides so a
-  second run decides the same or just records, so one cut short (an upload
-  fails, the socket drops) is finished by the next; the record is saved
-  only when the whole run succeeds.
-- A file the zip leaves out (over 20 MB, a name the guard refuses) is left
-  alone, never taken for deleted. A folder missing from the library is an
-  error, never a delete of everything.
-- When: every connect of a session with a record (after the lesson sync
-  lets go of the challenge, if it holds it), every lesson sync of a
-  workspace not open in the app, and while a session is live, each
-  `new_commit` from another client. That pull runs on a worker thread in the
-  save queue, so it lands between saves and never stalls the socket; commits
-  arriving during a pull make one more pull. A pull that fails or finds the
-  session offline is owed to the next connect, which then downloads even at
-  the base commit. The app process keeps the lesson sync and its sessions
-  off the same challenge (`registry.rs`).
 
 ## Echo360 is an LTI launch with up to two streams
 

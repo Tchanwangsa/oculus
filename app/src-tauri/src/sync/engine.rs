@@ -18,6 +18,9 @@ pub struct Engine {
     /// (`file-manifest.json`). A matching pair with the artifact on disk skips
     /// the download.
     pub(super) manifest: std::cell::RefCell<HashMap<String, (String, u64)>>,
+    /// Local edits to Ed challenge files this run replaced with Ed's copy
+    /// (`phases::ed_workspace`), said once at the end.
+    pub(super) replaced_edits: std::cell::Cell<usize>,
 }
 
 impl Engine {
@@ -34,6 +37,7 @@ impl Engine {
             parse_pdfs: true,
             options: SyncOptions::default(),
             manifest: std::cell::RefCell::new(manifest),
+            replaced_edits: std::cell::Cell::new(0),
         }
     }
 
@@ -163,6 +167,7 @@ impl Engine {
                 label: String::new(),
             });
         }
+        self.forget_edit_records();
         subjects.len()
     }
 

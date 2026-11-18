@@ -1,6 +1,10 @@
-//! A challenge workspace's zip, unpacked into the files worth keeping.
+//! A challenge workspace's zip, unpacked into the files worth keeping; the
+//! guard every workspace path goes through; and the prune that makes a
+//! slide's workspace folder hold only what Ed's zip has.
 
+use std::collections::HashSet;
 use std::io::Read;
+use std::path::{Path, PathBuf};
 
 /// A file bigger than this is left out of the library and named in the log.
 pub const MAX_ENTRY_BYTES: u64 = 20 * 1024 * 1024;
@@ -82,4 +86,104 @@ pub fn unpack(zip: &[u8]) -> Result<(Vec<WorkspaceFile>, Vec<Skipped>), String> 
         files.push(WorkspaceFile { path, bytes });
     }
     Ok((files, skipped))
+}
+
+/// Where workspace file `rel` sits under `root`, the slide's workspace
+/// folder. Refused: an empty or absolute path, `.`/`..` or an empty
+/// component, a hidden one (the library keeps no dotfiles of a workspace,
+/// [`unpack`]), `\`, `:` or NUL, and any path whose deepest existing part
+/// resolves outside `root` through a symlink.
+pub fn resolve(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let refused = || format!("{rel} is not a path inside the workspace");
+    if rel.is_empty() || rel.starts_with('/') || rel.contains(['\\', ':', '\0']) {
+        return Err(refused());
+    }
+    let parts: Vec<&str> = rel.split('/').collect();
+    if parts.iter().any(|p| p.is_empty() || p.starts_with('.')) {
+        return Err(refused());
+    }
+    let real_root = root
+        .canonicalize()
+        .map_err(|_| "the workspace folder is missing from the library".to_string())?;
+    let target = parts
+        .iter()
+        .fold(root.to_path_buf(), |p, part| p.join(part));
+    let mut existing = target.as_path();
+    while existing.symlink_metadata().is_err() {
+        existing = existing.parent().ok_or_else(refused)?;
+    }
+    let real = existing.canonicalize().map_err(|_| refused())?;
+    if !real.starts_with(&real_root) {
+        return Err(refused());
+    }
+    Ok(target)
+}
+
+/// What [`prune`] keeps, all paths absolute.
+#[derive(Debug, Default)]
+pub struct Keep {
+    /// Files, by their exact path: a folder of the same name is not kept.
+    pub files: HashSet<PathBuf>,
+    /// Paths kept with everything under them: a parse artifact, which may be
+    /// a folder of pictures.
+    pub prefixes: Vec<PathBuf>,
+}
+
+impl Keep {
+    fn holds_folder(&self, path: &Path) -> bool {
+        self.prefixes.iter().any(|f| path.starts_with(f))
+    }
+
+    pub fn holds(&self, path: &Path) -> bool {
+        self.files.contains(path) || self.holds_folder(path)
+    }
+}
+
+/// What [`prune`] did, each path `root`-relative with `/` separators.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Pruned {
+    /// The files deleted, sorted.
+    pub removed: Vec<String>,
+    /// The files that could not be deleted, each with the reason.
+    pub failed: Vec<(String, String)>,
+}
+
+/// Delete every file under `root` that `keep` does not hold, hidden files
+/// and symlinks included (a link is removed, never followed), then every
+/// folder left empty, `root` too. A missing `root` prunes nothing.
+pub fn prune(root: &Path, keep: &Keep) -> Pruned {
+    let mut pruned = Pruned::default();
+    prune_dir(root, "", keep, &mut pruned);
+    let _ = std::fs::remove_dir(root);
+    pruned.removed.sort();
+    pruned
+}
+
+fn prune_dir(dir: &Path, prefix: &str, keep: &Keep, pruned: &mut Pruned) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let rel = format!("{prefix}{}", entry.file_name().to_string_lossy());
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        // A folder where Ed has a file of that name goes, so the file can land.
+        if kind.is_dir() {
+            if !keep.holds_folder(&path) {
+                prune_dir(&path, &format!("{rel}/"), keep, pruned);
+                // Fails, as it should, while anything kept is still inside.
+                let _ = std::fs::remove_dir(&path);
+            }
+            continue;
+        }
+        if keep.holds(&path) {
+            continue;
+        }
+        match std::fs::remove_file(&path) {
+            Ok(()) => pruned.removed.push(rel),
+            Err(e) => pruned.failed.push((rel, e.to_string())),
+        }
+    }
 }

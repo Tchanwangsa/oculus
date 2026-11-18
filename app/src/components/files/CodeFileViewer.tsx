@@ -6,9 +6,8 @@ import { LoadingFill } from "@/components/ui/layout/PageParts";
 import type { DbFile } from "@/lib/db";
 import { readCourseFile } from "@/lib/files/courseFiles";
 
-/** A source file in the library (`isCodeFile`), read-only in `CodeEditor`.
- *  A challenge's own files are edited in its workspace instead
- *  (`components/lessons/workspace/`). */
+/** A source file in the library (`isCodeFile`), read-only in `CodeEditor`,
+ *  an Ed challenge's files included: those are edited on Ed. */
 export function CodeFileViewer({ file }: { file: DbFile }) {
   const [text, setText] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);

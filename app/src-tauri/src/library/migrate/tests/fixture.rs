@@ -144,11 +144,6 @@ fn disk(d: &Path) {
     // Records outside the library that name paths in it.
     file(
         d,
-        "ed-workspaces/1.json",
-        &format!(r#"{{"slide_dir":"{S}/lessons/1-intro/01-q","files":{{}}}}"#),
-    );
-    file(
-        d,
         "canvas-pages/14/pages.json",
         &format!(r#"{{"canvas":"{S}/notebooks/nb.notebook","pageCount":0,"pages":[]}}"#),
     );

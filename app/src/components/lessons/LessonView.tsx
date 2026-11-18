@@ -7,14 +7,15 @@ import { useLiveLessonIndex } from "@/lib/ed/slideStatus";
 import { markSlideOpened } from "@/lib/ed/views";
 import { openFileSmart, recordFileAccess } from "@/lib/files/openFile";
 import { LessonSidebar } from "./LessonSidebar";
-import { WorkspacePane } from "./workspace/WorkspacePane";
+import { ChallengeHeader } from "./ChallengeHeader";
 
 /**
  * An Ed lesson as Ed shows it: its slides down the left, the selected one on
- * the right — a PDF slide in the PDF viewer, a `code` challenge as its
- * workspace (brief and editor), any other as its markdown. The
- * slide rides in the URL (`&slide=<id>`), so a restored tab or Back reopens
- * it; without one the lesson opens on its first slide not yet completed.
+ * the right — a PDF slide in the PDF viewer, any other as its markdown, a
+ * challenge's under a header that opens it on Ed, where it runs and is
+ * marked. The slide rides in the URL (`&slide=<id>`), so a restored tab or
+ * Back reopens it; without one the lesson opens on its first slide not yet
+ * completed.
  */
 export function LessonView({
   file,
@@ -51,8 +52,7 @@ export function LessonView({
   // A PDF slide's PDF until it is synced falls back to the slide's own page,
   // which links to it.
   const shown = (slide.pdf ? pdf : undefined) ?? md;
-  // Only `code` challenges edit here; jupyter and the rest stay read-only.
-  const workspace = slide.type === "code" && !slide.pdf ? slide.challengeId : null;
+  const edSlideUrl = slide.challengeId != null ? slide.url : null;
 
   // Each slide opened clears its never-opened mark, as a file page does.
   const mdId = md?.id;
@@ -81,9 +81,8 @@ export function LessonView({
         edUrl={slide.url ?? index.url}
       />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {workspace != null && md ? (
-          <WorkspacePane key={workspace} challengeId={workspace} slideId={slide.id ?? null} brief={md} files={files} />
-        ) : shown ? (
+        {edSlideUrl && <ChallengeHeader edUrl={edSlideUrl} />}
+        {shown ? (
           /* In-slide links open the linked file beside this page. */
           <FileViewer key={shown.id} file={shown} files={files} onOpenFile={openFileSmart} />
         ) : (

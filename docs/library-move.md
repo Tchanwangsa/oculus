@@ -98,7 +98,7 @@ moving at once: the second waits, then finds the marker.
    twice.
 4. **Rewrite files** (`contents.rs`, `links.rs`): every moved markdown file's
    relative links, the `asset://` picture links notes hold, a renamed PDF's
-   records, `ed-workspaces/*.json` `slide_dir`, the notebooks' `pages.json`
+   records, the notebooks' `pages.json`
    (under `canvas-pages/` or `whiteboard-pages/`), the subjects' memories links, and `agents/opencode.json` when
    opencode has been used. Each is a no-op the second time.
 

@@ -1,6 +1,6 @@
 //! Ed access: token auth, course mapping, Discussion threads, Lessons (slides,
-//! quizzes, challenge workspaces, their local sync state and the editor's live
-//! session on one), and the `<document>` XML → Markdown converter both share.
+//! quizzes and a read-only mirror of each challenge's workspace), and the
+//! `<document>` XML → Markdown converter both share.
 //!
 //! Ed authenticates API calls with an `x-token` JWT that oculus-keyd holds and
 //! attaches to its `ed` route; this module never reads it back. The token is
@@ -20,13 +20,10 @@ mod lti;
 mod palette;
 mod region;
 mod render;
-pub mod sahara;
 mod threads;
 pub mod views;
-mod workspace;
-pub mod workspace_api;
-pub mod workspace_session;
-pub mod workspace_state;
+pub mod workspace;
+mod workspace_api;
 
 #[cfg(test)]
 mod lesson_tests;

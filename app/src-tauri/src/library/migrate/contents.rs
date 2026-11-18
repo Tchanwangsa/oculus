@@ -1,7 +1,7 @@
 //! Paths inside files, rewritten once everything has moved: every moved
-//! markdown file's links, a renamed PDF's parse records, the Ed workspace
-//! records and notebook page manifests outside the library, the subjects'
-//! memories links, and opencode's generated config. Each is a no-op the
+//! markdown file's links, a renamed PDF's parse records, the notebook page
+//! manifests outside the library, the subjects' memories links, and
+//! opencode's generated config. Each is a no-op the
 //! second time, so a run cut short repeats this part whole.
 
 use std::path::Path;
@@ -19,7 +19,6 @@ pub struct ContentCounts {
     pub notes: usize,
     pub links: usize,
     pub records: usize,
-    pub workspaces: usize,
     pub manifests: usize,
 }
 
@@ -47,15 +46,10 @@ pub fn rewrite(
             counts.records += 1;
         }
     }
-    counts.workspaces = remap_files(
-        &data_dir.join(crate::sources::ed::workspace_state::DIR),
-        None,
-        rules,
-    )?;
     // The pictures' folder has its whiteboard name only once
     // `whiteboard` runs, after this move.
     for dir in [super::whiteboard::LEGACY_PAGES_DIR, PAGES_DIR] {
-        counts.manifests += remap_files(&data_dir.join(dir), Some(PAGES_MANIFEST), rules)?;
+        counts.manifests += remap_files(&data_dir.join(dir), PAGES_MANIFEST, rules)?;
     }
     for code in &plan.relink {
         crate::agents::link_course(data_dir, code)
@@ -125,21 +119,15 @@ fn replace_strings(value: &mut Value, from: &str, to: &str) -> bool {
     }
 }
 
-/// The JSON files in `dir` (or, with `inner`, the file of that name in each
-/// of its folders) with their library paths followed through the rules.
-fn remap_files(dir: &Path, inner: Option<&str>, rules: &Rules) -> Result<usize, String> {
+/// The JSON file named `inner` in each of `dir`'s folders, with its library
+/// paths followed through the rules.
+fn remap_files(dir: &Path, inner: &str, rules: &Rules) -> Result<usize, String> {
     let Ok(read) = std::fs::read_dir(dir) else {
         return Ok(0);
     };
     let mut changed = 0;
     for entry in read.flatten() {
-        let path = match inner {
-            Some(name) => entry.path().join(name),
-            None => entry.path(),
-        };
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
+        let path = entry.path().join(inner);
         let Ok(raw) = std::fs::read(&path) else {
             continue;
         };

@@ -10,11 +10,10 @@ const rank = (status: string | null | undefined) => (status == null ? -1 : (RANK
 type StatusMap = ReadonlyMap<number, string>;
 
 /**
- * What Ed answered for slides opened here (`markSlideOpened` in `views.ts`),
- * what the Lessons tab read on open (`refreshSlideStatuses`) and what a
- * passing submission proved, by Ed slide id. The index on disk only learns
- * a status at the next sync, so the sidebar's ticks and the Lessons tab's
- * counts read this over it. It is kept in the webview's storage, so a
+ * What Ed answered for slides opened here (`markSlideOpened` in `views.ts`)
+ * and what the Lessons tab read on open (`refreshSlideStatuses`), by Ed
+ * slide id. The index on disk only learns a status at the next sync, so the
+ * sidebar's ticks and the Lessons tab's counts read this over it. It is kept in the webview's storage, so a
  * restart does not drop what only this store knows.
  */
 export const useSlideStatusStore = create<{ byId: StatusMap }>()(
@@ -30,11 +29,6 @@ export const useSlideStatusStore = create<{ byId: StatusMap }>()(
     },
   ),
 );
-
-/** Whether a submission of this Ed status completes its challenge's slide,
- *  as Ed's web app does after a mark: passed, or submitted without marking. */
-export const completesSlide = (submissionStatus: string) =>
-  submissionStatus === "passed" || submissionStatus === "submitted";
 
 /** Record Ed's `status` for slide `id`; a status never moves back. */
 export function recordSlideStatus(id: number, status: string): void {

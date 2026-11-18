@@ -185,7 +185,14 @@ impl Reporter for TermReporter {
             "  {} {}  {short:<52} {}",
             paint(&format!("{phase:<13}"), DIM),
             paint(&format!("{counter:>7}"), DIM),
-            paint(&format!("{:>9}", human_bytes(f.size_bytes)), DIM)
+            paint(
+                &if f.action == "removed" {
+                    format!("{:>9}", "removed")
+                } else {
+                    format!("{:>9}", human_bytes(f.size_bytes))
+                },
+                DIM
+            )
         );
         let _ = std::io::stdout().flush();
         self.written.lock().unwrap().push(f.clone());

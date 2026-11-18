@@ -151,7 +151,6 @@ fn an_old_library_moves_into_the_tree() {
     assert!(!exists(&d, "lectures"));
 
     // Records outside the library.
-    assert!(read(&d, "ed-workspaces/1.json").contains(&s("Course/Lessons/1-intro/01-q")));
     assert!(read(&d, "canvas-pages/14/pages.json").contains(&s("nb.notebook")));
     assert!(exists(&d, "courses/loose.pdf"), "loose files stay");
     assert!(summary.left.iter().any(|l| l.contains("loose.pdf")));
