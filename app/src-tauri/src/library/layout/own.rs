@@ -12,7 +12,7 @@ use super::zone::{same_name, segments, zone_of, Zone};
 pub enum OwnKind {
     Upload,
     Document,
-    Canvas,
+    Whiteboard,
     Notebook,
 }
 
@@ -22,7 +22,7 @@ impl OwnKind {
         match self {
             Self::Upload => "upload",
             Self::Document => "document",
-            Self::Canvas => "canvas",
+            Self::Whiteboard => "whiteboard",
             Self::Notebook => "notebook",
         }
     }
@@ -32,14 +32,14 @@ impl OwnKind {
         match self {
             Self::Upload => None,
             Self::Document => Some(".md"),
-            Self::Canvas => Some(".canvas"),
+            Self::Whiteboard => Some(".whiteboard"),
             Self::Notebook => Some(".notebook"),
         }
     }
 
     /// The kind a file name says it is, wherever it sits.
     pub(super) fn by_extension(name: &str) -> Self {
-        [Self::Document, Self::Canvas, Self::Notebook]
+        [Self::Document, Self::Whiteboard, Self::Notebook]
             .into_iter()
             .find(|k| k.extension().is_some_and(|ext| name.ends_with(ext)))
             .unwrap_or(Self::Upload)

@@ -1,5 +1,5 @@
 //! The parity fixtures the TypeScript reference also runs
-//! (`app/tests/lib/canvas/collabFixtures.test.ts`).
+//! (`app/tests/lib/whiteboard/collabFixtures.test.ts`).
 
 use super::super::error::Code;
 use super::super::{format, model, transaction};
@@ -32,9 +32,9 @@ fn parse(text: &str) -> Result<Value, String> {
 
 #[test]
 fn valid_documents_parse_and_serialize_like_typescript() {
-    let serialized =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/canvas-model/serialized");
-    for (name, text) in fixtures("canvas-model/valid") {
+    let serialized = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/fixtures/whiteboard-model/serialized");
+    for (name, text) in fixtures("whiteboard-model/valid") {
         let value = parse(&text).unwrap_or_else(|e| panic!("{name}: {e}"));
         let expected = std::fs::read_to_string(serialized.join(&name)).unwrap_or(text);
         assert_eq!(format::serialize(&value).unwrap(), expected, "{name}");
@@ -43,7 +43,7 @@ fn valid_documents_parse_and_serialize_like_typescript() {
 
 #[test]
 fn invalid_documents_are_rejected() {
-    for (name, text) in fixtures("canvas-model/invalid") {
+    for (name, text) in fixtures("whiteboard-model/invalid") {
         assert!(parse(&text).is_err(), "{name} was accepted");
     }
 }
@@ -60,7 +60,7 @@ fn code(code: Code) -> &'static str {
 
 #[test]
 fn transactions_match_the_reference_implementation() {
-    for (name, text) in fixtures("canvas-collab") {
+    for (name, text) in fixtures("whiteboard-collab") {
         let fixture: Value = serde_json::from_str(&text).unwrap();
         let document = &fixture["document"];
         model::validate(document).unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -92,7 +92,7 @@ fn effective_transaction_leaves_out_what_was_already_applied() {
         serde_json::json!({"id": id, "type": "rectangle", "x": x, "y": 0, "width": 1, "height": 1,
             "stroke": "#000", "fill": "#fff", "strokeWidth": 1, "style": "clean", "seed": 1})
     };
-    let document = serde_json::json!({"type": "oculus-canvas", "version": 1,
+    let document = serde_json::json!({"type": "oculus-whiteboard", "version": 1,
         "elements": [shape("a", 5), shape("b", 0)], "viewport": {"x": 0, "y": 0, "zoom": 1},
         "background": "dots"});
     let tx = serde_json::json!({"edits": [
@@ -125,7 +125,7 @@ fn additions_carry_their_placement_through_diff_and_the_ack() {
             "stroke": "#000", "fill": "#fff", "strokeWidth": 1, "style": "clean", "seed": 1})
     };
     let doc = |ids: &[&str]| {
-        serde_json::json!({"type": "oculus-canvas", "version": 1,
+        serde_json::json!({"type": "oculus-whiteboard", "version": 1,
             "elements": ids.iter().map(|id| shape(id)).collect::<Vec<_>>(),
             "viewport": {"x": 0, "y": 0, "zoom": 1}, "background": "#fff"})
     };
@@ -161,7 +161,7 @@ fn additions_carry_their_placement_through_diff_and_the_ack() {
 fn a_paper_edit_travels_through_diff_and_leaves_out_what_was_already_applied() {
     let page = |id: &str| serde_json::json!({"id": id, "width": 595, "height": 842});
     let doc = |pages: &[&str]| {
-        serde_json::json!({"type": "oculus-canvas", "version": 1, "elements": [],
+        serde_json::json!({"type": "oculus-whiteboard", "version": 1, "elements": [],
             "viewport": {"x": 0, "y": 0, "zoom": 1}, "background": "#fff",
             "paper": {"pages": pages.iter().map(|id| page(id)).collect::<Vec<_>>()}})
     };
@@ -178,7 +178,7 @@ fn a_paper_edit_travels_through_diff_and_leaves_out_what_was_already_applied() {
     assert!(!transaction::has_changes(&replayed));
 
     // Documents with no paper at either end produce no paper edit.
-    let whiteboard = serde_json::json!({"type": "oculus-canvas", "version": 1, "elements": [],
+    let whiteboard = serde_json::json!({"type": "oculus-whiteboard", "version": 1, "elements": [],
         "viewport": {"x": 0, "y": 0, "zoom": 1}, "background": "#fff"});
     assert!(transaction::diff(&whiteboard, &whiteboard)
         .get("paper")

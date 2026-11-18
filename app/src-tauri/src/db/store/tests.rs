@@ -579,7 +579,7 @@ async fn file_rows_follow_touch_rename_and_delete() {
     sqlx::raw_sql(
         "INSERT INTO subjects (id, code, name) VALUES (1, 'A', 'Alpha');
          INSERT INTO files (id, subject_id, filename, relative_path, file_type, size_bytes)
-           VALUES (9, 1, 'Plan.canvas', 'courses/A/Plan.canvas', 'canvas', 10);
+           VALUES (9, 1, 'Plan.whiteboard', 'courses/A/Plan.whiteboard', 'whiteboard', 10);
          INSERT INTO pages (file_id, page_no) VALUES (9, 1);
          INSERT INTO document_versions (file_id, kind, text, hash) VALUES (9, 'auto', '', '');",
     )
@@ -615,13 +615,13 @@ async fn file_rows_follow_touch_rename_and_delete() {
     let (size, _, _, flags) = row(pool.clone()).await.unwrap();
     assert_eq!((size, flags), (43, (true, true, true)));
 
-    rename_file_row(&pool, 9, "Next.canvas", "courses/A/Next.canvas")
+    rename_file_row(&pool, 9, "Next.whiteboard", "courses/A/Next.whiteboard")
         .await
         .unwrap();
     let (_, filename, rel, _) = row(pool.clone()).await.unwrap();
     assert_eq!(
         (filename.as_str(), rel.as_str()),
-        ("Next.canvas", "courses/A/Next.canvas")
+        ("Next.whiteboard", "courses/A/Next.whiteboard")
     );
 
     delete_file_row(&pool, 9).await.unwrap();

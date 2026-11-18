@@ -329,7 +329,7 @@ fn finish(data_dir: &Path, after: Vec<After>, moved: &[MovedRow]) {
     }
     for row in moved {
         if let Err(e) =
-            crate::library::files::canvases::snapshots::retarget(data_dir, row.id, &row.rel)
+            crate::library::files::whiteboards::snapshots::retarget(data_dir, row.id, &row.rel)
         {
             elog!("[oculus] drive: page pictures of {}: {e}", row.rel);
         }

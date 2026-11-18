@@ -19,7 +19,7 @@ pub struct ImportedFile {
     pub file_type: String,
     pub size_bytes: u64,
     /// The row's `files.category`, from its path (`layout::category_of`):
-    /// a dropped `.md` is a note, a `.canvas` a canvas.
+    /// a dropped `.md` is a note, a `.whiteboard` a whiteboard.
     pub category: String,
 }
 

@@ -1,9 +1,9 @@
-//! The canvas authority: the single writer of a shared canvas file. Desktop
+//! The whiteboard authority: the single writer of a shared whiteboard file. Desktop
 //! panes and paired devices submit content transactions; the authority applies
-//! each against the canonical document, persists it through the canvas file
+//! each against the canonical document, persists it through the whiteboard file
 //! guard, bumps the revision and fans the change out. A session starts when
-//! sharing starts and ends on close, delete or app exit; outside one, canvases
-//! save through the ordinary `write_canvas` path. See docs/drawing-canvas.md.
+//! sharing starts and ends on close, delete or app exit; outside one, whiteboards
+//! save through the ordinary `write_whiteboard` path. See docs/drawing-whiteboard.md.
 
 pub(crate) mod commands;
 mod disk;
@@ -98,7 +98,7 @@ impl Authority {
             .any(|session| session.lock().owns(&root, rel))
         {
             return Err(
-                "This canvas is shared. Save, rename or delete it through its shared session."
+                "This whiteboard is shared. Save, rename or delete it through its shared session."
                     .into(),
             );
         }
@@ -142,7 +142,7 @@ impl Authority {
             if state.phase() != Phase::Ended {
                 if !state.owns(&root, rel) {
                     return Err(AuthorityError::invalid(
-                        "This canvas is shared under another path.",
+                        "This whiteboard is shared under another path.",
                     ));
                 }
                 return state.snapshot();
@@ -153,7 +153,7 @@ impl Authority {
             .any(|session| session.lock().owns(&root, rel))
         {
             return Err(AuthorityError::invalid(
-                "This canvas already has a shared session under another file id.",
+                "This whiteboard already has a shared session under another file id.",
             ));
         }
         let session = Arc::new(Session::open(file_id, &root, rel, text)?);

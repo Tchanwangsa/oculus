@@ -89,7 +89,7 @@ pub fn run() {
                 library::paths::data_dir(),
                 widgets::kit::Kit::for_app(app.handle()),
             ));
-            // Device sharing: off until a canvas is shared (docs/device-sharing.md).
+            // Device sharing: off until a whiteboard is shared (docs/device-sharing.md).
             app.manage(companion::Companion::for_app(app.handle()));
 
             sources::echo360::cleanup_partial_downloads(&library::paths::data_dir());
@@ -218,30 +218,30 @@ pub fn run() {
             library::files::commands::open_course_file,
             library::files::commands::scan_parsed_files,
             library::files::uploads::import_uploads,
-            library::files::canvases::export::export_canvas_image,
-            library::files::canvases::imports::canvas_open_library_pdf,
-            library::files::canvases::images::canvas_read_dropped_image,
-            library::files::canvases::imports::canvas_render_pdf_page,
-            library::files::canvases::imports::canvas_close_pdf,
-            library::files::canvases::create_canvas,
-            library::files::canvases::read_canvas,
-            library::files::canvases::drafts::read_canvas_draft,
-            library::files::canvases::drafts::write_canvas_draft,
-            library::files::canvases::drafts::delete_canvas_draft,
-            library::files::canvases::export_pdf::canvas_export_pdf,
-            library::files::canvases::snapshots::canvas_write_page_snapshots,
-            library::files::canvases::snapshots::canvas_delete_page_snapshots,
-            library::files::canvases::write_canvas,
-            library::files::canvases::rename_canvas,
-            library::files::canvases::delete_canvas,
-            library::files::canvases::list_canvases,
-            library::files::canvases::authority::commands::canvas_authority_open,
-            library::files::canvases::authority::commands::canvas_authority_commit,
-            library::files::canvases::authority::commands::canvas_authority_snapshot,
-            library::files::canvases::authority::commands::canvas_authority_resolve_external,
-            library::files::canvases::authority::commands::canvas_authority_rename,
-            library::files::canvases::authority::commands::canvas_authority_delete,
-            library::files::canvases::authority::commands::canvas_authority_close,
+            library::files::whiteboards::export::export_whiteboard_image,
+            library::files::whiteboards::imports::whiteboard_open_library_pdf,
+            library::files::whiteboards::images::whiteboard_read_dropped_image,
+            library::files::whiteboards::imports::whiteboard_render_pdf_page,
+            library::files::whiteboards::imports::whiteboard_close_pdf,
+            library::files::whiteboards::create_whiteboard,
+            library::files::whiteboards::read_whiteboard,
+            library::files::whiteboards::drafts::read_whiteboard_draft,
+            library::files::whiteboards::drafts::write_whiteboard_draft,
+            library::files::whiteboards::drafts::delete_whiteboard_draft,
+            library::files::whiteboards::export_pdf::whiteboard_export_pdf,
+            library::files::whiteboards::snapshots::whiteboard_write_page_snapshots,
+            library::files::whiteboards::snapshots::whiteboard_delete_page_snapshots,
+            library::files::whiteboards::write_whiteboard,
+            library::files::whiteboards::rename_whiteboard,
+            library::files::whiteboards::delete_whiteboard,
+            library::files::whiteboards::list_whiteboards,
+            library::files::whiteboards::authority::commands::whiteboard_authority_open,
+            library::files::whiteboards::authority::commands::whiteboard_authority_commit,
+            library::files::whiteboards::authority::commands::whiteboard_authority_snapshot,
+            library::files::whiteboards::authority::commands::whiteboard_authority_resolve_external,
+            library::files::whiteboards::authority::commands::whiteboard_authority_rename,
+            library::files::whiteboards::authority::commands::whiteboard_authority_delete,
+            library::files::whiteboards::authority::commands::whiteboard_authority_close,
             companion::commands::companion_share_start,
             companion::commands::companion_share_stop,
             companion::commands::companion_stop_all,
@@ -484,12 +484,12 @@ pub fn run() {
                 tauri::async_runtime::spawn_blocking(runtime::network::refresh);
             }
             // Don't let a CLI agent outlive the window, the Spotify device
-            // linger in Spotify's device list, or a canvas share outlive the app.
+            // linger in Spotify's device list, or a whiteboard share outlive the app.
             if matches!(event, tauri::RunEvent::Exit) {
                 harness::app::shutdown(app_handle);
                 music::shutdown(app_handle);
                 companion::commands::shutdown(app_handle);
-                library::files::canvases::authority::global().close_all();
+                library::files::whiteboards::authority::global().close_all();
             }
         });
 }

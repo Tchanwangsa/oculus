@@ -199,7 +199,7 @@ mod tests {
             "courses/A/notes.md",
             "courses/A/Exam prep/deep/summary.md",
             "courses/B/data.json",
-            "courses/A/board.canvas",
+            "courses/A/board.whiteboard",
             "studio/videos/v/video.json",
         ] {
             let path = format!("{lib}/{inner}");

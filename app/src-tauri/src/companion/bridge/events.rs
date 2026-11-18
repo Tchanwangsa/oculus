@@ -5,7 +5,7 @@
 //! and leaves anything slower to `Core::end_file`'s thread.
 
 use crate::companion::core::Core;
-use crate::library::files::canvases::authority::events::{Event, Phase};
+use crate::library::files::whiteboards::authority::events::{Event, Phase};
 use std::sync::Arc;
 
 pub fn on_event(core: &Arc<Core>, event: &Event) {

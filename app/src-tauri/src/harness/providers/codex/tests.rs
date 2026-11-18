@@ -112,7 +112,7 @@ fn a_thread_may_write_every_subjects_own_files_and_not_course_or_oculus() {
         "courses/A/Exam prep/summary.md",
         "courses/A/Course/Files/a.pdf",
         "courses/A/.oculus/agents/INSTRUCTIONS.md",
-        "courses/B/board.canvas",
+        "courses/B/board.whiteboard",
     ] {
         let path = library.join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -122,7 +122,7 @@ fn a_thread_may_write_every_subjects_own_files_and_not_course_or_oculus() {
     for rel in [
         "courses/A/notes.md",
         "courses/A/Exam prep",
-        "courses/B/board.canvas",
+        "courses/B/board.whiteboard",
     ] {
         assert!(roots.contains(&library.join(rel)), "{rel} in {roots:?}");
     }

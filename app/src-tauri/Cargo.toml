@@ -106,7 +106,7 @@ imagesize = "0.13"
 # crates.io once a release carries it.
 hayro = { git = "https://github.com/LaurenzV/hayro", rev = "9016f891986f290b9bc00dabf3e5e572c6e1cdb2" }
 image = { version = "0.25", default-features = false, features = ["png"] }
-# Writes a notebook's PDF export (`library/files/canvases/export_pdf.rs`) and the tests' synthetic PDFs.
+# Writes a notebook's PDF export (`library/files/whiteboards/export_pdf.rs`) and the tests' synthetic PDFs.
 lopdf = { version = "0.34", default-features = false, features = ["nom_parser"] }
 # Spreadsheets (xlsx/xlsm/xls/ods) become markdown text in-process
 # (`src/pages/sheets/`); no LibreOffice, no parse service, no embedding.

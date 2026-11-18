@@ -1,7 +1,7 @@
-//! The `.canvas` validator, a line-for-line port of `validate` in
-//! `app/src/lib/canvas/model.ts` and `isCanvasImageDataUrl` in
+//! The `.whiteboard` validator, a line-for-line port of `validate` in
+//! `app/src/lib/whiteboard/model.ts` and `isWhiteboardImageDataUrl` in
 //! `imageSource.ts`. It reads a `serde_json::Value`, so unknown fields are
-//! never dropped. The shared fixtures under `app/tests/fixtures/canvas-model/`
+//! never dropped. The shared fixtures under `app/tests/fixtures/whiteboard-model/`
 //! hold both implementations to the same answers. A present-but-`null` optional
 //! field counts as present, as `!== undefined` does in TypeScript.
 
@@ -91,23 +91,47 @@ fn fixed_segment(value: &Value) -> bool {
     })
 }
 
-/// A whole document, as `parseCanvasDocument` accepts it.
+/// The `type` every drawing is written with.
+pub(super) const DOCUMENT_TYPE: &str = "oculus-whiteboard";
+/// The `type` a drawing saved before the kind was called whiteboard holds:
+/// read as `DOCUMENT_TYPE`, and replaced by it on the next save.
+const LEGACY_TYPE: &str = "oculus-canvas";
+
+/// True when `kind` is a drawing's `type`.
+pub(crate) fn is_drawing_type(kind: &str) -> bool {
+    matches!(kind, DOCUMENT_TYPE | LEGACY_TYPE)
+}
+
+pub(in crate::library::files::whiteboards) fn drawing_type(value: &Value) -> bool {
+    value["type"].as_str().is_some_and(is_drawing_type)
+}
+
+/// `LEGACY_TYPE` replaced by `DOCUMENT_TYPE`; true when it was there.
+pub(in crate::library::files::whiteboards) fn normalize_type(value: &mut Value) -> bool {
+    if value["type"] != LEGACY_TYPE {
+        return false;
+    }
+    value["type"] = Value::from(DOCUMENT_TYPE);
+    true
+}
+
+/// A whole document, as `parseWhiteboardDocument` accepts it.
 pub fn validate(value: &Value) -> Result<(), String> {
     let Some(doc) = value.as_object() else {
-        return Err("This file is not an Oculus canvas.".into());
+        return Err("This file is not an Oculus whiteboard.".into());
     };
-    if doc.get("type").and_then(Value::as_str) != Some("oculus-canvas") {
-        return Err("This file is not an Oculus canvas.".into());
+    if !drawing_type(value) {
+        return Err("This file is not an Oculus whiteboard.".into());
     }
     if finite(doc.get("version")) != Some(1.0) {
-        return Err("Unsupported canvas version.".into());
+        return Err("Unsupported whiteboard version.".into());
     }
     let Some(elements) = doc.get("elements").and_then(Value::as_array) else {
-        return Err("Canvas elements must be an array.".into());
+        return Err("Whiteboard elements must be an array.".into());
     };
     validate_viewport(doc.get("viewport"))?;
     if !doc.get("background").is_some_and(Value::is_string) {
-        return Err("Canvas background must be a colour.".into());
+        return Err("Whiteboard background must be a colour.".into());
     }
     if let Some(paper) = doc.get("paper") {
         validate_paper(paper)?;
@@ -119,22 +143,22 @@ pub fn validate(value: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// A notebook's `paper`, as `paperProblem` in `app/src/lib/canvas/paper.ts`
+/// A notebook's `paper`, as `paperProblem` in `app/src/lib/whiteboard/paper.ts`
 /// accepts it: 1 to `MAX_PAGES` pages with unique IDs, positive sizes and a
 /// known template, and a non-negative gap.
 pub fn validate_paper(value: &Value) -> Result<(), String> {
     let Some(paper) = value.as_object() else {
-        return Err("Canvas paper must be an object.".into());
+        return Err("Whiteboard paper must be an object.".into());
     };
     if paper.contains_key("gap")
         && !finite(paper.get("gap")).is_some_and(|gap| (0.0..=MAX_GAP).contains(&gap))
     {
-        return Err("Canvas paper has an invalid gap.".into());
+        return Err("Whiteboard paper has an invalid gap.".into());
     }
     let pages = paper.get("pages").and_then(Value::as_array);
     let Some(pages) = pages.filter(|p| !p.is_empty() && p.len() <= MAX_PAGES) else {
         return Err(format!(
-            "Canvas paper needs between 1 and {MAX_PAGES} pages."
+            "Whiteboard paper needs between 1 and {MAX_PAGES} pages."
         ));
     };
     let mut ids = HashSet::new();
@@ -146,21 +170,21 @@ pub fn validate_paper(value: &Value) -> Result<(), String> {
             .and_then(Value::as_str)
             .filter(|id| !id.is_empty());
         let (Some(page), Some(id)) = (page, id) else {
-            return Err(format!("Canvas page {n} needs a unique ID."));
+            return Err(format!("Whiteboard page {n} needs a unique ID."));
         };
         if !ids.insert(id) {
-            return Err(format!("Canvas page {n} needs a unique ID."));
+            return Err(format!("Whiteboard page {n} needs a unique ID."));
         }
         for key in ["width", "height"] {
             if !finite(page.get(key)).is_some_and(|side| side > 0.0 && side <= MAX_SIDE) {
-                return Err(format!("Canvas page {n} has an invalid {key}."));
+                return Err(format!("Whiteboard page {n} has an invalid {key}."));
             }
         }
         if page
             .get("template")
             .is_some_and(|t| !t.as_str().is_some_and(|t| PAPER_TEMPLATES.contains(&t)))
         {
-            return Err(format!("Canvas page {n} has an invalid template."));
+            return Err(format!("Whiteboard page {n} has an invalid template."));
         }
     }
     Ok(())
@@ -176,7 +200,7 @@ pub fn validate_viewport(value: Option<&Value>) -> Result<(), String> {
     if ok {
         Ok(())
     } else {
-        Err("Canvas viewport must have finite coordinates and a positive zoom.".into())
+        Err("Whiteboard viewport must have finite coordinates and a positive zoom.".into())
     }
 }
 
@@ -190,17 +214,17 @@ pub fn validate_element<'a>(
     let el: &Map<String, Value> = match value.as_object() {
         Some(el) => match el.get("id").and_then(Value::as_str) {
             Some(id) if !id.is_empty() && ids.insert(id) => el,
-            _ => return Err(format!("Canvas element {n} needs a unique ID.")),
+            _ => return Err(format!("Whiteboard element {n} needs a unique ID.")),
         },
-        None => return Err(format!("Canvas element {n} needs a unique ID.")),
+        None => return Err(format!("Whiteboard element {n} needs a unique ID.")),
     };
     let kind = el.get("type").and_then(Value::as_str);
     if !kind.is_some_and(|t| TYPES.contains(&t)) {
-        return Err("Unsupported canvas element type.".into());
+        return Err("Unsupported whiteboard element type.".into());
     }
     for key in ["x", "y", "width", "height", "strokeWidth", "seed"] {
         if finite(el.get(key)).is_none() {
-            return Err(format!("Canvas element {n} has an invalid {key}."));
+            return Err(format!("Whiteboard element {n} has an invalid {key}."));
         }
     }
     let style = el.get("style").and_then(Value::as_str);
@@ -209,13 +233,13 @@ pub fn validate_element<'a>(
         || !el.get("fill").is_some_and(Value::is_string)
         || !matches!(style, Some("sketch" | "clean"))
     {
-        return Err(format!("Canvas element {n} has an invalid appearance."));
+        return Err(format!("Whiteboard element {n} has an invalid appearance."));
     }
     if el.contains_key("fontSize") && !finite(el.get("fontSize")).is_some_and(|s| s > 0.0) {
-        return Err(format!("Canvas element {n} has an invalid font size."));
+        return Err(format!("Whiteboard element {n} has an invalid font size."));
     }
     if el.get("text").is_some_and(|t| !t.is_string()) {
-        return Err(format!("Canvas element {n} has invalid text."));
+        return Err(format!("Whiteboard element {n} has invalid text."));
     }
     if (kind == Some("image") || el.contains_key("dataUrl"))
         && !el
@@ -224,17 +248,17 @@ pub fn validate_element<'a>(
             .is_some_and(is_image_data_url)
     {
         return Err(format!(
-            "Canvas element {n} needs an embedded PNG, JPEG, WebP or GIF image."
+            "Whiteboard element {n} needs an embedded PNG, JPEG, WebP or GIF image."
         ));
     }
     if el.get("sourceName").is_some_and(|s| !s.is_string()) {
         return Err(format!(
-            "Canvas element {n} has an invalid image source name."
+            "Whiteboard element {n} has an invalid image source name."
         ));
     }
     for key in ["naturalWidth", "naturalHeight"] {
         if el.contains_key(key) && !finite(el.get(key)).is_some_and(|v| v > 0.0) {
-            return Err(format!("Canvas element {n} has an invalid {key}."));
+            return Err(format!("Whiteboard element {n} has an invalid {key}."));
         }
     }
     if let Some(points) = el.get("points") {
@@ -245,25 +269,27 @@ pub fn validate_element<'a>(
             })
         });
         if !ok {
-            return Err(format!("Canvas element {n} has invalid points."));
+            return Err(format!("Whiteboard element {n} has invalid points."));
         }
     }
     if el.contains_key("opacity") && !unit(el.get("opacity")) {
-        return Err(format!("Canvas element {n} has an invalid opacity."));
+        return Err(format!("Whiteboard element {n} has an invalid opacity."));
     }
     if el.get("locked").is_some_and(|v| !v.is_boolean()) {
-        return Err(format!("Canvas element {n} has an invalid locked flag."));
+        return Err(format!(
+            "Whiteboard element {n} has an invalid locked flag."
+        ));
     }
     for (key, values) in CHOICES {
         if let Some(v) = el.get(key) {
             if !v.as_str().is_some_and(|v| values.contains(&v)) {
-                return Err(format!("Canvas element {n} has an invalid {key}."));
+                return Err(format!("Whiteboard element {n} has an invalid {key}."));
             }
         }
     }
     for key in ["startBinding", "endBinding"] {
         if el.get(key).is_some_and(|b| !binding(b)) {
-            return Err(format!("Canvas element {n} has an invalid {key}."));
+            return Err(format!("Whiteboard element {n} has an invalid {key}."));
         }
     }
     if let Some(segments) = el.get("fixedSegments") {
@@ -271,7 +297,9 @@ pub fn validate_element<'a>(
             .as_array()
             .is_some_and(|s| s.iter().all(fixed_segment))
         {
-            return Err(format!("Canvas element {n} has invalid fixed segments."));
+            return Err(format!(
+                "Whiteboard element {n} has invalid fixed segments."
+            ));
         }
     }
     Ok(())

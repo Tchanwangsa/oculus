@@ -1,16 +1,19 @@
-//! Desktop recovery records are separate from the saved canvas, keyed by file ID.
+//! Desktop recovery records are separate from the saved whiteboard, keyed by file ID.
 use std::path::{Path, PathBuf};
+
+/// The folder, data-dir-relative, that holds one `<file id>.json` per draft.
+pub(crate) const DIR: &str = "recovery/whiteboards";
 
 fn path_at(root: &Path, file_id: i64, create: bool) -> Result<Option<PathBuf>, String> {
     if file_id <= 0 {
-        return Err("Invalid canvas file ID".into());
+        return Err("Invalid whiteboard file ID".into());
     }
     let mut path = root.to_path_buf();
-    for part in ["recovery", "canvases"] {
+    for part in DIR.split('/') {
         path.push(part);
         match std::fs::symlink_metadata(&path) {
             Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
-                return Err("Unsafe canvas recovery folder".into());
+                return Err("Unsafe whiteboard recovery folder".into());
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound && create => {
@@ -23,7 +26,7 @@ fn path_at(root: &Path, file_id: i64, create: bool) -> Result<Option<PathBuf>, S
     path.push(format!("{file_id}.json"));
     match std::fs::symlink_metadata(&path) {
         Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
-            return Err("Unsafe canvas recovery file".into());
+            return Err("Unsafe whiteboard recovery file".into());
         }
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -61,13 +64,13 @@ fn remove_at(root: &Path, file_id: i64) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn read_canvas_draft(file_id: i64) -> Result<Option<String>, String> {
+pub async fn read_whiteboard_draft(file_id: i64) -> Result<Option<String>, String> {
     crate::runtime::blocking::run(move || read_at(&crate::library::paths::data_dir(), file_id))
         .await
 }
 
 #[tauri::command]
-pub async fn write_canvas_draft(file_id: i64, content: String) -> Result<(), String> {
+pub async fn write_whiteboard_draft(file_id: i64, content: String) -> Result<(), String> {
     crate::runtime::blocking::run(move || {
         write_at(&crate::library::paths::data_dir(), file_id, &content)
     })
@@ -75,7 +78,7 @@ pub async fn write_canvas_draft(file_id: i64, content: String) -> Result<(), Str
 }
 
 #[tauri::command]
-pub async fn delete_canvas_draft(file_id: i64) -> Result<(), String> {
+pub async fn delete_whiteboard_draft(file_id: i64) -> Result<(), String> {
     crate::runtime::blocking::run(move || remove_at(&crate::library::paths::data_dir(), file_id))
         .await
 }
@@ -86,15 +89,18 @@ mod tests {
     use crate::test_support::Scratch;
 
     #[test]
-    fn large_recovery_is_independent_of_the_saved_canvas_and_clears() {
-        let root = Scratch::new("canvas-disk-recovery");
-        let canvas = root.join("saved.canvas");
-        std::fs::write(&canvas, "saved document").unwrap();
+    fn large_recovery_is_independent_of_the_saved_whiteboard_and_clears() {
+        let root = Scratch::new("whiteboard-disk-recovery");
+        let whiteboard = root.join("saved.whiteboard");
+        std::fs::write(&whiteboard, "saved document").unwrap();
         assert_eq!(read_at(&root, 42).unwrap(), None);
         let draft = "x".repeat(6 * 1024 * 1024);
         write_at(&root, 42, &draft).unwrap();
         assert_eq!(read_at(&root, 42).unwrap(), Some(draft));
-        assert_eq!(std::fs::read_to_string(canvas).unwrap(), "saved document");
+        assert_eq!(
+            std::fs::read_to_string(whiteboard).unwrap(),
+            "saved document"
+        );
         write_at(&root, 42, "newer draft").unwrap();
         assert_eq!(read_at(&root, 42).unwrap().as_deref(), Some("newer draft"));
         remove_at(&root, 42).unwrap();
@@ -106,8 +112,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn recovery_paths_refuse_symlinks() {
-        let root = Scratch::new("canvas-draft-scope");
-        let outside = Scratch::new("canvas-draft-outside");
+        let root = Scratch::new("whiteboard-draft-scope");
+        let outside = Scratch::new("whiteboard-draft-outside");
         std::os::unix::fs::symlink(&*outside, root.join("recovery")).unwrap();
         assert!(write_at(&root, 1, "draft").is_err());
         assert!(read_at(&root, 1).is_err());

@@ -1,7 +1,7 @@
 //! `GET /api/s/<id>/snapshot` and `GET /api/s/<id>/changes?from=<rev>`.
-//! A snapshot is the canvas file text, serialized once by the authority and
+//! A snapshot is the whiteboard file text, serialized once by the authority and
 //! streamed from that one buffer with its exact length; `x-oculus-kind` says
-//! whether the file is a canvas or a notebook. Catch-up joins the
+//! whether the file is a whiteboard or a notebook. Catch-up joins the
 //! log's stored entries into a JSON array.
 
 use crate::companion::core::Core;
@@ -9,7 +9,7 @@ use crate::companion::grants::Share;
 use crate::companion::server::http::{
     error, full, no_store, respond, session_ended, streamed, Reply,
 };
-use crate::library::files::canvases::DrawingKind;
+use crate::library::files::whiteboards::DrawingKind;
 use bytes::{BufMut, Bytes, BytesMut};
 use hyper::header::HeaderValue;
 use hyper::StatusCode;
@@ -32,7 +32,7 @@ pub async fn snapshot(core: &Arc<Core>, share: &Arc<Share>) -> Reply {
             return error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "io",
-                "The canvas could not be read.",
+                "The whiteboard could not be read.",
             )
         }
     };
@@ -40,7 +40,7 @@ pub async fn snapshot(core: &Arc<Core>, share: &Arc<Share>) -> Reply {
         return session_ended();
     }
     // The page's notebook mode follows the file's kind (its path), never the
-    // document: `paper` in a canvas means nothing.
+    // document: `paper` in a whiteboard means nothing.
     let kind = DrawingKind::of(&snapshot.relative_path).unwrap_or_default();
     let body = streamed(Bytes::from(snapshot.text), share.cancel.clone());
     let mut reply = no_store(respond(StatusCode::OK, "text/plain; charset=utf-8", body));
@@ -82,7 +82,7 @@ pub fn changes(share: &Share, query: Option<&str>) -> Reply {
         return error(
             StatusCode::GONE,
             "gone",
-            "These changes are no longer kept. Reload the canvas.",
+            "These changes are no longer kept. Reload the whiteboard.",
         );
     };
     let size = entries.iter().map(|e| e.json.len() + 1).sum::<usize>() + 2;

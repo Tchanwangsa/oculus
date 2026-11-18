@@ -1,5 +1,5 @@
 //! A move or delete never runs under a job: a file being parsed or embedded
-//! right now, or a canvas shared to a device, is refused with an `io` error
+//! right now, or a whiteboard shared to a device, is refused with an `io` error
 //! that says so. The parse and embed claims (`parse::InFlight`, keyed by the
 //! PDF a file parses as) are taken for every file the command touches and
 //! held until its rows are written, so no parse starts on a file mid-move;
@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use super::error::{shown, DriveError, DriveResult};
-use crate::library::files::canvases::authority;
+use crate::library::files::whiteboards::authority;
 use crate::parse::{InFlight, InFlightClaim};
 
 /// The claims a command holds; dropping it frees the files.

@@ -6,7 +6,7 @@
 //! needing `server` to a thread. While the server runs, `core` follows the
 //! address observer: a changed list publishes a new `companion-state` and
 //! every link is rebuilt from its unchanged grant on the next read; no
-//! listener, socket, token or canvas is touched.
+//! listener, socket, token or whiteboard is touched.
 
 use super::assets::Assets;
 use super::bridge;
@@ -16,8 +16,8 @@ use super::grants::{EndReason, Grants, Share};
 use super::limits::{Limits, PORT_ATTEMPTS, PREFERRED_PORT};
 use super::server::Server;
 use super::wire::{CompanionState, Endpoints, ShareInfo, ShareSummary};
-use crate::library::files::canvases::authority::events::Phase;
-use crate::library::files::canvases::authority::Authority;
+use crate::library::files::whiteboards::authority::events::Phase;
+use crate::library::files::whiteboards::authority::Authority;
 use crate::runtime::network::{self, Observer, Subscription};
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex, MutexGuard};

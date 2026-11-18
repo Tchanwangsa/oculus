@@ -47,13 +47,13 @@ impl AuthorityError {
     }
 
     pub fn ended() -> Self {
-        Self::new(Code::SessionEnded, "This canvas is no longer shared.")
+        Self::new(Code::SessionEnded, "This whiteboard is no longer shared.")
     }
 
     pub fn external() -> Self {
         Self::new(
             Code::ExternalEdit,
-            "The canvas file changed outside Oculus. Choose which version to keep.",
+            "The whiteboard file changed outside Oculus. Choose which version to keep.",
         )
     }
 }

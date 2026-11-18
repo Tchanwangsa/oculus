@@ -13,7 +13,7 @@ pub const CATEGORIES: &[&str] = &[
     "syllabus",
     "upload",
     "document",
-    "canvas",
+    "whiteboard",
     "notebook",
     "page",
     "assignment",

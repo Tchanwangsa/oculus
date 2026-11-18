@@ -9,7 +9,7 @@ use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
-/// An accepted change to a shared canvas's content.
+/// An accepted change to a shared whiteboard's content.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Change {

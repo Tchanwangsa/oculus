@@ -1,4 +1,4 @@
-//! Content transactions, ported from `app/src/lib/canvas/collaboration.ts`:
+//! Content transactions, ported from `app/src/lib/whiteboard/collaboration.ts`:
 //! `{edits:[{id,before,after,afterId?}], order?, background?, paper?}`. Preconditions
 //! compare only the touched objects, so independent edits from the same old
 //! revision merge; an edit already in place is skipped, and a failure applies
@@ -7,7 +7,7 @@
 //! `order`, `background` and `paper` count as absent when JavaScript would
 //! treat them as falsy, which the shared fixtures pin down. A `paper` edit
 //! (`{before, after}`, whole papers) conflicts under the background's code:
-//! the page setup is the canvas's background layer.
+//! the page setup is the whiteboard's background layer.
 
 use super::error::{AuthorityError, Code};
 use super::model;
@@ -66,7 +66,7 @@ fn invalid(message: &str) -> AuthorityError {
 /// order that is a permutation of its own IDs, string backgrounds.
 pub fn validate(value: &Value) -> Result<(), AuthorityError> {
     let Some(tx) = value.as_object() else {
-        return Err(invalid("Invalid canvas transaction."));
+        return Err(invalid("Invalid whiteboard transaction."));
     };
     let edits = tx.get("edits").and_then(Value::as_array);
     if tx
@@ -74,7 +74,7 @@ pub fn validate(value: &Value) -> Result<(), AuthorityError> {
         .any(|k| !matches!(k.as_str(), "edits" | "order" | "background" | "paper"))
         || edits.is_none_or(|e| e.len() > MAX_EDITS)
     {
-        return Err(invalid("Invalid canvas transaction fields."));
+        return Err(invalid("Invalid whiteboard transaction fields."));
     }
     let mut ids = HashSet::new();
     for edit in edits.into_iter().flatten() {
@@ -193,7 +193,7 @@ pub fn apply(document: &Value, transaction: &Value) -> Result<(Value, Value), Au
         if !same_value(current, &edit["before"]) {
             return Err(AuthorityError::new(
                 Code::ConflictShape,
-                "A collaborator changed the same shape. Your draft is kept; download it or use the shared canvas.",
+                "A collaborator changed the same shape. Your draft is kept; download it or use the shared whiteboard.",
             ));
         }
         if edit["after"].is_null() {
@@ -335,7 +335,7 @@ pub fn has_changes(transaction: &Value) -> bool {
         || truthy(transaction.get("paper"))
 }
 
-/// `diffCanvasContent`: the transaction from `before` to `after`, viewport excluded.
+/// `diffWhiteboardContent`: the transaction from `before` to `after`, viewport excluded.
 pub fn diff(before: &Value, after: &Value) -> Value {
     let index = |doc: &Value| -> Map<String, Value> {
         doc["elements"]

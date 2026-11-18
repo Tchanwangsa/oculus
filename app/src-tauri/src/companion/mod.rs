@@ -1,6 +1,6 @@
 //! Device sharing: a LAN HTTP/WebSocket server that lets a browser on another
-//! device (an iPad, a phone) open a shared canvas and edit it through the
-//! canvas authority. Off at launch; the server starts with the first share
+//! device (an iPad, a phone) open a shared whiteboard and edit it through the
+//! whiteboard authority. Off at launch; the server starts with the first share
 //! and stops with the last. The wire protocol, the security boundary and the
 //! limits are in docs/device-sharing.md.
 //!

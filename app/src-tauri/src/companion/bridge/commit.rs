@@ -11,8 +11,8 @@ use crate::companion::limits::ID_CHARS;
 use crate::companion::server::http::{
     closing, error, json, read_capped, session_ended, BodyError, Reply,
 };
-use crate::library::files::canvases::authority::error::AuthorityError;
-use crate::library::files::canvases::authority::session::{Ack, Op};
+use crate::library::files::whiteboards::authority::error::AuthorityError;
+use crate::library::files::whiteboards::authority::session::{Ack, Op};
 use hyper::body::Incoming;
 use hyper::header::CONTENT_LENGTH;
 use hyper::{Request, StatusCode};
@@ -79,9 +79,9 @@ pub async fn commit(core: &Arc<Core>, share: &Arc<Share>, request: Request<Incom
 }
 
 /// Parse the body and commit it. Runs on a blocking thread: parsing a
-/// large body and writing the canvas both take a while.
+/// large body and writing the whiteboard both take a while.
 fn apply(
-    authority: &crate::library::files::canvases::authority::Authority,
+    authority: &crate::library::files::whiteboards::authority::Authority,
     file_id: i64,
     bytes: &[u8],
 ) -> Result<Ack, AuthorityError> {

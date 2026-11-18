@@ -50,7 +50,7 @@ async fn recordings_for(data_dir: &Path, rel: &str) -> Vec<Recording> {
 }
 
 /// A notebook's first page as PNG bytes, from the pictures the editor writes
-/// for chat agents (`canvases::snapshots`); empty until one is written.
+/// for chat agents (`whiteboards::snapshots`); empty until one is written.
 #[tauri::command]
 pub async fn drive_notebook_cover(file_id: i64) -> Result<tauri::ipc::Response, String> {
     crate::runtime::blocking::run(move || {

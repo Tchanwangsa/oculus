@@ -183,7 +183,7 @@ mod tests {
         for rel in [
             "courses/X/notes.md",
             "courses/X/Exam prep/deep/scan.pdf",
-            "courses/Y/board.canvas",
+            "courses/Y/board.whiteboard",
             "courses/X/.assets/p.png",
         ] {
             assert!(own_zone(rel), "{rel}");
