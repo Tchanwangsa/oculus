@@ -17,7 +17,7 @@ export function SideColumn({ events, yours, opener, now, thisWeek, openRange }: 
   openRange: string | null;
 }) {
   const open = openRange != null;
-  const yoursAside = openRange ? openRange.toLowerCase() : thisWeek ? "this week" : undefined;
+  const yoursAside = openRange ? openRange[0].toLowerCase() + openRange.slice(1) : thisWeek ? "this week" : undefined;
   return (
     <div className="min-w-0 space-y-6">
       <section>

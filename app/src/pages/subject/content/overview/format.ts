@@ -1,8 +1,15 @@
-import { fmtDay, fmtShortDate, fmtTime, startOfDay } from "@/lib/format/format";
+import { fmtShortDate, fmtTime, startOfDay } from "@/lib/format/format";
 import { displayLocale } from "@/lib/format/locale";
 import type { Week } from "@/lib/weeks";
 
 const DAY_MS = 86_400_000;
+const YEAR_MS = 365 * DAY_MS;
+
+/** "9 Nov", with the year once the date is more than a year away: "9 Nov 2025". */
+export function shortDate(d: Date, now = new Date()): string {
+  if (Math.abs(now.getTime() - d.getTime()) <= YEAR_MS) return fmtShortDate(d);
+  return d.toLocaleDateString(displayLocale, { day: "numeric", month: "short", year: "numeric" });
+}
 
 /** "Mon". */
 export function weekday(d: Date): string {
@@ -11,7 +18,7 @@ export function weekday(d: Date): string {
 
 /** A row's day: "Mon" inside one week, "12 Nov" in an edge week spanning many. */
 export function rowDay(d: Date, open: boolean): string {
-  return open ? fmtDay(d) : weekday(d);
+  return open ? shortDate(d) : weekday(d);
 }
 
 /** Which end of the strip a week sits at. `weekOf` folds every date before
@@ -25,10 +32,10 @@ export function weekEdge(index: number, count: number): WeekEdge {
 /** "22 Sep – 28 Sep": the week's Monday to its Sunday (`end` is the next Monday).
  *  The edge weeks hold everything beyond them: "Until 28 Sep", "From 22 Sep". */
 export function weekRange(week: Week, edge: WeekEdge = null): string {
-  const sunday = fmtShortDate(new Date(week.end.getTime() - DAY_MS));
-  if (edge === "last") return `From ${fmtShortDate(week.start)}`;
+  const sunday = shortDate(new Date(week.end.getTime() - DAY_MS));
+  if (edge === "last") return `From ${shortDate(week.start)}`;
   if (edge === "first") return `Until ${sunday}`;
-  return `${fmtShortDate(week.start)} – ${sunday}`;
+  return `${shortDate(week.start)} – ${sunday}`;
 }
 
 /** What the strip's heading calls a week: "Week 5", "Break", "2 weeks after teaching",
