@@ -28,7 +28,7 @@ and stable Rust, plus the MSVC toolchain, Windows SDK and WebView2.
 | That the configs, `beforeBuildCommand` and CI agree on the sidecars and keyd's helper | `app/scripts/bundle-config.test.mjs` |
 | keyd's release policy against a signed bundle | `app/keyd/tests/bundle.rs` |
 | Keeps keyd's OS calls inside its adapters | `app/scripts/keyd-seams.test.mjs` |
-| Builds the drawing canvas geometry to WebAssembly | `app/scripts/build-canvas.mjs`, `app/canvas-core/`; [drawing-canvas.md](./drawing-canvas.md) |
+| Builds the whiteboard geometry to WebAssembly | `app/scripts/build-whiteboard.mjs`, `app/whiteboard-core/`; [drawing-whiteboard.md](./drawing-whiteboard.md) |
 | Builds the maths engine to WebAssembly | `app/scripts/build-math.mjs`, `app/math-core/` |
 | Stages the CLI into the bundle | `app/scripts/stage-cli.mjs` |
 | Regenerates `docs/cli-reference.md` | `app/scripts/gen-cli-docs.mjs` |
@@ -57,7 +57,7 @@ bun run editor-wasm   # the editor core's wasm for dev shadow mode (docs/editor-
 bun run keyd          # build and sign the dev oculus-keyd; install it from the main checkout
 bun run stage-keyd    # build and sign the release oculus-keyd the bundle ships, into binaries/
 bun run math          # build the maths wasm into app/math-core/pkg/
-bun run canvas        # build the drawing geometry wasm into app/canvas-core/pkg/
+bun run whiteboard    # build the drawing geometry wasm into app/whiteboard-core/pkg/
 bun run widget-kit    # build the chat widgets' kit into app/dist/widget-kit/ (docs/widgets.md)
 ```
 
@@ -77,7 +77,7 @@ It is bun's lifecycle hook for `dev`. `beforeDevCommand` calls
 `app/scripts/dev.mjs`, which supplies `OCULUS_CLI_WATCH=1` in the child
 environment before running bun, so every `tauri dev` runs it on either OS. In order it
 runs `bun install`, fetches ffmpeg, compiles the speech helper,
-`whisper-cli`, the maths wasm and the drawing canvas wasm, builds the
+`whisper-cli`, the maths wasm and the whiteboard wasm, builds the
 device-sharing companion page when its inputs changed
 ([device-sharing.md](./device-sharing.md#desktop-ui); never fatal), builds the
 chat widgets' kit when its inputs changed ([widgets.md](./widgets.md); never
@@ -237,7 +237,7 @@ allowing jobs skipped by the filters and failing if any selected job fails or
 is cancelled; use this as the required branch-protection check.
 
 - The macOS and Windows jobs run for changes under `app/src-tauri`, keyd,
-  Studio, maths or canvas, build scripts, package dependencies, Rust toolchain
+  Studio, maths or the whiteboard core, build scripts, package dependencies, Rust toolchain
   configuration, the CI/release workflows, or the generated CLI reference.
   Frontend-only changes skip both jobs.
 - The keyd Linux seam check runs for changes to keyd or Rust build configuration.

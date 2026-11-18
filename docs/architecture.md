@@ -28,7 +28,7 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Credential storage (keychain, and `CloudKey` for the three cloud keys keyd holds), the keyd client; provider probes; the Okta calls, which keyd answers or the keychain does when it is absent | `app/src-tauri/src/providers/credentials/`, `app/keyd/core/src/client.rs`; `app/src-tauri/src/providers/mineru.rs`, `app/src-tauri/src/providers/voyage.rs`, `app/src-tauri/src/providers/groq.rs`, `app/src-tauri/src/auth/okta/` |
 | Lecture video server | `app/src-tauri/src/lectures/media.rs` |
 | This machine's addresses, observed once for the process (music and device sharing subscribe) | `app/src-tauri/src/runtime/network/` |
-| Device-sharing server, on the LAN only while a canvas is shared ([device-sharing.md](./device-sharing.md)) | `app/src-tauri/src/companion/` |
+| Device-sharing server, on the LAN only while a drawing is shared ([device-sharing.md](./device-sharing.md)) | `app/src-tauri/src/companion/` |
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
 | Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/runtime/bundled.rs` |
 | ONNX Runtime (static): the CPU session and pinned, checksummed model-pack downloads | `app/src-tauri/src/runtime/onnx/` |
@@ -408,8 +408,8 @@ folder with its new place; [library-move.md](./library-move.md)).
   names compare ignoring ASCII case, as macOS and Windows volumes do.
   `Course` and `.oculus` are reserved at a subject's root (`reserved_name`).
 - **The student's files are everything else in a subject, at any depth.**
-  Their kind is their extension: `.md` a note, `.canvas`, `.notebook`, else an
-  upload. Every creator (imports, notes, canvases, notebooks, browser
+  Their kind is their extension: `.md` a note, `.whiteboard`, `.notebook`, else an
+  upload. Every creator (imports, notes, whiteboards, notebooks, browser
   downloads) takes a target folder, checked by `own_target`
   (`app/src-tauri/src/library/drive/ops/guard.rs`): the subject's root or an
   existing folder of the student's in that subject; with none it lands at the
@@ -420,11 +420,11 @@ folder with its new place; [library-move.md](./library-move.md)).
   synced zone, whatever a phase computes; `the_sync_writes_only_into_course`
   holds it.
 - **`own_file_ok(rel, kind)` is the guard of every command that writes,
-  renames or deletes the student's files** (notes, uploads, canvases,
+  renames or deletes the student's files** (notes, uploads, whiteboards,
   notebooks): in the own zone, the kind's extension, no dot-name (staging
-  files and a note's `.assets/` are dot-names), no `:`. Canvases add a
+  files and a note's `.assets/` are dot-names), no `:`. Drawings add a
   refusal of any symlink on the way (`checked` in
-  `app/src-tauri/src/library/files/canvases.rs`).
+  `app/src-tauri/src/library/files/whiteboards.rs`).
 - **IPC commands that read or open what the frontend names go through
   `resolve`** (`read_course_file`, `open_course_file`) or `resolve_absolute`
   (`echo360_read_transcript`, which gets a stored absolute path): `Outside`

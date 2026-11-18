@@ -12,8 +12,8 @@ independently of Oculus and needs no desktop restart.
 | Capture browser inputs, lifecycle, slow operations and errors | `app/src/companion/diagnostics/index.ts` |
 | Isolated browser input comparison pad | `app/input-test.html`, `app/src/companion/diagnostics/inputTest.ts` |
 | Independent worker watchdog and bounded upload queue | `app/src/companion/diagnostics/worker.ts`, `app/src/companion/diagnostics/protocol.ts` |
-| Optional tracing hooks shared with the desktop, the log and the overlay | `app/src/lib/canvas/diagnostics.ts` |
-| Gesture and tool decisions, camera moves, paint timing | `app/src/hooks/canvas/useCanvasInteraction.ts` |
+| Optional tracing hooks shared with the desktop, the log and the overlay | `app/src/lib/whiteboard/diagnostics.ts` |
+| Gesture and tool decisions, camera moves, paint timing | `app/src/hooks/whiteboard/useWhiteboardInteraction.ts` |
 | The debug button's on-screen touch, Pencil and gesture overlay | `app/src/companion/DebugToggle.tsx`, `app/src/companion/gestureOverlay.ts` |
 | Rebase, operation persistence and drawing serialization timing | `app/src/lib/companion/shareClient.ts`, `app/src/lib/companion/drafts.ts` |
 
@@ -36,7 +36,7 @@ The receiver accepts batches only with its temporary token and a browser Origin
 on the sharing port range, on the same hostname as the receiver request. It
 allows no log reads. Request bodies are bounded to 64 KiB and 100 events; at
 most eight requests wait for disk writes. Logs rotate at 10 MiB with three
-previous files, independently of canvas recovery storage.
+previous files, independently of drawing recovery storage.
 
 ## Capture, handler and state records distinguish different freezes
 
@@ -49,11 +49,11 @@ document-bubble records show whether an input reached the page and continued
 through its handlers; touch records include contact counts and cancellation
 state. Native gesture records include scale, rotation and whether their default
 was cancelled. Startup identifies the bundle, touch policy and native gesture
-policy, including whether the canvas touch guard is attached to the body.
+policy, including whether the drawing's touch guard is attached to the body.
 Visual viewport changes record browser page scale and offsets separately
 from the drawing's camera. Input delay compares
 the event timestamp with delivery time. Control labels, inline body pointer
-blocking and the canvas's inert state help identify an overlay intercepting
+blocking and the drawing's inert state help identify an overlay intercepting
 input. Editable text, document contents, image data and sharing secrets are
 excluded.
 
@@ -79,8 +79,8 @@ handled, and up to 80 camera samples as `ms,dx,dy` from the pan's start. A
 glide ends with `camera.glide-end` (`rest`, `pinned`, or `halted:` and what
 stopped it) and how far it moved. Any single camera write of 150 px or a
 quarter's zoom records `camera.jump` with its cause (pan, glide, wheel, page,
-fit, zoom, resize, external, publish), and a canvas size change records
-`canvas.resize`. `gesture.down` carries the contact's width and height.
+fit, zoom, resize, external, publish), and a drawing area size change records
+`whiteboard.resize`. `gesture.down` carries the contact's width and height.
 
 ## The debug button shows gestures for a screen recording
 
@@ -93,7 +93,7 @@ what each contact became when it lifted, cancels, a second finger turning a
 gesture into navigation, ignored input, tool changes, pan releases and why they
 did or didn't glide, glide ends, camera jumps (two-finger ones aside, which a
 pinch makes on every frame) and resizes. It never takes input. Both it and the
-log listen to the same canvas traces, so either works without the other.
+log listen to the same drawing traces, so either works without the other.
 
 ## A worker detects a blocked main thread without waiting for it to recover
 
@@ -127,7 +127,7 @@ memory without limit.
 `/c/assets/input-test.html` is a standalone entry served by the same sharing
 server. Open it in another tab on the device. It paints only temporary ink and
 counts pointer contacts, raw touch starts and test-button taps. Its import graph
-excludes React, the canvas editor, the sharing client and notebook storage.
+excludes React, the drawing editor, the sharing client and notebook storage.
 Nothing drawn here is saved or sent as document content.
 
 The pad uses the same optional diagnostic receiver and a fresh diagnostic

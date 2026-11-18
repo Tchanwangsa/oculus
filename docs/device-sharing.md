@@ -1,9 +1,9 @@
 # Device sharing
 
-A shared canvas or notebook can be opened and edited from a browser on another device on
+A shared whiteboard or notebook can be opened and edited from a browser on another device on
 the same network (an iPad with a Pencil, a phone) through a small HTTP and
-WebSocket server in the app. The server is a transport into the canvas
-authority ([drawing-canvas.md](./drawing-canvas.md#a-shared-canvas-has-one-writer)),
+WebSocket server in the app. The server is a transport into the whiteboard
+authority ([drawing-whiteboard.md](./drawing-whiteboard.md#a-shared-drawing-has-one-writer)),
 which stays the only writer of the file. Sharing is off at launch.
 
 ## Where
@@ -20,25 +20,25 @@ which stays the only writer of the file. Sharing is off at launch.
 | This Mac's addresses as endpoints, labels, the Host list | `app/src-tauri/src/companion/endpoints/` |
 | The address observer it follows | `app/src-tauri/src/runtime/network/` |
 | Every bound and timeout | `app/src-tauri/src/companion/limits.rs` |
-| The share dialog: state, link, QR, address choice, Stop | `app/src/components/canvas/CanvasShareDialog.tsx`, `app/src/components/canvas/share/` |
+| The share dialog: state, link, QR, address choice, Stop | `app/src/components/whiteboard/WhiteboardShareDialog.tsx`, `app/src/components/whiteboard/share/` |
 | Command wrappers, the `companion-state` store (`useSharing`), the dialog's controller and its registry | `app/src/lib/sharing/` |
 | The QR encoder and its checks | `app/src/lib/qr/`, `app/tests/lib/qr/`, `app/tests/qr/` |
 | Settings → Device sharing | `app/src/pages/settings/integrations/DeviceSharingPage.tsx`, `app/src/components/settings/sharing/` |
 | The companion page's build at each dev start | `app/scripts/build-companion.mjs` |
-| Shared canvas shell, fullscreen / focus mode and browser policy | `app/src/companion/App.tsx`, `app/src/companion/useCanvasFocus.ts`, `app/src/companion/fullscreenPolicy.ts` |
+| Shared drawing shell, fullscreen / focus mode and browser policy | `app/src/companion/App.tsx`, `app/src/companion/useWhiteboardFocus.ts`, `app/src/companion/fullscreenPolicy.ts` |
 
 The selected address's link is one compact input group with copy and, on
 macOS, a Share icon that opens the system share sheet. The sheet's destination
-picker and dismissal are managed by AppKit; the canvas dialog remains open
+picker and dismissal are managed by AppKit; the share dialog remains open
 behind it.
 
-The shared page's **Expand canvas** button hides the Oculus header, outer
+The shared page's **Expand whiteboard** (or **Expand notebook**) button hides the Oculus header, outer
 padding and rounded frame. On iPad and iPhone it uses a fixed viewport-sized
 focus view: [WebKit's native fullscreen dismissal gesture](https://bugs.webkit.org/show_bug.cgi?id=227387)
 competes with drawing and panning. The policy recognises iPadOS's desktop Mac
 identity using its touch points. Other browsers also request native fullscreen
 when available, keeping focus mode if it is unavailable or refused. The
-top-right **Exit expanded canvas** button or Escape restores the shell.
+top-right **Exit expanded** button (named for the kind too) or Escape restores the shell.
 The drawing paints to the viewport edges; safe-area insets move the floating
 controls instead of reserving blank bands above and below the drawing.
 Conflict and recovery notices remain visible, and an unsaved or reconnecting
@@ -47,7 +47,7 @@ be hidden when the browser grants fullscreen.
 
 ## The server runs only while something is shared
 
-`companion_share_start(fileId)` needs the canvas's authority session to be
+`companion_share_start(fileId)` needs the drawing's authority session to be
 live (the pane attaches first) and otherwise fails with `not-live`. The first
 share binds the server; stopping the last share stops it; a second
 `share_start` for a shared file returns the same share. Stopping a share ends
@@ -112,7 +112,7 @@ While the server runs it subscribes to the observer. When the list changes
   every share's links, read again through `companion_shares`, are built
   from the same grant: same share id, same key, new addresses.
 - The listener, its port, open sockets, requests in flight, the change log
-  and the canvas are untouched; nothing is revoked or rotated.
+  and the drawing are untouched; nothing is revoked or rotated.
 - The Host allow-list is the current list: a Host whose address has gone is
   refused, and one that has just come up is accepted, at once if it is in
   the latest snapshot, otherwise after a re-read the miss forces (at most
@@ -135,7 +135,7 @@ send to a server or in a Referer. The page sends it only as
 | Request | Answer |
 | --- | --- |
 | `GET /c/`, `GET /c/assets/**` | The browser bundle (public; Host check only) |
-| `GET /api/s/<id>/snapshot` | The drawing's file text with its exact `Content-Length`, `X-Oculus-Epoch`, `X-Oculus-Revision`, `X-Oculus-Phase`, and `X-Oculus-Kind` (`canvas` or `notebook`, from the file's path) |
+| `GET /api/s/<id>/snapshot` | The drawing's file text with its exact `Content-Length`, `X-Oculus-Epoch`, `X-Oculus-Revision`, `X-Oculus-Phase`, and `X-Oculus-Kind` (`whiteboard` or `notebook`, from the file's path) |
 | `POST /api/s/<id>/commit` | `{clientId, seq, opId, epoch, transaction}` → `{epoch, revision, seq, opId, replayed, transaction}` |
 | `GET /api/s/<id>/changes?from=<rev>[&epoch=<e>]` | `[{epoch, revision, clientId, transaction}]` after `from` |
 | `GET /api/s/<id>/ws` | The push socket |
@@ -211,7 +211,7 @@ cargo test --lib companion::tests::e2e -- --ignored --nocapture
 ```
 
 `companion/tests/e2e.rs` starts the loopback harness (real server and
-authority over a temporary canvas, pings every 200 ms), shares the canvas and
+authority over a temporary whiteboard, pings every 200 ms), shares it and
 runs `app/tests/e2e/shareClientE2E.ts` with bun, passing the port and key in
 `OCULUS_E2E_PORT` and `OCULUS_E2E_KEY`. The script drives real `ShareClient`s
 built by `browserShareEnv` over bun's fetch, WebSocket and timers, sending
@@ -224,9 +224,9 @@ In about 6 s it covers:
   desktop commit; a foreign Origin is refused on POST and on the socket.
 - A fresh desktop JavaScript session rejoins the existing native authority,
   then receives browser edits live and sends desktop edits back live, without
-  whole-file writes or reopening the canvas.
+  whole-file writes or reopening the file.
 - Independent edits merge; the same shape edited on both is a `conflict` for
-  one tab, whose draft stays until `useSharedCanvas()`.
+  one tab, whose draft stays until `useSharedWhiteboard()`.
 - A 10 MiB PNG goes up as one POST and down to the other tab intact.
 - Deleting the large image and immediately undoing it while the delete is held
   before sending restores the image on both tabs and in the Mac's saved file.
@@ -237,7 +237,7 @@ In about 6 s it covers:
   drafts exportable; a reload of the old link, a retry and the old op sent to
   the restarted share replay nothing into the new epoch.
 
-The test then checks the file on disk: a valid canvas with each stroke once,
+The test then checks the file on disk: a valid whiteboard with each stroke once,
 the image byte for byte (SHA-256), thirteen revisions in the first epoch and one in
 the second, desktop and `web:` committers, and no secret in the script's
 output. A LAN address is not covered: the harness's addresses are fake, so
@@ -263,14 +263,14 @@ Loading waits for recovery before connecting. Earlier epochs stay downloadable
 and are never replayed into a new share. Actual storage failures retain the draft
 in memory and show a warning while changes remain unconfirmed.
 
-The header has a fixed height, and notices overlay the canvas instead of adding
+The header has a fixed height, and notices overlay the drawing instead of adding
 rows above it. Saving, reconnecting and storage notices cannot change the
-canvas's position or size while the person writes. The Mac owns the saved file;
-its separate disk recovery record is described in [drawing-canvas.md](./drawing-canvas.md#one-save-session-owns-every-pane-editing-a-file).
+drawing's position or size while the person writes. The Mac owns the saved file;
+its separate disk recovery record is described in [drawing-whiteboard.md](./drawing-whiteboard.md#one-save-session-owns-every-pane-editing-a-file).
 
 For timestamped input and freeze traces on the Mac, see
 [companion-diagnostics.md](./companion-diagnostics.md). Its optional receiver
-operates independently of canvas recovery and the sharing server.
+operates independently of drawing recovery and the sharing server.
 
 ## What sharing does not promise
 
@@ -280,7 +280,7 @@ operates independently of canvas recovery and the sharing server.
   vanished address cannot find the Mac again; the Mac shows the new link
   and the device rejoins under a new origin, whose drafts do not follow.
 - The device's page opens a notebook in notebook mode only when the snapshot's
-  `X-Oculus-Kind` says `notebook` (anything else is a canvas, whatever the
+  `X-Oculus-Kind` says `notebook` (anything else is a whiteboard, whatever the
   document holds), and a downloaded draft keeps that kind's extension. Its
   text names that kind too; before the first snapshot names it (a failed first
   load, the opening spinner, the tab title) it says "drawing". A page
@@ -292,7 +292,7 @@ operates independently of canvas recovery and the sharing server.
 
 ## Desktop UI
 
-A canvas's header has a Share button that opens `CanvasShareDialog`. Sharing
+A drawing's header has a Share button that opens `WhiteboardShareDialog`. Sharing
 outlives the dialog; the header's status says `Sharing · 2 devices` while it
 runs. `app/src/lib/sharing/` is desktop-only (it calls Tauri), and
 `app/tests/repo/sharingGraph.test.ts` keeps the companion from importing it.
@@ -316,7 +316,7 @@ runs. `app/src/lib/sharing/` is desktop-only (it calls Tauri), and
   links (and each address's own device count, which only `companion_shares`
   carries), and a share missing from an event is checked with `companion_shares`
   before the session detaches, because an event can predate the start. A
-  vanished share gets a controller even for a canvas whose dialog never
+  vanished share gets a controller even for a drawing whose dialog never
   opened, so a share stopped in Settings or ended natively hands its file back
   to ordinary saves.
 - **The state line claims only what the server counts**: `Sharing · no device
@@ -349,12 +349,12 @@ runs. `app/src/lib/sharing/` is desktop-only (it calls Tauri), and
 - **Stop asks inline**, in the dialog and in Settings; Escape cancels the
   question before it closes the dialog.
 - **Settings → Device sharing** says what sharing is and is not, and lists the
-  live shares from the event: the canvas title from its open session, the
+  live shares from the event: the drawing's title from its open session, the
   device count, the addresses folded (the event's bare endpoints, so no link
   or key is shown), Stop, and Stop all.
 - **`tauri dev` never builds `dist/companion/`**, so the dev preflight runs
   `app/scripts/build-companion.mjs`. It skips when `index.html` there is newer
-  than `app/src/`, `canvas-core/pkg/` and the build's config (all of `src/`,
+  than `app/src/`, `whiteboard-core/pkg/` and the build's config (all of `src/`,
   since Tailwind scans it); a build takes about 2 s, and a failed one is
   logged without stopping the start.
 

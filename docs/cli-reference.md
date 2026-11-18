@@ -419,8 +419,9 @@ running it by hand is only needed to watch it or preview it. Synced folders go i
 subject's Course/ folder, the student's own folders flatten into the subject's root,
 lecture recordings move from lectures/<id>/ into Course/Recordings/<date>-<slug>/, parse
 records into .oculus/derived/, and the database's paths are rewritten to match. Old
-paths stay readable through the path_moves table. Once done, a marker in the data
-folder's .library-move/ makes it a no-op.
+paths stay readable through the path_moves table. Then each drawing saved as .canvas
+becomes .whiteboard, with its rows and old paths following. Once done, markers in the
+data folder's .library-move/ make both no-ops.
 
 Usage: oculus library migrate [OPTIONS]
 
@@ -499,7 +500,7 @@ Options:
           Restrict to these subjects; prefix codes are fine. Repeatable
 
   -c, --category <CATEGORY>
-          Only these categories (home, syllabus, upload, document, canvas, notebook,
+          Only these categories (home, syllabus, upload, document, whiteboard, notebook,
           page, assignment, quiz, announcement, ed, lessons, file, module, image,
           other). Repeatable
 
@@ -535,8 +536,8 @@ nothing — run `oculus index <SUBJECT_CODE>` for it.
 A notebook — pages the student writes on, `<title>.notebook` among their own files — has
 no text. It prints one line per page with the path of that page's picture, which the app
 redraws a few seconds after each stroke, and how long ago; open the pictures with your
-image tool. `--pages` picks pages by number. A canvas (`<title>.canvas`) is a drawing
-with no pages and no text, and says so.
+image tool. `--pages` picks pages by number. A whiteboard (`<title>.whiteboard`) is a
+drawing with no pages and no text, and says so.
 
 FILE may be a full library path, a bare filename, or any distinctive fragment of either.
 An ambiguous fragment lists the candidates instead of guessing.
@@ -577,7 +578,7 @@ Options:
           Only this extension (pdf, md, pptx, docx, png …)
 
   -c, --category <CATEGORY>
-          Only these categories (home, syllabus, upload, document, canvas, notebook,
+          Only these categories (home, syllabus, upload, document, whiteboard, notebook,
           page, assignment, quiz, announcement, ed, lessons, file, module, image,
           other). Repeatable
 

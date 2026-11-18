@@ -23,7 +23,7 @@ library files; the rest of the frontend has its own pages:
 | The companion's transport: share-link credentials, HTTP and socket client, stored drafts | `app/src/lib/companion/` |
 | The first-run gate: onboarding or the shell ([onboarding.md](./onboarding.md)) | `app/src/App.tsx`, `app/src/hooks/shell/useOnboardingGate.ts` |
 | Backend events → SQLite and stores | `app/src/hooks/backend/useBackendEvents.ts`, `app/src/hooks/backend/useEvents.ts`, `app/src/lib/pipeline/parseStatusWriter.ts`, `app/src/lib/db/connection.ts` |
-| Own files: uploads, notes and drawings, their rows and reconcilers | `app/src/lib/files/uploads.ts`, `app/src/lib/notes/documents.ts`, `app/src/lib/canvas/files.ts`, `app/src/lib/drive/reconcile.ts`, `app/src-tauri/src/library/files/commands.rs`, `app/src-tauri/src/library/drive/ops/reconcile/` |
+| Own files: uploads, notes and drawings, their rows and reconcilers | `app/src/lib/files/uploads.ts`, `app/src/lib/notes/documents.ts`, `app/src/lib/whiteboard/files.ts`, `app/src/lib/drive/reconcile.ts`, `app/src-tauri/src/library/files/commands.rs`, `app/src-tauri/src/library/drive/ops/reconcile/` |
 | File category icons and recency marks | `app/src/lib/files/fileTypes.ts`, `app/src/components/files/FileRecency.tsx` |
 | Path-keyed state following Drive's moves ([below](#path-keyed-state-follows-drive)) | `app/src/lib/shell/pathFollow.ts`, `app/src/lib/shell/followLibrary.ts`, `app/src/stores/shell/tabs/follow.ts` |
 | Drive's folder browser and folder tree ([below](#drive-is-one-folder-browser-over-the-disk)); `list_folder` | `app/src/components/drive/`, `app/src/hooks/drive/`, `app/src/lib/drive/`, `app/src-tauri/src/library/drive/` |
@@ -69,19 +69,19 @@ Credential descriptions and parse errors say credential store across platforms.
 
 ## The companion page is a second entry
 
-A device paired with Share on a canvas ([device-sharing.md](./device-sharing.md))
+A device paired with Share on a whiteboard or notebook ([device-sharing.md](./device-sharing.md))
 loads a page of its own, not the desktop app: `app/companion.html` and
 `app/src/companion/`, built by `vite.companion.config.ts` (`bun run
 companion:build`, the last step of `bun run build`, after the desktop bundle
 so the desktop build's `emptyOutDir` cannot delete it) into
 `app/dist/companion/`. The entry is renamed `index.html`, every URL is under
-`/c/`, and the canvas WebAssembly and the Inter and Manrope fonts are hashed
+`/c/`, and the whiteboard WebAssembly and the Inter and Manrope fonts are hashed
 files in `dist/companion/assets/` (`assetsInlineLimit: 0`, so nothing becomes a
 `data:` URL); the desktop's `public/` files are left out.
 
-- **No Tauri.** The page renders the real `CanvasSurface`, so the canvas's
-  host services come from `CanvasPlatformContext`
-  ([drawing-canvas.md](./drawing-canvas.md#tools-and-exports-share-the-same-geometry)),
+- **No Tauri.** The page renders the real `WhiteboardSurface`, so the drawing's
+  host services come from `WhiteboardPlatformContext`
+  ([drawing-whiteboard.md](./drawing-whiteboard.md#tools-and-exports-share-the-same-geometry)),
   whose default is the browser's. `app/tests/repo/companionGraph.test.ts` walks
   the page's imports, lazy ones included, and fails on `@tauri-apps/*`,
   `@/lib/db` or the SQL plugin; it also checks the desktop entry never imports
@@ -118,8 +118,8 @@ files in `dist/companion/assets/` (`assetsInlineLimit: 0`, so nothing becomes a
   embedded page images, while the desktop uses disk. The operation identity,
   replay rules and stable notice layout are described in
   [device-sharing.md](./device-sharing.md#recovery-survives-a-browser-reload-without-moving-the-drawing).
-  A conflict keeps the drawing until Use shared canvas; Download draft saves
-  it as a `.canvas` file.
+  A conflict keeps the drawing until Use shared whiteboard (or notebook);
+  Download draft saves it as a file of its kind.
 
 ## Subject lists keep content flat and distinguish file types by colour
 
@@ -211,12 +211,12 @@ are routed: Drive's rail section at `/drive/*` and the Files tab at
   its row's (`fileTitle`), its parse state `ParseStateBadge` and
   `useFileParseState` (the parse store over `files.parse_status`), its new dot
   `RecencyDot`. Listings and rows re-read on `DRIVE_CHANGED_EVENT` and the
-  upload, note, canvas and scrape events, once they stop for 300 ms. The PDFs
+  upload, note, whiteboard and scrape events, once they stop for 300 ms. The PDFs
   on screen have their parse state read back from disk
   (`useReconcileParseStatus`), for a parse an earlier session finished, and a
   folder in a subject asks for its own files' rows (below).
 - **The view.** The header holds the trail, a search scoped to the folder
-  and everything below it, and New (folder, note, canvas, notebook, upload
+  and everything below it, and New (folder, note, whiteboard, notebook, upload
   files or a folder), drawn only where the folder is `writable`. The Type,
   From and Modified pills, like the search, switch to the flat recursive list,
   narrowed by `filterListing` (`lib/drive/filters.ts`); a search alone keeps
@@ -231,8 +231,8 @@ are routed: Drive's rail section at `/drive/*` and the Files tab at
   file's converted PDF's, first page through the viewer's renderer
   (`openPdf`, `renderPage`); a notebook's first page from the pictures its
   editor writes for chat agents (`drive_notebook_cover`, PNG bytes from
-  `canvas-pages/<file id>/`); a recording's frame from `lecture_thumbnail`; an
-  image itself. A canvas, a video file and anything else show their glyph.
+  `whiteboard-pages/<file id>/`); a recording's frame from `lecture_thumbnail`; an
+  image itself. A whiteboard, a video file and anything else show their glyph.
 - **Selection is Finder's** (`lib/drive/selection.ts`): a click picks one,
   ⌘-click toggles, ⇧-click takes the run from the anchor, ⌘A picks all,
   Escape clears, a click in empty space clears. Double-click or Enter opens
@@ -270,7 +270,7 @@ target folder is a subject's root or an existing folder of the student's:
 | `delete_preview` | `rels` | every file a delete would remove |
 | `copy_to_own` | `rels`, `targetDir` | the copies' paths, in order |
 | `import_uploads` | `subjectCode`, `paths`, optional `targetDir` | one outcome per file |
-| `create_document`, `create_canvas` | as before, optional `targetDir` | the new file |
+| `create_document`, `create_whiteboard` | as before, optional `targetDir` | the new file |
 
 - **Names.** A name may not be empty, start with a dot, hold `/`, `\`, `:`,
   NUL or a control character, or start or end with a space; `Course` and
@@ -308,7 +308,7 @@ target folder is a subject's root or an existing folder of the student's:
 - **Busy files.** A move, rename or delete is refused (`io`, "being parsed
   right now") while a parse or embed runs on any file it touches, and holds
   those files (`parse::InFlight`, `InFlight::embedding`) until its rows are
-  written, so no parse starts on a file mid-move; a canvas shared to a device
+  written, so no parse starts on a file mid-move; a drawing shared to a device
   is refused the same way.
 - **`drive-changed`.** Each command but `delete_preview` emits
   `{ subjectIds, moved: [{ from, to }], removed, added }`, and so does
@@ -404,7 +404,7 @@ One row per item shows its latest qualifying change in the selected week:
 file/page updates must be more than an hour after creation; Ed updates mean
 replies and have no one-hour gate. `parseEdThread` counts rendered reply
 headers, including nested comments; a file without a known count says
-Replies. Announcements use creation only. Student documents, canvases,
+Replies. Announcements use creation only. Student documents, whiteboards,
 notebooks and uploads appear in Yours, by creation or content change; chats
 merge live harness rows and every page of the subject's threads
 (`getSubjectThreads`), so a week's chats older than the store's newest show.
@@ -432,7 +432,7 @@ time without changing the snapshot, so the page calls it on unmount and dots
 survive the visit. Every storage access tolerates unavailable storage.
 
 The hook reuses subject files and weeks, rejects stale asynchronous reads,
-and refreshes after file access/scrapes, document/canvas/upload changes, calendar,
+and refreshes after file access/scrapes, document/whiteboard/upload changes, calendar,
 lecture/download/progress, project, revision and harness-thread events. Its
 minute clock advances deadlines, past events and revision counts. Loading
 and read errors are exposed; metadata read failures retain filename fallbacks.
@@ -652,9 +652,10 @@ and read errors are exposed; metadata read failures retain filename fallbacks.
   sheet's text) when `reconcileOwnFiles` runs, so a note written elsewhere
   just appears.
 
-The editor a document opens in is [editor.md](./editor.md). Drawing canvases are
-listed by Drive, with a `canvas` category and versioned `.canvas` files; see
-[drawing-canvas.md](./drawing-canvas.md).
+The editor a document opens in is [editor.md](./editor.md). Whiteboards and
+notebooks are listed by Drive, with `whiteboard` and `notebook` categories and
+versioned `.whiteboard` and `.notebook` files; see
+[drawing-whiteboard.md](./drawing-whiteboard.md).
 
 ## Gotchas
 

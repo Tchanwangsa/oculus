@@ -176,7 +176,7 @@ another rating; the attempt records that override.
 
 Every attempt retains the answer, rating, score/max, feedback, judge model,
 override and elapsed seconds. The schema also reserves a working field for
-attempt context. It does not implement drawing-canvas working or hints.
+attempt context. It does not implement whiteboard or notebook working or hints.
 
 ## Written answers are marked only on Submit
 

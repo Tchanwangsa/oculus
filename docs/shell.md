@@ -262,8 +262,8 @@ while Ctrl+Shift+Z is Redo.
   active element (the note) when native focus moves to a browser page.
 - **Back and Forward (⌘[ / ⌘]) can be claimed.** `menu-back` / `menu-forward`
   step the pane's history unless a handler registered with `onBackForward`
-  (`app/src/lib/menu/backForwardRouting.ts`) takes them first; a drawing
-  canvas with a selection does, to step its layer order. Like `routeEdit`, no
+  (`app/src/lib/menu/backForwardRouting.ts`) takes them first; a whiteboard
+  or notebook with a selection does, to step its layer order. Like `routeEdit`, no
   handler is offered the key while `document.hasFocus()` is false.
 - **Select All is a custom item too**, because WebKit's `selectAll:` with no
   field focused selects the whole window. A focused browser page gets the
@@ -502,7 +502,7 @@ navigates the pane. Its field is `SideNavSearch`
 
 `app/src/lib/search/filters.ts` owns the filter catalogue, tokens and resolution
 without database or navigation effects. ⌘K takes filters: `in:<subject>` and `type:<kind>`
-(a file kind is a `files.category`: notes, uploads, canvases and notebooks
+(a file kind is a `files.category`: notes, uploads, whiteboards and notebooks
 among them). Its Go to rows include Drive and Drive's Recent. Typing
 the colon turns the key into a chip with the caret inside it, and the list shows
 only its values; picking one (or a space after an unambiguous value) fixes the

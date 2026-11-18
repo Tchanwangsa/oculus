@@ -97,8 +97,8 @@ moving at once: the second waits, then finds the marker.
    twice.
 4. **Rewrite files** (`contents.rs`, `links.rs`): every moved markdown file's
    relative links, the `asset://` picture links notes hold, a renamed PDF's
-   records, `ed-workspaces/*.json` `slide_dir`, `canvas-pages/*/pages.json`
-   `canvas`, the subjects' memories links, and `agents/opencode.json` when
+   records, `ed-workspaces/*.json` `slide_dir`, the notebooks' `pages.json`
+   (under `canvas-pages/` or `whiteboard-pages/`), the subjects' memories links, and `agents/opencode.json` when
    opencode has been used. Each is a no-op the second time.
 
 ## Stored paths are recognised, never followed
@@ -139,8 +139,8 @@ resolved when read.
 Right after the Drive move and under its lock,
 `library::migrate::whiteboard` renames every `.canvas` drawing among the
 student's own files to `.whiteboard`, `canvas-pages/` and
-`recovery/canvases/` to their new names, and the rows and `path_moves` with
-them, with its own journal and marker (`.library-move/whiteboard`). A
+`recovery/canvases/` to their new names, and the rows, `path_moves`, page
+manifests and the notes that link to a renamed drawing with them, with its own journal and marker (`.library-move/whiteboard`). A
 `.canvas` drawing that reaches the library later (a backup, another Mac, an
 agent) is renamed by Drive's reconcile and imports
 ([frontend.md](./frontend.md#own-files-written-outside-the-app-get-rows)), with

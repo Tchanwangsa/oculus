@@ -1,7 +1,7 @@
 # Note editor
 
 Drive's New → Note makes a note in the folder on screen, alongside
-[drawing canvases](./drawing-canvas.md). A student document is a markdown file
+[whiteboards and notebooks](./drawing-whiteboard.md). A student document is a markdown file
 edited in CodeMirror 6, in a Live
 (rendered) or Raw mode; the same editor is a form field for markdown kept in a
 database row. A document's row and file are in

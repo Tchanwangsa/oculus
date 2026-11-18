@@ -3274,14 +3274,14 @@ chapter list inline — rebuilt on every send and before any spawn.
 
 `harnessSend` (`app/src/lib/harness/commands.ts`) adds `openNotebookContext()`
 to `SendOptions.context` whenever a notebook is open in the editor
-(`app/src/lib/canvas/openNotebooks.ts`, registered by `CanvasEditor`): each
+(`app/src/lib/whiteboard/openNotebooks.ts`, registered by `WhiteboardEditor`): each
 notebook's title, the page in view and the `oculus read` command that lists its
 page pictures, most recently touched first, at most three. So "is my working on
 page 2 right?" needs no `@`, in any thread. Like the lecture's moment it rides
 the prompt under "What the student had open when this was sent" and never the
 row. The `oculus-library` skill tells the agent what to do with it: open the
 page's picture, comment on the student's own working, not rewrite it, and not
-touch `notebooks/` or `canvases/` ([drawing-canvas.md](./drawing-canvas.md#what-a-chat-agent-sees)).
+open the `.notebook` file itself ([drawing-whiteboard.md](./drawing-whiteboard.md#what-a-chat-agent-sees)).
 
 ## A Studio thread carries its video
 

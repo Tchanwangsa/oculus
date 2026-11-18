@@ -243,7 +243,7 @@ or malformed dates are unknown, never the sync's clock.
 | Announcement | `posted_at`, else `created_at` | Same as creation |
 | Assignment or quiz | `unlock_at`, else `created_at` | `updated_at` |
 | Ed thread | Thread `created_at` | Latest answer/comment `created_at`, including nested comments; NULL without replies |
-| Ed lesson, module, student document/canvas/upload | NULL | NULL |
+| Ed lesson, module, student document/whiteboard/notebook/upload | NULL | NULL |
 
 The course API's `syllabus_body` and description-only home have no
 content-specific timestamps, so their source dates stay NULL; course creation

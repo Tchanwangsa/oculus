@@ -178,10 +178,10 @@ rewriting itself in place is how a long run is told from a stuck one.
   sheets, and with no rows yet `read` prints its `.md` from disk.
 - `read` on a notebook (a `notebook` row) prints page-picture paths, not text:
   `commands/query/notebook.rs` reads the manifest the app writes under
-  `canvas-pages/<file id>/` (`library::paths::notebook`) and lists each page's
+  `whiteboard-pages/<file id>/` (`library::paths::notebook`) and lists each page's
   PNG with its age. A page whose picture is missing from disk is left out; with
   none left, or none ever written, it fails and says how to get them. A
-  `canvas` row is a whiteboard: not text, no pictures, and `read` says so.
+  `whiteboard` row is not text and has no pictures, and `read` says so.
 - Read commands share subject-ID resolution in `commands/query/subjects.rs`: an omitted scope
   means every subject, while a prefix keeps every matching term and an unknown
   code fails before querying files.

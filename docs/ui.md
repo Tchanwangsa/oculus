@@ -220,9 +220,9 @@ themes are opt-in and keep the same structure.
   `@phosphor-icons/react`.
 - **Icons are Phosphor.** One Phosphor lacks is drawn in
   `app/src/components/icons/` on its `IconBase`, so it takes the same `size`
-  and `weight` props. The canvas's tool rail is the one exception: its
-  tools are coloured drawings in `app/src/components/canvas/toolArt/`
-  ([drawing-canvas.md](./drawing-canvas.md#the-bars-are-docked-beside-the-drawing)).
+  and `weight` props. The drawing editor's tool rail is the one exception: its
+  tools are coloured drawings in `app/src/components/whiteboard/toolArt/`
+  ([drawing-whiteboard.md](./drawing-whiteboard.md#the-bars-are-docked-beside-the-drawing)).
 - **A CLI agent's mark is in its vendor's colours** (`ProviderMark`, files in
   `app/src/assets/providers/`), the one exception to the single accent:
   Claude's clay fill, Antigravity's gradient arch, OpenAI's blossom in full
