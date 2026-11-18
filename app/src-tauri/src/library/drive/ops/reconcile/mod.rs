@@ -192,7 +192,8 @@ async fn convert_drawings(
             })
             .await
             .ok();
-            known.extend(pass.converted.into_iter().map(|c| c.from));
+            // A re-attached row's whiteboard stays rowless this pass too.
+            known.extend(pass.converted.into_iter().flat_map(|c| [c.from, c.to]));
             known.extend(pass.waiting);
             return (Vec::new(), known);
         }

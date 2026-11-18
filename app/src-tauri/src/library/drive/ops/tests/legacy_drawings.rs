@@ -316,3 +316,41 @@ async fn a_row_spelled_in_another_unicode_form_keeps_its_id() {
         .unwrap();
     assert_eq!(rows, 1);
 }
+
+#[tokio::test]
+async fn a_pass_cut_short_after_the_rename_puts_the_row_back_on_its_drawing() {
+    let lib = renamed_library("drive-legacy-cut").await;
+    // The last pass renamed `Board.canvas` (taking ` (2)`, beside the
+    // student's own), then stopped before its row followed.
+    let gone = own(CODE, "Board.canvas");
+    let id = lib.row(&gone).await;
+    lib.file(
+        &own(CODE, "Board.whiteboard"),
+        b"{\"type\":\"oculus-whiteboard\"}",
+    )
+    .await;
+    let to = own(CODE, "Board (2).whiteboard");
+    lib.put(&to, DRAWING.as_bytes());
+
+    let (inserted, moved) = reconcile(&lib).await;
+    assert!(inserted.is_empty(), "no second row: {inserted:?}");
+    assert_eq!(moved, [(gone.clone(), to.clone())]);
+    assert_eq!(lib.row_of(id).await, Some(whiteboard_row(&to)));
+    assert_eq!(moved_to(&lib, &gone).await, Some(to.clone()));
+}
+
+#[tokio::test]
+async fn a_gone_canvas_row_with_two_possible_drawings_is_left() {
+    let lib = renamed_library("drive-legacy-cut-two").await;
+    let gone = own(CODE, "Board.canvas");
+    let id = lib.row(&gone).await;
+    // Saved since (the new type), or a sibling the row could equally be.
+    lib.put(&own(CODE, "Board.whiteboard"), DRAWING.as_bytes());
+    lib.put(&own(CODE, "Board (3).whiteboard"), DRAWING.as_bytes());
+    lib.put(&own(CODE, "Other.whiteboard"), DRAWING.as_bytes());
+
+    let (inserted, moved) = reconcile(&lib).await;
+    assert!(moved.is_empty());
+    assert_eq!(inserted.len(), 3);
+    assert_eq!(lib.row_of(id).await.unwrap().1, gone);
+}

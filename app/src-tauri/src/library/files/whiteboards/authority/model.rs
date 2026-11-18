@@ -97,6 +97,11 @@ pub(super) const DOCUMENT_TYPE: &str = "oculus-whiteboard";
 /// read as `DOCUMENT_TYPE`, and replaced by it on the next save.
 const LEGACY_TYPE: &str = "oculus-canvas";
 
+/// True when `kind` is the `type` a drawing held before the rename.
+pub(crate) fn is_legacy_type(kind: &str) -> bool {
+    kind == LEGACY_TYPE
+}
+
 /// True when `kind` is a drawing's `type`.
 pub(crate) fn is_drawing_type(kind: &str) -> bool {
     matches!(kind, DOCUMENT_TYPE | LEGACY_TYPE)

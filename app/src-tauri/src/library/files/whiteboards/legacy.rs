@@ -9,7 +9,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use super::authority::model::is_drawing_type;
+use super::authority::model::{is_drawing_type, is_legacy_type};
 use super::DrawingKind;
 
 /// The extension a drawing had.
@@ -49,6 +49,19 @@ pub fn read(path: &Path) -> Contents {
         Ok(file) => of_head(serde_json::from_reader(BufReader::new(file))),
         Err(e) => Contents::Unreadable(e.to_string()),
     }
+}
+
+/// True when the file at `path` still holds the `type` drawings had: a
+/// drawing renamed from `.canvas` and not saved since, since a save writes
+/// the new one.
+pub fn holds_legacy_type(path: &Path) -> bool {
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    matches!(
+        serde_json::from_reader(BufReader::new(file)),
+        Ok(Head { kind: Some(kind) }) if is_legacy_type(&kind)
+    )
 }
 
 /// What `bytes` hold.
