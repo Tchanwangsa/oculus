@@ -266,3 +266,29 @@ async fn an_old_path_through_the_drive_moves_folder_rule_reaches_the_renamed_dra
         Some(own(CODE, "c.pdf"))
     );
 }
+
+#[tokio::test]
+async fn a_canvas_that_is_not_json_and_not_landing_is_an_upload() {
+    let lib = renamed_library("drive-legacy-text").await;
+    let rel = own(CODE, "notes.canvas");
+    lib.put(&rel, b"plain text, not JSON");
+    let an_hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    std::fs::File::options()
+        .write(true)
+        .open(lib.path(&rel))
+        .unwrap()
+        .set_modified(an_hour_ago)
+        .unwrap();
+
+    let (inserted, moved) = reconcile(&lib).await;
+    assert!(moved.is_empty());
+    let got: Vec<(&str, &str)> = inserted
+        .iter()
+        .map(|f| (f.relative_path.as_str(), f.category.as_str()))
+        .collect();
+    assert_eq!(got, [(rel.as_str(), "upload")]);
+    assert!(lib.exists(&rel) && !lib.exists(&own(CODE, "notes.whiteboard")));
+
+    let (again, moved) = reconcile(&lib).await;
+    assert!(again.is_empty() && moved.is_empty());
+}

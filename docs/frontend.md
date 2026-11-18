@@ -342,8 +342,11 @@ the folder or a row holds the name, compared as the volume compares names
 every older path that led to it (`record_moves`,
 [library-move.md](./library-move.md#drawings-named-canvas)), never replacing
 a rule a rowless `.canvas` path already has. A file that does not
-read as whole JSON (still being copied) gets no row and waits for a later
-pass; a failed rename is logged and left. `import_uploads` gives a picked
+read as whole JSON gets no row and waits for a later pass while it was
+written in the last 30 s (`LANDING`: still being copied); after that it is
+not a drawing and gets an upload row like another app's. A drawing that
+lands slower than that is renamed with its upload row by id on the next
+pass. A failed rename is logged and left. `import_uploads` gives a picked
 `.canvas` drawing the `.whiteboard` name as it lands. `reconcileOwnFiles`
 (`app/src/lib/drive/reconcile.ts`) kicks each new file's parse as an
 upload's is kicked, then brings notes and drawings in line
