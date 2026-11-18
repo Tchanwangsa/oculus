@@ -2,7 +2,7 @@ import type { WhiteboardTransaction } from "./collaboration";
 import type { WhiteboardViewport } from "./model";
 
 /** What a save session sees of the native whiteboard authority while a whiteboard is
- * shared (docs/drawing-canvas.md, "A shared canvas has one writer"). Injected
+ * shared (docs/drawing-whiteboard.md, "A shared drawing has one writer"). Injected
  * through `WhiteboardSessionIO.authority`, so the session logic runs on fakes in tests;
  * `files.ts` holds the Tauri-backed one. */
 export interface WhiteboardAuthorityIO<F> {

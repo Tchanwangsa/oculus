@@ -1,7 +1,7 @@
 /** One serialized write queue per file, shared by every mounted pane. While the
  * file is shared the same queue commits content transactions to the whiteboard
  * authority instead of writing the file, and merges everyone else's changes
- * under this desktop's unsent edits (docs/drawing-canvas.md, "One save session
+ * under this desktop's unsent edits (docs/drawing-whiteboard.md, "One save session
  * owns every pane editing a file"). */
 import { clientPendingTransactions, containsClientTransaction, reconcileClientDocument } from "./clientReconciliation";
 import { applyWhiteboardTransaction, diffWhiteboardContent, hasWhiteboardChanges, sameValue, type WhiteboardTransaction } from "./collaboration";

@@ -1,7 +1,7 @@
-# Canvases and notebooks live in Drive
+# Whiteboards and notebooks live in Drive
 
 Drive holds the student's own notes and drawings among their other files. A drawing is one of
-two kinds on the same engine: a **canvas**, an infinite whiteboard, or a
+two kinds on the same engine: a **whiteboard**, an infinite board, or a
 **notebook**, paper pages to write on. Either opens in a tab or beside another
 page.
 
@@ -10,87 +10,87 @@ page.
 | Piece | Location |
 | --- | --- |
 | Drive's folder browser, its Type filter and New menu | `app/src/components/drive/` ([frontend.md](./frontend.md#drive-is-one-folder-browser-over-the-disk)) |
-| File route and editor choice (passes the file's kind to `CanvasEditor`) | `app/src/pages/subject/files/FilePage.tsx` |
-| The two kinds: extension, category, path and row helpers, reconcile plan | `app/src/lib/canvas/drawingKinds.ts`, `DrawingKind` in `app/src-tauri/src/library/files/canvases.rs` |
+| File route and editor choice (passes the file's kind to `WhiteboardEditor`) | `app/src/pages/subject/files/FilePage.tsx` |
+| The two kinds: extension, category, path and row helpers, reconcile plan | `app/src/lib/whiteboard/drawingKinds.ts`, `DrawingKind` in `app/src-tauri/src/library/files/whiteboards.rs` |
 | Extension → category for a path (`.notebook` is `notebook`) | `app/src/lib/files/libraryLayout.ts`, `app/src-tauri/src/library/layout/category.rs` |
-| Drawing file rows, reconciles and native command wrappers | `app/src/lib/canvas/files.ts` |
-| Shared ordered saves and the shared-canvas adapter | `app/src/lib/canvas/sessions.ts`, `app/src/lib/canvas/sessionRuntime.ts`, `app/src/lib/canvas/authority.ts` |
-| Desktop recovery drafts | `app/src/lib/canvas/drafts.ts`, `app/src-tauri/src/library/files/canvases/drafts.rs` |
-| Authority command wrappers and event listeners | `app/src/lib/canvas/files.ts` (`canvasAuthority`) |
-| Title, save state, recovery, conflict and pause controls, the Share button and editor host | `app/src/components/canvas/CanvasEditor.tsx` |
-| Drawing surface and its layout, label text overlay, the tool rail and the top bar's style controls | `app/src/components/canvas/CanvasSurface.tsx`, `app/src/components/canvas/CanvasToolbar.tsx`, `app/src/components/canvas/CanvasStyleBar.tsx`, `app/src/components/canvas/canvas.css` |
-| The rail's tool drawings (an outline at rest, flat colour when chosen) | `app/src/components/canvas/toolArt/` (`ToolArt.tsx` renders the parts in `pointer.ts`, `ink.ts`, `insert.ts`, `shapes.ts` and `graphs.ts`) |
-| Pointer gestures, history, keyboard commands and the notebook's page rules | `app/src/hooks/canvas/useCanvasInteraction.ts` |
-| Two-finger pan and pinch | `app/src/lib/canvas/touchViewport.ts` |
-| Pan momentum: release speed and glide | `app/src/lib/canvas/momentum.ts` |
-| What a reload resumes on this device: tool, drawing style, each drawing's camera | `app/src/lib/canvas/viewState.ts` |
-| Zoom ranges | `app/src/lib/canvas/zoom.ts` |
-| Content transactions (undo steps and shared edits) and rebasing | `app/src/lib/canvas/collaboration.ts`, `app/src/lib/canvas/clientReconciliation.ts` |
-| Device-local drawing preferences (the eraser's settings) | `app/src/lib/canvas/toolPreferences.ts` |
-| Eraser controls and cuts along the pointer sweep | `app/src/components/canvas/inspector/EraserControls.tsx`, `app/src/lib/canvas/erase.ts` |
-| What a selection box selects (release and live preview) | `app/src/lib/canvas/boxSelect.ts` |
-| Selection by a closed lasso loop | `app/src/lib/canvas/lasso.ts` |
-| Freehand pen geometry and device-local ink presets | `app/src/lib/canvas/pens.ts`, `app/src/lib/canvas/inkPresets.ts`, `app/src/components/canvas/CanvasPresetBar.tsx` |
-| The two canvases that paint a freehand stroke in progress | `app/src/lib/canvas/liveStroke.ts`, `app/src/components/canvas/CanvasSurface.tsx` |
-| Builders for matrix and coordinate axes | `app/src/lib/canvas/templates.ts` |
-| Native selection, callout and touch defaults kept off the canvas | `app/src/lib/canvas/browserSelectionGuard.ts` |
-| Canvas2D drawing and image export | `app/src/lib/canvas/render.ts`, `app/src/lib/canvas/renderSvg.ts` |
-| Text fonts, measuring, wrapping and label layout | `app/src/lib/canvas/renderText.ts` |
-| Versioned document model and coordinate helpers | `app/src/lib/canvas/model.ts`, `app/src/lib/canvas/geometry.ts` |
-| Pages: the `paper` field, `notebookPaper`, layout, templates, locked backdrops, the page camera | `app/src/lib/canvas/paper.ts` |
-| Drawing pages and templates, the element → page owner, export bounds | `app/src/lib/canvas/renderPaper.ts`, `renderPagePng` and `paintCanvas` in `app/src/lib/canvas/render.ts`, `paperSvg` in `renderSvg.ts` |
-| What the pointer reaches on a page | `app/src/lib/canvas/pageHits.ts` |
-| Page operations: add, insert, duplicate, move, remove, template, size, PDF pages | `app/src/lib/canvas/pages.ts` |
-| Page bar, page sidebar, thumbnails, per-page menu and drag to reorder | `app/src/components/canvas/pages/` |
-| What a page's picture depends on | `app/src/lib/canvas/pageFingerprints.ts` |
-| New notebook: blank paper or a copy of a library PDF | `app/src/components/canvas/NotebookDialog.tsx`, `app/src/lib/canvas/notebook.ts` |
-| A PDF's Draw button: a notebook or a canvas copy of its pages | `app/src/components/canvas/DrawOnCopy.tsx`, `app/src/lib/canvas/pdfCopy.ts` |
-| Page pictures for chat agents: change detection, writer, hook, Rust commands and manifest | `app/src/lib/canvas/snapshots.ts`, `app/src/hooks/canvas/useNotebookSnapshots.ts`, `app/src-tauri/src/library/files/canvases/snapshots.rs`, `app/src-tauri/src/library/paths/notebook.rs` |
-| Which notebooks are open, for the chat message | `app/src/lib/canvas/openNotebooks.ts` (read by `harnessSend` in `app/src/lib/harness/commands.ts`) |
+| Drawing file rows, reconciles and native command wrappers | `app/src/lib/whiteboard/files.ts` |
+| Shared ordered saves and the shared-drawing adapter | `app/src/lib/whiteboard/sessions.ts`, `app/src/lib/whiteboard/sessionRuntime.ts`, `app/src/lib/whiteboard/authority.ts` |
+| Desktop recovery drafts | `app/src/lib/whiteboard/drafts.ts`, `app/src-tauri/src/library/files/whiteboards/drafts.rs` |
+| Authority command wrappers and event listeners | `app/src/lib/whiteboard/files.ts` (`whiteboardAuthority`) |
+| Title, save state, recovery, conflict and pause controls, the Share button and editor host | `app/src/components/whiteboard/WhiteboardEditor.tsx` |
+| Drawing surface and its layout, label text overlay, the tool rail and the top bar's style controls | `app/src/components/whiteboard/WhiteboardSurface.tsx`, `app/src/components/whiteboard/WhiteboardToolbar.tsx`, `app/src/components/whiteboard/WhiteboardStyleBar.tsx`, `app/src/components/whiteboard/whiteboard.css` |
+| The rail's tool drawings (an outline at rest, flat colour when chosen) | `app/src/components/whiteboard/toolArt/` (`ToolArt.tsx` renders the parts in `pointer.ts`, `ink.ts`, `insert.ts`, `shapes.ts` and `graphs.ts`) |
+| Pointer gestures, history, keyboard commands and the notebook's page rules | `app/src/hooks/whiteboard/useWhiteboardInteraction.ts` |
+| Two-finger pan and pinch | `app/src/lib/whiteboard/touchViewport.ts` |
+| Pan momentum: release speed and glide | `app/src/lib/whiteboard/momentum.ts` |
+| What a reload resumes on this device: tool, drawing style, each drawing's camera | `app/src/lib/whiteboard/viewState.ts` |
+| Zoom ranges | `app/src/lib/whiteboard/zoom.ts` |
+| Content transactions (undo steps and shared edits) and rebasing | `app/src/lib/whiteboard/collaboration.ts`, `app/src/lib/whiteboard/clientReconciliation.ts` |
+| Device-local drawing preferences (the eraser's settings) | `app/src/lib/whiteboard/toolPreferences.ts` |
+| Eraser controls and cuts along the pointer sweep | `app/src/components/whiteboard/inspector/EraserControls.tsx`, `app/src/lib/whiteboard/erase.ts` |
+| What a selection box selects (release and live preview) | `app/src/lib/whiteboard/boxSelect.ts` |
+| Selection by a closed lasso loop | `app/src/lib/whiteboard/lasso.ts` |
+| Freehand pen geometry and device-local ink presets | `app/src/lib/whiteboard/pens.ts`, `app/src/lib/whiteboard/inkPresets.ts`, `app/src/components/whiteboard/WhiteboardPresetBar.tsx` |
+| The two `<canvas>` layers that paint a freehand stroke in progress | `app/src/lib/whiteboard/liveStroke.ts`, `app/src/components/whiteboard/WhiteboardSurface.tsx` |
+| Builders for matrix and coordinate axes | `app/src/lib/whiteboard/templates.ts` |
+| Native selection, callout and touch defaults kept off the drawing | `app/src/lib/whiteboard/browserSelectionGuard.ts` |
+| Canvas2D drawing and image export | `app/src/lib/whiteboard/render.ts`, `app/src/lib/whiteboard/renderSvg.ts` |
+| Text fonts, measuring, wrapping and label layout | `app/src/lib/whiteboard/renderText.ts` |
+| Versioned document model and coordinate helpers | `app/src/lib/whiteboard/model.ts`, `app/src/lib/whiteboard/geometry.ts` |
+| Pages: the `paper` field, `notebookPaper`, layout, templates, locked backdrops, the page camera | `app/src/lib/whiteboard/paper.ts` |
+| Drawing pages and templates, the element → page owner, export bounds | `app/src/lib/whiteboard/renderPaper.ts`, `renderPagePng` and `paintWhiteboard` in `app/src/lib/whiteboard/render.ts`, `paperSvg` in `renderSvg.ts` |
+| What the pointer reaches on a page | `app/src/lib/whiteboard/pageHits.ts` |
+| Page operations: add, insert, duplicate, move, remove, template, size, PDF pages | `app/src/lib/whiteboard/pages.ts` |
+| Page bar, page sidebar, thumbnails, per-page menu and drag to reorder | `app/src/components/whiteboard/pages/` |
+| What a page's picture depends on | `app/src/lib/whiteboard/pageFingerprints.ts` |
+| New notebook: blank paper or a copy of a library PDF | `app/src/components/whiteboard/NotebookDialog.tsx`, `app/src/lib/whiteboard/notebook.ts` |
+| A PDF's Draw button: a notebook or a whiteboard copy of its pages | `app/src/components/whiteboard/DrawOnCopy.tsx`, `app/src/lib/whiteboard/pdfCopy.ts` |
+| Page pictures for chat agents: change detection, writer, hook, Rust commands and manifest | `app/src/lib/whiteboard/snapshots.ts`, `app/src/hooks/whiteboard/useNotebookSnapshots.ts`, `app/src-tauri/src/library/files/whiteboards/snapshots.rs`, `app/src-tauri/src/library/paths/notebook.rs` |
+| Which notebooks are open, for the chat message | `app/src/lib/whiteboard/openNotebooks.ts` (read by `harnessSend` in `app/src/lib/harness/commands.ts`) |
 | `oculus read` on a notebook | `app/src-tauri/src/bin/oculus/commands/query/notebook.rs` |
-| PDF export | `app/src-tauri/src/library/files/canvases/export_pdf.rs`, `exportPdf` in `app/src/lib/canvas/platform/` |
-| Style fields, which element types take them, inspector sections | `app/src/lib/canvas/style.ts` |
-| The style bar's controls, its More styles and selection popovers, palettes and popover guards | `app/src/components/canvas/inspector/` |
+| PDF export | `app/src-tauri/src/library/files/whiteboards/export_pdf.rs`, `exportPdf` in `app/src/lib/whiteboard/platform/` |
+| Style fields, which element types take them, inspector sections | `app/src/lib/whiteboard/style.ts` |
+| The style bar's controls, its More styles and selection popovers, palettes and popover guards | `app/src/components/whiteboard/inspector/` |
 | Colour palette popover | `app/src/components/ui/color/ColorPalette.tsx` |
-| Shape labels: commit, grow rule, restyling | `app/src/lib/canvas/labels.ts` |
-| Bindable outlines | `app/src/lib/canvas/outline.ts` |
-| Arrow binding, end placement, following | `app/src/lib/canvas/bindings.ts` |
-| Arrow path (the one rendered path), curve, point edits, handles, retyping | `app/src/lib/canvas/arrow/` |
-| Elbow routing: headings, ends, grid, A*, route, fixed segments and segment drags | `app/src/lib/canvas/elbow/` |
-| Scaling a selection | `app/src/lib/canvas/resize.ts` |
-| Image import modal (and a notebook's Insert PDF pages), library PDF search and selectable pages | `app/src/components/canvas/CanvasImageDialog.tsx`, `app/src/components/canvas/CanvasLibraryPdfs.tsx`, `app/src/components/canvas/CanvasPdfPages.tsx` |
-| Image decoding and batch placement; native PDF import sessions | `app/src/lib/canvas/importMedia.ts`, `app/src/lib/canvas/mediaPlacement.ts`; `app/src/lib/canvas/importPdf.ts` |
-| Image drops, placement previews and raster paste | `app/src/hooks/canvas/useCanvasMediaDrop.ts`, `app/src/lib/ui/nativeFileDrop.ts`, `app/src-tauri/src/library/files/canvases/images.rs` |
-| What the surface takes from its host (export saving, library PDF search and opening): the browser default and the desktop's | `app/src/lib/canvas/platform/` |
-| Area captures, crop geometry and clipped PNG rendering | `app/src/lib/canvas/region.ts`, `app/src/components/canvas/CanvasRegionActions.tsx`, `app/src/components/canvas/CanvasCaptureHold.tsx` |
-| Embedded raster validation and Canvas2D image cache | `app/src/lib/canvas/imageSource.ts`, `app/src/lib/canvas/renderImages.ts` |
-| Scoped library PDF sessions and page rasterisation | `app/src-tauri/src/library/files/canvases/imports.rs` |
-| Element edits as replaceable maps, and additions stacked above an element | `app/src/lib/canvas/changes.ts` |
-| Layer order moves | `app/src/lib/canvas/layers.ts` |
-| Clipboard envelope and clone with remapped bindings | `app/src/lib/canvas/renderClipboard.ts` |
-| Retained Rust scene and WebAssembly bridge | `app/canvas-core/src/`, `app/src/lib/canvas/engine.ts` |
-| Native file commands, both kinds, and scoped paths | `app/src-tauri/src/library/files/canvases.rs` |
-| Shared-canvas authority: validator, transactions, sessions, receipts, commands | `app/src-tauri/src/library/files/canvases/authority/` |
+| Shape labels: commit, grow rule, restyling | `app/src/lib/whiteboard/labels.ts` |
+| Bindable outlines | `app/src/lib/whiteboard/outline.ts` |
+| Arrow binding, end placement, following | `app/src/lib/whiteboard/bindings.ts` |
+| Arrow path (the one rendered path), curve, point edits, handles, retyping | `app/src/lib/whiteboard/arrow/` |
+| Elbow routing: headings, ends, grid, A*, route, fixed segments and segment drags | `app/src/lib/whiteboard/elbow/` |
+| Scaling a selection | `app/src/lib/whiteboard/resize.ts` |
+| Image import modal (and a notebook's Insert PDF pages), library PDF search and selectable pages | `app/src/components/whiteboard/WhiteboardImageDialog.tsx`, `app/src/components/whiteboard/WhiteboardLibraryPdfs.tsx`, `app/src/components/whiteboard/WhiteboardPdfPages.tsx` |
+| Image decoding and batch placement; native PDF import sessions | `app/src/lib/whiteboard/importMedia.ts`, `app/src/lib/whiteboard/mediaPlacement.ts`; `app/src/lib/whiteboard/importPdf.ts` |
+| Image drops, placement previews and raster paste | `app/src/hooks/whiteboard/useWhiteboardMediaDrop.ts`, `app/src/lib/ui/nativeFileDrop.ts`, `app/src-tauri/src/library/files/whiteboards/images.rs` |
+| What the surface takes from its host (export saving, library PDF search and opening): the browser default and the desktop's | `app/src/lib/whiteboard/platform/` |
+| Area captures, crop geometry and clipped PNG rendering | `app/src/lib/whiteboard/region.ts`, `app/src/components/whiteboard/WhiteboardRegionActions.tsx`, `app/src/components/whiteboard/WhiteboardCaptureHold.tsx` |
+| Embedded raster validation and Canvas2D image cache | `app/src/lib/whiteboard/imageSource.ts`, `app/src/lib/whiteboard/renderImages.ts` |
+| Scoped library PDF sessions and page rasterisation | `app/src-tauri/src/library/files/whiteboards/imports.rs` |
+| Element edits as replaceable maps, and additions stacked above an element | `app/src/lib/whiteboard/changes.ts` |
+| Layer order moves | `app/src/lib/whiteboard/layers.ts` |
+| Clipboard envelope and clone with remapped bindings | `app/src/lib/whiteboard/renderClipboard.ts` |
+| Retained Rust scene and WebAssembly bridge | `app/whiteboard-core/src/`, `app/src/lib/whiteboard/engine.ts` |
+| Native file commands, both kinds, and scoped paths | `app/src-tauri/src/library/files/whiteboards.rs` |
+| Shared-drawing authority: validator, transactions, sessions, receipts, commands | `app/src-tauri/src/library/files/whiteboards/authority/` |
 | `files` row updates from Rust | `app/src-tauri/src/db/store/files.rs` (`touch_file_row`, `rename_file_row`, `delete_file_row`) |
-| Format and transaction parity fixtures (run by the TypeScript and Rust tests) | `app/tests/fixtures/canvas-model/`, `app/tests/fixtures/canvas-collab/`, `app/tests/lib/canvas/collabFixtures.test.ts` |
-| WebAssembly build | `app/scripts/build-canvas.mjs` |
-| Format, geometry, labels, style, bindings, layer order, pages, WASM parity and save-session tests | `app/tests/lib/canvas/` |
-| Pen, touch, undo, notebook and outside-document tests that drive the hook's handlers | `app/tests/hooks/canvas/` |
+| Format and transaction parity fixtures (run by the TypeScript and Rust tests) | `app/tests/fixtures/whiteboard-model/`, `app/tests/fixtures/whiteboard-collab/`, `app/tests/lib/whiteboard/collabFixtures.test.ts` |
+| WebAssembly build | `app/scripts/build-whiteboard.mjs` |
+| Format, geometry, labels, style, bindings, layer order, pages, WASM parity and save-session tests | `app/tests/lib/whiteboard/` |
+| Pen, touch, undo, notebook and outside-document tests that drive the hook's handlers | `app/tests/hooks/whiteboard/` |
 
 ## The kind is the file's extension
 
 | Kind | File | `files` row |
 | --- | --- | --- |
-| Canvas | `courses/<code>/…/<title>.canvas` | `category = canvas`, `file_type = canvas` |
+| Whiteboard | `courses/<code>/…/<title>.whiteboard` | `category = whiteboard`, `file_type = whiteboard` |
 | Notebook | `courses/<code>/…/<title>.notebook` | `category = notebook`, `file_type = notebook` |
 
 Either sits anywhere among the student's own files; a new one lands at the
-subject's root. `list_canvases` walks the own files at any depth
+subject's root. `list_whiteboards` walks the own files at any depth
 (`layout::own_files`), so a drawing moved into a folder keeps its row.
 
 Both are the same JSON. The kind comes from the path (`DrawingKind::of`, the
 own-file guard, and `drawingKindOfPath`) or the row's category (`drawingKindOf`), never from what
-the document holds. `FilePage` passes it to `CanvasEditor`, the companion page
+the document holds. `FilePage` passes it to `WhiteboardEditor`, the companion page
 reads it from the snapshot's `x-oculus-kind` header
 ([device-sharing.md](./device-sharing.md)), and below the editor it is one
 boolean, `notebook`.
@@ -101,30 +101,35 @@ notebook, "whiteboard" on a whiteboard (`kindNoun` and `kindTitle` in
 extension). Where no file is in view, as in Settings → Device sharing, it says
 "a whiteboard or notebook".
 
-- **Commands.** `create_canvas` and `list_canvases` take an optional
-  `kind` (`"canvas"` by default; `createDrawing`, `createCanvas`,
+- **Commands.** `create_whiteboard` and `list_whiteboards` take an optional
+  `kind` (`"whiteboard"` by default; `createDrawing`, `createWhiteboard`,
   `createNotebook` in `files.ts`). Read, write, rename and delete take a path
   and accept either kind's; a rename keeps the file's own folder and
   extension. A notebook's content must have valid `paper`
-  (`validate` in `canvases.rs`), so a write that drops it is refused.
-- **Reconciles.** Each kind has its own (`reconcileCanvases`,
+  (`validate` in `whiteboards.rs`), so a write that drops it is refused.
+- **Reconciles.** Each kind has its own (`reconcileWhiteboards`,
   `reconcileNotebooks`, both `reconcileDrawings`), planned by
   `planDrawingRows`: it adds rows for its files on disk and removes rows of
   its own category whose file is gone, and never touches the other kind's
   rows or folder. A removed row's page pictures, if any, go with it.
-- **Drive** lists notes, canvases and notebooks in the student's folders
+- **Drive** lists notes, whiteboards and notebooks in the student's folders
   beside their other files; its Type filter narrows to one kind. New offers
-  Note, Canvas and Notebook… (a dialog, below), made in the folder on screen.
+  Note, Whiteboard and Notebook… (a dialog, below), made in the folder on screen.
   Notes are ordinary Markdown documents ([editor.md](./editor.md)). A title
   is its filename; a rename keeps the database ID, and open tabs on the file
   follow it ([frontend.md](./frontend.md#path-keyed-state-follows-drive)).
 
 ## The format is one open envelope
 
-The envelope is `type: oculus-canvas`, `version: 1`, with elements, a viewport
+The envelope is `type: oculus-whiteboard`, `version: 1`, with elements, a viewport
 and background. Element coordinates are world coordinates; viewport x/y
 translate in screen units before applying zoom. Polyline points are local to
 their element's x/y. IDs are unique within one document.
+
+Both readers (`parseWhiteboardDocument`, `validate` in `authority/model.rs`)
+also take `type: oculus-canvas` and write `oculus-whiteboard` on the next
+save. A drawing file named `.canvas` is renamed to `.whiteboard` at launch or
+as Drive finds it ([library-move.md](./library-move.md#drawings-named-canvas)).
 
 The format describes geometry and appearance, independently of the editor
 implementation. Sketch and clean are per-element appearance choices. Extra
@@ -134,7 +139,7 @@ being dropped. Introducing a new geometry kind requires coordinated model,
 renderer, Rust geometry and format validation changes.
 
 Appearance and label fields are optional and validated when present; the
-version stays 1, and an absent field means its default (`CANVAS_DEFAULTS` in
+version stays 1, and an absent field means its default (`WHITEBOARD_DEFAULTS` in
 `model.ts`). A writer omits a field that equals the default.
 
 | Field | Values (default) | Applies to |
@@ -201,22 +206,22 @@ A notebook has a top-level `paper`: fixed-size pages stacked down the board.
   default), `grid`, `ruled`, `dotted`, `graph`, `cornell`, `music` or
   `isometric`. `gap` is 0 to 1000. Other fields are kept. `paperProblem` and `validate_paper` in `authority/model.rs` apply the
   same rule, and the model fixtures hold them together.
-- **A canvas ignores `paper`.** A `.canvas` that holds one keeps it: the model
+- **A whiteboard ignores `paper`.** A `.whiteboard` that holds one keeps it: the model
   validates and saves it back as written, and the file is never rewritten for
   it. Nothing else reads it: no sheets, page camera, clipping, page tools,
   pictures, chat context or PDF export, so it opens and exports exactly like
-  the same canvas without it. Every page behaviour asks `notebookPaper(document,
+  the same whiteboard without it. Every page behaviour asks `notebookPaper(document,
   notebook)` rather than reading `paper`.
 - **Sharing.** A change to the pages travels in a transaction as
   `paper: { before, after }`, both whole papers, and merges like the
   background: it applies when the current paper equals either side, and
   otherwise fails with `conflict-background`. Two devices editing pages at once
   therefore conflict, and the draft is kept. A document with no paper never
-  gains or loses one through a transaction, and a canvas never sends one.
+  gains or loses one through a transaction, and a whiteboard never sends one.
 
 ### The pages bound the camera and the pen
 
-- **Drawing.** `paintCanvas` paints each page as a white sheet with a soft
+- **Drawing.** `paintWhiteboard` paints each page as a white sheet with a soft
   shadow on the desk (the document's `background`, `NOTEBOOK_DESK` grey for a
   new notebook), then its template, then the elements, each clipped to its own
   page; a run of elements on one page shares one clip. The whiteboard's dot
@@ -234,7 +239,7 @@ A notebook has a top-level `paper`: fixed-size pages stacked down the board.
   most 40% of the view's height may show desk above the first page or below
   the last. Zoom runs from 60% of the fitted zoom to 800% (`zoomLimits`); wheel,
   pinch and buttons share it, and a whiteboard keeps 10% to 800%
-  (`CANVAS_ZOOM_LIMITS`). A resize or new paper from elsewhere re-clamps.
+  (`WHITEBOARD_ZOOM_LIMITS`). A resize or new paper from elsewhere re-clamps.
   A touch or pen pan, one finger or two, released while moving glides on and
   decelerates like iOS scrolling (`momentum.ts`); it stops at the end of the
   pages, and the next touch, wheel or camera button stops it where it is (a
@@ -260,8 +265,8 @@ A notebook has a top-level `paper`: fixed-size pages stacked down the board.
   the shown part of an element inside it (`shownBounds`).
 - **Export.** PNG and SVG cover the pages alone, each element clipped to its
   page, and an area capture clips the same way. PDF (desktop only,
-  `CanvasPlatform.exportPdf`) draws each page on white at 2.5 pixels a point
-  and `canvas_export_pdf` writes one PDF page per notebook page at its size:
+  `WhiteboardPlatform.exportPdf`) draws each page on white at 2.5 pixels a point
+  and `whiteboard_export_pdf` writes one PDF page per notebook page at its size:
   the picture is stored as PNG's own compressed rows (a Flate stream with a
   PNG predictor), so nothing is recompressed.
 
@@ -271,7 +276,7 @@ The bar at the bottom shows the page in view with steps either side and
 toggles the **Pages** sidebar: a column of thumbnails at each page's
 proportions, the page in view marked. A click goes to a page. **Add page** at
 the end of the list (`AddPageMenu`) offers a new page, at the last page's
-template and size, or pages from a library PDF (`CanvasImageDialog` with
+template and size, or pages from a library PDF (`WhiteboardImageDialog` with
 `pdfPages`); the companion has no library, so there it adds the page straight
 away. Each thumbnail's ⋯ menu adds a page before or after, duplicates,
 changes the template or size (A4 and Letter, portrait or landscape) and
@@ -280,7 +285,7 @@ page's template to the whole notebook as one undo step. Dragging a
 thumbnail reorders the pages on pointer events. A mouse lifts after a few
 pixels and a finger or Pencil after a short hold. The list scrolls near its
 edges (`usePageReorder`). On a
-narrow canvas the sidebar lies over the drawing like a drawer, behind it a dim
+narrow pane the sidebar lies over the drawing like a drawer, behind it a dim
 scrim that closes it when pressed.
 
 - Every operation in `pages.ts` moves elements with their page, keeping each
@@ -302,14 +307,14 @@ scrim that closes it when pressed.
 New file → Notebook… opens a dialog with two starts. **Blank paper** is one A4
 page, portrait or landscape, in a template. **From a PDF** lists the subject's
 PDFs and copies their pages: each is rendered as for any PDF import
-(`canvas_open_library_pdf`, `canvas_render_pdf_page`) and laid on its own page
+(`whiteboard_open_library_pdf`, `whiteboard_render_pdf_page`) and laid on its own page
 as a `locked` image the size of the PDF page, so the original is only read and
 the notebook outlives it. A PDF over 100 pages, or whose pages come to over
 64 MB, is refused with a sentence that says so (`readPdfPages`).
 
 A PDF's own page has a **Draw** button (`DrawOnCopy`) with two choices, each
 a copy named after the PDF and opened beside it. **Notebook** is the copy
-above. **Canvas** is a `.canvas` with no paper holding the PDF pages as
+above. **Whiteboard** is a `.whiteboard` with no paper holding the PDF pages as
 ordinary, unlocked images at their size, stacked top to bottom with a gap like
 an image import, to sketch around (`boardFromPages`).
 
@@ -318,7 +323,7 @@ an image import, to sketch around (`boardFromPages`).
 An agent reads neither file: it is JSON holding every stroke and the
 assignment's pictures. While a notebook is open, `useNotebookSnapshots` redraws
 the pages that changed 1.5 seconds after the content stops changing and sends
-only those to `canvas_write_page_snapshots`. A canvas gets none of this.
+only those to `whiteboard_write_page_snapshots`. A whiteboard gets none of this.
 
 - **Change detection** is by page, from the elements that touch it
   (`pageFingerprints`), so a stroke on page 2 redraws page 2, and a pan, a
@@ -326,7 +331,7 @@ only those to `canvas_write_page_snapshots`. A canvas gets none of this.
   the screen does, clipped, without ink from the next page. Writes run one at a
   time and the last scheduled document wins; a failed write is shown in the
   editor and tried again on the next change.
-- **Storage** is `canvas-pages/<file id>/` under the library: `page-NNN.png`
+- **Storage** is `whiteboard-pages/<file id>/` under the library: `page-NNN.png`
   per page (2 pixels a point, about 1190 × 1680 for A4) and `pages.json`, the
   notebook's path, page count and, for each page, its id, picture and the Unix
   time it was last redrawn (`library::paths::notebook`). It is keyed by the
@@ -337,7 +342,7 @@ only those to `canvas_write_page_snapshots`. A canvas gets none of this.
   and a symlinked folder.
 - **`oculus read <notebook>`** prints each page's picture path and how long
   ago it was redrawn; `--pages` picks pages. A notebook never opened since it
-  was made has no pictures and the command says so; a canvas is not text and
+  was made has no pictures and the command says so; a whiteboard is not text and
   says so. The agent opens the PNG with its own image tool, and a chat message
   names the open notebooks and the page in view
   ([harness.md](./harness.md#a-notebook-the-student-has-open-rides-the-prompt)).
@@ -360,7 +365,7 @@ applies the stroke's opacity once, so a marker can cross itself without
 darkening. Other strokes use the scene's element renderer to repaint the
 whole stroke on the tip canvas. A notebook clips both canvases to the same
 page as the committed stroke, replaying the ink if its growing bounds
-change which page owns it. All three backing stores use the drawing canvas's measured
+change which page owns it. All three backing stores use the scene canvas's measured
 rectangle and device pixel ratio. A resize or camera move replays the ink
 with the new transform.
 
@@ -371,7 +376,7 @@ coordinates for subsequent queries. There is no Tauri round trip for a pointer e
 is capped at eight scene arrays independently of undo history.
 
 Each shape is a record of 14 floats (`engine.ts`, documented on
-`CanvasScene::new` in `app/canvas-core/src/lib.rs`): kind, x, y, width, height,
+`WhiteboardScene::new` in `app/whiteboard-core/src/lib.rs`): kind, x, y, width, height,
 strokeWidth, filled, point offset, point count, `heads`, startAngle, startSize,
 endAngle, endSize. `heads` is a bitfield: 1 for a head at the first point, 2 at
 the last, so Rust tests a head only at the ends that draw one. An arrow’s
@@ -387,7 +392,7 @@ implementation available. Tests compare queries against the actual compiled
 WASM, including negative coordinates, transparent shapes, labelled shapes and
 start and end arrowheads.
 
-`bun canvas-core/bench.ts` measures geometry queries separately from rendering.
+`bun whiteboard-core/bench.ts` measures geometry queries separately from rendering.
 Its synthetic 10,000-shape grid gives approximately 6 ms for the first scene
 transfer/index build, 0.45 ms for 2,000 retained hit queries and 0.86 ms for
 500 viewport queries on the development machine. These are geometry timings,
@@ -401,7 +406,7 @@ in-flight write are drained before Saved is published, and an update that lands
 as a save finishes is saved by that same flush. The debounce batches completed
 changes rather than sending every pointer point to disk.
 
-A recovery record under `recovery/canvases/<file-id>.json` in the library
+A recovery record under `recovery/whiteboards/<file-id>.json` in the library
 records the document and its base disk text. Native commands write it atomically
 without the browser storage quota. Existing localStorage drafts migrate only
 after a successful disk write. Recovery operations are ordered separately from
@@ -410,7 +415,7 @@ It is validated before restore. When the disk has changed independently,
 the editor offers Use recovery copy or Keep disk version; recovery never
 silently overwrites a newer file. Invalid recovery stays recoverable until
 explicitly discarded. Save errors keep the draft and show Retry save. A
-recovery-storage failure is a separate notice over the canvas: it neither
+recovery-storage failure is a separate notice over the drawing: it neither
 marks a successful document save as failed nor resizes the drawing area.
 
 Rename flushes pending edits before moving the file. Unmount and pagehide
@@ -419,38 +424,38 @@ so reopening reads disk again. Delete runs through the same queue and marks
 the session deleted, preventing a late autosave from recreating the file.
 
 Native writes stage a sibling temporary file and rename it into place after
-fsync. File commands accept only a four-part subject canvas or notebook path
-and reject symlinks in its components. Canvas paths use their own guard; note mutation
+fsync. File commands accept only a four-part subject whiteboard or notebook path
+and reject symlinks in its components. Drawing paths use their own guard; note mutation
 commands remain scoped to notes.
 
-## A shared canvas has one writer
+## A shared drawing has one writer
 
-While a canvas is shared, the canvas authority
-(`library/files/canvases/authority/`) is the only writer of its file. Desktop
+While a drawing is shared, the whiteboard authority
+(`library/files/whiteboards/authority/`) is the only writer of its file. Desktop
 panes and paired devices send content transactions (`collaboration.ts`:
 per-element `before`/`after`, an optional layer order, background and a notebook's paper); the
 viewport never travels in one. An added element (`before: null`) goes on top
 unless the edit names `afterId`, the element just below it in the sender's
 scene (`null` for the bottom); it is then inserted above that element, or on
-top if that element is gone. `diffCanvasContent` sets `afterId` only on an
+top if that element is gone. `diffWhiteboardContent` sets `afterId` only on an
 addition with an older element above it, such as an undone delete, so
 additions on top from two devices both land, in arrival order. `afterId` on an
 edit that is not an addition, or naming the edit's own ID, is invalid. A session is keyed by the file's database ID
-and starts with `canvas_authority_open`, given the pane's flushed text, which
-must equal the file on disk. The native registry fences ordinary `write_canvas`,
-`rename_canvas` and `delete_canvas` commands against a session owning the same
+and starts with `whiteboard_authority_open`, given the pane's flushed text, which
+must equal the file on disk. The native registry fences ordinary `write_whiteboard`,
+`rename_whiteboard` and `delete_whiteboard` commands against a session owning the same
 path, including a paused session. Opening and whole-file mutations take the
 same registry lock, so a delayed desktop autosave cannot overwrite shared
 changes between the ownership check and the write. Drive's move, rename and
 delete take the same lock for their disk step (`while_unshared`) and refuse a
-folder holding a shared canvas. One path cannot have two
-sessions under different file IDs. Outside a session, `write_canvas` saves as
+folder holding a shared drawing. One path cannot have two
+sessions under different file IDs. Outside a session, `write_whiteboard` saves as
 above.
 
 - One lock per session. A commit validates the transaction, applies it to the
   canonical document, writes the file, bumps the revision and then broadcasts
   `{fileId, epoch, revision, clientId, transaction}`: the Tauri event
-  `canvas-authority-change` to the main webview, and the in-process
+  `whiteboard-authority-change` to the main webview, and the in-process
   `Subscribers` list a network transport reads. A conflict, invalid input or
   failed write changes nothing.
 - Preconditions compare only the touched objects, by value: numbers as numbers
@@ -466,9 +471,9 @@ above.
   epoch is `session-ended`.
 - Before every overwrite the authority compares the file's SHA-256 with the
   bytes it last read or wrote. On a mismatch it writes nothing: the session
-  pauses (`external-edit`, and a `canvas-authority-state` event), keeping the
+  pauses (`external-edit`, and a `whiteboard-authority-state` event), keeping the
   outside version on disk and its own document in memory until
-  `canvas_authority_resolve_external` adopts the disk version (broadcast as a
+  `whiteboard_authority_resolve_external` adopts the disk version (broadcast as a
   change with no client) or keeps its own. Another process can still write
   between the check and the rename: this guards cooperating editors, it is not
   a cross-process compare-and-swap.
@@ -488,27 +493,27 @@ Errors are `{code, message}` with `code` one of `conflict-shape`,
 `io`.
 
 The Rust validator and transaction code port `model.ts`, `imageSource.ts` and
-`collaboration.ts`. `app/tests/fixtures/canvas-model/` and `canvas-collab/`
+`collaboration.ts`. `app/tests/fixtures/whiteboard-model/` and `whiteboard-collab/`
 hold the cases both test suites run, so the two cannot drift. The authority
-writes the bytes `serializeCanvasDocument` writes: serde_json keeps key order
+writes the bytes `serializeWhiteboardDocument` writes: serde_json keeps key order
 (`preserve_order`) and parses floats exactly (`float_roundtrip`), and
 `authority/format.rs` prints numbers by JavaScript's rules. serde_json refuses
 two things `JSON.parse` reads, a lone surrogate escape and nesting deeper than
-128 levels; such a canvas cannot be shared.
+128 levels; such a drawing cannot be shared.
 
 ## Sharing turns the session's saves into commits
 
-Loading a desktop canvas first probes `canvas_authority_snapshot`, with its
+Loading a desktop drawing first probes `whiteboard_authority_snapshot`, with its
 event listener and whole-file fence already installed. If a native session
 survived a webview reload, the desktop joins its canonical snapshot and replays
 changes buffered during the probe. This happens without opening Share, and
 does not write the disk file. Only `session-ended` means no authority owns the
-canvas and ordinary file loading and saves may resume; other probe failures
+file and ordinary file loading and saves may resume; other probe failures
 surface as load errors. Recovery drafts still require the usual explicit
 choice. Refreshing an existing share also rejoins a detached desktop session.
 
 `attachAuthority()` runs on the session's queue: it finishes the whole-file
-flush, then calls `canvas_authority_open` with that flushed text and switches
+flush, then calls `whiteboard_authority_open` with that flushed text and switches
 the session to commit mode. From the moment the open is sent until the file is
 reread after sharing, the session is fenced: its whole-file write throws, a
 save queued in that window writes nothing, and the step holding the fence saves
@@ -521,16 +526,16 @@ pane unmounts, until it is detached.
 
 In commit mode a save diffs the session's canonical document (the authority's
 document at its last known revision) against the panes' document
-(`diffCanvasContent`) and commits that transaction under the session's
+(`diffWhiteboardContent`) and commits that transaction under the session's
 `clientId`, an increasing `seq` and a fresh `opId`; a viewport that differs from
 the last one sent travels with it, or alone with no edits. One op is in flight.
 An ack whose revision follows the canonical one applies its transaction; one
 already covered changes nothing; any other (a replay, or a gap) refetches
-`canvas_authority_snapshot`. A failure with no code may not have reached the
+`whiteboard_authority_snapshot`. A failure with no code may not have reached the
 authority, so the same op is resent unchanged on retry and a replay answers it.
 A refused op frees its `seq`.
 
-`canvas-authority-change` events, our own included, advance the canonical
+`whiteboard-authority-change` events, our own included, advance the canonical
 document in revision order. Each advance redraws the panes as the canonical
 document with this desktop's unsent edits rebased on top
 (`reconcileClientDocument`) and this desktop's viewport, so a merge never
@@ -543,11 +548,11 @@ which is rebased under the unsent edits the same way.
 
 - **Conflict.** A `conflict-*` refusal, or a remote change that touches a shape
   with an unsent edit, keeps the draft (and its recovery copy), stops commits
-  and makes the surface inert. The editor offers Use shared canvas (drop the
-  unsent change and show the canonical document) and Save draft as copy (a new
-  canvas in the same subject holding the draft).
+  and makes the surface inert. The editor offers Use shared whiteboard, or
+  notebook (drop the unsent change and show the canonical document), and Save
+  draft as copy (a new drawing in the same subject holding the draft).
 - **Paused.** `external-edit` pauses commits; edits keep collecting. Use file
-  on disk and Keep my version call `canvas_authority_resolve_external`
+  on disk and Keep my version call `whiteboard_authority_resolve_external`
   (`adopt-disk`, `keep-ours`) and then commit the unsent edits.
 - **Stale op.** The session takes a new `clientId`, refetches the snapshot and
   commits again.
@@ -555,10 +560,10 @@ which is rebased under the unsent edits the same way.
   whole-file path after rereading the file. Unsent edits become the Use
   recovery copy / Keep disk version choice; a recovery copy made while shared
   never matches the disk text, so after a restart it is offered, never applied.
-- **Rename and delete** go through `canvas_authority_rename` and
-  `canvas_authority_delete`. The authority updates the `files` row on a
+- **Rename and delete** go through `whiteboard_authority_rename` and
+  `whiteboard_authority_delete`. The authority updates the `files` row on a
   background thread; the wrappers in `files.ts` update it too and announce
-  `CANVASES_CHANGED_EVENT`, so Drive's reload never reads the old row.
+  `WHITEBOARDS_CHANGED_EVENT`, so Drive's reload never reads the old row.
 
 The status line reads Sharing, Sharing paused or Sharing ended before the save
 state.
@@ -593,18 +598,18 @@ scales proportionally around the opposite edge's midpoint. A single line or
 arrow has [point-editing handles](#arrows-are-sharp-curved-or-elbow-paths) in
 place of the selection frame (`selectionFrame` in `render.ts`).
 
-The canvas root scopes shortcuts and participates in native Edit menu
-routing. A visible note editor must not claim undo while a canvas owns focus.
+The editor root scopes shortcuts and participates in native Edit menu
+routing. A visible note editor must not claim undo while a drawing owns focus.
 Text inputs keep their own native editing behavior. Pressing the drawing takes
 focus and clears retained DOM selections, so WebKit cannot send clipboard
 commands to a chat's old contenteditable caret. Drawing gestures capture
 the active pointer and suppress WebKit text selection: `installBrowserSelectionGuard`
-on the canvas root cancels `selectstart` and `contextmenu` outside text fields and
+on the editor root cancels `selectstart` and `contextmenu` outside text fields and
 native touch defaults on the drawing element. In the companion these touch
 listeners attach to the page body, with a target check for this surface's canvas,
 so touch tracking covers a stable ancestor across canvas repaints. The
 desktop listeners stay on the editor root. The companion opts into
-`suppressNativeGestures` on `CanvasSurface`: Safari's `gesturestart`,
+`suppressNativeGestures` on `WhiteboardSurface`: Safari's `gesturestart`,
 `gesturechange` and `gestureend` defaults are cancelled there so native
 pinch/rotation does not compete with the Pointer Events camera. The desktop
 leaves those events alone for WebKit trackpad zoom. This suppresses
@@ -614,11 +619,11 @@ canvas and editor also declare `touch-action: none`; the canvas is not draggable
 
 PNG and SVG export cover the whole drawing with padding, excluding editor
 chrome, selection, binding hints and grid. The surface saves an export and
-opens a PDF for import through `useCanvasPlatform()`
-(`lib/canvas/platform/`), so its own imports never reach Tauri. The default is
+opens a PDF for import through `useWhiteboardPlatform()`
+(`lib/whiteboard/platform/`), so its own imports never reach Tauri. The default is
 a plain browser's: an export downloads, and Choose PDF says to open Oculus
 desktop while image files still import. The desktop root (`main.tsx`) provides
-`tauriCanvasPlatform`, whose export command opens a native Save dialog and
+`tauriWhiteboardPlatform`, whose export command opens a native Save dialog and
 writes only the path selected there. Its library search uses
 `searchLibraryFiles` with a PDF type filter; its PDF opener is `importPdf.ts`. SVG text and attribute
 values are escaped. PNG export caps its dimensions to bound bitmap allocation.
@@ -684,7 +689,7 @@ larger of 2 screen pixels and half the stroke's width. If no piece survives,
 the stroke is deleted. Images and locked elements are never erased.
 
 During the gesture, the scene paints erased parts at a quarter of their
-opacity (`ghosts` in `paintCanvas`) and the kept pieces at full style opacity.
+opacity (`ghosts` in `paintWhiteboard`) and the kept pieces at full style opacity.
 The eraser passes over the ghosts. Release commits the whole gesture as one
 undo step through `commitChanges`. Escape, a cancelled pointer or a second
 finger discards the preview.
@@ -692,8 +697,8 @@ finger discards the preview.
 ## Undo is per pane and touches only its own edits
 
 Each committed edit records the content transaction from the scene before it
-to the scene after it, and its inverse (`diffCanvasContent`). Undo and redo
-apply that transaction to the current scene (`applyCanvasTransaction`), so a
+to the scene after it, and its inverse (`diffWhiteboardContent`). Undo and redo
+apply that transaction to the current scene (`applyWhiteboardTransaction`), so a
 shape someone else added since stays. If they changed a shape the step would
 restore, the step is refused and dropped, and the surface shows why inline;
 it never overwrites or removes their work. Undo leaves the camera alone, waits
@@ -715,7 +720,7 @@ The camera belongs to the pane. Without `onViewportChange`, pan and zoom are
 saved in the document (a pan when it ends, wheel and buttons after 180 ms) as
 the file's initial view. With it, they go only to that callback and never
 through `onChange`, for a host that keeps its camera local. The desktop editor
-and the companion both pass one, so scrolling never marks a canvas unsaved; the
+and the companion both pass one, so scrolling never marks a drawing unsaved; the
 camera reaches the file only inside the next real edit's document.
 
 A reload or reopen resumes on the same device (`viewState.ts`, localStorage):
@@ -726,7 +731,7 @@ written 400 ms after it stops moving and on `pagehide`, and comes back at the
 first real size in place of a notebook's first fit, then clamped like any
 other camera. Damaged fields fall back to the defaults one by one.
 
-## Images and PDF pages are saved inside the canvas
+## Images and PDF pages are saved inside the drawing
 
 Add image opens a modal for local PNG, JPEG, WebP or GIF images, or PDFs
 already in the Oculus library. Choose PDF opens an in-app search by filename
@@ -743,12 +748,12 @@ the desktop platform's webview listener and bounded raster reader; decoded
 images preview their exact placement before release. Browser file drags show
 a placement marker until file bytes become available on drop. Embedded or
 local-asset images dragged from chat use the same decoder. Pasted raster images
-are inserted at the view centre; canvas clipboard envelopes keep their cloning
+are inserted at the view centre; drawing clipboard envelopes keep their cloning
 and binding rules. Text fields keep their own paste behavior. Async reads are
 cancelled on replacement or unmount, and errors leave the drawing intact.
 
 An image element stores a base64 raster `dataUrl`, its source name and natural
-dimensions alongside its world bounds. The `.canvas` stays self-contained:
+dimensions alongside its world bounds. The `.whiteboard` stays self-contained:
 reopening, copying and exporting do not depend on the original source file.
 Remote URLs and SVG input are rejected. Images use their rectangular bounds
 for selection and culling in both the JavaScript reference and Rust core.
@@ -759,7 +764,7 @@ that deletion is one undo step.
 
 ### Capture duplicates an area; cropping trims an image
 
-**Capture area** (C) drags a rectangle anywhere on the canvas. The resulting
+**Capture area** (C) drags a rectangle anywhere on the drawing. The resulting
 PNG includes the background, a notebook's pages, images and annotations inside that area,
 clipped at its edges, without tool overlays or the whiteboard grid. The area
 stays selected with a dashed border and eight handles; the rest of the viewport
@@ -771,7 +776,7 @@ writes a PNG to the system
 clipboard where the browser supports image writes. Paste inserts that image
 through the ordinary image-paste path. Clipboard encoding starts as a promise during the button click so Safari keeps user
 activation while images decode. LAN HTTP pages cannot use the system image
-clipboard; their error points to Duplicate for copying within the canvas.
+clipboard; their error points to Duplicate for copying within the drawing.
 
 **Duplicate** beside Copy adds the captured pixels as a selected image,
 offset 24 units and ready to move. It works on a LAN HTTP page without system
@@ -842,25 +847,25 @@ box, the shape grows downward on commit and when the font size or family
 changes; it never shrinks to fit. Resizing a labelled shape rewraps the label
 and keeps its font size (standalone text scales its font).
 
-Fonts are the `CANVAS_FONT_STACKS` in `renderText.ts`. Sans and mono repeat
+Fonts are the `WHITEBOARD_FONT_STACKS` in `renderText.ts`. Sans and mono repeat
 `--font-sans` and `--font-mono` from `app/src/styles/theme.css` because
 Canvas2D and SVG cannot read CSS variables; edit both together. The overlay
 textarea, Canvas2D, SVG and the width measurer use the same stacks.
 
 ## The bars are docked beside the drawing
 
-`CanvasSurface` docks the tool rail at the left and places the top bar
+`WhiteboardSurface` docks the tool rail at the left and places the top bar
 above the drawing. The notebook's Pages sidebar opens between the rail and
 the editor root. The sidebar and rail sit outside the root, which scopes
 shortcuts and clipboard commands. Tool and figure buttons hand focus back
 to the root.
 
-- **The rail** (`CanvasToolbar`) is a 52px column (`--canvas-rail-width`) in
+- **The rail** (`WhiteboardToolbar`) is a 52px column (`--whiteboard-rail-width`) in
   five groups: Select, Lasso, Grab, Capture area; Pen, Highlighter, Eraser;
   Text, Image, Matrix; Rectangle, Oval, Diamond, Arrow, Line; X-Y axes, X-Y-Z
   axes. It scrolls when the pane is shorter than the column. Each entry's key
   is shown on it and in its tooltip: S L G C, P H E, T I M, R O D A N, Y Z;
-  Shift+G toggles a canvas's grid. Grab is the `hand` tool. Image opens the
+  Shift+G toggles a whiteboard's grid. Grab is the `hand` tool. Image opens the
   image picker. Matrix inserts nine squares in the current shape style,
   and the axes insert arrows in x red, y green and z blue. They are ordinary
   rectangles and arrows placed at the centre of the view, shifted onto the
@@ -874,18 +879,18 @@ to the root.
 - **The top bar** holds the style controls on the left
   ([below](#the-inspector-shows-what-applies-to-the-selection)) and, on the
   right, undo and redo, zoom (out, the percentage, in, fit), the grid on a
-  canvas, export and the shortcuts list.
+  whiteboard, export and the shortcuts list.
 - **The drawing area** holds the scene, live ink, overlays and the
   notebook's bottom page bar. The scene canvas's box sets the dimensions
   and coordinates for painting, pointer events and image drops.
 - **Narrow panes give up parts of the top bar** by the editor root's width
-  (`canvas.css`): the zoom percentage and fit at 1180px or less, the pen's
+  (`whiteboard.css`): the zoom percentage and fit at 1180px or less, the pen's
   name at 1100px, the sixth colour pick and the hint at 1000px, every pick but
   the current-colour button at 860px, the exact font-size field and the
   shortcuts at 760px. The style half then scrolls sideways with faded edges.
 - **The companion** keeps 100px at the bar's right end for its expand and
   debug buttons; expanded, the rail and the bar start below the status bar
-  and the page bar clears the home indicator (`--canvas-bottom-edge`,
+  and the page bar clears the home indicator (`--whiteboard-bottom-edge`,
   `app/src/companion/companion.css`).
 
 ## The inspector shows what applies to the selection
@@ -910,12 +915,12 @@ element of those kinds. Clicking a non-ink element adopts its look as the
 default. Freehand ink uses the active tool preset. Opacity previews while
 dragging and commits one undo step on release.
 
-The inspector is `CanvasStyleBar.tsx`, the left half of the top bar
+The inspector is `WhiteboardStyleBar.tsx`, the left half of the top bar
 ([above](#the-bars-are-docked-beside-the-drawing)), shown when sections apply,
 an ink tool is chosen or the eraser is. With the eraser it holds the eraser's
 settings (`inspector/EraserControls.tsx`, [above](#the-eraser-takes-whole-elements-or-cuts-strokes)).
 The inline controls include the ink presets, stroke colour, pen menu, Fill,
-stroke width and font size. The pen menu draws samples with the canvas's
+stroke width and font size. The pen menu draws samples with the drawing's
 pen geometry and offers eight writing pens or two markers according to the
 current pen. The width slider previews while dragged. It and the numeric
 field use 0.5-unit steps from 0.5 to 30, or up to 60 for a marker. Font
@@ -925,20 +930,20 @@ selection the bar ends with its actions (`inspector/SelectionActions.tsx`).
 **Crop image** appears for a lone image. **Layer** opens the layer moves,
 and **Delete** removes the selection. Popovers open below the bar.
 
-The page bar and the style popovers share `.canvas-chrome` in `canvas.css`: a
+The page bar and the style popovers share `.whiteboard-chrome` in `whiteboard.css`: a
 translucent, blurred card that turns nearly opaque under the pointer or
 keyboard focus. One file per control lives in
-`app/src/components/canvas/inspector/`. The colour shows five top picks (six
+`app/src/components/whiteboard/inspector/`. The colour shows five top picks (six
 fluorescent ones for a marker) and a button for the current colour
 (`ColorRow`); that button and Fill open
-`ColorPalette` (`app/src/components/ui/color/`) on the canvas palette in
+`ColorPalette` (`app/src/components/ui/color/`) on the drawing palette in
 `inspector/palette.ts`: a grid of hues, the shades of the hue the colour
 belongs to (`colorShades`), the hex code and the full picker behind Custom.
 Strokes pick a hue's base and fills its palest shade. Edges is a Sharp/Round
 pair and Arrow type a Sharp/Curved/Elbow trio. Each arrow end is a button
 showing its head that opens a grid of the six types. These popovers focus
 themselves rather than their first option, leave focus in an open text
-overlay, and keep their keys from the canvas's shortcuts
+overlay, and keep their keys from the drawing's shortcuts
 (`inspector/popoverGuards.ts`). Arrowhead glyphs are drawn by
 `arrowheadShape`, so the picker previews exactly what the arrow gets. A press
 on the bar or its popovers outside a field (`keepTextFocus`) keeps focus in an
@@ -960,10 +965,10 @@ The style bar's Layer popover and the shortcuts run the same `reorder` in the
 hook, which publishes the reordered document as one undo step. It cannot go
 through `commitChanges`, because `applyElementChanges` keeps order. ⌘] and ⌘[
 step forward and backward, ⌘⇧] and ⌘⇧[ go to the front and back. The View
-menu's Back and Forward own ⌘[ and ⌘], so the canvas claims them through
+menu's Back and Forward own ⌘[ and ⌘], so the drawing claims them through
 `onBackForward` (`app/src/lib/menu/backForwardRouting.ts`) while it has focus
 and a selection; with nothing selected they step the pane's history as
-elsewhere. The ⇧ variants reach the canvas's own keydown.
+elsewhere. The ⇧ variants reach the drawing's own keydown.
 
 ## Arrow ends bind to shapes and follow them
 
@@ -1003,7 +1008,7 @@ they affect, re-placed. A change that removes a target drops the binding on
 that end and leaves the arrow where it is. Moving an arrow (drag or nudge)
 without its target in the selection drops that end’s binding (`moveElements`).
 Duplicate and paste remap bindings to elements cloned in the same batch and
-drop the rest (`cloneCanvasElements`).
+drop the rest (`cloneWhiteboardElements`).
 
 Every element edit goes through the hook’s two funnels: `previewChanges` for
 gesture previews (into the overrides map) and `commitChanges` for committed
@@ -1128,7 +1133,7 @@ the tip-to-wing segments of any head type, and a `none` end has no head to hit.
 
 ## Build and verification include the WASM asset
 
-`bun run canvas` builds the standalone Rust crate and wasm-bindgen glue.
+`bun run whiteboard` builds the standalone Rust crate and wasm-bindgen glue.
 The installed CLI version must match the pinned crate, and the
 `wasm32-unknown-unknown` target must be installed. Generated pkg output is
 ignored. Predev, build and test run the builder; CI checks native Rust tests,
@@ -1136,21 +1141,21 @@ formatting and Clippy as well as frontend format and WASM parity tests.
 
 ## Gotchas
 
-- Read pages through `notebookPaper(document, notebook)`, never `document.paper`; a `.canvas` may hold paper and must still behave as a whiteboard.
-- Never decide the kind from the document: it is the path's (`DrawingKind::of`, `drawingKindOfPath`), or a canvas holding paper turns into a notebook.
+- Read pages through `notebookPaper(document, notebook)`, never `document.paper`; a `.whiteboard` may hold paper and must still behave as a whiteboard.
+- Never decide the kind from the document: it is the path's (`DrawingKind::of`, `drawingKindOfPath`), or a whiteboard holding paper turns into a notebook.
 - Replace elements and their array immutably; the retained spatial scene and Path2D cache use identity.
 - Keep gesture previews separate from the committed scene or every pointer move rebuilds the BVH.
 - Never write the scene during a gesture: previews live in overrides, so an outside document can replace the base underneath and the gesture commits onto it.
-- Key the surface by file (`FilePage` keys `CanvasEditor` by file ID); a different file's document is otherwise taken as an outside update and keeps the old undo history.
+- Key the surface by file (`FilePage` keys `WhiteboardEditor` by file ID); a different file's document is otherwise taken as an outside update and keeps the old undo history.
 - Route every element edit through `previewChanges` / `commitChanges`; writing `elements` directly leaves bound arrows detached from a moved target. Layer order is the one exception (`reorder`), since it moves no element.
-- Canvas2D font names must match the loaded `"Inter Variable"` family (`CANVAS_FONT_STACKS`); a wrong name measures and wraps with a fallback font, and the label cache is dropped on `document.fonts` `loadingdone` for the same reason.
-- Keep `CANVAS_FONT_STACKS` in step with `theme.css`; drift makes the canvas, the overlay textarea and SVG export disagree on wrapping.
+- Canvas2D font names must match the loaded `"Inter Variable"` family (`WHITEBOARD_FONT_STACKS`); a wrong name measures and wraps with a fallback font, and the label cache is dropped on `document.fonts` `loadingdone` for the same reason.
+- Keep `WHITEBOARD_FONT_STACKS` in step with `theme.css`; drift makes Canvas2D, the overlay textarea and SVG export disagree on wrapping.
 - A hollow labelled shape counts as filled for hit testing in both the JS reference and the WASM record; change one and the parity test fails.
 - Re-place a line or arrow’s points with `throughPoints`; setting x/y by hand shifts an elbow arrow’s fixed segments, which are local to x/y.
 - A new arrow path kind must come out of `linePath`; computing a path elsewhere makes bounds, hit testing and the WASM scene disagree with what is drawn.
 - Add a new optional field to `STYLE_KEYS` and `KEY_TYPES` in `style.ts` as well as to `validate` in `model.ts`, or the inspector cannot patch it.
 - Unknown format versions must fail before writing; partial loading must never erase unfamiliar data.
 - Rename and delete through the shared session so pending writes cannot target an obsolete path.
-- Native menu shortcuts need menu routing (`editRouting.ts`, `backForwardRouting.ts`): macOS gives the menu its accelerators first, so the canvas's keydown never sees ⌘Z, ⌘[ or ⌘].
+- Native menu shortcuts need menu routing (`editRouting.ts`, `backForwardRouting.ts`): macOS gives the menu its accelerators first, so the drawing's keydown never sees ⌘Z, ⌘[ or ⌘].
 - Reset the pending frame sentinel when cancelling RAF during effect cleanup, or StrictMode replay cannot schedule a paint.
 - Geometry benchmarks do not measure Canvas2D painting or end-to-end interaction latency.
