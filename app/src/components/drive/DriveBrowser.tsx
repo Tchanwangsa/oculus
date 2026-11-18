@@ -19,7 +19,7 @@ import { isFlat, NO_FILTERS, type DriveFilters } from "@/lib/drive/filters";
 import { itemEditable, itemZone, type DriveItem } from "@/lib/drive/items";
 import { itemHref, openInNewTab, openItem, revealItem } from "@/lib/drive/open";
 import { baseName, subjectRelOf } from "@/lib/drive/paths";
-import { clickSelect, EMPTY_SELECTION, pruneSelection, selectAll, type Selection } from "@/lib/drive/selection";
+import { boxSelect, clickSelect, EMPTY_SELECTION, pruneSelection, selectAll, type Selection } from "@/lib/drive/selection";
 import { filePagePath } from "@/lib/files/openFile";
 import { scheduleOwnReconcile } from "@/lib/drive/reconcile";
 import { isMac } from "@/lib/platform";
@@ -36,9 +36,10 @@ import { makeNew } from "./header/makeNew";
 import { NewMenu, type NewKind } from "./header/NewMenu";
 import { DriveToolbar, type DriveLayout } from "./toolbar/DriveToolbar";
 import { useDriveGroups } from "./useDriveGroups";
+import { useMarquee } from "./useMarquee";
 
 /** Below this width the list keeps two columns; from the other the details
- *  panel shows. Measured on the browser itself, never the window. */
+ *  panel can be shown. Measured on the browser itself, never the window. */
 const NARROW = 560;
 const DETAILS = 900;
 
@@ -100,6 +101,9 @@ export function DriveBrowser({ root, folder, folderHref, rootLabel, leading }: D
     `oculus-drive-layout:${root || "drive"}`,
     (raw) => (raw === "grid" || raw === "list" ? raw : root ? "list" : "grid"),
   );
+  /** The details panel is the student's to open (the toolbar's Info), never
+   *  opened by selecting; remembered across folders and launches. */
+  const [detailsOpen, setDetailsOpen] = useStoredState<boolean>("oculus-drive-details", (raw) => raw === "true");
   const [openGroups, setOpenGroups] = useStoredSet("oculus-drive-open-groups");
   const folds = useMemo(() => ({
     open: openGroups,
@@ -148,6 +152,15 @@ export function DriveBrowser({ root, folder, folderHref, rootLabel, leading }: D
     onFiles: (paths, target) => void importInto(paths, target.rel, subjects),
     onEntries: (plan, target) => void dropInto(plan, target.rel, subjects),
     onRefused: () => setProblem(READ_ONLY_TEXT),
+  });
+
+  // A marquee builds on the selection it found when its box lifted.
+  const selectionNow = useRef(selection);
+  selectionNow.current = selection;
+  const marqueeBase = useRef<Selection>(EMPTY_SELECTION);
+  const startMarquee = useMarquee({
+    start: () => { marqueeBase.current = selectionNow.current; },
+    box: (hit, mods) => setSelection(boxSelect(marqueeBase.current, hit, mods)),
   });
 
   const selectedItems = useCallback(() => order.filter((i) => selection.keys.has(i.key)), [order, selection]);
@@ -235,9 +248,8 @@ export function DriveBrowser({ root, folder, folderHref, rootLabel, leading }: D
     }
   };
 
-  const detailItem = width >= DETAILS && selection.keys.size === 1
-    ? order.find((i) => selection.keys.has(i.key) && i.type !== "folder")
-    : undefined;
+  const detailsFit = width >= DETAILS;
+  const showDetails = detailsFit && detailsOpen;
   const crumbs = driveCrumbs({
     root,
     folder,
@@ -305,10 +317,17 @@ export function DriveBrowser({ root, folder, folderHref, rootLabel, leading }: D
           placeholder={folder === "" ? "Search Drive" : "Search this folder"}
           action={writable && subject ? <NewMenu busy={adding} onPick={startNew} /> : undefined}
         />
-        <DriveToolbar filters={filters} onFilters={setFilters} layout={layout} onLayout={setLayout} />
+        <DriveToolbar
+          filters={filters}
+          onFilters={setFilters}
+          layout={layout}
+          onLayout={setLayout}
+          details={detailsFit ? { open: detailsOpen, onToggle: () => setDetailsOpen((open) => !open) } : undefined}
+        />
         <div className="flex min-h-0 flex-1">
           <div
             className="flex min-w-0 flex-1 flex-col"
+            onPointerDown={startMarquee}
             onClick={(e) => {
               // A click in empty space clears the selection; one in a portalled
               // menu (React bubbles it here) is the menu's.
@@ -322,7 +341,7 @@ export function DriveBrowser({ root, folder, folderHref, rootLabel, leading }: D
               <DriveList groups={groups} folds={folds} synced={synced} narrow={width > 0 && width < NARROW} before={before} empty={empty} />
             )}
           </div>
-          {detailItem && <DetailsPanel item={detailItem} />}
+          {showDetails && <DetailsPanel picked={selectedItems()} onClose={() => setDetailsOpen(false)} />}
         </div>
         <DropOverlay
           show={!!overHere}

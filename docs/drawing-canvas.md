@@ -104,6 +104,9 @@ boolean, `notebook`.
 - **Drive** lists notes, canvases and notebooks in the student's folders
   beside their other files; its Type filter narrows to one kind. New offers
   Note, Canvas and Notebook… (a dialog, below), made in the folder on screen.
+  A card's picture of a drawing is drawn from its file by this renderer at
+  card size, or is a notebook's first page picture
+  ([frontend.md](./frontend.md#drive-is-one-folder-browser-over-the-disk)).
   Notes are ordinary Markdown documents ([editor.md](./editor.md)). A title
   is its filename; a rename keeps the database ID, and open tabs on the file
   follow it ([frontend.md](./frontend.md#path-keyed-state-follows-drive)).

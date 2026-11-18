@@ -12,7 +12,8 @@ import { entryMeta } from "./meta";
 
 /** A folder or subject as a one-line card: glyph, name, and a line under it
  *  saying what it holds or, mid-drag, whether it takes the drop. A locked
- *  folder carries the lock at its end. */
+ *  folder carries the lock at its end. Kept on its own layer, as `FileCard`
+ *  is, so a glide never re-snaps its glyphs (`docs/ui.md`). */
 export function FolderCard({ item }: { item: DriveItem }) {
   const view = useDriveView();
   const drop = dropStateOf(item, view);
@@ -24,7 +25,7 @@ export function FolderCard({ item }: { item: DriveItem }) {
       <div
         {...itemProps(item, view)}
         title={subject ? displayName(subject.name, subject.code) : item.name}
-        className={cn(CARD, "flex items-center gap-2.5 px-3 py-2.5", cardState(view.selected.has(item.key), drop))}
+        className={cn(CARD, "flex items-center gap-2.5 px-3 py-2.5 will-change-transform", cardState(view.selected.has(item.key), drop))}
       >
         <ItemIcon item={item} size={18} />
         <div className="min-w-0 flex-1">

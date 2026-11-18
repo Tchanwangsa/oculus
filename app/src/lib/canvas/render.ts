@@ -39,7 +39,11 @@ export interface CanvasPaintOptions {
 /** A ghost's share of its element's opacity. */
 export const GHOST_ALPHA = 0.25;
 
-export interface CanvasRenderOptions { notebook?: boolean }
+export interface CanvasRenderOptions {
+  notebook?: boolean;
+  /** Pixels on the picture's longer side, so a thumbnail is drawn at its own size rather than shrunk from a full export. */
+  maxSize?: number;
+}
 
 interface ElementPaths { body: Path2D; heads?: Path2D; filledHeads?: Path2D }
 const pathCache = new WeakMap<CanvasElement, ElementPaths>();
@@ -359,7 +363,8 @@ export async function exportCanvasPng(document: CanvasDocument, options: CanvasR
   if (!bounds) return null;
   await loadCanvasImages(document.elements);
   const padding = 32;
-  const ratio = Math.min(2, 8192 / Math.max(bounds.width + padding * 2, bounds.height + padding * 2));
+  const side = Math.max(bounds.width + padding * 2, bounds.height + padding * 2);
+  const ratio = Math.min(2, 8192 / side, (options.maxSize ?? Infinity) / side);
   const canvas = window.document.createElement('canvas');
   canvas.width = Math.ceil((bounds.width + padding * 2) * ratio);
   canvas.height = Math.ceil((bounds.height + padding * 2) * ratio);

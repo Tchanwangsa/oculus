@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { clickSelect, EMPTY_SELECTION, pruneSelection, selectAll, selectedInOrder } from "@/lib/drive/selection";
+import { boxSelect, clickSelect, EMPTY_SELECTION, pruneSelection, selectAll, selectedInOrder } from "@/lib/drive/selection";
 
 const ORDER = ["a", "b", "c", "d", "e"];
 const keys = (s: { keys: ReadonlySet<string> }) => [...s.keys].sort();
@@ -59,4 +59,28 @@ test("pruning drops entries that left and keeps identity otherwise", () => {
 
 test("selected keys come back in screen order", () => {
   expect(selectedInOrder({ keys: new Set(["d", "a"]), anchor: null }, ORDER)).toEqual(["a", "d"]);
+});
+
+describe("boxSelect", () => {
+  const base = { keys: new Set(["a", "b"]), anchor: "a" };
+
+  test("a plain box picks only what it covers", () => {
+    const s = boxSelect(base, ["c", "d"], plain);
+    expect(keys(s)).toEqual(["c", "d"]);
+    expect(s.anchor).toBe("c");
+  });
+
+  test("⇧ adds what it covers to what was picked", () => {
+    expect(keys(boxSelect(base, ["b", "c"], { toggle: false, range: true }))).toEqual(["a", "b", "c"]);
+  });
+
+  test("⌘ toggles what it covers against what was picked", () => {
+    expect(keys(boxSelect(base, ["b", "c"], { toggle: true, range: false }))).toEqual(["a", "c"]);
+  });
+
+  test("an empty plain box clears and keeps the anchor", () => {
+    const s = boxSelect(base, [], plain);
+    expect(keys(s)).toEqual([]);
+    expect(s.anchor).toBe("a");
+  });
 });
