@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 
 pub use apply::Hooks;
 pub use journal::{Kind, Op, Plan, Step};
-pub use resolve::resolve_moved;
+pub use resolve::{record_moves, resolve_moved, OwnRule};
 pub use rules::Rule;
 pub use startup::refuse_to_start;
 

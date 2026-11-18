@@ -318,3 +318,39 @@ fn an_old_library_moves_then_renames_at_launch() {
         serde_json::from_str(&read(&d, "whiteboard-pages/14/pages.json")).unwrap();
     assert_eq!(manifest["whiteboard"], s("nb.notebook"));
 }
+
+#[test]
+fn two_drawings_of_one_name_keep_their_own_old_paths() {
+    // The Drive move flattened `canvases/a.canvas` to `a.canvas` and an
+    // `uploads/a.canvas` beside it to `a (2).canvas`, with a rule of its own.
+    let d = Scratch::new("whiteboard-same-name");
+    file(&d, ".library-move/done", "drive");
+    file(&d, &s("a.canvas"), DRAWING);
+    file(&d, &s("a (2).canvas"), DRAWING);
+    block(async {
+        let pool = pool(&d).await;
+        crate::library::migrate::db::ensure(&pool).await.unwrap();
+        sqlx::raw_sql(&format!(
+            "INSERT INTO subjects (id, code, name) VALUES (1, '{CODE}', 'One');
+             INSERT INTO files (id, subject_id, filename, relative_path, file_type, category) VALUES
+               (1, 1, 'a.canvas', '{S}/a.canvas', 'canvas', 'canvas'),
+               (2, 1, 'a (2).canvas', '{S}/a (2).canvas', 'canvas', 'canvas');
+             INSERT INTO path_moves (old_prefix, new_prefix) VALUES
+               ('{S}/uploads/a.canvas', '{S}/a (2).canvas'),
+               ('{S}/canvases', '{S}'), ('{S}/uploads', '{S}');"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+    });
+    run(&d, &Hooks::default()).unwrap();
+    assert_eq!(moved(&d, &s("canvases/a.canvas")), Some(s("a.whiteboard")));
+    assert_eq!(
+        moved(&d, &s("uploads/a.canvas#x")),
+        Some(s("a (2).whiteboard#x"))
+    );
+    assert_eq!(moved(&d, &s("a.canvas")), Some(s("a.whiteboard")));
+    assert_eq!(moved(&d, &s("a (2).canvas")), Some(s("a (2).whiteboard")));
+    assert_eq!(moved(&d, &s("uploads/b.pdf")), Some(s("b.pdf")));
+}

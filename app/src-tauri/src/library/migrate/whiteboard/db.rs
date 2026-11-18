@@ -13,6 +13,7 @@ use crate::library::layout;
 use crate::library::migrate::db::{column, json_column, Tx};
 use crate::library::migrate::links::Linker;
 use crate::library::migrate::rules::{Rule, Rules};
+use crate::library::migrate::{record_moves, OwnRule};
 
 /// The rows the plan reads.
 #[derive(Default)]
@@ -185,38 +186,13 @@ async fn versions(tx: &mut Tx<'_>, linker: &Linker<'_>) -> Result<usize, String>
     Ok(changed)
 }
 
-/// A rule per renamed drawing, and one for every older rule that led to it
+/// A rule per renamed drawing, and one for every older path that led to it
 /// (the Drive move's `canvases/a.canvas` → `a.canvas`), so an old path
-/// resolves to the drawing in one step.
+/// resolves to the drawing in one step (`record_moves`).
 async fn path_moves(tx: &mut Tx<'_>, rules: &[Rule]) -> Result<usize, String> {
-    let older: Vec<(String, String)> =
-        sqlx::query_as("SELECT old_prefix, new_prefix FROM path_moves")
-            .fetch_all(&mut **tx)
-            .await
-            .map_err(err("read path_moves"))?;
-    let mut out: Vec<(String, String)> = older
+    let renames: Vec<(Rule, OwnRule)> = rules
         .iter()
-        .flat_map(|(old, new)| rules.iter().filter_map(move |rule| through(old, new, rule)))
+        .map(|rule| (rule.clone(), OwnRule::Replace))
         .collect();
-    out.extend(rules.iter().map(|r| (r.old.clone(), r.new.clone())));
-    for (old, new) in &out {
-        sqlx::query("INSERT OR REPLACE INTO path_moves (old_prefix, new_prefix) VALUES (?1, ?2)")
-            .bind(old)
-            .bind(new)
-            .execute(&mut **tx)
-            .await
-            .map_err(err("path_moves"))?;
-    }
-    Ok(out.len())
-}
-
-/// The old path an older rule `old` → `new` sends to `rule.old`, mapped
-/// straight to `rule.new`.
-fn through(old: &str, new: &str, rule: &Rule) -> Option<(String, String)> {
-    if rule.old == new {
-        return Some((old.to_string(), rule.new.clone()));
-    }
-    let rest = rule.old.strip_prefix(new)?;
-    rest.starts_with('/')
-        .then(|| (format!("{old}{rest}"), rule.new.clone()))
+    record_moves(tx, &renames).await
 }

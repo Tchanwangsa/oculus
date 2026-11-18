@@ -140,7 +140,14 @@ Right after the Drive move and under its lock,
 `library::migrate::whiteboard` renames every `.canvas` drawing among the
 student's own files to `.whiteboard`, `canvas-pages/` and
 `recovery/canvases/` to their new names, and the rows, `path_moves`, page
-manifests and the notes that link to a renamed drawing with them, with its own journal and marker (`.library-move/whiteboard`). A
+manifests and the notes that link to a renamed drawing with them, with its own journal and marker (`.library-move/whiteboard`).
+A rename's rules go through `record_moves` (`library/migrate/resolve.rs`):
+the drawing's own rule, plus every old path the rules already kept resolve
+to the drawing's old path, mapped straight to its new one, since a lookup
+takes one step. An old path is derived only when the kept rules really send
+it there, so a file renamed on a clash (`uploads/a.canvas` → `a (2).canvas`)
+keeps its own rule rather than taking its folder's (`uploads` → the subject
+root) to another drawing named `a`. A
 `.canvas` drawing that reaches the library later (a backup, another Mac, an
 agent) is renamed by Drive's reconcile and imports
 ([frontend.md](./frontend.md#own-files-written-outside-the-app-get-rows)), with
