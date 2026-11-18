@@ -10,7 +10,7 @@ import { triggerSync } from "@/lib/pipeline/syncRunner";
 import { useIndexStore } from "@/stores/sync/indexStore";
 import { usePipelineStore, statusOf, type PipelineItem } from "@/stores/sync/pipelineStore";
 import { useParseStore } from "@/stores/sync/parseStore";
-import { parseFile, parseSkip, parseSkipped } from "@/lib/files/courseFiles";
+import { parseFile, parsePrioritise, parseSkip, parseSkipped } from "@/lib/files/courseFiles";
 import type { ActivityView } from "./constants";
 
 interface SyncActionsInput {
@@ -139,6 +139,21 @@ export function useSyncActions({
     );
   }, []);
 
+  /** Move a waiting file to the front of its queue: an embed in the index
+   *  queue, otherwise a parse (or its upload) in Rust's. The row says so
+   *  once the move is made; a failure leaves it as it was. */
+  const prioritiseItem = useCallback((it: PipelineItem) => {
+    const mark = () =>
+      usePipelineStore.getState().touch(it.relativePath, it.subjectId, { prioritisedAt: Date.now() });
+    if (it.parse === "done") {
+      if (useIndexStore.getState().prioritise(it.relativePath)) mark();
+      return;
+    }
+    parsePrioritise(it.relativePath).then(mark, (e) =>
+      console.error("parse_prioritise failed", it.relativePath, e),
+    );
+  }, []);
+
   /** Resume every paused row; parses batch behind one another and embeds go
    *  into the one serial queue. */
   const resumeAll = useCallback(() => {
@@ -168,6 +183,7 @@ export function useSyncActions({
     handleSyncClick,
     resumeItem,
     skipItem,
+    prioritiseItem,
     resumeAll,
     toggleSubject,
   };

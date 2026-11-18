@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { DropdownMenu } from 'radix-ui';
-import { ArrowLineDownIcon, ArrowLineUpIcon, CaretRightIcon, CheckIcon, CopyIcon, DotsThreeIcon, FrameCornersIcon, GridFourIcon, TrashIcon } from '@phosphor-icons/react';
+import { ArrowLineDownIcon, ArrowLineUpIcon, CaretRightIcon, CheckIcon, CopyIcon, DotsThreeIcon, FrameCornersIcon, GridFourIcon, StackIcon, TrashIcon } from '@phosphor-icons/react';
 import { A4, PAPER_TEMPLATES, templateOf, type PaperPage, type PaperTemplate } from '@/lib/canvas/paper';
 import type { PageSize } from '@/lib/canvas/pages';
 import { cn } from '@/lib/utils';
@@ -20,6 +20,7 @@ export interface PageMenuActions {
   insert: (side: 'before' | 'after') => void;
   duplicate: () => void;
   setTemplate: (template: PaperTemplate) => void;
+  applyTemplateToAll: () => void;
   setSize: (size: PageSize) => void;
   remove: () => void;
 }
@@ -69,6 +70,8 @@ export function PageMenu({ page, number, canRemove, actions }: { page: PaperPage
                   <PaperThumb template={template} orientation={orientation} long={26} />{TEMPLATE_LABELS[template]}
                 </Choice>)}
               </DropdownMenu.RadioGroup>
+              {SEPARATOR}
+              <Item icon={<StackIcon size={15} />} onSelect={actions.applyTemplateToAll}>Apply to every page</Item>
             </DropdownMenu.SubContent>
           </DropdownMenu.Portal>
         </DropdownMenu.Sub>

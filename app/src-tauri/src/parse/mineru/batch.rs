@@ -5,11 +5,17 @@
 //! comes first, with at most `IN_FLIGHT` batches running. The window opens
 //! when the dispatcher finds work, so a lone file waits one window and goes.
 //! A file over `SOLO_UPLOAD_BYTES` skips the window and travels alone.
+//!
+//! Who is picked is ordered by `parse::Priority`: a file the student pushed
+//! ahead fills a batch, or leaves alone, before the ones that were waiting,
+//! and several pushed files keep their order. A batch already sent is never
+//! recalled.
 
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::parse::{ParseError, Progress};
+use crate::parse::priority::sort_key;
+use crate::parse::{ParseError, Priority, Progress};
 use crate::providers::ratelimit::{hold, Permits};
 
 use super::client::{CloudDocument, DocumentOutput};
@@ -35,6 +41,11 @@ struct Queued {
 impl Queued {
     fn solo(&self) -> bool {
         self.document.bytes() > SOLO_UPLOAD_BYTES
+    }
+
+    /// Prioritised files first, in press order.
+    fn precedence(&self) -> u64 {
+        sort_key(Priority::shared().rank(self.document.path()))
     }
 }
 
@@ -108,9 +119,12 @@ impl Batcher {
 
     fn dispatch(self: Arc<Self>) {
         loop {
-            let batch = self.next_batch();
-            // Backpressure: work keeps queueing, nothing else is sent.
+            self.await_window();
+            // Backpressure: work keeps queueing, nothing else is sent. The
+            // batch is chosen only once a slot is free, so a file pushed
+            // ahead while every slot was busy still goes first.
             self.permits.acquire();
+            let batch = self.take_batch();
             let batcher = self.clone();
             if std::thread::Builder::new()
                 .name("mineru-cloud-batch".into())
@@ -125,7 +139,10 @@ impl Batcher {
         }
     }
 
-    fn next_batch(&self) -> Vec<Queued> {
+    /// Block until there is work and its window has closed: a large file is
+    /// ready at once; otherwise the window opens on the first job's key and
+    /// closes when it elapses or `max_files` compatible jobs are in.
+    fn await_window(&self) {
         let mut queue = hold(&self.queue);
         while queue.waiting.is_empty() {
             queue = self
@@ -133,16 +150,15 @@ impl Batcher {
                 .wait(queue)
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
-
-        // A large file has nothing to wait for: it goes now, alone.
-        if let Some(index) = queue.waiting.iter().position(Queued::solo) {
-            return vec![queue.waiting.remove(index)];
+        // A large file has nothing to wait for.
+        if queue.waiting.iter().any(Queued::solo) {
+            return;
         }
 
-        // The window opens now, on the oldest job's key. A large file that
-        // arrives meanwhile is not counted, and leaves on the next round.
+        // A large file that arrives meanwhile is not counted, and leaves on
+        // the next round.
         let opened = Instant::now();
-        let key = queue.waiting[0].key;
+        let key = first_key(&queue.waiting);
         loop {
             let compatible = queue
                 .waiting
@@ -151,7 +167,7 @@ impl Batcher {
                 .count();
             let remaining = self.window.saturating_sub(opened.elapsed());
             if compatible >= self.max_files || remaining.is_zero() {
-                break;
+                return;
             }
             queue = self
                 .wake
@@ -159,10 +175,30 @@ impl Batcher {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .0;
         }
+    }
 
+    /// Take the next batch off the queue: the best-ranked large file alone,
+    /// else up to `max_files` jobs under the first job's key, best-ranked
+    /// first. The sort is stable, so arrival order holds among equals.
+    fn take_batch(&self) -> Vec<Queued> {
+        let mut queue = hold(&self.queue);
+        let solo = queue
+            .waiting
+            .iter()
+            .enumerate()
+            .filter(|(_, job)| job.solo())
+            .min_by_key(|(index, job)| (job.precedence(), *index))
+            .map(|(index, _)| index);
+        if let Some(index) = solo {
+            return vec![queue.waiting.remove(index)];
+        }
+
+        let key = first_key(&queue.waiting);
+        let mut waiting = std::mem::take(&mut queue.waiting);
+        waiting.sort_by_key(Queued::precedence);
         let mut batch = Vec::new();
         let mut kept = Vec::new();
-        for job in std::mem::take(&mut queue.waiting) {
+        for job in waiting {
             if job.key == key && !job.solo() && batch.len() < self.max_files {
                 batch.push(job);
             } else {
@@ -172,6 +208,16 @@ impl Batcher {
         queue.waiting = kept;
         batch
     }
+}
+
+/// The key of the job to go first: the best-ranked, else the oldest.
+fn first_key(waiting: &[Queued]) -> u64 {
+    waiting
+        .iter()
+        .enumerate()
+        .min_by_key(|(index, job)| (job.precedence(), *index))
+        .map(|(_, job)| job.key)
+        .unwrap_or_default()
 }
 
 /// Run one batch and hand every document its answer. A panic is caught, or
@@ -393,6 +439,64 @@ mod tests {
             batches,
             vec![vec![1_000, 2_000], vec![SOLO_UPLOAD_BYTES + 1]]
         );
+    }
+
+    /// The sizes of the documents the recorder ran, in the order they ran.
+    fn ran_in_order(recorder: &Recorder) -> Vec<u64> {
+        hold(&recorder.bytes).concat()
+    }
+
+    #[test]
+    fn a_prioritised_file_is_sent_before_the_ones_waiting() {
+        let recorder = Recorder::new(Duration::from_millis(200));
+        // One file per batch and one batch at a time: every run is one pick.
+        let batcher = Arc::new(Batcher::new(Duration::from_millis(10), 1, 1));
+        let mut handles = vec![submit_sized(&batcher, recorder.clone(), "prio-head", 10)];
+        std::thread::sleep(Duration::from_millis(80));
+        for (name, bytes) in [("prio-a", 1), ("prio-b", 2), ("prio-c", 3)] {
+            handles.push(submit_sized(&batcher, recorder.clone(), name, bytes));
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        Priority::shared().prioritise(Path::new("/library/prio-c.pdf"));
+        for handle in handles {
+            handle.join().unwrap().0.unwrap();
+        }
+        assert_eq!(
+            ran_in_order(&recorder),
+            vec![10, 3, 1, 2],
+            "the running file finishes, the pushed one is next, the rest keep their order"
+        );
+    }
+
+    #[test]
+    fn several_prioritised_files_keep_the_order_they_were_pushed_in() {
+        let recorder = Recorder::new(Duration::from_millis(200));
+        let batcher = Arc::new(Batcher::new(Duration::from_millis(10), 1, 1));
+        let mut handles = vec![submit_sized(&batcher, recorder.clone(), "order-head", 10)];
+        std::thread::sleep(Duration::from_millis(80));
+        for (name, bytes) in [("order-a", 1), ("order-b", 2), ("order-c", 3)] {
+            handles.push(submit_sized(&batcher, recorder.clone(), name, bytes));
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        Priority::shared().prioritise(Path::new("/library/order-c.pdf"));
+        Priority::shared().prioritise(Path::new("/library/order-b.pdf"));
+        for handle in handles {
+            handle.join().unwrap().0.unwrap();
+        }
+        assert_eq!(ran_in_order(&recorder), vec![10, 3, 2, 1]);
+    }
+
+    #[test]
+    fn a_running_batch_is_not_interrupted_by_a_push() {
+        let recorder = Recorder::new(Duration::from_millis(200));
+        let batcher = Arc::new(Batcher::new(Duration::from_millis(10), 1, 1));
+        let first = submit_sized(&batcher, recorder.clone(), "busy-first", 10);
+        std::thread::sleep(Duration::from_millis(80));
+        let second = submit_sized(&batcher, recorder.clone(), "busy-second", 20);
+        Priority::shared().prioritise(Path::new("/library/busy-second.pdf"));
+        first.join().unwrap().0.unwrap();
+        second.join().unwrap().0.unwrap();
+        assert_eq!(ran_in_order(&recorder), vec![10, 20]);
     }
 
     #[test]

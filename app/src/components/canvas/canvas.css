@@ -1,42 +1,35 @@
-.canvas-frame { container: canvas-frame / inline-size; }
+.canvas-frame { container: canvas-frame / inline-size; --canvas-rail-width: 52px; }
 .canvas-editor { container-type: inline-size; isolation: isolate; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .canvas-editor canvas { touch-action: none; -webkit-user-select: none; user-select: none; }
-/* Floating chrome lets the drawing show through, and firms up under the pointer or keyboard focus. The blur is always on, so hover never promotes a new layer. */
+/* The rail scrolls up and down and the style bar sideways, by touch too, with no scrollbar showing. */
+.canvas-rail { touch-action: pan-y; scrollbar-width: none; }
+.canvas-style-bar { touch-action: pan-x; scrollbar-width: none; }
+.canvas-rail::-webkit-scrollbar, .canvas-style-bar::-webkit-scrollbar { display: none; }
+/* Floating chrome over the drawing (the page bar, popovers) lets it show through, and firms up under the pointer or keyboard focus. The blur is always on, so hover never promotes a new layer. */
 .canvas-chrome { --canvas-chrome-mix: 70%; background-color: color-mix(in oklab, var(--color-card) var(--canvas-chrome-mix), transparent); -webkit-backdrop-filter: blur(14px) saturate(1.4); backdrop-filter: blur(14px) saturate(1.4); transition: background-color 150ms ease; }
 /* A dark card over white paper turns grey sooner, so it keeps more of itself. */
 .dark .canvas-chrome { --canvas-chrome-mix: 82%; }
 .canvas-chrome:is(:hover, :focus-within) { background-color: color-mix(in oklab, var(--color-card) 96%, transparent); }
-/* The bars' top and bottom edges; the companion moves them clear of the status bar and the home indicator. */
-.canvas-editor { --canvas-top-edge: 1rem; --canvas-bottom-edge: 1rem; }
-.canvas-toolbox { top: var(--canvas-top-edge); }
-/* Under the tool bar: its 54px plus an 8px gap. */
-.canvas-style-bar { top: calc(var(--canvas-top-edge) + 62px); }
-.canvas-style-scroller { scrollbar-width: none; }
-.canvas-style-scroller::-webkit-scrollbar { display: none; }
-/* Below both bars, so an error never covers the style bar. */
-.canvas-alert { top: calc(var(--canvas-top-edge) + 114px); }
+/* The page bar's bottom edge; the companion moves it clear of the home indicator. */
+.canvas-editor { --canvas-bottom-edge: 0.75rem; }
 .canvas-pages { bottom: var(--canvas-bottom-edge); }
 .canvas-text-input { field-sizing: content; min-width: 3ch; min-height: 1.4em; max-width: 70vw; outline: 1px solid var(--color-brand); outline-offset: 5px; resize: none; overflow: hidden; border: 0; padding: 0; margin: 0; background: transparent; line-height: 1.4; white-space: pre; -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .canvas-label-input { field-sizing: fixed; min-width: 1ch; max-width: none; outline-offset: 3px; white-space: pre-wrap; overflow-wrap: anywhere; }
-@container (max-width: 760px) {
-  /* The tool bar is 48px here. */
-  .canvas-style-bar { top: calc(var(--canvas-top-edge) + 56px); }
-  .canvas-style-size-field { display: none; }
-  .canvas-short-hint { display: none; }
-  .canvas-toolbox { gap: 0; padding: 4px; }
-  .canvas-toolbox button { width: 34px; height: 38px; }
-  /* Stacked over the zoom bar, on its left edge: 42px bar plus an 8px gap. */
-  .canvas-pages { left: 1rem; bottom: calc(var(--canvas-bottom-edge) + 50px); transform: none; translate: none; }
+/* The top bar gives up its least needed parts as the editor narrows; the style half then scrolls sideways. */
+@container (max-width: 1180px) {
+  .canvas-bar-zoom { display: none; }
 }
-@container (max-width: 470px) {
-  .canvas-toolbox button { width: 29px; }
-  .canvas-toolbox button > span { display: none; }
-  .canvas-reset-view { display: none; }
+@container (max-width: 1100px) {
+  .canvas-bar-pen-name { display: none; }
+}
+@container (max-width: 1000px) {
+  .canvas-style-pick-extra, .canvas-short-hint { display: none; }
+}
+@container (max-width: 860px) {
   .canvas-style-picks { display: none; }
-  .canvas-bottom { gap: 4px; }
 }
-@container (max-width: 400px) {
-  .canvas-toolbox button { width: 26px; }
+@container (max-width: 760px) {
+  .canvas-style-size-field, .canvas-bar-help { display: none; }
 }
 
 .canvas-capture-hold { opacity: 0; animation: canvas-capture-hold-reveal 0s 180ms forwards; }
@@ -48,7 +41,8 @@
 .canvas-short-hint { animation: canvas-hint-fade 4s ease forwards; }
 @keyframes canvas-hint-fade { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
 .canvas-page-scrim { display: none; }
+/* Narrow, the page sidebar lies over the drawing beside the rail and closes like a drawer. */
 @container canvas-frame (max-width: 560px) {
-  .canvas-page-sidebar { position: absolute; top: 0; bottom: 0; left: 0; z-index: 30; box-shadow: var(--shadow-lg); }
-  .canvas-page-scrim { display: block; position: absolute; inset: 0; z-index: 29; background: rgb(0 0 0 / 0.2); }
+  .canvas-page-sidebar { position: absolute; top: 0; bottom: 0; left: var(--canvas-rail-width); z-index: 30; box-shadow: var(--shadow-lg); }
+  .canvas-page-scrim { display: block; position: absolute; inset: 0 0 0 var(--canvas-rail-width); z-index: 29; background: rgb(0 0 0 / 0.2); }
 }

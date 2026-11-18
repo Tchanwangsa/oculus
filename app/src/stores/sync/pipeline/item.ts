@@ -28,6 +28,9 @@ export interface PipelineItem {
    *  event without them clears them. */
   embedWaitingUntil?: number;
   embedWaitingReason?: string;
+  /** When the student pushed this waiting file to the front of its queue;
+   *  live-only, and cleared once the file starts (`leftQueue`). */
+  prioritisedAt?: number;
   /** While parse is "queued": place in the parse queue, when it is known. */
   parseQueuePos?: number;
   /** While parse is "active". Absent: processing. */
@@ -88,6 +91,21 @@ export function newItem(relativePath: string, subjectId: number): PipelineItem {
 }
 
 /** Clears a parse's upload sub-state: a new parse, or new bytes. */
+/** Does this patch take a file out of the waiting line — it started, ended or
+ *  was skipped — so a push it carried no longer means anything? */
+export function leftQueue(patch: StagePatch): boolean {
+  return (
+    patch.embed === "active" ||
+    patch.embed === "done" ||
+    patch.embed === "error" ||
+    patch.parse === "done" ||
+    patch.parse === "error" ||
+    patch.parse === "skipped" ||
+    patch.parsePhase === "uploading" ||
+    patch.parsePhase === "processing"
+  );
+}
+
 export const NO_UPLOAD = {
   parsePhase: undefined,
   bytesDone: undefined,

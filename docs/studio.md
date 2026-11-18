@@ -190,7 +190,7 @@ Everything Studio keeps is under `<app data>/studio/`
 "The student reviews the agent's suggested readings").
 `courses/` stays read-only to agents, so no library lives there. It is the
 one folder besides `agents/` and the database an agent thread may write
-([harness.md](./harness.md#every-thread-runs-from-agents-and-that-is-the-containment)).
+([harness.md](./harness.md#every-thread-runs-from-agents-it-writes-there-and-in-the-students-own-files)).
 
 - `oculus studio new <slug> [--subject CODE] [--title T] [--portrait]`
   (`studio::videos::create_in`) makes `videos/<slug>/`: `video.json` at
@@ -413,7 +413,7 @@ video that names no theme (`oculus studio new`, the app's New video with no
 theme picked) takes its subject library's default, else the global
 library's, else the bundled `default`
 (`studio::libraries::default_theme`), and video.json gets that name. A
-default naming a theme its cascade no longer has is passed over; a
+default naming a theme missing from its cascade is passed over. A
 `library.json` that does not parse stops the video being made, naming the
 file. Agents may edit the file by hand; the Themes page sets it with
 `studio_theme_set_default`. A theme's name is its file stem, lowercase
@@ -680,9 +680,9 @@ manifest. Scenes run one at a time, in video order.
   fix is a suggested reading the student accepts, then another `narrate`.
 - **Writes.** The manifest is rewritten atomically after each scene, so a
   failure keeps the scenes before it; the error names the scene and the
-  command exits 1. After the last scene, entries whose id is no longer a
-  narrated scene are dropped and every `.wav` (or interrupted `.wav.part`)
-  in `narration/` that no entry names is deleted; other files are left. A
+  command exits 1. After the last scene, the manifest retains only entries
+  for narrated scene IDs. The command deletes every `.wav` or interrupted
+  `.wav.part` in `narration/` that the manifest leaves unreferenced. A
   manifest this build cannot read (another version, damaged) is rebuilt
   from nothing, with a warning.
 - **Output.** Per scene: the id, `narrated` or `cached`, the clip's length,
@@ -737,10 +737,8 @@ The model is int8: fp16 and q4f16 exports come out silent with no error.
   A voice is its own one-file pack, so it downloads, cancels and deletes
   alone and two can download at once. `af_heart` and `am_michael` are the
   starters, the two a bare `oculus studio voices download` fetches. A voice
-  counts as downloaded when `<id>.bin` is in the folder at 522,240 bytes,
-  so a voice an earlier version downloaded needs nothing again. Any other
-  `<id>.bin` at that size, put there by hand, narrates with `--voice` but
-  is not listed.
+  counts as downloaded when `<id>.bin` is in the folder at 522,240 bytes.
+  An unlisted `<id>.bin` at that size can also narrate with `--voice`.
 - **One speaker per run.** `KokoroSpeaker::ready` checks the model, the
   G2P pack and the chosen voice's file, and no other voice. The reader (the dictionary, the video's lexicon and
   the guesser; `reader.rs`) loads on the first key and the model session
@@ -876,9 +874,9 @@ suggested for words it doubts, until the student decides on each.
   `(suggestion "NESS-ter-off" marked wrong: "<note>"; suggest again)`.
 - **Deciding** (`Store::decide`) writes the word into the subject's
   `lexicon.json`, or the global library's for a video without a subject:
-  `correct` writes the suggestion, `fine` the original as `/phonemes/`, so
-  the word is no longer a guess. The value is checked first, against the
-  dictionary of the `g2p-en-us` pack. The writer (`review::write_entry`)
+  `correct` writes the suggestion and `fine` writes the original as
+  `/phonemes/`. The value is checked first against the dictionary of the
+  `g2p-en-us` pack. The writer (`review::write_entry`)
   keeps every other key, `_` comments included, in its place (serde_json's
   `preserve_order`), keeps a replaced key's place, creates a missing file,
   and refuses a file that is not a JSON object rather than overwrite it.
@@ -2218,8 +2216,8 @@ the `Slide` starter animates it in. Rendering never opens a PDF.
   props for the crop (`src`, `aspect`, `page`, `pageAspect`, `bbox`, and a
   `source` label from the file name), which the command also prints.
 - **Lint.** `oculus studio lint` reads every sidecar under
-  `assets/slides/` and warns when the PDF at `source` no longer has the
-  sidecar's sha256, naming the scene whose props hold the crop's `src`
+  `assets/slides/` and warns when the PDF at `source` has a different
+  SHA-256 hash from the sidecar's, naming the scene whose props hold the crop's `src`
   (else the video) and the `oculus studio slide` call that makes it again.
   A PDF it cannot read is not checked (`slides::lint`).
 - **`Slide`** (`library/components/Slide.tsx`) draws the crop on a paper

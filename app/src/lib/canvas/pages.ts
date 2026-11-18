@@ -4,7 +4,7 @@
  * page the screen clips it to), and keeps its offset from that page's top-centre wherever the page ends up.
  */
 import type { CanvasDocument, CanvasElement } from './model';
-import { isLocked, nextPageId, pageRects, withAddedPage, type PageRect, type Paper, type PaperPage, type PaperTemplate } from './paper';
+import { isLocked, nextPageId, pageRects, templateOf, withAddedPage, type PageRect, type Paper, type PaperPage, type PaperTemplate } from './paper';
 import { elementPage } from './renderPaper';
 import { elementBounds } from './geometry';
 import { cloneCanvasElements } from './renderClipboard';
@@ -112,8 +112,16 @@ export function removePage(document: CanvasDocument, pageId: string): CanvasDocu
 /** Page `index` drawn on `template`; nothing moves. */
 export function setPageTemplate(document: CanvasDocument, index: number, template: PaperTemplate): CanvasDocument {
   const { paper } = document;
-  if (!valid(paper, index) || (paper.pages[index].template ?? 'blank') === template) return document;
+  if (!valid(paper, index) || templateOf(paper.pages[index]) === template) return document;
   return { ...document, paper: withPages(paper, replaced(paper.pages, index, { ...paper.pages[index], template })) };
+}
+
+/** Apply one template to every page while keeping the layout and elements. */
+export function setAllPageTemplates(document: CanvasDocument, template: PaperTemplate): CanvasDocument {
+  const { paper } = document;
+  if (!paper || paper.pages.every(page => templateOf(page) === template)) return document;
+  const pages = paper.pages.map(page => templateOf(page) === template ? page : { ...page, template });
+  return { ...document, paper: withPages(paper, pages) };
 }
 
 /**

@@ -23,6 +23,7 @@ either. MinerU is ~100× faster than docling with formula enrichment, with 1% vs
 | Call site; one thread per PDF; LibreOffice conversion | `app/src-tauri/src/sync/parse.rs`, `app/src-tauri/src/sync/phases/output.rs`, `app/src-tauri/src/sync/office.rs` |
 | Spreadsheets to text: conversion, page rows, startup reconcile | `app/src-tauri/src/pages/sheets/` |
 | Skipping a file: the `parse_skip` command and its marks | `app/src-tauri/src/sync/scrape/mod.rs`, `app/src-tauri/src/parse/skips.rs` (`Skips`) |
+| Prioritising a waiting file: the `parse_prioritise` command, the ranks, the local engine's gate | `app/src-tauri/src/sync/scrape/mod.rs`, `app/src-tauri/src/parse/priority.rs` (`Priority`), `app/src-tauri/src/parse/mineru/local/gate.rs` |
 | Artifact names and purging | `app/src-tauri/src/library/layout/derived.rs`, `app/src-tauri/src/library/paths/course.rs` |
 | MinerU token commands (through `oculus-keyd`, else the keychain) + the pre-store token probe | `app/src-tauri/src/providers/mineru.rs`, `app/src-tauri/src/providers/credentials/` (`CloudKey`) |
 | Engine selection, endpoint override, local probe | `app/src-tauri/src/parse/commands.rs` |
@@ -119,13 +120,12 @@ was still progressing.
   so its byte total is the sum. Only the cloud uploads; the local engine
   reports `processing` alone, and an absent `phase` means `processing`.
 
-**Concurrency belongs to each engine.** `sync/phases/output.rs` spawns one detached thread
-per PDF. Cloud threads park on the batcher's condvar until their window
-closes. The local client holds one permit (`PARSE_GATE`) because `mineru-api`
-reports `max_concurrent_requests: 1` — a second request would only queue
-inside that server on a socket of ours. It is taken before the first progress
-report, so a file waiting for it still reads as queued. A gate there
-would keep cloud files out of the window they are meant to share.
+**Concurrency belongs to each engine.** `sync/phases/output.rs` spawns one
+detached thread per PDF. Cloud threads wait on the batcher's condition
+variable. The local client's `PARSE_GATE` grants one permit because
+`mineru-api` serves one request at a time. The client holds the permit from
+before its first progress report until the result ZIP is off the socket.
+Waiters stay queued in File Activity and consume no server connection.
 
 **One parse per PDF.** A sync, the sweep and "Parse now" can ask for the same
 file at once. `parse::InFlight` holds each PDF path while its parse runs; a
@@ -169,6 +169,25 @@ can and without artifacts always:
   for a fresh parse cannot revive it.
 - **Local**: a blocking `/file_parse` cannot be aborted cleanly, so the mark is
   checked before and after taking `PARSE_GATE` and after the request returns.
+
+## A waiting parse can be pushed to the front
+
+`parse_prioritise(relativePath)` resolves the same PDF key used by
+`InFlight` and `Skips` and gives it the next in-memory `Priority` rank.
+Prioritised files keep their press order. The rank is cleared when the
+parse ends. Active work continues while rank determines which waiter goes
+next.
+
+- **Cloud batches** are selected when an in-flight slot frees. Files above
+  the solo-upload threshold go first, ranked within that group. For a
+  regular batch, the best-ranked job determines the compatibility key.
+  Compatible jobs fill the batch by rank, then arrival order.
+- **Cloud uploads** are picked individually as each PUT finishes. Ranked
+  files go first, followed by the smallest waiting files, so **Prioritise**
+  still affects a file waiting to upload inside a submitted batch.
+- **Local requests** get the permit in rank order, with arrival order as
+  the tie-breaker. The gate reads the ranks when it chooses the next
+  waiter.
 
 ## `.pages.json` is the only evidence a parse finished
 

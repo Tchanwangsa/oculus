@@ -212,6 +212,7 @@ pub fn run() {
             library::drive::ops::commands::delete_preview,
             library::drive::ops::commands::copy_to_own,
             library::drive::ops::reconcile::reconcile_own_files,
+            sync::scrape::parse_prioritise,
             library::files::commands::read_course_file,
             library::files::commands::course_file_has_content,
             library::files::commands::open_course_file,

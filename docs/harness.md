@@ -159,7 +159,7 @@ folders beside its `Course/` and `.oculus/` (`layout::Zone::Own`), written
 without a request. What stays protected is one list in `protected.rs`: each
 subject's `Course/` and `.oculus/` (`subject_dirs`, the layout's
 `reserved_names`), the subjects' folder itself and anything in it outside a
-subject, an earlier version's session folder (`library_dirs`), the root files
+subject, the `canvas-session/` folder (`library_dirs`), the root files
 by pattern (the vault and its lock and temp files among them, so an agent
 cannot delete or truncate the sealed sessions) and the workspace folders. agy
 names the files instead.

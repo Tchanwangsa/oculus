@@ -541,13 +541,16 @@ and read errors are exposed; metadata read failures retain filename fallbacks.
   page count. The table sizes by its own width (`@container`): narrow, the
   caption hides behind that tooltip, and narrower still the subject code goes,
   so the name keeps the room. Clicking the name opens the file beside the page (⌘-click a new
-  tab, via `data-tab-href`); clicking elsewhere expands it. Row actions
-  (▶ resume, retry, embed or parse a skipped file; Skip; Open beside) take the
-  time's place on hover or keyboard focus. Skip is offered until the parse
-  finishes and needs no confirmation — Parse now undoes it. The expanded row
-  holds only what the row leaves out: each step with its clock time (and the
-  upload's size), the whole error sentence or what a wait means, the path, and
-  the actions as labelled buttons.
+  tab, via `data-tab-href`), and clicking elsewhere expands it. Row actions
+  take the time's place on hover or keyboard focus. On the Sync page,
+  **Prioritise** appears for a queued parse, a parse waiting to upload or a
+  queued embed. It puts the file behind any already prioritised in that
+  queue. The action gives way to a “prioritised” caption until the file
+  starts. See [parse ordering](./parsing.md#a-waiting-parse-can-be-pushed-to-the-front)
+  and [embed ordering](./retrieval.md#ingest-follows-a-parse-through-one-queue).
+  **Skip** is offered until the parse finishes, and **Parse now** undoes it.
+  The expanded row shows each step's clock time, upload size, the full
+  error or reason for a wait, the path and the labelled action buttons.
 - **Live events and the DB seed share each row, and neither may strand it.**
   A sync's `unchanged` file only settles an existing row's download — it
   never creates one, since no parse event follows. `updated` resets parse and
@@ -584,7 +587,7 @@ and read errors are exposed; metadata read failures retain filename fallbacks.
   [browser saves](./viewers.md#downloads-wait-for-a-destination-while-their-bytes-arrive).
   Paths cross IPC, never bytes, and a taken name steps aside
   (`notes (2).pdf`) unless the bytes are identical. A new upload lands in the
-  folder it was dropped on (`targetDir`), else at the subject's root beside
+  drop target folder (`targetDir`), else at the subject's root beside
   `Course/`; its row's category is the one Rust read off its path.
 - **Finder drops land on Drive's folders** (`useDriveDrop`): a folder card,
   list row or tree row, else the folder on screen. `useFileDrop` ignores a

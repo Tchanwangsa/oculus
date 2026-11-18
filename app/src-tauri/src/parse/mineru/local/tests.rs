@@ -3,7 +3,7 @@ use super::*;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::test_support::{dead_origin, write_pdf, FakeServer, Scratch};
 
@@ -411,9 +411,7 @@ fn a_waiting_parse_reports_no_progress_until_it_has_the_gate() {
     let server = FakeServer::start(move |_| (200, zip.clone()));
 
     let seen = Arc::new(Mutex::new(Vec::new()));
-    let held = PARSE_GATE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let held = PARSE_GATE.acquire(Path::new("/held.pdf"), Priority::shared());
     let parse = {
         let (origin, seen, root) = (server.origin(), seen.clone(), dir.to_path_buf());
         std::thread::spawn(move || {

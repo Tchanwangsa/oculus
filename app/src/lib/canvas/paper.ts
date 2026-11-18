@@ -5,7 +5,7 @@ import { CANVAS_ZOOM_LIMITS, clampZoom, type ZoomLimits } from './zoom';
 /** What a document opens as: a whiteboard, or a notebook whose pages bound the camera, the pen and the ink. The file's kind (`DrawingKind`). */
 export type CanvasKind = DrawingKind;
 
-export type PaperTemplate = 'blank' | 'grid' | 'ruled' | 'dotted';
+export type PaperTemplate = 'blank' | 'grid' | 'ruled' | 'dotted' | 'graph' | 'cornell' | 'music' | 'isometric';
 
 /** One sheet. Its position is derived from its place in `Paper.pages` (`pageRects`), never stored. */
 export interface PaperPage {
@@ -35,7 +35,7 @@ export interface PageRect {
   template: PaperTemplate;
 }
 
-export const PAPER_TEMPLATES: readonly PaperTemplate[] = ['blank', 'grid', 'ruled', 'dotted'];
+export const PAPER_TEMPLATES: readonly PaperTemplate[] = ['blank', 'grid', 'ruled', 'dotted', 'graph', 'cornell', 'music', 'isometric'];
 export const PAPER_DEFAULTS = { gap: 24, template: 'blank' } as const satisfies { gap: number; template: PaperTemplate };
 /** A4 in points (210 x 297 mm). */
 export const A4 = { width: 595, height: 842 } as const;

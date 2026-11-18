@@ -226,6 +226,19 @@ pub fn parse_skip(relative_path: String, subject_id: i64, skip: bool) -> Result<
     Ok(())
 }
 
+/// Move one waiting parse to the front of the queue. Parses take turns at the
+/// cloud batcher and the local server's gate; this ranks the file behind any
+/// already pushed (`parse::Priority`) and ahead of everything else. A parse
+/// already running is not interrupted, and a file with no parse waiting is
+/// unaffected: the rank is dropped when its parse next ends.
+#[tauri::command]
+pub fn parse_prioritise(relative_path: String) -> Result<(), String> {
+    let key = crate::sync::parse_key(&crate::library::paths::data_dir(), &relative_path);
+    crate::parse::Priority::shared().prioritise(&key);
+    elog!("[oculus] parse prioritised: {relative_path}");
+    Ok(())
+}
+
 /// Await the same native work for a confirmed job card, so its durable result
 /// reflects completion rather than the point at which a worker was spawned.
 pub(crate) async fn confirmed<F, Fut>(

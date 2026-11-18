@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { newItem, settleError, inFlight, FRESH_MS } from "./pipeline/item";
+import { newItem, settleError, inFlight, leftQueue, FRESH_MS } from "./pipeline/item";
 import type { PipelineItem, StagePatch } from "./pipeline/item";
 import { mergeSeed, seededItem, type SeedRow } from "./pipeline/seed";
 import { hasFailed, isComplete } from "./pipeline/status";
@@ -85,6 +85,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
         ...prev,
         ...(onDisk ? { download: "done" as const } : {}),
         ...patch,
+        ...(leftQueue(patch) && patch.prioritisedAt === undefined
+          ? { prioritisedAt: undefined }
+          : {}),
         // Keep a subject id we already know over a missing one.
         subjectId: prev.subjectId || subjectId,
         // Any live event means the file is moving again.

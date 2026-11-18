@@ -1,4 +1,5 @@
-//! Fetching one Canvas file: downloads, the manifest, and the skip rules.
+//! Fetching Canvas files: the course file listing, downloads, the manifest,
+//! and the skip rules.
 
 use std::collections::HashMap;
 
@@ -10,8 +11,8 @@ use crate::sync::office::{
 };
 use crate::sync::render::{content_type_of, file_name, locked_until, modified_of};
 use crate::sync::{
-    Engine, Fetched, FileEvent, FileFailed, FileStart, SourceDates, Subject, DOWNLOADABLE_TYPES,
-    MAX_FILE_BYTES,
+    Engine, Fetched, FileEvent, FileFailed, FileStart, LinkCrawl, SourceDates, Subject,
+    DOWNLOADABLE_TYPES, MAX_FILE_BYTES,
 };
 
 impl Engine {
@@ -27,12 +28,23 @@ impl Engine {
         if !r.ok() {
             return Ok(Fetched::Skipped);
         }
-        let info = r.json()?;
-        let name = file_name(&info, display);
+        self.fetch_described_file(c, file_id, &r.json()?, display)
+    }
+
+    /// [`Engine::fetch_file`] for a file whose Canvas description is already
+    /// in hand, as the course file listing returns it.
+    pub(in crate::sync) fn fetch_described_file(
+        &self,
+        c: &Subject,
+        file_id: i64,
+        info: &serde_json::Value,
+        display: Option<&str>,
+    ) -> Result<Fetched, String> {
+        let name = file_name(info, display);
 
         // Canvas serves some uploads as a generic binary (whatever the
         // uploader's browser claimed); those fall back to the extension.
-        let ct = content_type_of(&info);
+        let ct = content_type_of(info);
         let video = is_video(&ct, &name);
         let office = office_ext(&ct).or_else(|| {
             is_generic_binary(&ct)
@@ -53,7 +65,7 @@ impl Engine {
             );
             return Ok(Fetched::Skipped);
         }
-        if let Some(until) = locked_until(&info) {
+        if let Some(until) = locked_until(info) {
             let name = info["display_name"].as_str().or(display).unwrap_or("file");
             self.reporter
                 .log("info", &c.code, &format!("{name}: locked{until}, skipped"));
@@ -73,7 +85,7 @@ impl Engine {
         };
 
         // Unchanged since last time and on disk (derived PDF too) → skip.
-        let modified = modified_of(&info);
+        let modified = modified_of(info);
         let meta_size = info["size"].as_u64().unwrap_or(0);
         let known = !modified.is_empty()
             && self
@@ -92,7 +104,7 @@ impl Engine {
                 category: layout::category_of(&inner).to_string(),
                 canvas_id: Some(file_id),
                 source_url: None,
-                source_dates: SourceDates::file(&info),
+                source_dates: SourceDates::file(info),
                 action: "unchanged",
             });
         };
@@ -123,7 +135,7 @@ impl Engine {
 
         // Resolved before the announcement: no URL means nothing to download,
         // and a file announced as downloading must end in an event.
-        let Some(url) = self.download_url(&info, file_id)? else {
+        let Some(url) = self.download_url(info, file_id)? else {
             return Ok(Fetched::Skipped);
         };
 
@@ -157,7 +169,7 @@ impl Engine {
                 &bytes,
                 Some(file_id),
                 None,
-                SourceDates::file(&info),
+                SourceDates::file(info),
             )
             .map_err(|e| failed(format!("Could not save the file: {e}.")))?;
 
@@ -196,6 +208,35 @@ impl Engine {
                 .insert(file_id.to_string(), (modified, meta_size));
         }
         Ok(Fetched::Saved(rel))
+    }
+
+    /// Fetch every file in the course's Files listing that the modules walk
+    /// and the link crawl did not reach. A course that hides Files from
+    /// students answers 401/403/404, which `get_all` reads as an empty list.
+    pub(in crate::sync) fn scrape_file_listing(
+        &self,
+        c: &Subject,
+        crawl: &mut LinkCrawl,
+    ) -> Result<(), String> {
+        let listing = self
+            .canvas
+            .get_all(&format!("/api/v1/courses/{}/files?per_page=100", c.id))?;
+        for info in &listing {
+            if self.reporter.cancelled() {
+                break;
+            }
+            let Some(id) = info["id"].as_i64() else {
+                continue;
+            };
+            if !crawl.seen_files.insert(id.to_string()) {
+                continue;
+            }
+            if let Err(e) = self.fetch_described_file(c, id, info, None) {
+                self.reporter
+                    .log("warning", &c.code, &format!("file {id}: {e}"));
+            }
+        }
+        Ok(())
     }
 
     /// Add one entry to `file-manifest.json` as it is on disk now: a download

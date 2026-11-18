@@ -37,6 +37,11 @@ export function modeExtension(live: boolean): Extension {
   return [liveMode.of(live), live ? livePreview() : rawMode()];
 }
 
+/** macOS reports arrow and function keys as private-use characters
+ *  (→ is U+F703); WebKit can deliver one as typed text, which shows as a
+ *  missing-glyph box. A key is never text, so none is inserted. */
+const noFunctionKeyText = EditorView.inputHandler.of((_view, _from, _to, text) => /^[\uF700-\uF8FF]+$/.test(text));
+
 /** ⌘/Ctrl-click opens a link in either mode; a plain click edits it. */
 const linkClicks = EditorView.domEventHandlers({
   mousedown(e, view) {
@@ -102,6 +107,7 @@ export function noteExtensions(opts: {
     hostCompartment.of(noteHost.of(opts.host)),
     liveCompartment.of(modeExtension(opts.live)),
     suggestCompartment.of(opts.suggest),
+    noFunctionKeyText,
     linkClicks,
     EditorView.domEventHandlers({
       paste(e) {

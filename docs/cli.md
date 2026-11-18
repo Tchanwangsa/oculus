@@ -85,9 +85,13 @@ which brings an existing database's schema up before rewriting its paths
   skips the back-off between automatic attempts but not the minute between any
   two, and it cannot lift a lockout or rejected-password pause (the app's
   Connect or a new `auth setup` does).
-- `run -s` scrapes, then parses and embeds each written PDF one file at a time,
-  then replaces each subject's `calendar_events` — always, since there are no
-  sync options to gate it ([calendar.md](./calendar.md)).
+- `run -s` scrapes and refreshes each subject's
+  [calendar](./calendar.md), then processes files written during that scrape.
+  It uses `index`'s PDF-backed file list, which excludes files marked skipped.
+  It parses files serially, using the converted sibling PDF for Office
+  documents and keeping the Office file as the library row. `--no-embed`
+  leaves the parse step enabled. `--no-parse` ends the run after the scrape
+  and calendar refresh.
 - Subject codes match on prefix (`MULT20015` finds `MULT20015_2026_SM2`),
   with space, `-` and `_` alike (`paths::fold_code`), so `cs-101` finds
   `CS 101 Fall 2026` and its `CS_101_Fall_2026` folder; lecture ids match on a

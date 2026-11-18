@@ -1,13 +1,14 @@
 import { memo } from "react";
-import { CaretRight, Play, SidebarSimple, SkipForward } from "@phosphor-icons/react";
+import { ArrowLineUp, CaretRight, Play, SidebarSimple, SkipForward } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { displayCode, fmtAgo } from "@/lib/format/format";
 import { fileIconFor } from "@/lib/files/fileTypes";
 import { filePagePath } from "@/lib/files/openFile";
 import { embedsIn, statusOf, type PipelineItem } from "@/stores/sync/pipelineStore";
-import { actionsOf, openItem } from "@/components/sync/pipeline/actions";
+import { openItem } from "@/components/sync/pipeline/actions";
+import { actionsOf } from "@/components/sync/pipeline/rowActions";
 import { CaptionText, RateLimitedCaption, captionOf } from "@/components/sync/pipeline/captions";
-import { COLS, SKIP_HINT } from "@/components/sync/pipeline/constants";
+import { COLS, PRIORITISE_HINT, SKIP_HINT } from "@/components/sync/pipeline/constants";
 import { Detail } from "@/components/sync/pipeline/Detail";
 import { IconAction } from "@/components/sync/pipeline/IconAction";
 import { isRateLimited, latestStageAt } from "@/components/sync/pipeline/facts";
@@ -21,6 +22,7 @@ export const Row = memo(function Row({
   onToggle,
   onResume,
   onSkip,
+  onPrioritise,
 }: {
   item: PipelineItem;
   embedStage: boolean;
@@ -31,13 +33,15 @@ export const Row = memo(function Row({
   onToggle: (path: string) => void;
   onResume?: (item: PipelineItem) => void;
   onSkip?: (item: PipelineItem) => void;
+  onPrioritise?: (item: PipelineItem) => void;
 }) {
   // A spreadsheet has no embed stage whatever the app's setting.
   const stages = embedsIn(item, embedStage);
   const s = statusOf(item, stages, now);
-  const actions = actionsOf(item, s, stages, !!onResume, !!onSkip);
+  const actions = actionsOf(item, s, stages, !!onResume, !!onSkip, !!onPrioritise);
   const run = onResume && (() => onResume(item));
   const skip = onSkip && (() => onSkip(item));
+  const prioritise = onPrioritise && (() => onPrioritise(item));
   const latest = latestStageAt(item);
   const href = filePagePath(item.subjectId, item.relativePath);
   const Icon = fileIconFor(item.filename);
@@ -103,6 +107,11 @@ export const Row = memo(function Row({
             {latest ? fmtAgo(latest) : "—"}
           </span>
           <div className="absolute inset-y-0 right-0 flex items-center gap-0.5 opacity-0 transition-opacity will-change-[opacity] group-focus-within/row:opacity-100 group-hover/row:opacity-100">
+            {actions.prioritise && prioritise && (
+              <IconAction hint={PRIORITISE_HINT} onClick={prioritise}>
+                <ArrowLineUp size={12} />
+              </IconAction>
+            )}
             {actions.run && run && (
               <IconAction hint={actions.run.hint} onClick={run}>
                 <Play size={11} weight="fill" />
@@ -121,7 +130,14 @@ export const Row = memo(function Row({
       </div>
 
       {expanded && (
-        <Detail item={item} embedStage={stages} actions={actions} onRun={run} onSkip={skip} />
+        <Detail
+          item={item}
+          embedStage={stages}
+          actions={actions}
+          onRun={run}
+          onSkip={skip}
+          onPrioritise={prioritise}
+        />
       )}
     </div>
   );

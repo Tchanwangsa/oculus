@@ -67,6 +67,9 @@ async fn every_canvas_phase_backfills_unchanged_rows_without_changing_local_rece
         } else if path == "/api/v1/files/11" {
             json!({"filename": "video.mp4", "content-type": "video/mp4", "size": 999,
                 "created_at": utc(1), "unlock_at": utc(2), "modified_at": utc(3)})
+        } else if path.starts_with("/api/v1/courses/1/files?") {
+            // The modules already fetched both, so the listing adds no events.
+            json!([{"id": 10, "filename": "notes.pdf"}, {"id": 11, "filename": "video.mp4"}])
         } else if path == "/api/v1/files/10/public_url" {
             json!({"public_url": "/download/10"})
         } else if path == "/download/10" {

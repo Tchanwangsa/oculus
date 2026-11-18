@@ -115,6 +115,15 @@ gives each term a `YYYY-MM` key, `subjects.term_sort`:
   into a per-course `LinkCrawl`, drained depth-first after the content phases
   with `seen` sets breaking cycles. Anything reachable from any scraped body
   lands on disk.
+- The `files` phase runs after the link crawl and before Ed when
+  `SyncOptions.modules` is enabled. `scrape_file_listing`
+  (`app/src-tauri/src/sync/phases/files.rs`) pages through the course's Files
+  listing (`/api/v1/courses/<id>/files`) and downloads eligible non-video
+  files even when nothing links to them from modules or scraped pages.
+  It shares the crawl's file-ID set, so a file named in a module keeps that
+  title. Listing entries supply the metadata directly and go through the
+  same download, manifest and skip rules. A 401, 403 or 404 ends pagination.
+  Other listing errors are logged as warnings and sync can proceed to Ed.
 - `SyncOptions` (announcements, assignments+quizzes, modules, Ed threads,
   Ed lessons) gates the phases; the app persists the choice from `SyncSettings.tsx`, the CLI syncs
   everything. The "Lectures" and "Calendar" toggles are not Rust phases: the

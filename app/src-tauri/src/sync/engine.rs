@@ -222,6 +222,19 @@ impl Engine {
         }
         self.crawl_links(c, &mut crawl);
 
+        // After the crawl, so a file a module names keeps the module's title;
+        // a failed listing must not cost the Ed phase.
+        if self.options.modules {
+            phase("files");
+            if self.stopped() {
+                return Ok(());
+            }
+            if let Err(e) = self.scrape_file_listing(c, &mut crawl) {
+                self.reporter
+                    .log("warning", &c.code, &format!("files: {e}"));
+            }
+        }
+
         if self.options.ed || self.options.ed_lessons {
             phase("ed");
             if self.stopped() {

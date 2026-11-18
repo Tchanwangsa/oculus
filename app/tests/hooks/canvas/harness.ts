@@ -42,7 +42,9 @@ export interface Harness {
   wheel: (event: { deltaX?: number; deltaY?: number; ctrlKey?: boolean; clientX?: number; clientY?: number }) => void;
   /** With a `size`: lays the editor out again at `size`, as its resize observer would. */
   resize: (size: { width: number; height: number }) => void;
-  options: { eraserAutoReturn: boolean; eraserMode?: EraserMode; eraserSize?: EraserSize; localViewport: boolean; kind?: CanvasKind; size?: { width: number; height: number } };
+  /** Runs the pending animation frame callbacks and returns how many ran. */
+  frame: () => number;
+  options: { eraserAutoReturn: boolean; eraserMode?: EraserMode; eraserSize?: EraserSize; localViewport: boolean; kind?: CanvasKind; size?: { width: number; height: number }; onInsertImage?: () => void };
 }
 
 /** Runs `effect` with a stand-in `window` when the test runtime has none, so DOM-sizing code can read it. */
@@ -55,8 +57,10 @@ function withWindow(effect: () => void) {
 /** `initial` is the document the hook mounts with; a `size` lays it out (a notebook's first fit) as the editor would. */
 export function createHarness(options: Partial<Harness['options']> = {}, initial: CanvasDocument = createCanvasDocument()): Harness {
   slots = [];
-  globalThis.requestAnimationFrame = (() => 1) as typeof requestAnimationFrame;
-  globalThis.cancelAnimationFrame = () => {};
+  const frames = new Map<number, FrameRequestCallback>();
+  let nextFrame = 1;
+  globalThis.requestAnimationFrame = callback => { frames.set(nextFrame, callback); return nextFrame++; };
+  globalThis.cancelAnimationFrame = id => { frames.delete(id); };
   const captures = new Set<number>();
   const listeners = new Map<string, (event: unknown) => void>();
   let layout = { width: 0, height: 0 }, observed: (() => void) | null = null;
@@ -86,6 +90,7 @@ export function createHarness(options: Partial<Harness['options']> = {}, initial
           eraserMode: harness.options.eraserMode,
           eraserSize: harness.options.eraserSize,
           kind: harness.options.kind,
+          onInsertImage: harness.options.onInsertImage,
         });
       } finally { rendering = false; }
       harness.editor.canvas.current = canvas as unknown as HTMLCanvasElement;
@@ -105,6 +110,12 @@ export function createHarness(options: Partial<Harness['options']> = {}, initial
       listeners.get('wheel')?.({ deltaX: 0, deltaY: 0, ctrlKey: false, metaKey: false, clientX: layout.width / 2, clientY: layout.height / 2, preventDefault: () => {}, ...event });
     },
     resize(size) { layout = size; withWindow(() => observed?.()); },
+    frame() {
+      const pending = [...frames.values()];
+      frames.clear();
+      for (const callback of pending) callback(performance.now());
+      return pending.length;
+    },
   };
   current = harness;
   harness.render(document);

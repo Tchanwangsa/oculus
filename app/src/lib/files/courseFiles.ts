@@ -23,6 +23,12 @@ export function parseSkip(subjectId: number, relativePath: string, skip: boolean
   return invoke("parse_skip", { relativePath, subjectId, skip });
 }
 
+/** Move one waiting parse to the front of the queue. Rust ranks it behind
+ *  any already pushed; a parse that is running is not interrupted. */
+export function parsePrioritise(relativePath: string) {
+  return invoke("parse_prioritise", { relativePath });
+}
+
 /** "Parse now" on a skipped file: lift the mark, then queue the parse. */
 export async function parseSkipped(subjectId: number, subjectCode: string, relativePath: string) {
   await parseSkip(subjectId, relativePath, false);

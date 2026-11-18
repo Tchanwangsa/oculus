@@ -642,9 +642,10 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
   resize handle and T does nothing; `captions={false}` leaves out the captions
   button. `useLibraryPlayback` is what `VideoFileViewer` and Studio's element
   share: pause with the tab, and one sound across lectures and library videos.
-- **Course ▸ Media holds the videos Oculus fetched** — module videos and
-  Canvas-page embeds, beside their `.vtt` captions — and Drive lists them as
-  any file. A video not yet downloaded shows only on its module.
+- **Course ▸ Media holds the downloaded videos** from module links and
+  Canvas-page embeds. Drive lists them as files alongside any `.vtt`
+  captions. The Modules page offers downloads for module videos that have
+  no local copy.
 - **One sound at a time**: a library video playing pauses the lecture
   (`pauseLecturePlayback`) and other library videos; a lecture's leader
   playing pauses every registered library video (`registerLibraryVideo` in
